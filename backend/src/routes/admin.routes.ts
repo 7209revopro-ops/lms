@@ -8,7 +8,7 @@ import { authenticateAdmin, requireRole, requireAdmin, requireAnyAdmin, requireI
 import { issueClassHandoff } from '@/controllers/classHandoff.controller.ts'
 import { validate } from '@/middleware/validate.middleware.ts'
 import { env } from '@/config/env.ts'
-import { authRateLimit } from '@/middleware/rateLimit.middleware.ts'
+import { authRateLimit, refreshRateLimit } from '@/middleware/rateLimit.middleware.ts'
 import { QuizService } from '@/services/quiz.service.ts'
 import { AssignmentService } from '@/services/assignment.service.ts'
 import { SectionService } from '@/services/section.service.ts'
@@ -19,6 +19,7 @@ import { documentRef } from '@/utils/documentRef.ts'
 import { UserService } from '@/services/user.service.ts'
 import { adminListDevices, adminApproveDevice, adminRevokeDevice } from '@/services/device.service.ts'
 import { sendSuccess, buildPaginationMeta, parsePagination } from '@/utils/response.ts'
+import { toSafeUser } from '@/models/types.ts'
 import { audit } from '@/middleware/audit.middleware.ts'
 import type { Request, Response, NextFunction } from 'express'
 
@@ -39,7 +40,7 @@ const userSvc    = new UserService()
    independent from the client-portal session (lms_at / lms_rt).
 ─────────────────────────────────────────────────────────────────────── */
 const adminLoginSchema = z.object({
-  email:    z.string().email().toLowerCase(),
+  email:    z.string().trim().email().toLowerCase(),
   password: z.string().min(1, 'Password is required'),
 })
 
@@ -52,7 +53,7 @@ const adminLoginTwoFactorSchema = z.object({
 
 router.post('/auth/login',   authRateLimit, validate(adminLoginSchema), authCtrl.adminLogin)
 router.post('/auth/login/2fa', authRateLimit, validate(adminLoginTwoFactorSchema), authCtrl.adminLoginTwoFactor)
-router.post('/auth/refresh', authRateLimit, authCtrl.adminRefresh)
+router.post('/auth/refresh', refreshRateLimit, authCtrl.adminRefresh)
 router.post('/auth/logout',  authRateLimit, authCtrl.adminLogout)
 router.get ('/auth/me',      authenticateAdmin, authCtrl.me)
 
@@ -226,7 +227,7 @@ const userUpdateSchema = z.object({
   isActive:   z.boolean().optional(),
   isVerified: z.boolean().optional(),
   name:       z.string().min(2).max(100).trim().optional(),
-  email:      z.string().email().optional(),
+  email:      z.string().trim().email().optional(),
   category:   z.enum(['4x-trading', 'digital-marketing', 'ai', 'jura']).nullable().optional(),
   categories: z.array(z.enum(['4x-trading', 'digital-marketing', 'ai', 'jura'])).optional(),
   avatarUrl:  z.string().url().or(z.literal('')).optional(),
@@ -236,7 +237,13 @@ const userUpdateSchema = z.object({
 
 const userCreateSchema = z.object({
   name:       z.string().min(2).max(100).trim(),
-  email:      z.string().email(),
+  /* .trim() BEFORE .email(): admins paste addresses out of spreadsheets and
+     chat messages, and those arrive with whitespace attached. Without the
+     trim the address is rejected as "Invalid email", which points at the
+     address rather than at the space that is actually wrong. The schema
+     stores it lowercased and trimmed anyway, so accepting it here only makes
+     the form agree with the database. */
+  email:      z.string().trim().email(),
   password:   z.string().min(8, 'Password must be at least 8 characters'),
   role:       z.enum(['student', 'instructor', 'admin', 'sub_admin', 'support', 'super_admin']).default('instructor'),
   bio:        z.string().max(2000).optional(),
@@ -389,7 +396,16 @@ router.post ('/users', requirePermission('users','create'),          validate(us
         )
       }
 
-      sendSuccess(res, user, 'User created', 201)
+      /* toSafeUser, not the raw document.
+
+         passwordHash is declared `select: false`, which hides it from QUERIES
+         -- but this document was just created, so it still carries the hash
+         that was written to it, and sending it raw put the bcrypt hash of the
+         new account's password in the API response. Every other route that
+         returns a user already goes through this allowlist; this one did not.
+         The field list is opt-in, so anything added to the schema later stays
+         out of responses until somebody decides it belongs there. */
+      sendSuccess(res, toSafeUser(user), 'User created', 201)
     } catch (err) { next(err) }
   },
 )

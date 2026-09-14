@@ -82,6 +82,46 @@ function ipBucket(raw: string): string | null {
   return `${prefix.join(':')}::/64`
 }
 
+/* ── The blind spot in the warning above ─────────────────────────────────
+   That warning only fires when the BACKEND has no secret. The failure that
+   actually happened is the other half: the backend has it, so the warning
+   stays quiet, while the frontends — which are the ones that must SEND the
+   header — never got the variable. Both apps run on Vercel, where env vars
+   live in project settings rather than a .env file on this host, so the value
+   in backend/.env proves nothing about them.
+
+   The symptom is silent and looks like a product limit: every visitor lands in
+   one bucket keyed on the proxy's address, so 15 sign-ins per 15 minutes and
+   15 document uploads per hour are shared by the ENTIRE platform. Students see
+   "Too many requests" having made one attempt.
+
+   So: once a proven header arrives, remember it. If none ever does while a
+   secret is configured, say so — loudly, once a minute, with the number of
+   requests that went into the shared bucket meanwhile. */
+let provenRelaySeen = false
+let unprovenRequests = 0
+let lastRelayWarnAt  = 0
+
+function noteMissingRelay(): void {
+  if (!PROXY_SECRET || provenRelaySeen) return
+  /* Not in the suites. They inherit PROXY_SHARED_SECRET from .env and never
+     relay it, which is correct for a test -- there is no proxy in front. The
+     warning is for whoever operates the deployment, and printing it 43 times
+     a chain only teaches people to scroll past it. */
+  if (process.env['NODE_ENV'] === 'test') return
+  unprovenRequests++
+  const now = Date.now()
+  if (now - lastRelayWarnAt < 60_000) return
+  lastRelayWarnAt = now
+  logger.warn(
+    { unprovenRequests },
+    'PROXY_SHARED_SECRET is set here but NO request has ever presented it — the ' +
+    'frontends are not relaying it, so every visitor shares one rate-limit bucket. ' +
+    'Set PROXY_SHARED_SECRET to this same value in BOTH Vercel projects (client and ' +
+    'admin) and redeploy. See M-11.',
+  )
+}
+
 export function clientKey(req: Request): string {
   /* 1. An authenticated caller is the fairest and least spoofable bucket.
         Only present on limiters that run after authenticate(); the global
@@ -96,9 +136,13 @@ export function clientKey(req: Request): string {
     const claimed = req.headers['x-lms-client-ip']
     if (typeof claimed === 'string') {
       const bucket = ipBucket(claimed)
-      if (bucket) return `ip:${bucket}`
+      if (bucket) {
+        provenRelaySeen = true
+        return `ip:${bucket}`
+      }
     }
   }
+  noteMissingRelay()
 
   /* 3. Whatever Express resolves under `trust proxy`. */
   return `ip:${ipBucket(req.ip ?? '') ?? 'unknown'}`
@@ -127,6 +171,33 @@ export const authRateLimit = rateLimit({
   skip:             rateLimitDisabled,
   handler: (_req, res) => {
     sendError(res, 'RATE_LIMITED', 'Too many requests. Please try again in 15 minutes.', 429)
+  },
+})
+
+/* ─── Session renewal ───────────────────────────────
+   Token refresh USED to sit in the auth bucket above, next to sign-in and
+   password reset. It does not belong there: an access token lives 15 minutes,
+   so every signed-in person spends one auth attempt every 15 minutes simply by
+   staying logged in — and with several tabs open, several at once. A bucket
+   sized for "how many passwords may somebody guess" was being drained by
+   people doing nothing wrong.
+
+   It is also a much weaker target: a refresh needs a valid httpOnly refresh
+   cookie, reuse detection kills the whole session on a replay, and the client
+   interceptor already caps its own retries. The limiter here exists to stop a
+   loop, not to stop a guesser.
+
+   Override: RATE_LIMIT_REFRESH_MAX.
+───────────────────────────────────────────────────── */
+export const refreshRateLimit = rateLimit({
+  windowMs:         15 * 60 * 1000,
+  max:              envInt('RATE_LIMIT_REFRESH_MAX', isDev ? 600 : 60),
+  standardHeaders:  true,
+  legacyHeaders:    false,
+  keyGenerator:     clientKey,
+  skip:             rateLimitDisabled,
+  handler: (_req, res) => {
+    sendError(res, 'RATE_LIMITED', 'Too many session refreshes. Please sign in again.', 429)
   },
 })
 
@@ -160,13 +231,24 @@ export const apiRateLimit = rateLimit({
 ──────────────────────────────────────────────────── */
 export const signupUploadRateLimit = rateLimit({
   windowMs:        60 * 60 * 1000,
-  max:             envInt('RATE_LIMIT_SIGNUP_UPLOAD_MAX', isDev ? 200 : 15),
+  /* Counted in FILES, but the unit that matters is registrations: a full
+     signup sends exactly three — passport, ID, photo. At 15 that was five
+     complete signups an hour from one address, and a household, a training
+     room or an office all share one. Worse, a student who is rejected at the
+     end (a taken email is the common case) and tries again spends three more.
+     45 is fifteen registrations, which is what the old number looked like it
+     meant. */
+  max:             envInt('RATE_LIMIT_SIGNUP_UPLOAD_MAX', isDev ? 200 : 45),
   standardHeaders: true,
   legacyHeaders:   false,
   keyGenerator:    clientKey,
   skip:            rateLimitDisabled,
   handler: (_req, res) => {
-    sendError(res, 'RATE_LIMITED', 'Too many document uploads. Please try again later.', 429)
+    /* "later" is the one thing the person cannot work out for themselves, and
+       the limiter is the only thing that knows it. */
+    sendError(res, 'RATE_LIMITED',
+      'Too many document uploads from this connection. Please wait an hour and try again, ' +
+      'or contact support if you need help completing your registration.', 429)
   },
 })
 

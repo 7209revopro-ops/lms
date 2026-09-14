@@ -36,7 +36,15 @@ export interface EmailSender {
 
 /* ─── Console sender (dev) ───────────────────────────── */
 class ConsoleEmailSender implements EmailSender {
-  private readonly dir = join(process.cwd(), '.logs', 'emails')
+  /* One directory per process when asked for.
+
+     Suites that assert on mail read this directory back and filter it only by
+     a timestamp watermark, which silently assumes they are the only writer.
+     Run two suites at once -- or a suite alongside anything else that sends --
+     and one process's mail is counted, and later deleted, by the other. A
+     per-run directory makes that assumption true instead of hoping for it. */
+  private readonly dir = process.env['EMAIL_LOG_DIR']?.trim()
+    || join(process.cwd(), '.logs', 'emails')
 
   async send(msg: EmailMessage): Promise<void> {
     try {

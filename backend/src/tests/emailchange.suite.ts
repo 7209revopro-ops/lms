@@ -79,6 +79,7 @@ const PW = 'CorrectHorse1'
 let seq = 0
 const addr = (tag: string) => `${tag}-${Date.now()}-${seq++}@ec.local`
 const code = (r: { body: any }) => r.body?.error?.code
+const msg  = (r: { body: any }) => String(r.body?.error?.message ?? '')
 
 /* The raw token never leaves the mailbox, so the suite reads the row the
    service wrote and re-derives what was mailed. Hashing matches the service's
@@ -364,8 +365,16 @@ try {
     const r = await call('PATCH', '/auth/me/email', {
       jar: sJar, body: { newEmail: addr('nope'), currentPassword: 'anything' },
     })
-    check('a social account is refused', r.status === 400, String(r.status))
-    check('and told why, with what to do instead', code(r) === 'OAUTH_ACCOUNT', code(r))
+    check('an account with no password is refused', r.status === 400, String(r.status))
+    check('and told why, with what to do instead', code(r) === 'NO_PASSWORD_SET', code(r))
+    /* The old code was OAUTH_ACCOUNT and the old message said "This account uses
+       social login. Please sign in with Google." There is no Google sign-in in
+       this backend -- no /auth/google route, no callback, findByProvider() is
+       never called -- so that sentence sent students to a door that does not
+       exist. The provider fields above are set only to prove the guard keys off
+       the MISSING HASH and not off `provider`. */
+    check('and never names a sign-in method that does not exist',
+      !/google|social/i.test(msg(r)), msg(r))
   }
 
 } catch (err) {

@@ -272,11 +272,25 @@ export class AuthService {
       )
     }
 
-    /* 3. Block OAuth-only accounts from password login */
+    /* 3. An account that has no password yet.
+
+       This used to answer "This account uses social login. Please sign in with
+       Google." Both halves were wrong. There is no Google sign-in — no
+       /auth/google route, no callback, and findByProvider() is never called
+       from anywhere — so it pointed at a door that does not exist. And these
+       are not social accounts: the two paths that create a user without a
+       password are the bulk student import and external-purchase provisioning,
+       neither of which involves a provider. Such a student is told to do the
+       one thing that cannot work, and never told the thing that can.
+
+       Forgot-password DOES work for them: it issues a reset token for any
+       active account regardless of whether a hash exists, and resetPassword()
+       simply writes one. So that is what the message names. */
     if (!user.passwordHash) {
       throw new AuthError(
-        'OAUTH_ACCOUNT',
-        'This account uses social login. Please sign in with Google.',
+        'NO_PASSWORD_SET',
+        'This account does not have a password yet. Use "Forgot password?" below and ' +
+        'we will email you a link to set one.',
         400,
       )
     }
@@ -743,8 +757,9 @@ export class AuthService {
     }
     if (!user.passwordHash) {
       throw new AuthError(
-        'OAUTH_ACCOUNT',
-        'This account uses social login, so it has no password to confirm with. Use forgot-password to set one first.',
+        'NO_PASSWORD_SET',
+        'This account does not have a password yet, so there is nothing to confirm with. ' +
+        'Use "Forgot password?" to set one first.',
         400,
       )
     }
@@ -861,8 +876,8 @@ export class AuthService {
     }
     if (!user.passwordHash) {
       throw new AuthError(
-        'OAUTH_ACCOUNT',
-        'This account uses social login. Use forgot-password to set a password.',
+        'NO_PASSWORD_SET',
+        'This account does not have a password yet. Use "Forgot password?" to set one.',
         400,
       )
     }

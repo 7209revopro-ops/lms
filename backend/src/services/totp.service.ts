@@ -125,7 +125,7 @@ export class TotpService {
       throw new TotpError('ALREADY_ENABLED', '2FA is already enabled on this account.', 409)
     }
     if (!user.passwordHash) {
-      throw new TotpError('OAUTH_ACCOUNT', 'Social-login accounts cannot use TOTP.', 400)
+      throw new TotpError('NO_PASSWORD_SET', 'Set a password before turning on two-factor authentication.', 400)
     }
     if (!(await comparePassword(password, user.passwordHash))) {
       throw new TotpError('WRONG_PASSWORD', 'Password is incorrect.', 401)
@@ -179,7 +179,7 @@ export class TotpService {
       throw new TotpError('NOT_ENABLED', '2FA is not enabled on this account.', 400)
     }
     if (!user.passwordHash) {
-      throw new TotpError('OAUTH_ACCOUNT', 'Social-login accounts cannot use TOTP.', 400)
+      throw new TotpError('NO_PASSWORD_SET', 'Set a password before turning on two-factor authentication.', 400)
     }
     const valid = await comparePassword(password, user.passwordHash)
     if (!valid) {

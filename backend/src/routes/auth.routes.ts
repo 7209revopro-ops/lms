@@ -3,7 +3,7 @@ import { z } from 'zod'
 import { AuthController } from '@/controllers/auth.controller.ts'
 import { validate } from '@/middleware/validate.middleware.ts'
 import { authenticate } from '@/middleware/auth.middleware.ts'
-import { authRateLimit, impersonationRateLimit } from '@/middleware/rateLimit.middleware.ts'
+import { authRateLimit, refreshRateLimit, impersonationRateLimit } from '@/middleware/rateLimit.middleware.ts'
 import { documentRef, requiredDocumentRef } from '@/utils/documentRef.ts'
 import totpRoutes from './totp.routes.ts'
 
@@ -39,7 +39,7 @@ const enrollmentAppSchema = z.object({
 
 const registerSchema = z.object({
   name:       z.string().min(2).max(120).trim(),
-  email:      z.string().email().toLowerCase(),
+  email:      z.string().trim().email().toLowerCase(),
   password:   z
     .string()
     .min(8, 'Password must be at least 8 characters')
@@ -51,16 +51,22 @@ const registerSchema = z.object({
 })
 
 const loginSchema = z.object({
-  email:    z.string().email().toLowerCase(),
+  /* .trim() BEFORE .email(): people paste their address out of the mail or
+     message that gave it to them, and that carries whitespace. Without the
+     trim it is refused as "Invalid email" -- which points at the address
+     rather than at the space, and reads to the person as "my account is
+     broken". Lowercasing already happens; trimming only makes the form agree
+     with how the address is stored and looked up. */
+  email:    z.string().trim().email().toLowerCase(),
   password: z.string().min(1, 'Password is required'),
 })
 
 /* ─── Passwordless (email → OTP) login ────────────── */
 const otpRequestSchema = z.object({
-  email: z.string().email().toLowerCase(),
+  email: z.string().trim().email().toLowerCase(),
 })
 const otpVerifySchema = z.object({
-  email: z.string().email().toLowerCase(),
+  email: z.string().trim().email().toLowerCase(),
   code:  z.string().regex(/^\d{6}$/, 'Enter the six-digit code from your email'),
 })
 const loginLinkSchema = z.object({
@@ -76,7 +82,7 @@ const loginTwoFactorSchema = z.object({
 
 /* ─── Reset / verify schemas ─────────────────────── */
 const forgotSchema = z.object({
-  email: z.string().email().toLowerCase(),
+  email: z.string().trim().email().toLowerCase(),
 })
 const resetSchema = z.object({
   token:    z.string().min(32),
@@ -103,7 +109,7 @@ router.post('/otp/verify',       authRateLimit, validate(otpVerifySchema),  auth
 router.post('/login-link/redeem', authRateLimit, validate(loginLinkSchema), auth.redeemLoginLink)
 /* The admin portal's second factor lives beside its own login, at
    /api/v1/admin/auth/login/2fa (see admin.routes.ts). */
-router.post('/refresh',          authRateLimit, auth.refresh)
+router.post('/refresh',          refreshRateLimit, auth.refresh)
 router.post('/logout',           authRateLimit, auth.logout)
 router.post('/forgot-password',  authRateLimit, validate(forgotSchema),   auth.forgotPassword)
 router.post('/reset-password',   authRateLimit, validate(resetSchema),    auth.resetPassword)

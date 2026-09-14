@@ -46,6 +46,14 @@ interface LoginFormProps {
 export function LoginForm({ onSwitch }: LoginFormProps) {
   const [showPassword, setShowPassword] = useState(false)
   const [serverError,  setServerError]  = useState<string | null>(null)
+  /* The error CODE, kept beside the message.
+
+     An account with no password cannot be talked out of the problem — it needs
+     an action, and the action is a reset link. Knowing which refusal this was
+     is what lets the box below carry a button instead of a sentence. */
+  const [serverErrorCode, setServerErrorCode] = useState<string | null>(null)
+  const [resetSent,       setResetSent]       = useState(false)
+  const [sendingReset,    setSendingReset]    = useState(false)
   /* 2FA challenge step — set when the backend answers with twoFactorRequired */
   const [challengeToken, setChallengeToken] = useState<string | null>(null)
   const [code,           setCode]           = useState('')
@@ -69,6 +77,9 @@ export function LoginForm({ onSwitch }: LoginFormProps) {
   const {
     register,
     handleSubmit,
+    /* Read back the typed address so the reset link can be sent to it without
+       asking the student to type it a second time. */
+    getValues,
     formState: { errors, isSubmitting },
   } = useForm<LoginValues>({
     resolver: zodResolver(loginSchema),
@@ -95,6 +106,7 @@ export function LoginForm({ onSwitch }: LoginFormProps) {
   /* ─── Submit handler ──────────────────────────── */
   const onSubmit = async (data: LoginValues) => {
     setServerError(null)
+    setServerErrorCode(null)
     try {
       const res = await api.post<{
         success: true
@@ -117,6 +129,29 @@ export function LoginForm({ onSwitch }: LoginFormProps) {
     } catch (err: any) {
       const msg = err?.response?.data?.error?.message
       setServerError(msg ?? 'Unable to sign in. Please try again.')
+      setServerErrorCode(err?.response?.data?.error?.code ?? null)
+    }
+  }
+
+  /* Sends the student the link that actually fixes their account.
+
+     Deliberately reuses forgot-password rather than anything new: it issues a
+     reset token for any active account whether or not a password hash exists,
+     and reset writes one — so it is already the right mechanism for an import
+     or an external purchase that never set one. */
+  const sendSetPasswordLink = async (): Promise<void> => {
+    const email = (getValues('email') ?? '').trim()
+    if (!email) return
+    setSendingReset(true)
+    try {
+      await api.post('/auth/forgot-password', { email })
+      setResetSent(true)
+    } catch {
+      /* forgot-password answers 200 whether or not the account exists, so a
+         failure here is the network rather than the address. */
+      setServerError('Could not send the link just now. Please try again in a moment.')
+    } finally {
+      setSendingReset(false)
     }
   }
 
@@ -623,11 +658,40 @@ export function LoginForm({ onSwitch }: LoginFormProps) {
               initial={{ opacity: 0, y: -6, scale: 0.98 }}
               animate={{ opacity: 1, y: 0, scale: 1 }}
               exit={{ opacity: 0, y: -4 }}
-              className="flex items-center gap-2.5 rounded-xl px-4 py-3 text-sm"
+              className="flex flex-col gap-2.5 rounded-xl px-4 py-3 text-sm"
               style={{ background: '#FEE2E2', color: 'var(--color-danger)' }}
             >
-              <AlertCircle size={15} />
-              {serverError}
+              <span className="flex items-center gap-2.5">
+                <AlertCircle size={15} className="flex-shrink-0" />
+                {serverError}
+              </span>
+
+              {/* An account with no password cannot act on a sentence.
+
+                  These are bulk-imported students and external-purchase
+                  buyers whose welcome link was never opened or has expired —
+                  they are not social logins, and there is no Google sign-in
+                  to send them to. One button, doing the thing that works. */}
+              {serverErrorCode === 'NO_PASSWORD_SET' && (
+                resetSent ? (
+                  <span className="flex items-center gap-2 rounded-lg px-3 py-2 text-[13px]"
+                    style={{ background: '#ECFDF5', border: '1px solid #A7F3D0', color: '#047857' }}>
+                    <Mail size={14} className="flex-shrink-0" />
+                    Check your inbox — we sent a link to set your password.
+                  </span>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={sendSetPasswordLink}
+                    disabled={sendingReset}
+                    className="flex items-center justify-center gap-2 rounded-lg px-4 py-2.5 text-[13px] font-bold text-white transition-opacity disabled:opacity-60"
+                    style={{ background: 'var(--color-primary)' }}>
+                    {sendingReset
+                      ? <><Spinner size={13} />Sending…</>
+                      : <><Mail size={14} />Email me a link to set my password</>}
+                  </button>
+                )
+              )}
             </motion.div>
           )}
         </AnimatePresence>

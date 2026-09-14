@@ -32,6 +32,14 @@
 
    Run: bun run test:assignments
 ───────────────────────────────────────────────────────────── */
+const nodePathBoot = await import('path')
+/* This suite reads the maildir back and asserts on what is in it, so it needs
+   a directory of its own. The shared .logs/emails is written by every suite
+   and by the dev server, and mailbox() can only filter by timestamp -- so a
+   second writer's mail lands inside this run's window, and the teardown below
+   would delete it. Per-process directory, named after the pid. */
+process.env.EMAIL_LOG_DIR = nodePathBoot.join(
+  process.cwd(), '.logs', 'emails-assignments-' + String(process.pid))
 process.env.DATABASE_URL = 'mongodb://localhost:27017/lms_assignments_suite'
 process.env.NODE_ENV     = 'test'
 process.env.PORT         = '0'
@@ -67,7 +75,9 @@ mongoose.set('autoIndex', false)
 
 const nodeFs   = await import('fs/promises')
 const nodePath = await import('path')
-const MAILDIR  = nodePath.join(process.cwd(), '.logs', 'emails')
+/* The per-process directory set at the top of this file -- never the
+   shared one, which the dev server and every other suite also write. */
+const MAILDIR  = process.env.EMAIL_LOG_DIR!
 const SUITE_START = Date.now() - 1
 let mailMark = SUITE_START
 
@@ -806,15 +816,17 @@ try {
   }
 
 } finally {
+  /* The maildir belongs to this process alone now, so take the whole thing.
+     The old sweep filtered by timestamp inside the SHARED directory, which
+     meant a concurrent run's mail was deleted along with this one's. */
   let removed = 0
   try {
-    for (const n of await nodeFs.readdir(MAILDIR)) {
-      if (!n.endsWith('.html')) continue
-      const ts = Number(n.split('-')[0])
-      if (Number.isFinite(ts) && ts >= SUITE_START) {
-        try { await nodeFs.unlink(nodePath.join(MAILDIR, n)); removed++ } catch {}
-      }
-    }
+    removed = (await nodeFs.readdir(MAILDIR)).length
+    /* Recursive, not rmdir: the app sends mail fire-and-forget, so a message
+       can still land between counting the directory and removing it, and
+       rmdir refuses a directory that is not empty. That is exactly how an
+       empty emails-<pid> folder was left behind on the first run of this. */
+    await nodeFs.rm(MAILDIR, { recursive: true, force: true })
   } catch {}
   lines.push(`\n(cleanup: removed ${removed} captured email file(s))`)
   await mongoose.connection.dropDatabase()
