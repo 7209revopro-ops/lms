@@ -1082,8 +1082,15 @@ export function RegisterForm({ onSwitch }: { onSwitch: () => void }) {
       if (!data.passportFile)                              errs.passportFile = 'Passport copy is required'
       else if (data.passportFile.size > MAX_FILE_BYTES)   errs.passportFile = 'Passport copy must not exceed 3 MB'
       if (!data.idType)                                   errs.idType       = 'Please select your ID type first'
-      else if (!data.idDocFile)                           errs.idDocFile    = `${ID_DOC_META[data.idType]?.label ?? 'ID document'} is required`
-      else if (data.idDocFile.size > MAX_FILE_BYTES)      errs.idDocFile    = `${ID_DOC_META[data.idType]?.label ?? 'ID document'} must not exceed 3 MB`
+      /* A student whose ID IS their passport has already uploaded it above.
+         ID_DOC_META['Passport'] is literally labelled "Passport Copy", so this
+         asked for the same page twice, both required, one right under the
+         other -- and the only way past the second box was to upload the same
+         file again or something arbitrary. */
+      else if (data.idType !== 'Passport' && !data.idDocFile)
+        errs.idDocFile = `${ID_DOC_META[data.idType]?.label ?? 'ID document'} is required`
+      else if (data.idDocFile && data.idDocFile.size > MAX_FILE_BYTES)
+        errs.idDocFile = `${ID_DOC_META[data.idType]?.label ?? 'ID document'} must not exceed 3 MB`
     }
 
     if (s === 2) {
@@ -1136,11 +1143,14 @@ export function RegisterForm({ onSwitch }: { onSwitch: () => void }) {
       setErrors(e => ({ ...e, passportFile: 'Passport copy must not exceed 3 MB' }))
       setStep(1); return
     }
-    if (!data.idDocFile) {
+    /* Same exemption as the step check. Without it this guard bounced the
+       student back to step 1 for a document the form had (correctly) stopped
+       asking them for -- and the box it pointed at was no longer on screen. */
+    if (data.idType !== 'Passport' && !data.idDocFile) {
       setErrors(e => ({ ...e, idDocFile: `${ID_DOC_META[data.idType]?.label ?? 'ID document'} is required` }))
       setStep(1); return
     }
-    if (data.idDocFile.size > MAX_FILE_BYTES) {
+    if (data.idDocFile && data.idDocFile.size > MAX_FILE_BYTES) {
       setErrors(e => ({ ...e, idDocFile: `${ID_DOC_META[data.idType]?.label ?? 'ID document'} must not exceed 3 MB` }))
       setStep(1); return
     }
@@ -1196,7 +1206,16 @@ export function RegisterForm({ onSwitch }: { onSwitch: () => void }) {
       }
 
       const passportUrl = await uploadDoc(data.passportFile, 'kyc')
-      const idDocUrl    = await uploadDoc(data.idDocFile,    'kyc')
+      /* The passport IS the ID document for these students, so send it as
+         both rather than uploading the same bytes twice or leaving a required
+         field empty. */
+      const idDocUrl    = data.idType === 'Passport'
+        ? passportUrl
+        /* Non-null by the guard above: for every type EXCEPT Passport that
+           guard returns early when the file is missing. The type checker
+           cannot see across it, and the assertion is narrower than widening
+           uploadDoc to take a null it should never receive. */
+        : await uploadDoc(data.idDocFile!, 'kyc')
       const photoUrl    = await uploadDoc(avatarFile,        'photo')
 
       const reg = await api.post('/auth/register', {
@@ -1502,8 +1521,14 @@ export function RegisterForm({ onSwitch }: { onSwitch: () => void }) {
             )}
           </div>
 
-          {/* Selected ID document upload — label depends on idType */}
-          {(() => {
+          {/* Selected ID document upload — label depends on idType.
+              Skipped when that type is Passport: it is the file above. */}
+          {data.idType === 'Passport' ? (
+            <p className="text-[11px]" style={{ color: 'rgba(255,255,255,0.45)' }}>
+              You chose Passport as your ID, so the copy above is the only
+              document we need.
+            </p>
+          ) : (() => {
             const docMeta = ID_DOC_META[data.idType] ?? { label: 'ID Document Copy', hint: 'Clear scan or photo of your government-issued ID (max 10 MB)' }
             return (
               <div>

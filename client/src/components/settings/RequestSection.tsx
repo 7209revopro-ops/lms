@@ -545,6 +545,18 @@ export function RequestSection() {
     setErrors(e => { const n = { ...e }; delete n[key]; return n })
 
   /* ── File state ─────────────────────────────── */
+  /* When the ID they named IS their passport, the two uploads below are the
+     same piece of paper.
+
+     The second box is labelled `${idType} Document Copy`, so choosing Passport
+     rendered "Passport Copy" and "Passport Document Copy" side by side, both
+     required. A student either uploaded the same scan twice or, to get past a
+     box they could not satisfy, uploaded something arbitrary -- which is worse
+     than asking twice, because it lands in KYC looking like a real second
+     document. Ask once, and store it in both fields so the admin screen and
+     the API contract are unchanged. */
+  const passportIsTheId = form.idType === 'Passport'
+
   const [passportFile, setPassportFile]   = useState<File | null>(null)
   const [idDocFile, setIdDocFile]         = useState<File | null>(null)
   const [photoFile, setPhotoFile]         = useState<File | null>(null)
@@ -566,6 +578,17 @@ export function RequestSection() {
     })
     return res.data?.data?.url ?? res.data?.url ?? ''
   }, [])
+
+  /* Changing the ID type away from Passport clears the copy that was filled
+     in from it. Without this the second box reappears already showing
+     "Uploaded ✓" -- holding the passport, not the Emirates ID it is now
+     asking for -- and the student has no reason to think anything is wrong. */
+  useEffect(() => {
+    if (!passportIsTheId && idDocUrl && idDocUrl === passportUrl) {
+      setIdDocUrl('')
+      setIdDocFile(null)
+    }
+  }, [passportIsTheId, idDocUrl, passportUrl])
 
   /* ── Validation ─────────────────────────────── */
   const [errors, setErrors] = useState<Errors>({})
@@ -658,7 +681,9 @@ export function RequestSection() {
         e['city'] = 'City name must be at least 2 characters'
       if (!form.addressCountry)      e['addressCountry']    = 'Address country is required'
       if (!passportUrl && !passportFile) e['passport'] = 'Passport copy is required'
-      if (!idDocUrl && !idDocFile)       e['idDoc']    = 'ID document copy is required'
+      /* Only when it is a genuinely different document. */
+      if (!passportIsTheId && !idDocUrl && !idDocFile)
+        e['idDoc'] = 'ID document copy is required'
     }
     if (s === 2) {
       if (!form.experienceLevel)        e['experienceLevel']    = 'Please select your experience level'
@@ -695,9 +720,13 @@ export function RequestSection() {
           setUploading(u => ({ ...u, passport: true }))
           const url = await uploadFile(passportFile, 'kyc')
           setPassportUrl(url)
+          /* One upload, both fields. complete-registration requires idDocUrl,
+             and for this student the passport IS the ID document -- so send it
+             rather than leaving a required field empty or uploading twice. */
+          if (passportIsTheId) setIdDocUrl(url)
           setUploading(u => ({ ...u, passport: false }))
         }
-        if (idDocFile) {
+        if (!passportIsTheId && idDocFile) {
           setUploading(u => ({ ...u, idDoc: true }))
           const url = await uploadFile(idDocFile, 'kyc')
           setIdDocUrl(url)
@@ -755,7 +784,11 @@ export function RequestSection() {
         city:               form.city,
         addressCountry:     form.addressCountry,
         passportUrl,
-        idDocUrl,
+        /* Derived here rather than trusted from state: the student may have
+           picked Passport, uploaded, gone back, and changed the ID type (or
+           the reverse). Deciding at submit time means the file that is sent
+           always matches the ID type that is sent. */
+        idDocUrl: passportIsTheId ? passportUrl : idDocUrl,
         photoUrl,
         experienceLevel:    form.experienceLevel,
         preferredStartDate: form.preferredStartDate,
@@ -1114,11 +1147,20 @@ export function RequestSection() {
                 <Field label="Passport Copy" required error={errors['passport']}>
                   <FileUpload label="Upload Passport" file={passportFile} onFile={setPassportFile}
                     uploading={uploading.passport} uploadedUrl={passportUrl} />
+                  {passportIsTheId && (
+                    <p className="mt-2 text-xs" style={{ color: 'var(--color-text-muted)' }}>
+                      You chose Passport as your ID, so this is the only document we need.
+                    </p>
+                  )}
                 </Field>
-                <Field label={`${form.idType || 'ID'} Document Copy`} required error={errors['idDoc']}>
-                  <FileUpload label="Upload ID Document" file={idDocFile} onFile={setIdDocFile}
-                    uploading={uploading.idDoc} uploadedUrl={idDocUrl} />
-                </Field>
+                {/* Hidden, not disabled: a greyed-out box still reads as
+                    something the student failed to do. */}
+                {!passportIsTheId && (
+                  <Field label={`${form.idType || 'ID'} Document Copy`} required error={errors['idDoc']}>
+                    <FileUpload label="Upload ID Document" file={idDocFile} onFile={setIdDocFile}
+                      uploading={uploading.idDoc} uploadedUrl={idDocUrl} />
+                  </Field>
+                )}
               </div>
 
               <Field label="Profile Photo (optional)">

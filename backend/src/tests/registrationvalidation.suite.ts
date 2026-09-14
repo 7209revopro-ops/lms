@@ -243,6 +243,48 @@ section('D. A COMPLETE application is accepted')
     `status=${r2.status} ${JSON.stringify(r2.body?.error ?? {}).slice(0, 160)}`)
 }
 
+/* ═════════════════ E — passport as its own ID document ═════════════════ */
+section('E. When the ID IS the passport, one file answers for both')
+{
+  /* Choosing "Passport" as the ID type used to put two required uploads on
+     screen for the same piece of paper -- in the signup form both were
+     labelled "Passport Copy". The forms now ask once and send that one file
+     as BOTH passportUrl and idDocUrl.
+
+     That makes "the two documents may be identical" a contract this API has
+     to keep. A later rule that they must differ would be perfectly reasonable
+     in isolation and would break every passport student at the last step, so
+     it is pinned here. */
+  const jar = await signedInStudent()
+  const one = 'kyc/one-and-only-passport.png'
+  const r = await call('PATCH', '/auth/me/complete-registration', jar, {
+    ...COMPLETE, idType: 'Passport', idNumber: 'PA998877',
+    passportUrl: one, idDocUrl: one,
+  })
+  check('E1 the same file in both document fields is accepted',
+    r.status === 200, `status=${r.status} ${JSON.stringify(r.body?.error ?? {}).slice(0, 200)}`)
+
+  /* And it is actually stored in both, so the admin review screen still has
+     a link under each heading rather than one dead row. */
+  const { UserModel: UM } = await import('@/models/schema.ts')
+  const saved = await UM.findOne({ 'enrollmentApplication.idNumber': 'PA998877' }).lean() as any
+  const app = saved?.enrollmentApplication
+  check('E2 both fields are persisted', !!app?.passportUrl && !!app?.idDocUrl,
+    JSON.stringify({ p: app?.passportUrl, i: app?.idDocUrl }))
+  check('E3 and they are the same document',
+    String(app?.passportUrl) === String(app?.idDocUrl),
+    `${app?.passportUrl} vs ${app?.idDocUrl}`)
+
+  /* The ordinary case still works -- two genuinely different files. */
+  const jar2 = await signedInStudent()
+  const r2 = await call('PATCH', '/auth/me/complete-registration', jar2, {
+    ...COMPLETE, idType: 'Emirates ID', idNumber: '784111122223334',
+    passportUrl: 'kyc/passport.png', idDocUrl: 'kyc/emirates-id.png',
+  })
+  check('E4 two different documents are still accepted', r2.status === 200,
+    `status=${r2.status}`)
+}
+
 } catch (err) {
   fail++
   lines.push(`  FAIL  suite threw — ${(err as Error).message}\n${(err as Error).stack}`)
