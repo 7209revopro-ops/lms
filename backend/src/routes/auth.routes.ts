@@ -142,29 +142,44 @@ const enrollmentDocsSchema = z.object({
 })
 
 /* Complete registration — express users upgrading to full enrollment */
+/* Every field the form marks with a * is required HERE too.
+
+   Eight of these were declared `z.string().max(n)` with no minimum, which
+   accepts the empty string. The form already refused a blank nationality,
+   home country, occupation, ID number, country of attendance, address
+   country, referral source or payment method -- but the server did not, so a
+   request that skipped the form (or a form change that dropped a check) could
+   file a registration with those blank and get a 200. The admin then reviews
+   an application with empty KYC fields and nothing to say why.
+
+   `.min(1)` with a sentence, not a bare minimum: the message is what the
+   student is shown when the field list is surfaced. */
+const required = (max: number, what: string) =>
+  z.string().trim().min(1, `${what} is required`).max(max)
+
 const completeRegistrationSchema = z.object({
-  phone:              z.string().min(5).max(30),
+  phone:              z.string().trim().min(5, 'Phone number is required').max(30),
   emergencyContact:   z.string().max(30).optional().or(z.literal('')),
   gender:             z.enum(['Male', 'Female', 'Prefer not to say']),
-  dateOfBirth:        z.string().min(1),
-  nationality:        z.string().max(80),
-  homeCountry:        z.string().max(80),
-  occupation:         z.string().max(120),
+  dateOfBirth:        z.string().min(1, 'Date of birth is required'),
+  nationality:        required(80,  'Nationality'),
+  homeCountry:        required(80,  'Home country'),
+  occupation:         required(120, 'Occupation'),
   idType:             z.enum(['Emirates ID', 'Passport', 'Aadhaar Card', 'Other']),
-  idNumber:           z.string().max(40),
-  countryAttendance:  z.string().max(80),
+  idNumber:           required(40,  'ID number'),
+  countryAttendance:  required(80,  'Country of attendance'),
   villa:              z.string().max(120).optional().or(z.literal('')),
-  city:               z.string().min(1).max(80),
-  addressCountry:     z.string().max(80),
+  city:               required(80,  'City'),
+  addressCountry:     required(80,  'Address country'),
   passportUrl:        requiredDocumentRef,
   idDocUrl:           requiredDocumentRef,
   photoUrl:           documentRef,
   experienceLevel:    z.enum(['Beginner', 'Intermediate', 'Advanced']),
-  preferredStartDate: z.string().min(1),
-  hearAboutUs:        z.string().max(80),
+  preferredStartDate: z.string().min(1, 'Preferred start date is required'),
+  hearAboutUs:        required(80,  'How you heard about us'),
   referralName:       z.string().max(120).optional().or(z.literal('')),
   programs:           z.array(z.string().max(120)).min(1, 'Select at least one program'),
-  paymentMethod:      z.string().max(50),
+  paymentMethod:      required(50,  'Payment method'),
   avatarUrl:          z.string().url().optional().or(z.literal('')),
 })
 

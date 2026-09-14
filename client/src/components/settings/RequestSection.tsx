@@ -421,6 +421,21 @@ interface FormData {
 
 interface Errors { [key: string]: string }
 
+/* API field name → the label printed above that box on this form. Anything
+   missing from here is simply left out of the message rather than shown as a
+   key, because a key the student cannot find is worse than a short list. */
+const FIELD_LABELS: Record<string, string> = {
+  phone: 'Phone', emergencyContact: 'Emergency Contact', gender: 'Gender',
+  dateOfBirth: 'Date of Birth', nationality: 'Nationality', homeCountry: 'Home Country',
+  occupation: 'Occupation', idType: 'ID Type', idNumber: 'ID Number',
+  countryAttendance: 'Country of Attendance', villa: 'Villa / Apartment', city: 'City',
+  addressCountry: 'Country', passportUrl: 'Passport copy', idDocUrl: 'ID document copy',
+  photoUrl: 'Photo', experienceLevel: 'Experience Level',
+  preferredStartDate: 'Preferred Start', hearAboutUs: 'Heard About Us',
+  referralName: 'Referral', programs: 'Programs', paymentMethod: 'Payment Method',
+  avatarUrl: 'Photo',
+}
+
 export function RequestSection() {
   const { data: user, isLoading } = useCurrentUser()
   const completeRegistration = useCompleteRegistration()
@@ -467,32 +482,59 @@ export function RequestSection() {
     termsAccepted:     false,
   })
 
-  /* Sync user data once loaded */
+  /* Prefill from the saved application ONCE, and never clobber typing.
+
+     This used to re-run on every `user` change and merge with `??`. Both
+     halves were wrong together:
+
+       · useCurrentUser has staleTime 60s and React Query refetches on window
+         focus by default, so simply alt-tabbing away to look up a passport
+         number and coming back re-ran this;
+       · `??` only falls back on null/undefined. A draft saved with
+         experienceLevel: '' and programs: [] is NOT absent by that test, so
+         those empty values were written straight over what the student had
+         just selected.
+
+     The student then sat on the payment step with Experience and Programs
+     silently blanked, pressed Submit, and the server refused the payload for
+     fields it looked like they had filled in.
+
+     Prefilling is still worth doing, so it happens once, and only into
+     fields that are still empty. */
+  const prefilled = useRef(false)
   useEffect(() => {
-    if (!user) return
+    if (!user || prefilled.current) return
+    prefilled.current = true
     const a = user.enrollmentApplication
+    /* Treat '' and [] as "nothing stored", which is what they mean here. */
+    const keep = <T,>(stored: T | undefined, current: T): T => {
+      if (stored === undefined || stored === null) return current
+      if (typeof stored === 'string' && stored.trim() === '') return current
+      if (Array.isArray(stored) && stored.length === 0) return current
+      return stored
+    }
     setForm(f => ({
       ...f,
       name:              user.name            ?? f.name,
-      phone:             a?.phone             ?? f.phone,
-      emergencyContact:  a?.emergencyContact  ?? f.emergencyContact,
-      gender:            a?.gender            ?? f.gender,
-      dateOfBirth:       a?.dateOfBirth       ?? f.dateOfBirth,
-      nationality:       a?.nationality       ?? f.nationality,
-      homeCountry:       a?.homeCountry       ?? f.homeCountry,
-      occupation:        a?.occupation        ?? f.occupation,
-      idType:            a?.idType            ?? f.idType,
-      idNumber:          a?.idNumber          ?? f.idNumber,
-      countryAttendance: a?.countryAttendance ?? f.countryAttendance,
-      villa:             a?.villa             ?? f.villa,
-      city:              a?.city              ?? f.city,
-      addressCountry:    a?.addressCountry    ?? f.addressCountry,
-      experienceLevel:   a?.experienceLevel   ?? f.experienceLevel,
-      preferredStartDate: a?.preferredStartDate ?? f.preferredStartDate,
-      hearAboutUs:       a?.hearAboutUs       ?? f.hearAboutUs,
-      referralName:      a?.referralName      ?? f.referralName,
-      programs:          a?.programs          ?? f.programs,
-      paymentMethod:     a?.paymentMethod     ?? f.paymentMethod,
+      phone:             keep(a?.phone, f.phone),
+      emergencyContact:  keep(a?.emergencyContact, f.emergencyContact),
+      gender:            keep(a?.gender, f.gender),
+      dateOfBirth:       keep(a?.dateOfBirth, f.dateOfBirth),
+      nationality:       keep(a?.nationality, f.nationality),
+      homeCountry:       keep(a?.homeCountry, f.homeCountry),
+      occupation:        keep(a?.occupation, f.occupation),
+      idType:            keep(a?.idType, f.idType),
+      idNumber:          keep(a?.idNumber, f.idNumber),
+      countryAttendance: keep(a?.countryAttendance, f.countryAttendance),
+      villa:             keep(a?.villa, f.villa),
+      city:              keep(a?.city, f.city),
+      addressCountry:    keep(a?.addressCountry, f.addressCountry),
+      experienceLevel:   keep(a?.experienceLevel, f.experienceLevel),
+      preferredStartDate: keep(a?.preferredStartDate, f.preferredStartDate),
+      hearAboutUs:       keep(a?.hearAboutUs, f.hearAboutUs),
+      referralName:      keep(a?.referralName, f.referralName),
+      programs:          keep(a?.programs, f.programs),
+      paymentMethod:     keep(a?.paymentMethod, f.paymentMethod),
     }))
   }, [user])
 
@@ -682,7 +724,21 @@ export function RequestSection() {
   }
 
   const handleSubmit = async () => {
-    if (!validateStep(3)) return
+    /* EVERY step, not just this one.
+
+       validateStep(3) checks the payment method and the tick-box and nothing
+       else, so anything missing from an earlier step went to the server
+       unchecked and came back as "Request validation failed" -- a message
+       that names no field and leaves the student with nowhere to click.
+
+       Checking all four here means the form answers for itself, in the step
+       where the problem is, and the student is taken to it. */
+    for (const st of [0, 1, 2, 3]) {
+      if (!validateStep(st)) {
+        if (st !== step) setStep(st)
+        return
+      }
+    }
     try {
       await completeRegistration.mutateAsync({
         phone:              form.phone,
@@ -711,7 +767,24 @@ export function RequestSection() {
       })
       setShowForm(false)
     } catch (err: any) {
-      const msg = err?.response?.data?.error?.message ?? 'Submission failed. Please try again.'
+      /* The API answers a rejected payload with details[] naming each field;
+         showing only error.message reduced all of that to "Request validation
+         failed". If the server ever refuses something the checks above let
+         through, say WHICH field -- otherwise the student is stuck guessing
+         on a form they cannot see anything wrong with. */
+      const e   = err?.response?.data?.error
+      const det = Array.isArray(e?.details) ? e.details : []
+      /* Named with the SAME words the form uses, not the API's field keys.
+         "Please check: experienceLevel, programs" is only marginally better
+         than the generic sentence if the student has to guess which box
+         "experienceLevel" is. */
+      const names = det
+        .map((d: any) => FIELD_LABELS[String(d?.field ?? '')] ?? '')
+        .filter(Boolean)
+      const unique = [...new Set(names)]
+      const msg = unique.length
+        ? `Please check ${unique.join(', ')} — then submit again.`
+        : (e?.message ?? 'Submission failed. Please try again.')
       setErrors({ submit: msg })
     }
   }
