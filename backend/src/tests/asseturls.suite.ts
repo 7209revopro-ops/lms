@@ -110,6 +110,33 @@ try {
     }
     check('none of them shadows the shared helper', offenders.length === 0, offenders.join(', '))
 
+    /* The OTHER shape of the same bypass, which this suite did not look for.
+
+       Shadowing sendSuccess is only one way to skip the rewrite; writing the
+       envelope by hand is the other, and it is the one that was actually left
+       in the tree. `res.json({ success: true, data: ... })` type-checks, reads
+       naturally, and ships raw pub-*.r2.dev URLs straight to the browser.
+
+       Three of them were live when this check was added, two carrying
+       avatarUrl: the admin Bookings list (the instructor AND student photo in
+       every row) and the admin class-feedback list. A guard written for one
+       spelling of a mistake does not cover the other spelling.
+
+       Health and webhook-ack responses are exempt by name -- they carry a
+       literal status object, never a stored document. */
+    const ENVELOPE_EXEMPT = new Set(['index.routes.ts', 'index.ts', 'webhooks.routes.ts'])
+    const handRolled: string[] = []
+    for (const f of files) {
+      if (ENVELOPE_EXEMPT.has(f)) continue
+      const src = await readFile(path.join(dir, f), 'utf8')
+      /* res.json( ... success: true ... ) across a few lines, but never an
+         error envelope, which legitimately goes out directly. */
+      const re = /res\s*\.\s*json\s*\(\s*\{[\s\S]{0,400}?success\s*:\s*true/g
+      if (re.test(src)) handRolled.push(f)
+    }
+    check('none of them hand-rolls a success envelope either',
+      handRolled.length === 0, handRolled.join(', '))
+
     /* And the ones that were offenders now import the shared one, rather than
        having simply deleted the helper and stopped responding. */
     for (const f of ['liveClasses.routes.ts', 'bookings.routes.ts', 'feedback.routes.ts']) {
@@ -211,6 +238,57 @@ try {
     check('with the SAME proxy URL the student side now gets',
       String(row?.avatarUrl ?? '').includes('/assets/avatars/probe.png'),
       String(row?.avatarUrl))
+  }
+
+  /* ═══════════════════════════════════════════════ */
+  section('E · the admin Bookings table — hand-rolled envelope, both photos')
+  {
+    /* The surface in the bug report. Every row carries TWO stored avatars:
+       the student who booked, and the session's instructor, reached through a
+       nested populate. The route wrote its envelope by hand, so neither was
+       ever rewritten -- and section A's original guard could not see it,
+       because nothing here shadows sendSuccess. */
+    const hash = await hashPassword(PW)
+    const org  = await OrganizationModel.findOne({ slug: 'dubai' }).lean() as any
+    const lc   = await LiveClassModel.findOne({ title: 'Session' }).lean() as any
+
+    const booker = await UserModel.create({
+      name: 'Booking Student', email: email('b'), passwordHash: hash, role: 'student',
+      isActive: true, isVerified: true, enrollmentStatus: 'approved',
+      organizationId: org._id, avatarUrl: STORED_AVATAR,
+    })
+    const { ClassBookingModel } = await import('@/models/schema.ts')
+    await ClassBookingModel.create({
+      userId: booker._id, liveClassId: lc._id, status: 'booked', bookedAt: new Date(),
+    })
+
+    const adminRow = await UserModel.findOne({ role: 'admin' }).lean() as any
+    const aJar: Jar = new Map()
+    const li = await call('POST', '/admin/auth/login', { jar: aJar, body: { email: adminRow.email, password: PW } })
+    check('E1 the admin signs in', li.status === 200, String(li.status))
+
+    const r = await call('GET', '/admin/bookings?per_page=50', { jar: aJar })
+    check('E2 the bookings list answers', r.status === 200, String(r.status))
+    check('E3 no raw r2.dev URL anywhere in it', !r.text.includes('.r2.dev'),
+      r.text.split('"').filter(x => x.includes('.r2.dev')).slice(0, 2).join(' | '))
+
+    const row = (r.body?.data ?? [])[0]
+    check('E4 the student avatar is proxied',
+      String(row?.userId?.avatarUrl ?? '').includes('/assets/avatars/probe.png'),
+      String(row?.userId?.avatarUrl))
+    /* The nested one, two populates deep -- the instructor shown in the
+       INSTRUCTOR column of that table. */
+    check('E5 the nested instructor avatar is proxied too',
+      String(row?.liveClassId?.instructorId?.avatarUrl ?? '').includes('/assets/avatars/probe.png'),
+      String(row?.liveClassId?.instructorId?.avatarUrl))
+
+    /* The hand-rolled envelope also omitted has_next / has_prev, so this
+       endpoint answered with a different meta shape from every other
+       paginated route. Nothing caught it until it went through the typed
+       helper. */
+    check('E6 pagination meta is the standard shape',
+      r.body?.meta && 'has_next' in r.body.meta && 'has_prev' in r.body.meta,
+      JSON.stringify(r.body?.meta))
   }
 
 } catch (err) {

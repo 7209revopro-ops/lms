@@ -62,7 +62,8 @@
     "test:ratelimitlive": "bun src/tests/ratelimitlive.suite.ts",
     "test:nopassword": "bun src/tests/nopassword.suite.ts",
     "test:instructorlogin": "bun src/tests/instructorlogin.suite.ts",
-    "diagnose-login": "bun src/scripts/diagnose-login.ts"
+    "diagnose-login": "bun src/scripts/diagnose-login.ts",
+    "diagnose-avatars": "bun src/scripts/diagnose-avatars.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1046.0",

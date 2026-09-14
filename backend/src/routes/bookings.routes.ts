@@ -29,7 +29,7 @@ import { NotificationService } from '@/services/notification.service.ts'
    value.
 
    Anything that serialises a stored asset URL has to go through here. */
-import { sendSuccess } from '@/utils/response.ts'
+import { sendSuccess, buildPaginationMeta } from '@/utils/response.ts'
 
 const router = Router()
 const notifSvc = new NotificationService()
@@ -334,11 +334,10 @@ router.get('/me', authenticate, validate(bookingQuerySchema, 'query'), async (re
         .lean({ virtuals: true }),
       ClassBookingModel.countDocuments(filter),
     ])
-    res.json({
-      success: true,
-      data: docs,
-      meta: { page, per_page, total_count: total, total_pages: Math.ceil(total / per_page) },
-    })
+    /* No avatar in this projection today, but the rule is the rule: anything
+       that serialises a stored document goes through sendSuccess, so a field
+       added to the populate later cannot quietly start shipping dead URLs. */
+    sendSuccess(res, docs, undefined, 200, buildPaginationMeta(total, page, per_page))
   } catch (err) { next(err) }
 })
 

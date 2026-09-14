@@ -75,7 +75,7 @@ router.get('/me', authenticate, async (req: Request, res: Response, next: NextFu
       .populate('liveClassId', 'id title scheduledStart')
       .sort({ createdAt: -1 })
       .lean({ virtuals: true })
-    res.json({ success: true, data: docs })
+    sendSuccess(res, docs)
   } catch (err) { next(err) }
 })
 

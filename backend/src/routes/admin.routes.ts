@@ -1870,11 +1870,8 @@ router.get('/bookings', requireInstructor, requirePermission('bookings','list'),
       const scoped    = filter['liveClassId'] as { $in?: unknown[] } | undefined
       const inScope   = !scoped?.$in || scoped.$in.some(id => String(id) === String(requested))
       if (!inScope) {
-        res.json({
-          success: true,
-          data: [],
-          meta: { page: Number(q.page) || 1, per_page: Number(q.per_page) || 50, total_count: 0, total_pages: 0 },
-        })
+        sendSuccess(res, [], undefined, 200,
+          buildPaginationMeta(0, Number(q.page) || 1, Number(q.per_page) || 50))
         return
       }
       filter['liveClassId'] = requested
@@ -1914,11 +1911,19 @@ router.get('/bookings', requireInstructor, requirePermission('bookings','list'),
     ])
 
     const withId = (d: any) => ({ ...d, id: d.id ?? String(d._id) })
-    res.json({
-      success: true,
-      data: docs.map(withId),
-      meta: { page, per_page, total_count: total, total_pages: Math.ceil(total / per_page) },
-    })
+    /* sendSuccess, not res.json.
+
+       The populate above pulls avatarUrl for the student AND for the session's
+       instructor. Those are stored as pub-*.r2.dev URLs, and that bucket is
+       private now, so the browser gets a 401 and the avatar falls back to an
+       initial. sendSuccess is what rewrites them onto the /assets proxy; a raw
+       res.json skips it and the failure is silent -- the JSON looks right and
+       only the picture is missing. */
+    /* buildPaginationMeta rather than a hand-rolled object: the raw res.json
+       this replaces omitted has_next / has_prev, so this endpoint was quietly
+       returning a different meta shape from every paginated route beside it.
+       The type checker only noticed once it went through the typed helper. */
+    sendSuccess(res, docs.map(withId), undefined, 200, buildPaginationMeta(total, page, per_page))
   } catch (err) { next(err) }
 })
 
@@ -2228,7 +2233,8 @@ router.get('/live-classes/:id/feedback', requireInstructor, async (req: Request,
       .sort({ createdAt: -1 })
       .lean({ virtuals: true })
     const avg = docs.length > 0 ? docs.reduce((s, d: any) => s + d.rating, 0) / docs.length : null
-    res.json({ success: true, data: { feedbacks: docs, averageRating: avg ? Math.round(avg * 10) / 10 : null, count: docs.length } })
+    /* Also avatar-bearing: userId is populated with avatarUrl above. */
+    sendSuccess(res, { feedbacks: docs, averageRating: avg ? Math.round(avg * 10) / 10 : null, count: docs.length })
   } catch (err) { next(err) }
 })
 
