@@ -2,7 +2,10 @@ import { Types } from 'mongoose'
 import { LiveClassRepository } from '@/repositories/liveClass.repository.ts'
 import { CourseRepository } from '@/repositories/course.repository.ts'
 import { EnrollmentRepository } from '@/repositories/enrollment.repository.ts'
-import { sendLiveClassScheduled } from '@/services/email.service.ts'
+/* sendLiveClassScheduled is no longer called from here: a new session is a
+   Standard-tier event and goes out in the daily digest instead. The sender
+   is kept for any caller that genuinely needs a standalone announcement. */
+import { queueDigestItem } from '@/jobs/digest.job.ts'
 import * as muxSvc from '@/services/mux.service.ts'
 import { fetchMeetRecordingUrl } from '@/services/googleMeet.service.ts'
 import { logger } from '@/utils/logger.ts'
@@ -684,6 +687,86 @@ export class LiveClassService {
   }
 
   /* ── Helpers ─────────────────────────────────────── */
+
+  /* Which students has this new session actually become available to?
+
+     Returns the set of user ids whose OWN progress puts them at the module
+     this session belongs to — "last completed module is the one immediately
+     prior", per the Class-Update Notification spec.
+
+     Everyone else still gets the in-app notification; they simply do not get
+     an email about a module they have not reached. That is the whole point:
+     email volume should track each student's progress, not the admin's
+     data-entry order.
+
+     Positions are compared by INDEX in the ordered module list, not by the
+     raw `order` value, because those are author-assigned and need not be
+     contiguous — a course numbered 10/20/30 would otherwise never match.
+
+     Three queries regardless of roster size: the lessons, the completions,
+     and the modules. Doing it per-student would be a query per person on
+     every class creation. */
+  async #studentsAtModule(
+    courseId: unknown,
+    sectionId: unknown,
+    userIds: string[],
+  ): Promise<Set<string>> {
+    const reached = new Set<string>()
+    if (!sectionId || userIds.length === 0) return reached
+
+    const { SectionModel, LessonModel, LessonProgressModel } = await import('@/models/schema.ts')
+
+    const sections = await SectionModel.find({ courseId }).sort({ order: 1 }).select('_id').lean() as any[]
+    const targetIdx = sections.findIndex(x => String(x._id) === String(sectionId))
+    /* The session hangs off a module that is not in this course's list — a
+       re-parented session, or stale data. Relevance cannot be established, so
+       nobody is emailed and everybody still sees it in-app. */
+    if (targetIdx === -1) return reached
+
+    const lessons = await LessonModel.find({ courseId }).select('_id sectionId').lean() as any[]
+    /* A module with no lessons cannot be "completed", so it can never be the
+       prior module. Tracked explicitly rather than treated as complete — the
+       opposite would mail the whole roster the moment somebody adds an empty
+       module. */
+    const lessonsBySection = new Map<string, string[]>()
+    for (const l of lessons) {
+      const k = String(l.sectionId)
+      lessonsBySection.set(k, [...(lessonsBySection.get(k) ?? []), String(l._id)])
+    }
+
+    const done = await LessonProgressModel.find({
+      courseId,
+      userId:      { $in: userIds },
+      completedAt: { $ne: null },
+    }).select('userId lessonId').lean() as any[]
+
+    const doneByUser = new Map<string, Set<string>>()
+    for (const d of done) {
+      const k = String(d.userId)
+      if (!doneByUser.has(k)) doneByUser.set(k, new Set())
+      doneByUser.get(k)!.add(String(d.lessonId))
+    }
+
+    for (const uid of userIds) {
+      const mine = doneByUser.get(uid) ?? new Set<string>()
+
+      /* The furthest module this student has finished, as an index. -1 means
+         they have completed none — a brand-new student, who sits immediately
+         BEFORE the first module and so is exactly the audience for a session
+         in it. Reading "no completions" as "no match" would silence the one
+         announcement a new joiner most wants. */
+      let lastCompletedIdx = -1
+      for (let i = 0; i < sections.length; i++) {
+        const ls = lessonsBySection.get(String(sections[i]!._id)) ?? []
+        if (ls.length > 0 && ls.every(id => mine.has(id))) lastCompletedIdx = i
+      }
+
+      if (targetIdx === lastCompletedIdx + 1) reached.add(uid)
+    }
+
+    return reached
+  }
+
   async #notifyEnrolledStudents(live: ILiveClass, courseTitle: string, courseSlug: string): Promise<void> {
     const enrolledStudents = await EnrollmentModel
       .find({ courseId: live.courseId, status: { $ne: 'dropped' } })
@@ -698,6 +781,36 @@ export class LiveClassService {
 
     const whenLabel = live.scheduledStart.toLocaleString('en-US',
       { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
+
+    /* Who is this session actually FOR?
+
+       Every enrolled student keeps their in-app notification — the spec's
+       "always logged, not always emailed" — but the email now goes only to
+       the students whose own progress has brought them to this module.
+
+       A session with no module cannot be judged for relevance at all. Those
+       fall back to in-app only rather than to the old roster-wide mail: not
+       being able to tell who needs it is not a reason to mail everybody, and
+       the warning below makes the case visible instead of silent. */
+    const candidateIds = enrolledStudents
+      .map(e => (e.userId as any)?._id)
+      .filter(Boolean)
+      .map((id: any) => String(id))
+
+    let reached = new Set<string>()
+    if (live.sectionId) {
+      reached = await this.#studentsAtModule(live.courseId, live.sectionId, candidateIds)
+      logger.info(
+        { liveClassId: String((live as any).id ?? (live as any)._id),
+          enrolled: candidateIds.length, emailed: reached.size },
+        'new live class: progress-gated notification',
+      )
+    } else {
+      logger.warn(
+        { liveClassId: String((live as any).id ?? (live as any)._id) },
+        'new live class has no module — in-app only, nobody emailed',
+      )
+    }
 
     for (const e of enrolledStudents) {
       const u = e.userId as unknown as {
@@ -719,10 +832,31 @@ export class LiveClassService {
         logger.warn({ err, userId: u._id.toString() }, 'live-class in-app notification failed')
       }
 
+      /* The gate. A student who has not reached this module has the
+         notification waiting for them in the app and nothing in their inbox. */
+      if (!reached.has(u._id.toString())) continue
+
+      /* Standard tier: QUEUED, not sent.
+
+         A new session is worth telling the student about, but it is not worth
+         interrupting them for — so it joins their daily digest instead of
+         becoming its own email. An admin entering next term's timetable in
+         one sitting now produces one line each in one mail, rather than a
+         mail per session.
+
+         Critical-tier changes to a session they have BOOKED (cancelled,
+         rescheduled, mentor changed) never come through here; those still
+         send immediately from notifyBookedStudents. */
       try {
-        await sendLiveClassScheduled(u.email, u.name, courseTitle, live.title, live.scheduledStart, courseUrl)
+        await queueDigestItem({
+          userId: u._id.toString(),
+          kind:   'new-session',
+          title:  `New session in ${courseTitle}`,
+          body:   `"${live.title}" — ${whenLabel}`,
+          link:   `/live-classes/${live.id}/watch`,
+        })
       } catch (err) {
-        logger.warn({ err, email: u.email }, 'live-class email send failed')
+        logger.warn({ err, email: u.email }, 'live-class digest queue failed')
       }
     }
   }

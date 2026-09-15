@@ -516,11 +516,21 @@ export function ClientTopbar() {
                           if (isUnread) markRead.mutate(n.id)
                           setNotifOpen(false)
                         }
+                        /* A notification may now point somewhere outside the
+                           app: the class-has-started reminder links straight
+                           to the meeting room. next/link would navigate the
+                           whole SPA away to meet.google.com, so the student
+                           loses the app to join a class they are about to
+                           come back from. An external target opens the room
+                           beside it instead. */
+                        const isExternal = /^https?:\/\//i.test(n.link ?? '')
                         return n.link
                           ? <motion.div key={n.id}
                             initial={{ opacity: 0, x: 8 }} animate={{ opacity: 1, x: 0 }}
                             transition={{ delay: i * 0.04 }}>
-                            <Link href={n.link} onClick={onClick}>{inner}</Link>
+                            {isExternal
+                              ? <a href={n.link} target="_blank" rel="noopener noreferrer" onClick={onClick}>{inner}</a>
+                              : <Link href={n.link} onClick={onClick}>{inner}</Link>}
                           </motion.div>
                           : <motion.div key={n.id}
                             initial={{ opacity: 0, x: 8 }} animate={{ opacity: 1, x: 0 }}

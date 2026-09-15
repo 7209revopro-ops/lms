@@ -5,6 +5,8 @@ import { env } from '@/config/env.ts'
 import { connectDatabase, disconnectDatabase } from '@/config/database.ts'
 import { logger } from '@/utils/logger.ts'
 import { startReminderJobs } from '@/jobs/reminders.job.ts'
+import { startDigestJob } from '@/jobs/digest.job.ts'
+import { startCriticalMailJob } from '@/jobs/criticalmail.job.ts'
 import { startEmailOutboxJob } from '@/jobs/emailOutbox.job.ts'
 import { TabbyService } from '@/services/tabby.service.ts'
 import { seedDefaultRoles } from '@/utils/seedRoles.ts'
@@ -254,6 +256,8 @@ async function bootstrap() {
   if ((process.env.NODE_APP_INSTANCE ?? '0') === '0') {
     startReminderJobs()
     startEmailOutboxJob()
+    startDigestJob()
+    startCriticalMailJob()
     logger.info('⏰  Reminder cron jobs started (primary instance)')
   } else {
     logger.info(`⏸️   Reminder cron jobs skipped (instance ${process.env.NODE_APP_INSTANCE})`)

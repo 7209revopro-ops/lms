@@ -18,6 +18,7 @@ import { requireSameOrgUser, callerMayAccess } from '@/utils/tenancy.ts'
 import { documentRef } from '@/utils/documentRef.ts'
 import { UserService } from '@/services/user.service.ts'
 import { adminListDevices, adminApproveDevice, adminRevokeDevice } from '@/services/device.service.ts'
+import { deviceLimitMeta, setDeviceLimitEnabled } from '@/services/settings.service.ts'
 import { sendSuccess, buildPaginationMeta, parsePagination } from '@/utils/response.ts'
 import { toSafeUser } from '@/models/types.ts'
 import { audit } from '@/middleware/audit.middleware.ts'
@@ -526,6 +527,40 @@ router.post('/impersonation-sessions/revoke-all', requireRole('super_admin'),
    pending second device, or revoke one to free a slot. Org admins see and act
    on their own academy only; super_admin sees all. */
 const DEVICE_STATUSES = ['pending', 'approved', 'revoked'] as const
+
+/* ─── The switch itself ──────────────────────────────────────────
+
+   READ is open to any admin: the Devices page has to be able to say whether
+   the queue it is showing is actually enforcing anything. An org admin
+   looking at a list of pending requests that cannot block anyone needs to
+   know that.
+
+   WRITE is super_admin only, and deliberately not a permission an org admin
+   can be granted. This is one global switch across every academy — a Dubai
+   admin turning it off would be turning it off for Bangalore too — and it
+   disables a security control, so it belongs to whoever owns the platform
+   rather than to whoever owns an academy. */
+router.get('/settings/device-limit', requireAnyAdmin, async (_req: Request, res: Response, next: NextFunction) => {
+  try {
+    sendSuccess(res, await deviceLimitMeta())
+  } catch (err) { next(err) }
+})
+
+const deviceLimitSchema = z.object({ enabled: z.boolean() })
+
+router.patch('/settings/device-limit',
+  requireRole('super_admin'),
+  validate(deviceLimitSchema),
+  audit('settings.device-limit', 'SystemSetting', undefined, r => ({ enabled: r.body.enabled })),
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const enabled = await setDeviceLimitEnabled(Boolean(req.body.enabled), req.user!.id)
+      sendSuccess(res, await deviceLimitMeta(),
+        enabled
+          ? 'Device limit is now enforced'
+          : 'Device limit is now off — students can sign in on any device')
+    } catch (err) { next(err) }
+  })
 
 router.get('/devices', requireAnyAdmin, async (req: Request, res: Response, next: NextFunction) => {
   try {

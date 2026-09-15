@@ -1744,6 +1744,9 @@ export type AuditAction =
   | 'bulk.publish'    | 'bulk.archive'    | 'bulk.delete'
   | 'course.import'   | 'course.export'
   | 'liveclass.create' | 'liveclass.update' | 'liveclass.delete' | 'liveclass.repeat'
+  /* Operator switches. `settings.device-limit` disables a security control
+     for every academy at once, so it is audited like an impersonation. */
+  | 'settings.device-limit'
 
 export interface IAuditLog extends Document {
   id:         string
@@ -1846,6 +1849,199 @@ EmailOutboxSchema.index({ sentAt: 1 }, { expireAfterSeconds: 30 * 24 * 60 * 60 }
 
 export const EmailOutboxModel =
   mongoose.model<IEmailOutbox>('EmailOutbox', EmailOutboxSchema)
+
+
+/* ─────────────────────────────────────────────────────
+   NOTIFICATION DIGEST QUEUE — Standard-tier events awaiting their daily mail
+   ─────────────────────────────────────────────────────
+   Phase 2 of the Class-Update Notification spec. Standard-tier events are
+   queued per student as they happen and flushed once a day into a single
+   "here's what changed in your classes today" email.
+
+   Critical-tier events (cancellation, reschedule, mentor change) never come
+   here — they bypass the queue entirely and send immediately, which is the
+   whole point of having tiers.
+
+   Deliberately NOT reusing EmailOutbox: that queue holds rendered messages
+   waiting on a transport that failed, and its drain sends each row as its own
+   email. These rows are the opposite — they are events waiting to be COMBINED
+   into one message that does not exist yet. Putting them in the same
+   collection would mean the outbox drain mails each one separately, which is
+   precisely the behaviour this replaces.
+───────────────────────────────────────────────────── */
+export interface IDigestQueue extends Document {
+  userId:      Types.ObjectId
+  kind:        string
+  title:       string
+  body:        string
+  link?:       string
+  queuedAt:    Date
+  sentAt?:     Date
+  createdAt:   Date
+  updatedAt:   Date
+}
+
+const DigestQueueSchema = new Schema<IDigestQueue>(
+  {
+    userId:   { type: Schema.Types.ObjectId, ref: 'User', required: true },
+    /* What happened, for grouping and for anyone reading the queue later. */
+    kind:     { type: String, required: true, maxlength: 60 },
+    title:    { type: String, required: true, maxlength: 200 },
+    body:     { type: String, required: true, maxlength: 500 },
+    link:     { type: String, maxlength: 500 },
+    queuedAt: { type: Date, default: () => new Date() },
+    /* Null until the digest carrying this row is sent. The flush claims rows
+       by stamping it, so a second run cannot re-send what the first took. */
+    sentAt:   { type: Date, default: null },
+  },
+  baseSchemaOptions,
+)
+
+/* The flush's only query: everything still pending, oldest first, per student. */
+DigestQueueSchema.index({ userId: 1, sentAt: 1, queuedAt: 1 })
+
+/* Sent rows are a 30-day record of what each digest contained; pending rows
+   are never swept, for the same reason the outbox never sweeps its own. */
+DigestQueueSchema.index({ sentAt: 1 }, { expireAfterSeconds: 30 * 24 * 60 * 60 })
+
+export const DigestQueueModel =
+  mongoose.model<IDigestQueue>('DigestQueue', DigestQueueSchema)
+
+
+/* ────────────────────────────────────────────────────
+   CRITICAL MAIL — parked, merged, then sent (Phase 4)
+
+   Critical-tier email no longer leaves from the request that caused it. Each
+   recipient's mail waits here for a short buffer so that back-to-back
+   corrections to the same session collapse into one, per §7 of the
+   Class-Update Notification spec.
+
+   Separate from DigestQueue on purpose. A digest row is a line in a message
+   that does not exist yet; a row here IS a message, addressed and ready, that
+   is deliberately not sent yet. They have different lifecycles: a digest row
+   waits for a clock, this one waits for the admin to stop typing.
+
+   Three terminal states, and the difference matters when reading the table:
+     · sentAt set, foldedToDigest false — mailed
+     · sentAt set, foldedToDigest true  — over the student's daily cap, so it
+       went into the digest instead. Closed out, but never mailed.
+     · supersededAt set                 — overtaken before it was sent. The
+       only producer today is a cancellation, which makes every other pending
+       fact about that session moot.
+
+   `claimedAt` is not a fourth state: it is the lock a flush takes on a row
+   before sending it, so two overlapping flushes cannot both deliver it.
+─────────────────────────────────────────────────── */
+export interface ICriticalMail extends Document {
+  liveClassId:        Types.ObjectId
+  userId:             Types.ObjectId
+  email:              string
+  name:               string
+  kind:               'cancelled' | 'rescheduled' | 'instructor'
+  title:              string
+  scheduledStart?:    Date
+  oldStart?:          Date
+  newStart?:          Date
+  oldInstructorName?: string
+  newInstructorName?: string
+  queuedAt:           Date
+  dueAt:              Date
+  sentAt?:            Date | null
+  foldedToDigest?:    boolean
+  supersededAt?:      Date | null
+  claimedAt?:         Date | null
+  createdAt:          Date
+  updatedAt:          Date
+}
+
+const CriticalMailSchema = new Schema<ICriticalMail>(
+  {
+    liveClassId: { type: Schema.Types.ObjectId, ref: 'LiveClass', required: true },
+    userId:      { type: Schema.Types.ObjectId, ref: 'User',      required: true },
+    /* The address and name are COPIED rather than joined at send time: the
+       mail is about what the student booked, and re-reading the user at flush
+       time would only matter if they changed their address inside the buffer,
+       which the account-change flow handles on its own. */
+    email:  { type: String, required: true, maxlength: 320 },
+    name:   { type: String, default: '',    maxlength: 200 },
+    kind:   { type: String, required: true, enum: ['cancelled', 'rescheduled', 'instructor'] },
+    title:  { type: String, required: true, maxlength: 255 },
+    /* The class's own start time, so the flush can tell when waiting out the
+       buffer would deliver the mail after the class it is about. */
+    scheduledStart:    { type: Date },
+    oldStart:          { type: Date },
+    newStart:          { type: Date },
+    oldInstructorName: { type: String, maxlength: 200 },
+    newInstructorName: { type: String, maxlength: 200 },
+    queuedAt:          { type: Date, default: () => new Date() },
+    /* Set once, from the FIRST edit, and never pushed back by a merge — a
+       rolling window would let a stream of corrections delay a cancellation
+       indefinitely. */
+    dueAt:             { type: Date, required: true },
+    sentAt:            { type: Date,    default: null },
+    foldedToDigest:    { type: Boolean, default: false },
+    supersededAt:      { type: Date,    default: null },
+    /* Set by whichever flush takes this row, BEFORE it sends. Two flushes can
+       overlap — the urgent path runs inside the admin's request on whatever
+       instance served it, while the cron tick runs on instance 0 — and an
+       in-process guard does not span processes. Without the claim both read
+       the same pending rows and both send: a cancellation delivered twice.
+       Cleared again if the send throws, so the next tick retries. */
+    claimedAt:         { type: Date,    default: null },
+  },
+  baseSchemaOptions,
+)
+
+/* The flush's query: what is pending and ready. */
+CriticalMailSchema.index({ sentAt: 1, supersededAt: 1, dueAt: 1 })
+
+/* The merge lookup: is there already a pending row for this session, this
+   student, this kind of change? */
+CriticalMailSchema.index({ liveClassId: 1, userId: 1, kind: 1, sentAt: 1 })
+
+/* The daily-cap count. */
+CriticalMailSchema.index({ userId: 1, sentAt: 1 })
+
+/* Sent rows are a 30-day record of what was mailed and what was capped;
+   pending rows are never swept. */
+CriticalMailSchema.index({ sentAt: 1 }, { expireAfterSeconds: 30 * 24 * 60 * 60 })
+
+export const CriticalMailModel =
+  mongoose.model<ICriticalMail>('CriticalMail', CriticalMailSchema)
+
+
+/* ────────────────────────────────────────────────────
+   SYSTEM SETTINGS — one row per switch, read through settings.service.ts
+
+   Deliberately key/value rather than a column per feature. These are operator
+   switches, not domain data: they are read constantly, written rarely, and the
+   next one should not need a migration.
+
+   `updatedBy` and `updatedAt` are the whole audit story for a switch that can
+   disable a security control — whoever turns the device limit off should be
+   answerable for it.
+─────────────────────────────────────────────────── */
+export interface ISystemSetting extends Document {
+  key:        string
+  value:      unknown
+  updatedBy?: Types.ObjectId
+  createdAt:  Date
+  updatedAt:  Date
+}
+
+const SystemSettingSchema = new Schema<ISystemSetting>(
+  {
+    key:       { type: String, required: true, unique: true, maxlength: 100 },
+    /* Mixed so a switch can grow from a boolean into an object without a
+       migration. Readers are responsible for validating what they get. */
+    value:     { type: Schema.Types.Mixed, required: true },
+    updatedBy: { type: Schema.Types.ObjectId, ref: 'User' },
+  },
+  baseSchemaOptions,
+)
+
+export const SystemSettingModel =
+  mongoose.model<ISystemSetting>('SystemSetting', SystemSettingSchema)
 
 
 /* ─────────────────────────────────────────────────────

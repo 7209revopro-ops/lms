@@ -111,6 +111,10 @@ async function dispatch(
   sessionStart: Date,
   kind:         'day-before' | 'day-of' | 'pre-session' | 'five-min' | 'at-time',
   emailFn:      () => Promise<void>,
+  /* Where the in-app notification should point. Supplied for 'at-time' only:
+     that is the moment the student needs the room and nothing else will do.
+     Every other reminder keeps sending them to their schedule. */
+  notifLink?:   string,
 ): Promise<void> {
   const dateLabel = fmtFull(sessionStart)
   const timeLabel = fmtTime(sessionStart)
@@ -137,7 +141,11 @@ async function dispatch(
     kind:  'class-reminder',
     title: notifTitle,
     body:  notifBody,
-    link:  '/class-bookings',
+    /* The class has started: send them to the room, not to a list with the
+       room somewhere on it. Every reminder used to land on /class-bookings,
+       so the meeting link existed ONLY inside the emails -- a student working
+       from the notification bell had no way to reach the class from it. */
+    link:  notifLink ?? '/class-bookings',
   }).catch(err => logger.error({ err, userId, kind }, '[Reminder] Failed to create in-app notification'))
 
   /* 2. Email — failure creates a system notification instead of silently dropping */
@@ -155,7 +163,7 @@ async function dispatch(
 }
 
 /* ── Day-before job ──────────────────────────────────── */
-async function runDayBeforeReminders(): Promise<void> {
+export async function runDayBeforeReminders(): Promise<void> {
   try {
     const { ClassBookingModel } = await import('@/models/schema.ts')
     const now  = new Date()
@@ -191,7 +199,7 @@ async function runDayBeforeReminders(): Promise<void> {
 }
 
 /* ── Day-of job ─────────────────────────────────────── */
-async function runDayOfReminders(): Promise<void> {
+export async function runDayOfReminders(): Promise<void> {
   try {
     const { ClassBookingModel } = await import('@/models/schema.ts')
     const now   = new Date()
@@ -227,7 +235,7 @@ async function runDayOfReminders(): Promise<void> {
 }
 
 /* ── Pre-session job (30 min) ────────────────────────── */
-async function runPreSessionReminders(): Promise<void> {
+export async function runPreSessionReminders(): Promise<void> {
   try {
     const { ClassBookingModel } = await import('@/models/schema.ts')
     const now  = new Date()
@@ -262,7 +270,7 @@ async function runPreSessionReminders(): Promise<void> {
 }
 
 /* ── 5-min job ───────────────────────────────────────── */
-async function runFiveMinReminders(): Promise<void> {
+export async function runFiveMinReminders(): Promise<void> {
   try {
     const { ClassBookingModel } = await import('@/models/schema.ts')
     const now  = new Date()
@@ -298,7 +306,7 @@ async function runFiveMinReminders(): Promise<void> {
 }
 
 /* ── At-time job ─────────────────────────────────────── */
-async function runAtTimeReminders(): Promise<void> {
+export async function runAtTimeReminders(): Promise<void> {
   try {
     const { ClassBookingModel } = await import('@/models/schema.ts')
     const now  = new Date()
@@ -322,6 +330,7 @@ async function runAtTimeReminders(): Promise<void> {
 
       await dispatch(userId, b.liveClassId.title, classAt, 'at-time', () =>
         sendClassStartingReminder(b.userId.email, b.userId.name, b.liveClassId.title, joinUrl),
+        joinUrl,
       )
 
       await ClassBookingModel.findByIdAndUpdate(b._id, { reminderAtTimeSent: true })
@@ -334,7 +343,7 @@ async function runAtTimeReminders(): Promise<void> {
 }
 
 /* ── Instructor 15-min job ───────────────────────────── */
-async function runInstructor15MinReminders(): Promise<void> {
+export async function runInstructor15MinReminders(): Promise<void> {
   try {
     const { LiveClassModel } = await import('@/models/schema.ts')
     const now  = new Date()
@@ -418,6 +427,15 @@ async function runRecordingPoller(): Promise<void> {
 }
 
 /* ── Entry point ─────────────────────────────────────── */
+/* Each run* function above is exported for one reason: so a test can call it.
+
+   cron.schedule() hands back nothing a test can await, so the only other way
+   to prove a reminder fires is to run the server and wait for the wall clock.
+   The header of this file records what that cost once already -- four
+   bookings whose class had been deleted threw inside a .filter(), and every
+   reminder for every student stopped, silently, for as long as it took
+   somebody to notice. Exporting the jobs is what lets remindermails.suite.ts
+   put a booking at each window and check the mail actually goes. */
 export function startReminderJobs(): void {
   // Every hour at :00 — day-before reminders (23–25 h window)
   cron.schedule('0 * * * *', runDayBeforeReminders)

@@ -41,6 +41,19 @@ process.env.NODE_ENV     = 'test'
 process.env.PORT         = '0'
 process.env.RATE_LIMIT_AUTH_MAX = '900'
 process.env.RATE_LIMIT_API_MAX  = '9000'
+
+/* Phase 4 OFF for this suite, deliberately.
+
+   Critical mail is normally parked for a 10-minute buffer and capped per
+   student per day. This suite predates both and is about the CONTENT of each
+   critical notice — who receives it, what it says, who is excluded — one
+   event at a time. With the buffer on, every assertion here would be testing
+   the flush; with the cap on, the later sections would start folding into the
+   digest simply because this one student triggers six changes in a row.
+
+   The buffer and the cap have their own suite: criticalmail.suite.ts. */
+process.env.CRITICAL_DEBOUNCE_MINS = '0'
+process.env.CRITICAL_MAIL_CAP      = '0'
 /* Force the console transport, which writes each message to .logs/emails/
    instead of sending it.
 
@@ -117,7 +130,7 @@ const describeMail = async (): Promise<string> => {
 const app = (await import('@/app.ts')).default
 const {
   UserModel, OrganizationModel, CourseModel, LiveClassModel,
-  ClassBookingModel, NotificationModel, EnrollmentModel,
+  ClassBookingModel, NotificationModel, EnrollmentModel, DigestQueueModel,
 } = await import('@/models/schema.ts')
 const { hashPassword } = await import('@/utils/hash.ts')
 
@@ -277,17 +290,25 @@ try {
     await until(async () => (await notesFor(booked._id, /rescheduled|Instructor changed/i)).length >= 2)
     const notes = await notesFor(booked._id, /rescheduled|Instructor changed/i)
     check('the student is told BOTH things', notes.length === 2, `${notes.length} notification(s)`)
+    /* Wait for the MAIL, not just the notifications — the two no longer
+       arrive together. The bell is written from the request; the email is
+       parked and sent afterwards, so a mailbox read that only waited on the
+       notifications catches the gap between them. Sections 1 and 2 already
+       wrapped their mail assertions this way; this one did not, and it is
+       the only reason it failed. */
     check('...and receives both emails',
-      (await mailFor('booked@t.local', /Rescheduled|Delay/i)).length === 1 &&
-      (await mailFor('booked@t.local', /Instructor Update/i)).length === 1,
+      await until(async () =>
+        (await mailFor('booked@t.local', /Rescheduled|Delay/i)).length === 1 &&
+        (await mailFor('booked@t.local', /Instructor Update/i)).length === 1),
       `${(await mailbox()).length} total`)
   }
 
   /* ══════════ 4. NEGATIVE — an unrelated edit tells nobody ══════════ */
-  section('UNRELATED EDIT — nobody is disturbed  ← the check that keeps this honest')
+  section('UNRELATED EDIT — no EMAIL  ← the check that keeps this honest')
   {
     resetMail()
     await NotificationModel.deleteMany({})
+    await DigestQueueModel.deleteMany({})
     const r = await call('PATCH', `/admin/live-classes/${session._id}`, {
       jar: adminJar, body: { title: 'Trading Masterclass (Updated Notes)' },
     })
@@ -296,8 +317,20 @@ try {
     await new Promise(r2 => setTimeout(r2, 1500))
     check('no email is sent for an unrelated edit', (await mailbox()).length === 0,
       await describeMail())
-    check('no in-app notification either', (await NotificationModel.countDocuments({})) === 0,
+
+    /* This used to assert ZERO notifications, and that assertion was a record
+       of the gap rather than of an intention: a title change reached the
+       student in no channel at all. §6 of the Class-Update Notification spec
+       makes the notification centre the source of truth for EVERY update, so
+       a minor edit is now logged in-app and joins tonight's digest. What has
+       to stay true here — and does — is that it sends no mail of its own.
+       The tiering itself is covered in detail by sessionedits.suite. */
+    check('but it IS logged in the notification centre',
+      (await NotificationModel.countDocuments({})) === 1,
       `${await NotificationModel.countDocuments({})} created`)
+    check('...and queued for the daily digest rather than mailed now',
+      (await DigestQueueModel.countDocuments({})) === 1,
+      `${await DigestQueueModel.countDocuments({})} queued`)
   }
 
   /* ══════════ 5. RE-SUBMITTING THE SAME VALUES ══════════ */

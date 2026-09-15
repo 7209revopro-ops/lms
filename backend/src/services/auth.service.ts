@@ -7,6 +7,7 @@ import { logger } from '@/utils/logger.ts'
 import { sendPasswordReset, sendVerifyEmail, sendRegistrationAttempt, sendLoginCode, sendCourseInvite, sendDeviceApprovalRequest } from '@/services/email.service.ts'
 import { TotpService } from '@/services/totp.service.ts'
 import { resolveDeviceForLogin, isDeviceApproved, type DeviceOutcome } from '@/services/device.service.ts'
+import { isDeviceLimitEnabled } from '@/services/settings.service.ts'
 import { env } from '@/config/env.ts'
 import type { RegisterDto, LoginDto, TokenPair, UserRole } from '@/types/index.ts'
 import type { SafeUser } from '@/models/types.ts'
@@ -1076,6 +1077,18 @@ export class AuthService {
      so an admin can approve it and the buyer can then sign in). */
   async #enforceDeviceForLogin(userId: string, role: UserRole, meta?: SessionMeta): Promise<void> {
     if (!isDeviceLimited(role)) return
+
+    /* The whole feature can be switched off by a super admin, in which case a
+       student signs in on any browser and no device row is written at all.
+
+       Not writing the row is the deliberate part. Recording devices while the
+       limit is off would fill the admin's approval queue with requests that
+       were never actually blocked, and every one of them would start blocking
+       the moment somebody switched the limit back on. Skipping entirely means
+       "off" means off, and re-enabling resumes from the devices that were
+       recorded while it was on. */
+    if (!(await isDeviceLimitEnabled())) return
+
     const deviceId = meta?.deviceId
     if (!deviceId) return // no browser device context (non-cookie client) — nothing to gate on
     const outcome = await resolveDeviceForLogin(userId, deviceId, { userAgent: meta?.userAgent, ip: meta?.ip })
@@ -1166,7 +1179,13 @@ export class AuthService {
        student whose device an admin revokes loses the session on the next
        refresh, rather than waiting out the 30-day token. 401 so the controller
        clears the cookies as a dead session. Staff are exempt. */
-    if (isDeviceLimited(user.role) && !(await isDeviceApproved(user.id, meta?.deviceId ?? ''))) {
+    /* Same switch on the refresh path. Without it, turning the limit off
+       would let a student sign in on a new browser and then lose the session
+       fifteen minutes later on its first refresh — the worst of both
+       behaviours. */
+    if (isDeviceLimited(user.role)
+      && (await isDeviceLimitEnabled())
+      && !(await isDeviceApproved(user.id, meta?.deviceId ?? ''))) {
       throw new AuthError('DEVICE_REVOKED', 'This device is no longer approved. Sign in again.', 401)
     }
     /* A rotation must preserve the portal the session started in, or the

@@ -56,3 +56,48 @@ export function useRevokeDevice() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ['admin', 'devices'] }),
   })
 }
+
+/* ─── The two-device limit can be switched off entirely ──────────────────
+   Read by any admin so the page can say whether the queue it is showing
+   enforces anything; written by a super admin only. */
+export interface DeviceLimitState {
+  enabled:       boolean
+  updatedAt:     string | null
+  updatedByName: string | null
+}
+
+/* NOT under ['admin','devices',...]: React Query invalidates by prefix, so a
+   key nested under the device list would be invalidated — and refetched —
+   every time the list is, which is exactly what the optimistic write below is
+   avoiding. */
+const LIMIT_KEY = ['admin', 'device-limit'] as const
+
+export function useDeviceLimit() {
+  return useQuery({
+    queryKey: LIMIT_KEY,
+    queryFn: async () => {
+      const res = await api.get<{ success: true; data: DeviceLimitState }>('/admin/settings/device-limit')
+      return res.data.data
+    },
+    staleTime: 20_000,
+  })
+}
+
+export function useSetDeviceLimit() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async (enabled: boolean) => {
+      const res = await api.patch<{ success: true; data: DeviceLimitState }>(
+        '/admin/settings/device-limit', { enabled })
+      return res.data.data
+    },
+    onSuccess: (data) => {
+      /* Write the fresh state straight into the cache rather than only
+         invalidating: the switch is the control the admin just operated, and
+         a refetch round-trip would let it flick back to its old position for
+         a moment. The device LIST is invalidated normally. */
+      qc.setQueryData(LIMIT_KEY, data)
+      qc.invalidateQueries({ queryKey: ['admin', 'devices'] })
+    },
+  })
+}

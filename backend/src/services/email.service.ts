@@ -36,6 +36,9 @@ export interface EmailSender {
 
 /* ─── Console sender (dev) ───────────────────────────── */
 class ConsoleEmailSender implements EmailSender {
+  /** Monotonic within the process — see the filename below. */
+  private static seq = 0
+
   /* One directory per process when asked for.
 
      Suites that assert on mail read this directory back and filter it only by
@@ -50,7 +53,18 @@ class ConsoleEmailSender implements EmailSender {
     try {
       await mkdir(this.dir, { recursive: true })
       const safe = msg.to.replace(/[^a-z0-9@._-]/gi, '_')
-      const file = join(this.dir, `${Date.now()}-${safe}.html`)
+      /* The sequence number is not decoration. The name used to be
+         `${Date.now()}-${to}.html`, so two messages to the same address in the
+         same millisecond landed on the same path and the second silently
+         overwrote the first. That is not hypothetical: once critical mail
+         started flushing in a batch, a reschedule and a reassignment for one
+         student went out back-to-back and the maildir showed one of them — a
+         suite then reported "receives both emails - 1 total" and the defect
+         was in how mail was recorded, not in what was sent.
+
+         Readers take the timestamp from the first `-` segment, so the counter
+         goes second and leaves that parsing intact. */
+      const file = join(this.dir, `${Date.now()}-${String(ConsoleEmailSender.seq++).padStart(4, '0')}-${safe}.html`)
       await writeFile(file, `<!-- to: ${msg.to} | subject: ${msg.subject} -->\n${msg.html}`, 'utf8')
       logger.info(
         { to: msg.to, subject: msg.subject, file },
@@ -1159,6 +1173,60 @@ export async function sendInstructorChangedNotification(
     to, subject, html,
     text: `Dear ${name},\n\nThe instructor for a session you have booked has changed. The date and time are unchanged.\n\nSession: ${sessionTitle}\nPrevious Instructor: ${oldInstructor}\nNew Instructor: ${newInstructor}\nWhen: ${dateStr} at ${timeStr} (UAE Time)\n\nYour booking is still confirmed — there is nothing you need to do.\n\nDelta Academy`,
   })
+}
+
+/** The once-a-day Standard-tier digest: everything that changed, in one mail.
+
+    One email instead of one per event is the entire point — a student who had
+    four sessions added across three courses used to get four separate mails,
+    which is the volume the notification spec was written to stop. */
+export async function sendDailyDigest(
+  to: string,
+  name: string,
+  items: { title: string; body: string }[],
+  scheduleUrl: string,
+): Promise<void> {
+  /* Singular when there is one. A digest that says "1 updates" reads like a
+     machine wrote it, and the whole redesign is about mail that respects the
+     reader. */
+  const count   = items.length
+  const subject = count === 1
+    ? `1 update in your classes today`
+    : `${count} updates in your classes today`
+
+  const rows = items.map(i => `
+    <tr><td style="padding:10px 0;border-bottom:1px solid #E5E7EB">
+      <p style="margin:0 0 4px;font-size:14px;font-weight:700;color:#0D0F1A">${escapeHtml(i.title)}</p>
+      <p style="margin:0;font-size:13px;color:#374151">${escapeHtml(i.body)}</p>
+    </td></tr>`).join('')
+
+  const html = wrap(subject, `
+    <h2 style="margin:0 0 16px;font-size:20px;font-weight:700;color:#0D0F1A">Here's what changed in your classes today</h2>
+    <p style="margin:0 0 16px;color:#374151">Dear <strong>${escapeHtml(name)}</strong>,</p>
+    <table cellpadding="0" cellspacing="0" style="width:100%;margin:0 0 24px">${rows}</table>
+    <p style="margin:0 0 24px">
+      <a href="${escapeHtml(sanitiseUrl(scheduleUrl))}" style="display:inline-block;background:linear-gradient(135deg,#0057b8,#2F6BFF);color:#fff;font-weight:700;padding:14px 28px;border-radius:12px;text-decoration:none;font-size:15px">
+        View my schedule →
+      </a>
+    </p>
+    <p style="margin:0;color:#374151"><strong>Delta Academy</strong></p>
+  `)
+
+  /* Assembled from an array rather than one long template literal.
+     The plain-text half needs real line breaks between items, and
+     embedding them inside a nested template is how this got mangled
+     the first time round. */
+  const lines = [
+    `Dear ${name},`, '',
+    `Here's what changed in your classes today:`, '',
+    ...items.flatMap(i => [`• ${i.title}`, `  ${i.body}`]),
+    '',
+    `View my schedule: ${scheduleUrl}`, '',
+    'Delta Academy',
+  ]
+  const text = lines.join(String.fromCharCode(10))
+
+  await sender.send({ to, subject, html, text })
 }
 
 export async function sendCancelledNotification(

@@ -7,6 +7,8 @@ import { createGoogleMeetLink } from '@/services/googleMeet.service.ts'
 import { sendSuccess } from '@/utils/response.ts'
 import { sendInstructorClassScheduled } from '@/services/email.service.ts'
 import { bookingClosesAt } from '@/utils/liveStatus.ts'
+import { parkCriticalMail, flushCriticalMail, isUrgent } from '@/jobs/criticalmail.job.ts'
+import type { CriticalKind } from '@/jobs/criticalmail.job.ts'
 
 function isPopulated(v: unknown): v is Record<string, unknown> & { id: string } {
   return !!v && typeof v === 'object' && typeof (v as { id?: unknown }).id === 'string'
@@ -128,12 +130,122 @@ export interface BookingChangeNotice {
   newInstructorId?:  string
 }
 
+/* ─────────────────────────────────────────────────────────────────────────
+   notifySessionEdited — everything that is NOT Critical
+
+   The Class-Update Notification spec is explicit that the notification centre
+   is the source of truth and email is a conditional layer on top: "every
+   update — Critical, Standard, and None/internal — is logged in the student's
+   in-app notification centre."
+
+   That was not true. Only cancel / reschedule / instructor produced anything
+   at all; every other edit notified nobody in any channel. Change the joining
+   link and a student booked on the session was never told, which is the gap
+   that turned up when somebody asked what happens when an admin pastes a new
+   Meet URL.
+
+   Two tiers land here, and the difference is what a student loses by hearing
+   late:
+
+     · the MEETING LINK — in-app immediately, no email. Waiting for the 6pm
+       digest to mention a link change would be worse than saying nothing: the
+       class it refers to may already be over. Emailing it is a decision that
+       belongs to whoever owns the mail volume, and the answer for now is no,
+       so it goes in the bell where the student can find it.
+
+     · everything else (title, description, duration, capacity, where it
+       meets) — in-app AND queued for the daily digest. None of it changes
+       whether they can attend.
+
+   Audience is the same as Critical: students holding a booking on THIS
+   session, never the course roster.
+───────────────────────────────────────────────────────────────────────── */
+export interface SessionEditNotice {
+  liveClassId:  string
+  title:        string
+  linkChanged:  boolean
+  /* Human labels for the minor fields that changed, e.g. ['time slot length',
+     'location']. Empty when nothing minor changed. */
+  minorChanges: string[]
+}
+
+export async function notifySessionEdited(notice: SessionEditNotice): Promise<{
+  recipients: number; notified: number; queued: number
+}> {
+  const tally = { recipients: 0, notified: 0, queued: 0 }
+  if (!notice.linkChanged && notice.minorChanges.length === 0) return tally
+
+  const { ClassBookingModel } = await import('@/models/schema.ts')
+  const { NotificationService } = await import('@/services/notification.service.ts')
+  const { queueDigestItem } = await import('@/jobs/digest.job.ts')
+  const notifications = new NotificationService()
+
+  const bookings = await ClassBookingModel.find({
+    liveClassId: notice.liveClassId,
+    status:      { $in: ['booked', 'attended'] },
+  }).select('userId').lean() as any[]
+
+  tally.recipients = bookings.length
+  if (!bookings.length) return tally
+
+  for (const b of bookings) {
+    const userId = String(b.userId)
+
+    if (notice.linkChanged) {
+      /* Immediate, and pointed at the session so the student can pick the new
+         link up from the app rather than hunting for the old mail. */
+      try {
+        await notifications.create(userId, {
+          kind:  'system',
+          title: `Joining link updated: ${notice.title}`,
+          body:  'The joining link for this session has changed. Open the class to use the new one.',
+          link:  `/live-classes/${notice.liveClassId}/watch`,
+        })
+        tally.notified++
+      } catch (err) {
+        logger.error({ err, userId }, 'session-edit: link notification failed')
+      }
+    }
+
+    if (notice.minorChanges.length) {
+      const what = notice.minorChanges.join(', ')
+      try {
+        await notifications.create(userId, {
+          kind:  'system',
+          title: `Updated: ${notice.title}`,
+          body:  `${what} changed for this session.`,
+          link:  '/class-bookings',
+        })
+        tally.notified++
+      } catch (err) {
+        logger.error({ err, userId }, 'session-edit: notification failed')
+      }
+
+      /* Standard tier: it joins tonight's digest rather than becoming mail of
+         its own. */
+      try {
+        await queueDigestItem({
+          userId,
+          kind:  'session-updated',
+          title: `Updated: ${notice.title}`,
+          body:  `${what} changed.`,
+          link:  '/class-bookings',
+        })
+        tally.queued++
+      } catch (err) {
+        logger.error({ err, userId }, 'session-edit: digest queue failed')
+      }
+    }
+  }
+
+  return tally
+}
+
 export async function notifyBookedStudents(notice: BookingChangeNotice): Promise<{
-  recipients: number; notified: number; emailed: number
+  recipients: number; notified: number; emailed: number; parked: number
 }> {
   const { ClassBookingModel, UserModel } = await import('@/models/schema.ts')
   const { NotificationService } = await import('@/services/notification.service.ts')
-  const email = await import('@/services/email.service.ts')
   const notifications = new NotificationService()
 
   /* A cancelled booking is not a recipient — that student already withdrew. */
@@ -142,7 +254,7 @@ export async function notifyBookedStudents(notice: BookingChangeNotice): Promise
     status:      { $in: ['booked', 'attended'] },
   }).select('userId').lean()
 
-  if (bookings.length === 0) return { recipients: 0, notified: 0, emailed: 0 }
+  if (bookings.length === 0) return { recipients: 0, notified: 0, emailed: 0, parked: 0 }
 
   /* One query for every recipient rather than one per booking. */
   const userIds = bookings.map(b => b.userId)
@@ -162,40 +274,47 @@ export async function notifyBookedStudents(notice: BookingChangeNotice): Promise
   const day = (d: Date | string) => new Date(d).toLocaleDateString('en-US', { timeZone: 'Asia/Dubai' })
   const isReschedule = day(oldStart) !== day(newStart)
 
-  let notified = 0, emailed = 0
+  /* `isReschedule` is no longer decided here: which of the two templates a
+     reschedule uses depends on the times as they stand when the mail finally
+     goes, and inside the debounce window they can still move again. The flush
+     makes that call. */
+  void isReschedule
+
+  let notified = 0, parked = 0
   for (const user of users) {
     const u = user as { _id: unknown; name?: string; email?: string }
-    const messages: { title: string; body: string; send?: () => Promise<void> }[] = []
+    const messages: { title: string; body: string; kind?: CriticalKind }[] = []
 
     if (notice.wasCancelled) {
       messages.push({
         title: `Class cancelled: ${notice.title}`,
         body:  'The session you booked has been cancelled.',
-        send:  () => email.sendCancelledNotification(u.email!, u.name ?? '', notice.title, oldStart),
+        kind:  'cancelled',
       })
     } else {
       if (notice.wasRescheduled) {
         messages.push({
           title: `Class rescheduled: ${notice.title}`,
           body:  `The session has moved to ${new Date(newStart).toLocaleString('en-US', { timeZone: 'Asia/Dubai' })}.`,
-          send:  () => isReschedule
-            ? email.sendRescheduledNotification(u.email!, u.name ?? '', notice.title, oldStart, newStart)
-            : email.sendDelayNotification(u.email!, u.name ?? '', notice.title, newStart),
+          kind:  'rescheduled',
         })
       }
       if (notice.instructorChanged) {
         messages.push({
           title: `Instructor changed: ${notice.title}`,
           body:  `${nameOf(notice.oldInstructorId)} has been replaced by ${nameOf(notice.newInstructorId)}.`,
-          send:  () => email.sendInstructorChangedNotification(
-            u.email!, u.name ?? '', notice.title,
-            nameOf(notice.oldInstructorId), nameOf(notice.newInstructorId), newStart,
-          ),
+          kind:  'instructor',
         })
       }
     }
 
     for (const m of messages) {
+      /* The bell fires from the request, as it always has. Phase 4's buffer
+         is on the EMAIL only: the in-app notice costs nothing to deliver, it
+         is the source of truth per §6, and delaying it would mean a student
+         refreshing the app right after an admin's edit still saw the old
+         session. Every correction inside the window shows up here in order;
+         only the mail is collapsed. */
       try {
         await notifications.create(String(u._id), {
           kind:  'system',
@@ -207,16 +326,49 @@ export async function notifyBookedStudents(notice: BookingChangeNotice): Promise
       } catch (err) {
         logger.error({ err, userId: String(u._id) }, 'booking change: in-app notification failed')
       }
-      if (u.email && m.send) {
-        try { await m.send(); emailed++ }
-        catch (err) { logger.error({ err, to: u.email }, 'booking change: email failed') }
+
+      if (u.email && m.kind) {
+        try {
+          await parkCriticalMail({
+            liveClassId: notice.liveClassId,
+            userId:      String(u._id),
+            email:       u.email,
+            name:        u.name ?? '',
+            kind:        m.kind,
+            title:       notice.title,
+            scheduledStart:    notice.newStart ?? notice.oldStart,
+            oldStart,
+            newStart,
+            ...(notice.instructorChanged ? {
+              oldInstructorName: nameOf(notice.oldInstructorId),
+              newInstructorName: nameOf(notice.newInstructorId),
+            } : {}),
+          })
+          parked++
+        } catch (err) {
+          logger.error({ err, to: u.email }, 'booking change: could not park email')
+        }
       }
     }
   }
 
-  logger.info({ liveClassId: notice.liveClassId, recipients: users.length, notified, emailed },
+  /* The buffer must never outlive the class it is about. A cancellation for a
+     session starting in eight minutes waits for nothing — it flushes here,
+     in the request, exactly as this function used to behave. */
+  let emailed = 0
+  if (parked > 0 && isUrgent(notice.newStart ?? notice.oldStart)) {
+    try {
+      const flushed = await flushCriticalMail({ liveClassId: notice.liveClassId })
+      emailed = flushed.sent
+    } catch (err) {
+      logger.error({ err, liveClassId: notice.liveClassId },
+        'booking change: urgent flush failed — rows stay parked for the next tick')
+    }
+  }
+
+  logger.info({ liveClassId: notice.liveClassId, recipients: users.length, notified, parked, emailed },
     'booking change notifications sent')
-  return { recipients: users.length, notified, emailed }
+  return { recipients: users.length, notified, emailed, parked }
 }
 
 export class LiveClassController {
@@ -769,6 +921,41 @@ export class LiveClassController {
       const oldInstructorId = oldSession?.instructorId ? String(oldSession.instructorId) : undefined
       const instructorChanged = !!data.instructorId && !!oldInstructorId &&
         String(data.instructorId) !== oldInstructorId
+
+      /* Everything that is NOT Critical, so that no edit passes silently.
+
+         Compared against the session as it stood, not against whether the
+         field was present in the request: an admin re-saving a form sends
+         every field back, so "was it in the body" would report a change on
+         every save and bury the real ones. */
+      const changed = (k: string, incoming: unknown) =>
+        incoming !== undefined && String(incoming ?? '') !== String((oldSession as any)?.[k] ?? '')
+
+      const linkChanged = changed('meetingUrl', data.meetingUrl)
+
+      /* Field name -> what a student would call it. Anything not listed is
+         staff-facing (mentor notes, stream ids) and stays out of the message
+         while still being logged by the audit trail. */
+      const MINOR_LABELS: Record<string, string> = {
+        title:           'the title',
+        description:     'the description',
+        durationMins:    'the length',
+        sessionCapacity: 'the number of seats',
+        location:        'the location',
+        room:            'the room',
+      }
+      const minorChanges = Object.entries(MINOR_LABELS)
+        .filter(([k]) => changed(k, (data as any)[k]))
+        .map(([, label]) => label)
+
+      if (linkChanged || minorChanges.length) {
+        void notifySessionEdited({
+          liveClassId: id,
+          title:       live.title,
+          linkChanged,
+          minorChanges,
+        }).catch(err => logger.error({ err, liveClassId: id }, 'session edit notification failed'))
+      }
 
       if (wasCancelled || wasRescheduled || instructorChanged) {
         void notifyBookedStudents({
