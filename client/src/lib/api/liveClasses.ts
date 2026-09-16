@@ -29,8 +29,14 @@ export interface LiveClass {
   location?:      string
   room?:          string
 
-  /* External-only */
-  meetingUrl?:    string
+  /* External-only. The Meet URL itself is NEVER in a list payload — it is
+     released by POST /live-classes/:id/join, on the click, inside the window
+     below, to the seat holder. These three let a screen draw the button at
+     the right moment for the right student. Both instants are SERVER-owned
+     (start .. start + 20 min); never recompute them from scheduledStart. */
+  isBooked?:      boolean     // caller holds a 'booked' or 'attended' seat
+  joinOpensAt?:   string
+  joinClosesAt?:  string
 
   /* Internal-only (Mux) */
   muxPlaybackId?: string
@@ -70,7 +76,12 @@ export interface WatchAccess {
   joinMode?:     'embed' | 'redirect'
   title:         string
   status:        LiveClassStatus
-  meetingUrl?:   string      // external only
+  /* External only — see the same fields on LiveClass. No meeting URL here. */
+  isBooked?:     boolean
+  /** External only — false means an in-person class typed external: nothing to join. */
+  isOnline?:     boolean
+  joinOpensAt?:  string
+  joinClosesAt?: string
   playbackUrl?:  string      // internal only
   recordingUrl?: string      // internal, after stream ends
   thumbnailUrl?: string
@@ -129,7 +140,9 @@ export function fmtCountdown(startIso: string, now: number): string {
 /* ── Query keys ──────────────────────────────────────── */
 export const liveClassKeys = {
   forCourse:   (slug: string)   => ['live-classes', 'course', slug]     as const,
-  upcoming:    ['live-classes', 'upcoming']                              as const,
+  /* Keyed by limit: the sidebar asks for 4 and the schedule page for 50, and
+     one key for both meant each fetch overwrote the other's cache entry. */
+  upcoming:    (limit: number) => ['live-classes', 'upcoming', limit]   as const,
   watch:       (id: string)     => ['live-classes', id, 'watch']        as const,
 }
 
@@ -193,7 +206,7 @@ export function useLiveClassesForCourse(slug: string | undefined) {
 /* GET /live-classes/upcoming — authenticated, across user's enrollments */
 export function useUpcomingLiveClasses(limit = 5) {
   return useQuery({
-    queryKey:        liveClassKeys.upcoming,
+    queryKey:        liveClassKeys.upcoming(limit),
     queryFn:         () => apiGet<LiveClass[]>('/live-classes/upcoming', { limit }),
     staleTime:       15_000,
     refetchInterval: 30_000,

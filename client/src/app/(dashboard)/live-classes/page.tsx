@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import { useMemo, useState } from 'react'
 import Link from 'next/link'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
@@ -14,6 +14,9 @@ import {
 } from '@/lib/api/liveClasses'
 import Spinner from '@/components/ui/Spinner'
 import { AvatarImg } from '@/components/ui/AvatarImg'
+import JoinMeetButton from '@/components/live-classes/JoinMeetButton'
+import { useJoinClock } from '@/hooks/useJoinClock'
+import { getJoinPhase } from '@/lib/joinWindow'
 
 /* ── Helpers ─────────────────────────────────────────── */
 function fmtTime(iso: string) {
@@ -167,7 +170,7 @@ function MiniCalendar({
 }
 
 /* ── Hero card (Live Now) ────────────────────────────── */
-function LiveHeroCard({ live, index }: { live: LiveClass; index: number }) {
+function LiveHeroCard({ live, index, now }: { live: LiveClass; index: number; now: number }) {
   const thumb    = live.thumbnailUrl ?? live.course?.thumbnailUrl
   const gradient = GRADIENTS[index % GRADIENTS.length]!
   const isInt    = live.type === 'internal'
@@ -244,13 +247,28 @@ function LiveHeroCard({ live, index }: { live: LiveClass; index: number }) {
               style={{ background: 'var(--color-danger)', boxShadow: '0 4px 14px rgba(239,68,68,0.4)' }}>
               <Radio size={12} />Watch now
             </Link>
-          ) : live.meetingUrl ? (
-            <a href={live.meetingUrl} target="_blank" rel="noreferrer"
-              className="ml-auto flex items-center gap-1.5 rounded-xl px-4 py-2 text-xs font-bold text-white transition-all hover:brightness-110"
-              style={{ background: 'var(--color-danger)', boxShadow: '0 4px 14px rgba(239,68,68,0.4)' }}>
-              <ExternalLink size={12} />Join now
-            </a>
-          ) : null}
+          ) : (
+            /* External: 'live' begins 15 min early, the Meet link does not.
+               Booked students get "Join opens at" until the start second,
+               then the button; everyone else gets nothing here. */
+            getJoinPhase(live, now) === 'hidden' ? (
+              /* Nothing to join for this student (not booked, in-person, or
+                 over) — but a LIVE NOW banner with no way to act on it is a
+                 dead end, so the landing page is always one tap away. */
+              <Link href={`/live-classes/${live.id}/watch`}
+                className="ml-auto inline-flex items-center gap-1.5 rounded-xl px-4 py-2 text-xs font-bold"
+                style={{ background: 'rgba(255,255,255,0.14)', color: '#fff', border: '1px solid rgba(255,255,255,0.28)' }}>
+                <ExternalLink size={11} />Details
+              </Link>
+            ) : (
+              <JoinMeetButton
+                sessionId={live.id} now={now} size="md"
+                accent="var(--color-danger)" mutedColor="rgba(255,255,255,0.7)"
+                isBooked={live.isBooked} joinOpensAt={live.joinOpensAt} joinClosesAt={live.joinClosesAt}
+                type={live.type} isOnline={live.isOnline} status={live.status}
+                className="ml-auto" />
+            )
+          )}
         </div>
       </div>
     </motion.div>
@@ -434,15 +452,24 @@ function SessionCard({ live, index, now }: { live: LiveClass; now: number; index
                   </motion.button>
                 </Link>
               )}
-              {/* External — gate through watch page so meetingUrl stays protected */}
+              {/* External — the Meet button while a booked student's window is
+                  open (fetched on the click, never held here); otherwise the
+                  watch page, which shows the window and the booking state. */}
               {!isInt && (liveNow || upcoming) && (
-                <Link href={`/live-classes/${live.id}/watch`}>
-                  <motion.button whileHover={{ scale: 1.04 }} whileTap={{ scale: 0.97 }}
-                    className="flex items-center gap-1 rounded-xl px-3 py-1.5 text-[10px] font-bold text-white"
-                    style={{ background: liveNow ? '#EF4444' : '#6366F1' }}>
-                    <ExternalLink size={9} />{liveNow ? 'Join' : 'Open'}
-                  </motion.button>
-                </Link>
+                getJoinPhase(live, now) === 'open' ? (
+                  <JoinMeetButton
+                    sessionId={live.id} now={now} size="xs" showLines={false} accent="#EF4444"
+                    isBooked={live.isBooked} joinOpensAt={live.joinOpensAt} joinClosesAt={live.joinClosesAt}
+                    type={live.type} isOnline={live.isOnline} status={live.status} />
+                ) : (
+                  <Link href={`/live-classes/${live.id}/watch`}>
+                    <motion.button whileHover={{ scale: 1.04 }} whileTap={{ scale: 0.97 }}
+                      className="flex items-center gap-1 rounded-xl px-3 py-1.5 text-[10px] font-bold"
+                      style={{ background: 'rgba(99,102,241,0.09)', color: '#6366F1', border: '1px solid rgba(99,102,241,0.20)' }}>
+                      <ExternalLink size={9} />Details
+                    </motion.button>
+                  </Link>
+                )
               )}
               {/* External ended — watch Google Drive recording in new tab */}
               {!isInt && rec && (
@@ -465,18 +492,16 @@ function SessionCard({ live, index, now }: { live: LiveClass; now: number; index
 /* ── Page ─────────────────────────────────────────────── */
 export default function LiveClassesPage() {
   const { data, isLoading, isError } = useUpcomingLiveClasses(50)
-  const [now,             setNow]          = useState(() => Date.now())
+  /* Server-anchored clock: 1 s tick only while a booked Meet class is within
+     two minutes of its join window opening/closing, 30 s otherwise. Drives
+     both the countdown labels and the Join buttons. */
+  const now = useJoinClock(data)
   const [filter,          setFilter]       = useState<FilterKey>('all')
   const [typeFilter,      setTypeFilter]   = useState<'all' | 'internal' | 'external'>('all')
   const [languageFilter,  setLanguageFilter] = useState('')
   const [search,          setSearch]       = useState('')
   const [selectedDate,    setSelectedDate] = useState<string | null>(null)
   const [showContactAdmin, setShowContactAdmin] = useState(false)
-
-  useEffect(() => {
-    const t = setInterval(() => setNow(Date.now()), 30_000)
-    return () => clearInterval(t)
-  }, [])
 
   const all = useMemo(() => (data ?? []).filter(l => l.status !== 'cancelled'), [data])
 
@@ -569,7 +594,7 @@ export default function LiveClassesPage() {
               <motion.div key="hero"
                 initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }}
                 className="mb-6 space-y-3">
-                {liveNow.map((l, i) => <LiveHeroCard key={l.id} live={l} index={i} />)}
+                {liveNow.map((l, i) => <LiveHeroCard key={l.id} live={l} index={i} now={now} />)}
               </motion.div>
             )}
           </AnimatePresence>

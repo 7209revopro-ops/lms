@@ -328,9 +328,18 @@ export async function runAtTimeReminders(): Promise<void> {
       const classAt = new Date(b.liveClassId.scheduledStart)
       const joinUrl = getJoinUrl(b.liveClassId)
 
+      /* The EMAIL carries the Meet link itself — that is the decision on
+         record. The in-app notice does not: a Notification row lives for ever
+         and is read back by GET /notifications long after the join window,
+         and after the student has cancelled the seat, so a raw URL in it is
+         a way to obtain the link with no gate at all. The notice points at
+         the class page instead, where the Join button is — one tap away
+         while the window is open, and honest about it once it is not. */
+      const liveClassId = String((b.liveClassId as { id?: string; _id?: unknown }).id
+        ?? (b.liveClassId as { _id?: unknown })._id)
       await dispatch(userId, b.liveClassId.title, classAt, 'at-time', () =>
         sendClassStartingReminder(b.userId.email, b.userId.name, b.liveClassId.title, joinUrl),
-        joinUrl,
+        `/live-classes/${liveClassId}/watch`,
       )
 
       await ClassBookingModel.findByIdAndUpdate(b._id, { reminderAtTimeSent: true })

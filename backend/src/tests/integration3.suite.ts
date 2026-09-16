@@ -171,6 +171,16 @@ try {
   check('no booking → refused', noBooking?.code === 'NOT_BOOKED', noBooking?.code)
 
   await ClassBookingModel.create({ userId: student._id, liveClassId: cls._id, status: 'booked' })
+
+  /* A seat is not enough on its own. This fixture used to mint straight after
+     booking with no enrolment at all — which is precisely the shape an admin
+     leaves behind by deleting an enrolment (booking rows are not touched),
+     and the gate now refuses it, for a room exactly as for a Meet link. */
+  let noEnrolment: any = null
+  try { await join.mintStudentTicket(cls.id, ctx(student)) } catch (e) { noEnrolment = e }
+  check('a booking whose enrolment is gone → NOT_ENROLLED', noEnrolment?.code === 'NOT_ENROLLED', noEnrolment?.code)
+
+  await EnrollmentModel.create({ userId: student._id, courseId: course._id, status: 'active', blockedLessons: [] })
   const joined = await join.mintStudentTicket(cls.id, ctx(student))
   const sc = await claimsOf(joined.ticket)
   check('with a booking → a student ticket', sc.role === 'student', sc.role)
@@ -200,9 +210,11 @@ try {
   section('G · module blocking (blockedLessons holds SECTION ids)')
   const gated = await mkClass({ sectionId: moduleRow._id })
   await ClassBookingModel.create({ userId: student._id, liveClassId: gated._id, status: 'booked' })
-  await EnrollmentModel.create({
-    userId: student._id, courseId: course._id, blockedLessons: [moduleRow._id],
-  })
+  /* The enrolment already exists from section E; block the module on it. */
+  await EnrollmentModel.updateOne(
+    { userId: student._id, courseId: course._id },
+    { $set: { blockedLessons: [moduleRow._id] } },
+  )
   let blocked: any = null
   try { await join.mintStudentTicket(gated.id, ctx(student)) } catch (e) { blocked = e }
   check('a blocked module refuses the live class too', blocked?.code === 'MODULE_BLOCKED', blocked?.code)

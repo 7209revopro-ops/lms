@@ -8,6 +8,9 @@ import {
   ExternalLink, BookOpen, Users, Tv2, Maximize2, Minimize2,
 } from 'lucide-react'
 import { useWatchAccess, isInteractiveRoom } from '@/lib/api/liveClasses'
+import { useJoinClock } from '@/hooks/useJoinClock'
+import { getJoinPhase } from '@/lib/joinWindow'
+import JoinMeetButton from '@/components/live-classes/JoinMeetButton'
 import MuxPlayer from '@mux/mux-player-react'
 import { useCurrentUser } from '@/lib/api/user'
 import { WatermarkOverlay } from '@/components/video/WatermarkOverlay'
@@ -110,6 +113,9 @@ export default function WatchPage({ params }: { params: Promise<{ id: string }> 
   const { id }   = use(params)
   const { data: user }   = useCurrentUser()
   const { data, isLoading, isError, error } = useWatchAccess(id)
+  /* External classes only: the Join button appears on the start second from
+     this clock, not from a refetch. Harmless for internal ones (30 s tick). */
+  const now = useJoinClock(data ? [data] : undefined)
 
   /* ── Loading ── */
   if (isLoading) {
@@ -153,8 +159,19 @@ export default function WatchPage({ params }: { params: Promise<{ id: string }> 
 
   if (!data) return null
 
-  /* ── External type — meeting link + homework sidebar ── */
-  if (data.type === 'external' && data.meetingUrl) {
+  /* ── External type — Meet join panel + homework sidebar ──
+     The URL is not in this payload. A booked student sees "Join opens at"
+     until the start, the button from the start second for 20 minutes, then
+     "Join link closed"; the link itself is fetched by the button on the
+     click. A student without a seat gets a plain landing, not an error. */
+  if (data.type === 'external') {
+    const phase = getJoinPhase(data, now)
+    /* The window's length comes from the two server instants, never from a
+       literal: an academy can widen the grace with one env var and this copy
+       has to follow it without a deploy. */
+    const graceMin = data.joinOpensAt && data.joinClosesAt
+      ? Math.round((new Date(data.joinClosesAt).getTime() - new Date(data.joinOpensAt).getTime()) / 60_000)
+      : 20
     return (
       <div className="mx-auto max-w-5xl">
         <Link href="/live-classes"
@@ -171,16 +188,38 @@ export default function WatchPage({ params }: { params: Promise<{ id: string }> 
               style={{ background: 'rgba(99,102,241,0.08)', border: '1px solid rgba(99,102,241,0.18)' }}>
               <ExternalLink size={24} style={{ color: '#6366F1' }} />
             </div>
-            <p className="mt-4 text-lg font-bold" style={{ color: 'var(--color-text-primary)' }}>External live class</p>
-            <p className="mt-2 max-w-xs text-sm" style={{ color: 'var(--color-text-muted)' }}>
-              This session is hosted on an external platform. Click below to join.
+            <p className="mt-4 text-lg font-bold" style={{ color: 'var(--color-text-primary)' }}>
+              {data.isBooked ? data.title : 'You have not booked this session'}
             </p>
-            <a href={data.meetingUrl} target="_blank" rel="noreferrer noopener"
-              className="mt-6 inline-flex items-center gap-2 rounded-2xl px-6 py-3 text-sm font-bold text-white"
-              style={{ background: '#6366F1', boxShadow: '0 4px 14px rgba(99,102,241,0.30)' }}>
-              <ExternalLink size={14} />Join Session
-            </a>
-            <StatusBadge status={data.status} />
+            <p className="mt-2 max-w-xs text-sm" style={{ color: 'var(--color-text-muted)' }}>
+              {!data.isBooked
+                ? 'This class runs on Google Meet and only students with a reserved seat can join. Reserve a seat from the class schedule.'
+                : phase === 'open'
+                ? 'This class runs on Google Meet. Click below to open it in a new tab.'
+                : phase === 'closed'
+                ? `The join link closes ${graceMin} minutes after the start. If you are still expecting to attend, contact your admin.`
+                : data.status === 'cancelled' || data.status === 'ended'
+                ? 'This session is no longer open to join.'
+                : data.isOnline === false
+                ? 'This is an in-person class — there is nothing to join online. Go to the room.'
+                : `This class runs on Google Meet. The join button unlocks at the start time and stays open for ${graceMin} minutes.`}
+            </p>
+            <div className="mt-6 flex flex-col items-center gap-3">
+              {data.isBooked ? (
+                <JoinMeetButton
+                  sessionId={id} now={now} size="lg" accent="#6366F1"
+                  isBooked={data.isBooked} joinOpensAt={data.joinOpensAt} joinClosesAt={data.joinClosesAt}
+                  type={data.type} isOnline={data.isOnline} status={data.status}
+                  className="max-w-xs px-6" />
+              ) : (
+                <Link href="/class-bookings"
+                  className="inline-flex items-center gap-2 rounded-2xl px-6 py-3 text-sm font-bold text-white"
+                  style={{ background: '#6366F1', boxShadow: '0 4px 14px rgba(99,102,241,0.30)' }}>
+                  <Calendar size={14} />Book a seat
+                </Link>
+              )}
+              <StatusBadge status={data.status} />
+            </div>
           </div>
 
           {/* ── Right: homework + info ── */}

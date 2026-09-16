@@ -77,3 +77,36 @@ export function resolveLiveStatus(
   if (now >= start - LIVE_LEAD_MS) return 'live'
   return 'scheduled'
 }
+
+/* ── When a BOOKED student may open the Meet link ────────────────────────
+   From the moment the class starts until STUDENT_JOIN_GRACE minutes after it.
+   Not before: the link is not a preview, and a room that fills up fifteen
+   minutes early is a room the instructor has to manage before they meant to
+   start. Not long after: twenty minutes late is still a student who can catch
+   up; forty is somebody joining a class that is half over, and a link that
+   stays live until the end is a link that can be shared into the class.
+
+   Deliberately NOT the same window as `resolveLiveStatus`. That one calls a
+   class "live" from fifteen minutes before, and drives tab counts, card
+   accents and the admin's own Join button, which stays exactly as it is. This
+   is a separate rule with its own name so changing one can never move the
+   other.
+
+   Overridable per academy without a deploy. Parsed once — env is fixed at
+   boot. */
+const STUDENT_JOIN_GRACE_MINUTES = (() => {
+  const raw = Number(process.env['STUDENT_JOIN_GRACE_MINUTES'])
+  return Number.isFinite(raw) && raw >= 0 && raw <= 240 ? raw : 20
+})()
+
+export const STUDENT_JOIN_GRACE_MS = STUDENT_JOIN_GRACE_MINUTES * 60_000
+
+/** The interval in which a booked student may take the Meet link — both ends
+ *  inclusive, which is how the gate (assertStudentMayJoin) reads it: refused
+ *  while now < opensAt, refused while now > closesAt, released between. This
+ *  is the ONLY place the two instants are computed; the gate, every student
+ *  DTO and the button the student sees all take them from here. */
+export function studentJoinWindow(scheduledStart: Date | string): { opensAt: Date; closesAt: Date } {
+  const start = new Date(scheduledStart).getTime()
+  return { opensAt: new Date(start), closesAt: new Date(start + STUDENT_JOIN_GRACE_MS) }
+}

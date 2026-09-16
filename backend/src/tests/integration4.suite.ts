@@ -128,6 +128,17 @@ try {
   section('B · a booked student in the window gets a ticket')
   const cls = await mkClass()
   await ClassBookingModel.create({ userId: student._id, liveClassId: cls._id, status: 'booked' })
+
+  /* A seat without an enrolment is what an admin leaves behind by deleting
+     the enrolment (booking rows are not touched), and the gate refuses it
+     over HTTP exactly as the service does. Until this check existed the
+     fixture minted straight after booking with no enrolment at all. */
+  const noEnrol = await call('POST', `/live-classes/${cls._id}/join-ticket`, { jar })
+  check('a seat whose enrolment is gone → 403 NOT_ENROLLED',
+    noEnrol.status === 403 && noEnrol.body?.error?.code === 'NOT_ENROLLED',
+    `${noEnrol.status} ${noEnrol.body?.error?.code}`)
+
+  await EnrollmentModel.create({ userId: student._id, courseId: course._id, status: 'active' })
   const ok = await call('POST', `/live-classes/${cls._id}/join-ticket`, { jar })
   check('200', ok.status === 200, `${ok.status} ${JSON.stringify(ok.body?.error ?? '')}`)
   check('a ticket is returned', typeof ok.body?.data?.ticket === 'string' && ok.body.data.ticket.split('.').length === 3)
@@ -174,8 +185,8 @@ try {
   section('E · watchAccess tells the client which engine to render')
   /* watchAccess gates on COURSE enrolment (the purchase), which is a separate
      thing from a class booking — a student can book a session only for a
-     course they already own. */
-  await EnrollmentModel.create({ userId: student._id, courseId: course._id })
+     course they already own. The enrolment was created in section B, where
+     the ticket gate now needs it too. */
   const wa = await call('GET', `/live-classes/${cls._id}/watch`, { jar })
   check('watch access succeeds for a booked student', wa.status === 200, String(wa.status))
   check('it reports provider=livekit', wa.body?.data?.provider === 'livekit', String(wa.body?.data?.provider))

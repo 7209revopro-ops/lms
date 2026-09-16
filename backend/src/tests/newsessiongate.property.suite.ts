@@ -9,13 +9,21 @@
 
    So this one does not choose. For a course of N modules it enrols ONE
    student standing at each possible position (completed 0 modules, 1, 2 …
-   N), adds a session to each module in turn, and checks the emailed set is
-   exactly the one student whose position matches — no more, no fewer.
+   N), adds a session to each module in turn, and checks the set QUEUED FOR
+   THE DIGEST is exactly the one student whose position matches — no more, no
+   fewer. Then it runs the digest and checks the mail that leaves matches.
 
    The property, stated once:
 
-     a session on module index i emails exactly the students whose
-     last-completed-module index is i-1, and nobody else
+     a session on module index i is queued for exactly the students whose
+     last-completed-module index is i-1, and nobody else; the digest then
+     mails each of them ONCE
+
+   (It used to say "emails". Phase 2 of the notification spec made a new
+   session a Standard-tier event — parked per student and sent once a day as
+   one message — and this suite was not updated with it, which nobody noticed
+   because no full chain run reached this file for a while. The check is now
+   in two halves so both the parking and the sending are proven.)
 
    It also re-checks the invariant that must survive all of it: EVERY
    enrolled student gets the in-app notification regardless, because email is
@@ -50,10 +58,11 @@ const mongoose = (await import('mongoose')).default
 mongoose.set('autoIndex', false)
 const {
   UserModel, OrganizationModel, CourseModel, SectionModel, LessonModel,
-  EnrollmentModel, LessonProgressModel, EmailOutboxModel, NotificationModel,
+  EnrollmentModel, LessonProgressModel, EmailOutboxModel, NotificationModel, DigestQueueModel,
 } = await import('@/models/schema.ts')
 const { hashPassword } = await import('@/utils/hash.ts')
 const { LiveClassService } = await import('@/services/liveClass.service.ts')
+const { runDailyDigest } = await import('@/jobs/digest.job.ts')
 
 await mongoose.connect(process.env.DATABASE_URL!)
 if (mongoose.connection.db!.databaseName !== 'lms_newsessiongateprop_suite') {
@@ -133,9 +142,9 @@ async function addSession(course: any, sectionId: unknown) {
     durationMins: 60, type: 'external', isOnline: true, meetingUrl: MEET,
     language: 'English', sessionCapacity: 30, organizationId: String(org._id),
   } as any)
-  /* The fan-out is awaited inside create(), but the outbox write that records
-     the mail is not — settle before counting. */
-  await new Promise(r => setTimeout(r, 1200))
+  /* The fan-out is awaited inside create(); a short settle keeps the count
+     honest if that ever changes. */
+  await new Promise(r => setTimeout(r, 400))
 }
 
 /* ═════════════════ the property, over several course shapes ═════════════════ */
@@ -149,29 +158,49 @@ for (const [moduleCount, lessonsPer, orders, label] of [
   section(`Course shape: ${label}`)
   const { course, modules, students } = await buildCourse(moduleCount, lessonsPer, orders)
 
-  /* Snapshot per student so each session's effect is measured on its own. */
+  /* Snapshot per student so each session's effect is measured on its own.
+     What is counted is the DIGEST QUEUE — a new session parks a row for the
+     student it is relevant to and mails nobody on the spot. */
+  const queued = (u: any) => DigestQueueModel.countDocuments({ userId: u._id })
   const before = new Map<string, number>()
-  for (const u of students) {
-    before.set(String(u._id), await EmailOutboxModel.countDocuments({ to: u.email }))
-  }
+  for (const u of students) before.set(String(u._id), await queued(u))
 
   for (let target = 0; target < moduleCount; target++) {
     await addSession(course, modules[target]!.sec._id)
 
-    /* Exactly one student should have gained a mail: the one who has
+    /* Exactly one student should have gained a queue row: the one who has
        completed `target` modules, i.e. stands immediately before this one. */
     const gained: string[] = []
     for (const u of students) {
-      const now  = await EmailOutboxModel.countDocuments({ to: u.email })
+      const now  = await queued(u)
       const prev = before.get(String(u._id)) ?? 0
       if (now > prev) gained.push(u.name)
       before.set(String(u._id), now)
     }
 
-    check(`module ${target + 1}: exactly the student at position ${target} is emailed`,
+    check(`module ${target + 1}: exactly the student at position ${target} is queued for the digest`,
       gained.length === 1 && gained[0] === `done-${target}`,
-      `emailed [${gained.join(', ')}], expected [done-${target}]`)
+      `queued [${gained.join(', ')}], expected [done-${target}]`)
   }
+
+  /* And nobody was mailed on the spot — the whole point of the digest. */
+  const mailedNow = await EmailOutboxModel.countDocuments({ to: { $in: students.map((u: any) => u.email) } })
+  check('no student was emailed at creation time', mailedNow === 0, `${mailedNow} mail(s)`)
+
+  /* Second half: the digest runs, and the mail that leaves is exactly one
+     message to each student who had a row — done-0 … done-(N-1) — and nothing
+     to done-N, who has completed the lot and had no session queued. */
+  await runDailyDigest()
+  const mailed: string[] = []
+  for (const u of students) {
+    const n = await EmailOutboxModel.countDocuments({ to: u.email })
+    if (n === 1) mailed.push(u.name)
+    else if (n > 1) mailed.push(`${u.name}x${n}`)
+  }
+  const expected = students.slice(0, moduleCount).map((u: any) => u.name)
+  check(`the digest mails each queued student exactly once (${expected.length} of ${students.length})`,
+    JSON.stringify(mailed.sort()) === JSON.stringify(expected.slice().sort()),
+    `mailed [${mailed.join(', ')}], expected [${expected.join(', ')}]`)
 
   /* Whatever the email did, the notification centre saw every session. */
   const everyoneNotified = await Promise.all(students.map(async (u: any) =>

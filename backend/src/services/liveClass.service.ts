@@ -412,7 +412,15 @@ export class LiveClassService {
     cltRoomName?:  string
     title:         string
     status:        string
-    meetingUrl?:   string
+    /* External (Google Meet) only. The URL itself is NOT here — it is fetched
+       on the click through POST /live-classes/:id/join. These three let the
+       watch page draw the button at the right moment for the right student. */
+    isBooked?:     boolean
+    /* So the page can tell an in-person class from an online one — a class
+       typed external with isOnline false has nothing to join. */
+    isOnline?:     boolean
+    joinOpensAt?:  string
+    joinClosesAt?: string
     playbackUrl?:  string
     recordingUrl?: string
     thumbnailUrl?: string
@@ -432,7 +440,12 @@ export class LiveClassService {
         : (rawCourseId as { _id?: Types.ObjectId })?._id ?? String(rawCourseId)
     const enrollment = await this.enrollRepo.findByUserCourse(userId, courseId).catch(() => null)
 
-    if (!enrollment) {
+    /* A dropped enrolment is no enrolment. findByUserCourse has no status
+       filter, so without this a student whose course access was withdrawn
+       still got the landing page — with isBooked true and a Join button the
+       click would then refuse. The list and feed exclude dropped already;
+       the three doors must agree. */
+    if (!enrollment || (enrollment as { status?: string }).status === 'dropped') {
       throw new LiveClassError('NOT_ENROLLED', 'You must be enrolled in this course to watch this session', 403)
     }
 
@@ -450,12 +463,27 @@ export class LiveClassService {
     }
 
     if (live.type === 'external') {
+      /* The link used to be handed out here to anyone enrolled, at any time.
+         Now the page gets the window and whether this student holds a seat;
+         the link is released only inside that window, only to that seat, by
+         the join endpoint. */
+      const { ClassBookingModel } = await import('@/models/schema.ts')
+      const { studentJoinWindow } = await import('@/utils/liveStatus.ts')
+      const seat = await ClassBookingModel.exists({
+        userId: new Types.ObjectId(userId),
+        liveClassId: live._id,
+        status: { $in: ['booked', 'attended'] },
+      })
+      const w = studentJoinWindow(live.scheduledStart)
       return {
-        type:       'external',
-        title:      live.title,
-        status:     live.status,
-        meetingUrl: live.meetingUrl,
-        viewerCount: 0,
+        type:         'external',
+        title:        live.title,
+        status:       live.status,
+        isBooked:     !!seat,
+        isOnline:     (live as { isOnline?: boolean }).isOnline !== false,
+        joinOpensAt:  w.opensAt.toISOString(),
+        joinClosesAt: w.closesAt.toISOString(),
+        viewerCount:  0,
         // recordingUrl intentionally excluded — admin-only, not exposed to students
       }
     }

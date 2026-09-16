@@ -262,6 +262,11 @@ try {
     ['DELETE', '/favorites/000000000000000000000000', undefined],
     ['POST',   '/enrollments',                  { courseId: '000000000000000000000000' }],
     ['POST',   '/bookings',                     { liveClassId: '000000000000000000000000' }],
+    /* The one door that hands out a Meet URL. An admin viewing-as a booked
+       student must not be able to pull the link through the student's
+       session; if this route were ever moved to authenticateAny it would
+       start passing, and this line is what would notice. */
+    ['POST',   '/live-classes/000000000000000000000000/join', undefined],
     ['PATCH',  '/auth/me/password',             { currentPassword: PW, newPassword: 'Whatever1' }],
     ['POST',   '/auth/logout-all',              undefined],
     ['DELETE', '/auth/account',                 { password: PW }],

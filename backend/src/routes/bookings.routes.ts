@@ -283,7 +283,7 @@ router.post('/', authenticate, requireEnrollmentApproval, validate(createBooking
       }
 
       bookingDoc = await booking.populate([
-        { path: 'liveClassId', select: 'id title scheduledStart durationMins meetingUrl muxPlaybackId type' },
+        { path: 'liveClassId', select: 'id title scheduledStart durationMins muxPlaybackId type isOnline' },
       ])
 
       sendSuccess(res, bookingDoc, 'Booking created', 201)
@@ -328,7 +328,12 @@ router.get('/me', authenticate, validate(bookingQuerySchema, 'query'), async (re
     const skip     = (page - 1) * per_page
     const [docs, total] = await Promise.all([
       ClassBookingModel.find(filter)
-        .populate('liveClassId', 'id title scheduledStart durationMins status meetingUrl muxPlaybackId type')
+        /* No meetingUrl in the populate: the link is released only by
+           POST /live-classes/:id/join, inside the join window, to the seat
+           holder. A booking row carried it for every status — cancelled
+           included — and at any time; that was a way to read the link
+           without ever being let in. */
+        .populate('liveClassId', 'id title scheduledStart durationMins status muxPlaybackId type isOnline')
         .sort({ bookedAt: -1 })
         .skip(skip).limit(per_page)
         .lean({ virtuals: true }),

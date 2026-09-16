@@ -261,8 +261,14 @@ section('H. The class-has-started notification points at the meeting itself')
     userId: student._id, kind: 'class-reminder',
   }).sort({ createdAt: -1 }).lean() as any
   check('H1 an at-start notification exists', !!note, String(note?.title))
-  check('H2 it links to the Google Meet room, not the schedule',
-    String(note?.link) === MEET, String(note?.link))
+  /* Not the raw Meet URL. A Notification row is read back by GET
+     /notifications for ever — after the join window, after the student has
+     cancelled the seat — so a URL stored in it is a link with no gate. The
+     notice points at the class page, where the Join button is; the EMAIL is
+     the one that carries the link itself. */
+  check('H2 it links to the class page, where the Join button is — not to the schedule, and not the raw URL',
+    /\/live-classes\/[^/]+\/watch$/.test(String(note?.link)) && String(note?.link) !== MEET,
+    String(note?.link))
 }
 
 /* ═════════════════ I — and only that one ═════════════════ */

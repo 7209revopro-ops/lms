@@ -405,22 +405,41 @@ export class LiveClassController {
       const user     = await UserModel.findById(req.user!.id).select('category').lean()
       const category = (user as any)?.category as string | undefined
       const docs     = await this.service.listUpcomingForUser(req.user!.id, limit, category)
+
+      /* The caller's seats, once. The Meet link is fetched on the click via
+         POST /live-classes/:id/join; the feed only says whether there is a
+         seat and when the button should show. */
+      const { ClassBookingModel } = await import('@/models/schema.ts')
+      const { studentJoinWindow } = await import('@/utils/liveStatus.ts')
+      const { Types } = await import('mongoose')
+      const seats = await ClassBookingModel.find(
+        { userId: new Types.ObjectId(req.user!.id), status: { $in: ['booked', 'attended'] } },
+        { liveClassId: 1 },
+      ).lean()
+      const bookedIds = new Set(seats.map((b: any) => String(b.liveClassId)))
+
       sendSuccess(res, docs.map(d => {
         const isEnrolled = (d as any).isEnrolled ?? false
         /* Entitlement is enrolment MINUS any module the admin blocked for this
-           student — a blocked module must not hand out the join/stream fields. */
+           student — a blocked module must not hand out the stream fields. */
         const isEntitled = (d as any).isEntitled ?? false
         const dto        = toDTO(d, isEntitled)
         /* The feed lists every upcoming session, enrolled or not — but only
-           entitled students receive the join/stream fields. */
+           entitled students receive the stream fields. */
         if (!isEntitled) {
-          delete (dto as any).meetingUrl
           delete (dto as any).muxPlaybackId
           delete (dto as any).playbackUrl
           delete (dto as any).thumbnailUrl
           delete (dto as any).recordingUrl
         }
-        ;(dto as any).isEnrolled = isEnrolled
+        /* Never to a student, entitled or not — see POST /:id/join. */
+        delete (dto as any).meetingUrl
+        ;(dto as any).isEnrolled   = isEnrolled
+        /* A seat AND a live enrolment — the click requires both. */
+        ;(dto as any).isBooked     = isEnrolled && bookedIds.has(String((d as any)._id ?? (d as any).id))
+        const w = (d as any).scheduledStart ? studentJoinWindow((d as any).scheduledStart) : null
+        ;(dto as any).joinOpensAt  = w ? w.opensAt.toISOString()  : undefined
+        ;(dto as any).joinClosesAt = w ? w.closesAt.toISOString() : undefined
         return dto
       }))
     } catch (err) { next(err) }

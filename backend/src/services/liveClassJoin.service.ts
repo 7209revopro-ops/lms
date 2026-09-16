@@ -23,6 +23,7 @@ import { LiveClassModel, type ILiveClass } from '@/models/schema.ts'
 import { mintTicket, roomNameFor, type MintedTicket, type TicketRole } from '@/services/integrationTicket.service.ts'
 import { tryEnsureRoom, cltConfigured } from '@/services/clt.service.ts'
 import { logger } from '@/utils/logger.ts'
+import { studentJoinWindow, STUDENT_JOIN_GRACE_MS } from '@/utils/liveStatus.ts'
 
 export class JoinError extends Error {
   constructor(
@@ -248,7 +249,58 @@ export async function mintHostTicket(
 /* ─────────────────────────────────────────────────────
    JOIN — a booked student  (wired up in Phase 4)
 ───────────────────────────────────────────────────── */
-export async function assertStudentMayJoin(live: ILiveClass, ctx: JoinContext): Promise<void> {
+/* The student gate is shared by two doors with different clocks:
+
+     LiveKit room  — 15 min before start … 15 min after the end. A room can be
+                     entered early and lingers, because the LMS hosts it.
+     Google Meet   — start … start + STUDENT_JOIN_GRACE. The link is not ours
+                     to keep open, so it is handed out only while it is for
+                     the class it names. See liveStatus.studentJoinWindow.
+
+   Everything before the clock — account, enrolment, academy, booking, module —
+   is identical for both, which is the point of sharing it: a student who is
+   refused a room for a permanent reason must be refused the link for the same
+   one. Only the window differs, so only the window is a parameter. */
+export interface StudentJoinWindow {
+  opensAt:    number
+  closesAt:   number
+  /** Booking statuses that count as holding a seat. */
+  seatStatuses: readonly string[]
+  tooEarly:   string
+  closed:     { code: string; message: string }
+}
+
+const LIVEKIT_WINDOW = (live: ILiveClass): StudentJoinWindow => {
+  const startMs = live.scheduledStart.getTime()
+  return {
+    opensAt:  startMs - JOIN_WINDOW_BEFORE_MIN * 60_000,
+    closesAt: startMs + (live.durationMins + JOIN_WINDOW_AFTER_MIN) * 60_000,
+    seatStatuses: ['booked'],
+    tooEarly: `This class opens ${JOIN_WINDOW_BEFORE_MIN} minutes before it starts.`,
+    closed:   { code: 'CLASS_OVER', message: 'This class is over.' },
+  }
+}
+
+export const MEET_WINDOW = (live: ILiveClass): StudentJoinWindow => {
+  const { opensAt, closesAt } = studentJoinWindow(live.scheduledStart)
+  const graceMin = Math.round(STUDENT_JOIN_GRACE_MS / 60_000)
+  return {
+    opensAt:  opensAt.getTime(),
+    closesAt: closesAt.getTime(),
+    /* A seat an admin has already marked attended is still a seat: somebody
+       who dropped off the call and comes back must not be refused. */
+    seatStatuses: ['booked', 'attended'],
+    tooEarly: 'The join link opens when the class starts.',
+    closed:   { code: 'JOIN_WINDOW_CLOSED',
+                message: `The join link closes ${graceMin} minutes after the class starts.` },
+  }
+}
+
+export async function assertStudentMayJoin(
+  live: ILiveClass,
+  ctx: JoinContext,
+  window: StudentJoinWindow = LIVEKIT_WINDOW(live),
+): Promise<void> {
   if (ctx.isActive === false) {
     throw new JoinError('ACCOUNT_DISABLED', 'This account is disabled.', 403)
   }
@@ -266,21 +318,33 @@ export async function assertStudentMayJoin(live: ILiveClass, ctx: JoinContext): 
   const booking = await ClassBookingModel.findOne({
     userId: new Types.ObjectId(ctx.userId),
     liveClassId: live._id,
-    status: 'booked',
+    status: { $in: [...window.seatStatuses] },
   }).lean()
   if (!booking) {
     throw new JoinError('NOT_BOOKED', 'You have not booked this class.', 403)
+  }
+
+  /* The seat is not enough on its own: it was taken when the student was
+     enrolled, and an admin can delete that enrolment afterwards without
+     touching the booking row. Requiring the enrolment HERE, at the click, is
+     what makes revoking course access actually revoke the class — the watch
+     page already refuses the same student with NOT_ENROLLED, and the two
+     doors must not disagree. A missing enrolment used to read as "nothing
+     blocked" and let the link through. */
+  const enrolment = await EnrollmentModel.findOne({
+    userId:   new Types.ObjectId(ctx.userId),
+    courseId: live.courseId,
+    status:   { $ne: 'dropped' },
+  }).select('blockedLessons').lean()
+  if (!enrolment) {
+    throw new JoinError('NOT_ENROLLED', 'You are no longer enrolled in this course.', 403)
   }
 
   /* blockedLessons stores SECTION ids despite the name — a legacy misnomer
      documented in CLAUDE.md. Module-level blocking must hold for a live class
      exactly as it does for a lesson. */
   if (live.sectionId) {
-    const enrolment = await EnrollmentModel.findOne({
-      userId: new Types.ObjectId(ctx.userId),
-      courseId: live.courseId,
-    }).select('blockedLessons').lean()
-    const blocked = (enrolment as { blockedLessons?: unknown[] } | null)?.blockedLessons ?? []
+    const blocked = (enrolment as { blockedLessons?: unknown[] }).blockedLessons ?? []
     if (blocked.some(id => String(id) === String(live.sectionId))) {
       throw new JoinError('MODULE_BLOCKED',
         'This module is not available on your plan.', 403)
@@ -289,19 +353,51 @@ export async function assertStudentMayJoin(live: ILiveClass, ctx: JoinContext): 
 
   /* Time window last: everything above is a permanent no, this one is "not
      yet", and the UI should be able to tell them apart. */
-  const startMs = live.scheduledStart.getTime()
-  const opensAt = startMs - JOIN_WINDOW_BEFORE_MIN * 60_000
-  const closesAt = startMs + (live.durationMins + JOIN_WINDOW_AFTER_MIN) * 60_000
   const now = Date.now()
 
-  if (now < opensAt) {
-    throw new JoinError('TOO_EARLY',
-      `This class opens ${JOIN_WINDOW_BEFORE_MIN} minutes before it starts.`,
-      425, Math.ceil((opensAt - now) / 1000))
+  if (now < window.opensAt) {
+    throw new JoinError('TOO_EARLY', window.tooEarly, 425,
+      Math.ceil((window.opensAt - now) / 1000))
   }
-  if (now > closesAt) {
-    throw new JoinError('CLASS_OVER', 'This class is over.', 409)
+  if (now > window.closesAt) {
+    throw new JoinError(window.closed.code, window.closed.message, 409)
   }
+}
+
+/* ─────────────────────────────────────────────────────
+   MEET — the link itself, released only inside the window
+   ─────────────────────────────────────────────────────
+   For an external Google Meet class the LMS cannot mint a ticket; the only
+   thing it controls is WHEN it hands the URL over and TO WHOM. So the URL is
+   in no student payload at all — not the schedule, not the feed, not the
+   watch page, not the booking list — and this is the one place it leaves the
+   server. Authorisation happens here, at the click, the way the handoff
+   authorises at exchange rather than at issue: a booking withdrawn a second
+   before the click is honoured. */
+export async function resolveMeetJoin(
+  liveClassId: string,
+  ctx: JoinContext,
+): Promise<{ url: string; closesAt: Date }> {
+  const live = await loadClass(liveClassId)
+
+  const isMeet = live.type === 'external'
+    && (live as { isOnline?: boolean }).isOnline !== false
+    && !!live.meetingUrl
+  if (!isMeet) {
+    throw new JoinError('NOT_A_MEET_CLASS', 'This class has no online meeting link.', 400)
+  }
+  if (live.status === 'cancelled') {
+    throw new JoinError('CLASS_CANCELLED', 'This class was cancelled.', 409)
+  }
+  if (live.status === 'ended') {
+    throw new JoinError('CLASS_ENDED', 'This class has already ended.', 409)
+  }
+
+  const window = MEET_WINDOW(live)
+  await assertStudentMayJoin(live, ctx, window)
+
+  logger.info({ liveClassId: live.id, actor: ctx.userId }, 'Meet link released to booked student')
+  return { url: live.meetingUrl!, closesAt: new Date(window.closesAt) }
 }
 
 export async function mintStudentTicket(liveClassId: string, ctx: JoinContext): Promise<MintedTicket & { roomName: string }> {

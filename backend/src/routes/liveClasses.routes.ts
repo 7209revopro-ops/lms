@@ -4,7 +4,7 @@ import { z } from 'zod'
 import { LiveClassController } from '@/controllers/liveClass.controller.ts'
 import { authenticate, authenticateAny, injectCategoryScope } from '@/middleware/auth.middleware.ts'
 import { validate } from '@/middleware/validate.middleware.ts'
-import { resolveLiveStatus, bookingClosesAt } from '@/utils/liveStatus.ts'
+import { resolveLiveStatus, bookingClosesAt, studentJoinWindow } from '@/utils/liveStatus.ts'
 import type { PaginationMeta } from '@/types/index.ts'
 /* The SHARED sendSuccess, deliberately — not a local one.
 
@@ -27,8 +27,6 @@ const ctrl   = new LiveClassController()
 /* ── Helper ─────────────────────────────────── */
 /* Join / stream fields — only entitled (enrolled) students may receive these. */
 const ENTITLED_ONLY_FIELDS = [
-  'meetingUrl',
-  'googleMeetCode',
   'muxLiveStreamId',
   'muxStreamKey',
   'muxPlaybackId',
@@ -38,9 +36,20 @@ const ENTITLED_ONLY_FIELDS = [
   'mentorNotes',
 ] as const
 
-/* Private staff commentary — never sent to a student, entitled or not. */
+/* Never sent to a student, entitled or not.
+
+   `meetingUrl` and `googleMeetCode` used to be entitled-only, which meant
+   "enrolled in the course" — every enrolled student could read the Meet link
+   from this JSON whether or not they had booked, and long before the class.
+   The link now leaves the server only through POST /:id/join, which checks
+   the booking and the start..start+20min window at the moment of the click.
+   The list carries `isBooked`, `joinOpensAt` and `joinClosesAt` instead, so
+   the page can show the button at the right moment without ever holding
+   what the button fetches. */
 const STAFF_ONLY_FIELDS = [
   'mentorNotes',
+  'meetingUrl',
+  'googleMeetCode',
 ] as const
 
 /* ── GET /live-classes — ALL sessions visible to logged-in students ────────────
@@ -90,8 +99,20 @@ router.get('/', authenticate, async (req: Request, res: Response, next: NextFunc
 
     const now = Date.now()
 
+    /* One query for every seat the caller holds, rather than one per row.
+       'attended' still counts: an admin marking a student present mid-class
+       must not make their Join button vanish. */
+    const { ClassBookingModel } = await import('@/models/schema.ts')
+    const seats = await ClassBookingModel.find(
+      { userId: new Types.ObjectId(userId), status: { $in: ['booked', 'attended'] } },
+      { liveClassId: 1 },
+    ).lean()
+    const bookedIds = new Set(seats.map((b: any) => String(b.liveClassId)))
+
     // Annotate with isEnrolled + the effective (clock-based) status:
-    // a scheduled session reads 'live' within [start-30m, start+15m], 'ended' after.
+    // a scheduled session reads 'live' from 15 min before start until its end
+    // (resolveLiveStatus), 'ended' after. The STUDENT join window is a
+    // different rule — start .. start+20m — carried separately below.
     let annotated = (classes as any[]).map(c => {
       const courseId = c.courseId
         ? String((c.courseId as any)?._id ?? (c.courseId as any)?.id ?? c.courseId)
@@ -116,6 +137,16 @@ router.get('/', authenticate, async (req: Request, res: Response, next: NextFunc
         bookingClosesAt: c.scheduledStart
           ? bookingClosesAt(c.scheduledStart).toISOString()
           : undefined,
+        /* The join window, from the same server clock as everything else on
+           this row. The button is drawn from these two instants; the link
+           itself is fetched on the click. */
+        /* A seat AND a live enrolment. The click requires both (a dropped
+           enrolment is refused NOT_ENROLLED), so a row must not promise a
+           button the click will refuse; `isEnrolled` above already excludes
+           dropped enrolments. */
+        isBooked:     isEnrolled && bookedIds.has(String(c._id)),
+        joinOpensAt:  c.scheduledStart ? studentJoinWindow(c.scheduledStart).opensAt.toISOString()  : undefined,
+        joinClosesAt: c.scheduledStart ? studentJoinWindow(c.scheduledStart).closesAt.toISOString() : undefined,
       }
       // Non-entitled students see the listing only — never the way in.
       if (!isEntitled) {
@@ -205,6 +236,59 @@ router.post('/:id/host-ticket', authenticateAny, injectCategoryScope, async (req
    in §7 of the plan runs first: booking, enrolment, module access, academy and
    the time window. A refusal here is the ONLY thing standing between a student
    and a classroom they have not paid for — CLT trusts the ticket completely. */
+/* ── POST /live-classes/:id/join — the Google Meet link, on the click ─────
+   The only way a student obtains a Meet URL. Everything the LiveKit ticket
+   checks is checked here too (booking, enrolment, module, academy, account),
+   then the Meet window: from the class start to twenty minutes after it. A
+   refusal is the whole protection — no list, feed or watch payload carries
+   the URL any more.
+
+   425 + Retry-After for "not yet", so the page can count down rather than
+   show a dead error to somebody who is merely early. */
+router.post('/:id/join', authenticate, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { resolveMeetJoin, JoinError } = await import('@/services/liveClassJoin.service.ts')
+    try {
+      const { UserModel } = await import('@/models/schema.ts')
+      /* enrollmentStatus and isActive are not on the token — they change while
+         a session is live, so they are read fresh on every click.
+
+         `authenticate` already refuses a disabled account before this runs,
+         so isActive here is a second line, not the first; it is kept because
+         the gate must stay correct if it is ever called from a path without
+         that middleware, and because the ticket route beside it does the
+         same. enrollmentStatus has no upstream check at all. */
+      const me = await UserModel.findById(req.user!.id)
+        .select('name email enrollmentStatus isActive organizationId').lean() as any
+
+      const joined = await resolveMeetJoin(String(req.params['id'] ?? ''), {
+        userId: req.user!.id,
+        name:   me?.name ?? req.user!.email.split('@')[0] ?? 'Student',
+        email:  req.user!.email,
+        role:   req.user!.role,
+        ...(me?.organizationId ? { organizationId: String(me.organizationId) } : {}),
+        ...(me?.enrollmentStatus ? { enrollmentStatus: me.enrollmentStatus } : {}),
+        isActive: me?.isActive !== false,
+      })
+      /* The one response that carries the link must never be served from a
+         cache — not the browser's, not a proxy's. Everything the gate just
+         decided is only true for this click. */
+      res.set('Cache-Control', 'no-store')
+      sendSuccess(res, { url: joined.url, closesAt: joined.closesAt.toISOString() }, 'Join link issued')
+    } catch (err: any) {
+      if (err instanceof JoinError) {
+        if (err.retryAfter) res.set('Retry-After', String(err.retryAfter))
+        res.status(err.status).json({
+          success: false,
+          error: { code: err.code, message: err.message, ...(err.retryAfter ? { retryAfter: err.retryAfter } : {}) },
+        })
+        return
+      }
+      throw err
+    }
+  } catch (err) { next(err) }
+})
+
 router.post('/:id/join-ticket', authenticate, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { mintStudentTicket, JoinError } = await import('@/services/liveClassJoin.service.ts')

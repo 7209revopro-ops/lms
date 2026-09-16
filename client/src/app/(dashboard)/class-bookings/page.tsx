@@ -15,7 +15,8 @@ import { useAllLiveClasses, type LiveClass } from '@/lib/api/liveClasses'
 import { useMyBookings, useCreateBooking, useCancelBooking, type MyBooking } from '@/lib/api/bookings'
 import { useCurrentUser } from '@/lib/api/user'
 import { APP_TIMEZONE } from '@/lib/timezone'
-import { useServerNow } from '@/hooks/useServerNow'
+import { useJoinClock } from '@/hooks/useJoinClock'
+import JoinMeetButton from '@/components/live-classes/JoinMeetButton'
 import Spinner from '@/components/ui/Spinner'
 import { titleCase } from '@/lib/titleCase'
 import { AvatarImg } from '@/components/ui/AvatarImg'
@@ -527,7 +528,10 @@ function SlotModal({group,bookingMap,onBook,onCancel,bookPending,cancelPending,o
     // eslint-disable-next-line react-hooks/exhaustive-deps
   },[])
   const [selectedId,setSelectedId] = useState<string|null>(defaultId)
-  const now = useServerNow(30_000)
+  /* Server-anchored clock. Ticks every second only while a booked slot is
+     within two minutes of its join window opening or closing, so the Join
+     button appears on the start second; 30 s otherwise. */
+  const now = useJoinClock(slots)
   useEffect(()=>{if(bookedSlot)setSelectedId(bookedSlot.id)},[bookedSlot?.id])
   useEffect(()=>{
     const h=(e:KeyboardEvent)=>{if(e.key==='Escape')onClose()}
@@ -635,7 +639,7 @@ function SlotModal({group,bookingMap,onBook,onCancel,bookPending,cancelPending,o
                            entirely on where the class runs:
 
                              in-app   — the room lives at /watch on this site
-                             external — a Google Meet link we already hold
+                             external — a Google Meet link, fetched on the click
                              in-person — there is nothing to join; go to the room
 
                            Until this branch existed, every one of those cases
@@ -657,19 +661,37 @@ function SlotModal({group,bookingMap,onBook,onCancel,bookPending,cancelPending,o
                             style={{background:cfg.color}}>
                             <Radio size={14}/>Join the Class
                           </Link>
-                        ):sAny?.meetingUrl?(
-                          <a href={sAny.meetingUrl} target="_blank" rel="noopener noreferrer"
-                            className="flex w-full items-center justify-center gap-2 rounded-2xl py-3.5 text-sm font-bold text-white"
-                            style={{background:cfg.color}}>
-                            <Video size={14}/>Join Google Meet
-                          </a>
                         ):(
-                          /* External, but no link on the record yet — the email
-                             is genuinely the only way in, so say so. */
-                          <div className="rounded-xl px-3 py-2.5 text-[11px] leading-relaxed"
-                            style={{background:'rgba(5,150,105,0.08)',color: '#064E3B',border:'1px solid rgba(5,150,105,0.18)'}}>
-                            <CheckCircle2 size={11} className="mr-1.5 inline" style={{color: 'var(--color-success)'}} strokeWidth={3}/>
-                            You reserved a seat. Your <strong>join link was emailed 5 min before</strong> class. Check your inbox!
+                          /* External. 'live' starts 15 min BEFORE the class,
+                             but the Meet link is released only from the start
+                             (to start + 20 min) — so this shows "Join opens at"
+                             first, then the button on the start second, then
+                             "Join link closed". The button decides from the
+                             server's window, not from this slot status. */
+                          <div className="space-y-2">
+                            <JoinMeetButton
+                              sessionId={sel.id} now={now} size="lg" accent={cfg.color}
+                              isBooked={sel.isBooked ?? booked}
+                              joinOpensAt={sel.joinOpensAt} joinClosesAt={sel.joinClosesAt}
+                              type={sel.type} isOnline={sel.isOnline} status={sel.status}
+                              className="justify-center text-center"/>
+                            <div className="rounded-xl px-3 py-2.5 text-[11px] leading-relaxed"
+                              style={{background:'rgba(5,150,105,0.08)',color: '#064E3B',border:'1px solid rgba(5,150,105,0.18)'}}>
+                              <CheckCircle2 size={11} className="mr-1.5 inline" style={{color: 'var(--color-success)'}} strokeWidth={3}/>
+                              {/* Phase-aware, or it would promise a button under a
+                                  "Join link closed" line. The minutes come from
+                                  the server's two instants, never from a literal. */}
+                              {(() => {
+                                const opens  = sel.joinOpensAt  ? new Date(sel.joinOpensAt).getTime()  : NaN
+                                const closes = sel.joinClosesAt ? new Date(sel.joinClosesAt).getTime() : NaN
+                                const mins   = Number.isNaN(opens) || Number.isNaN(closes) ? 20 : Math.round((closes - opens) / 60_000)
+                                if (!Number.isNaN(closes) && now > closes)
+                                  return 'Your seat was reserved, but the join link has closed. If you are still expecting to attend, contact your admin.'
+                                if (!Number.isNaN(opens) && now >= opens)
+                                  return `Your seat is reserved and the class is on now. The join link stays open for ${mins} minutes after the start.`
+                                return `Your seat is reserved. The join button unlocks at the class start time and stays open for ${mins} minutes.`
+                              })()}
+                            </div>
                           </div>
                         )
                       ):(
@@ -764,6 +786,14 @@ function SlotModal({group,bookingMap,onBook,onCancel,bookPending,cancelPending,o
                         <Clock size={11} className="mr-1.5 inline" style={{color: 'var(--color-text-muted)'}}/>
                         {mins<=5?'Join link sent. Check your inbox!':<>Your <strong>join link will be emailed 5 min before</strong> class.</>}
                       </div>
+                      {/* Online seat, ahead of the window: says when the in-app
+                          Join button unlocks (renders nothing for in-person). */}
+                      <JoinMeetButton
+                        sessionId={sel.id} now={now} size="lg"
+                        isBooked={sel.isBooked ?? true}
+                        joinOpensAt={sel.joinOpensAt} joinClosesAt={sel.joinClosesAt}
+                        type={sel.type} isOnline={sel.isOnline} status={sel.status}
+                        className="justify-center px-1"/>
                       {!(isOff && offlineDayOffset(sel.scheduledStart) === 0) && (
                         <button type="button" onClick={()=>onCancel(selBk.id,fmtShortSlot(sel.scheduledStart))} disabled={cancelPending.has(selBk.id)}
                           className="flex w-full items-center justify-center gap-1.5 rounded-2xl py-2 text-xs font-medium disabled:opacity-50"

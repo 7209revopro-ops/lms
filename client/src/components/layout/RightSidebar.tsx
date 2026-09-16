@@ -16,6 +16,8 @@ import { useUIStore } from '@/store/ui.store'
 import Spinner from '@/components/ui/Spinner'
 import { titleCase } from '@/lib/titleCase'
 import { AvatarImg } from '@/components/ui/AvatarImg'
+import { useJoinClock } from '@/hooks/useJoinClock'
+import JoinMeetButton from '@/components/live-classes/JoinMeetButton'
 
 /* ── Helpers ──────────────────────────────────────────── */
 function fmtMins(mins: number): string {
@@ -86,6 +88,9 @@ export function RightSidebar() {
   const { data: enrollments }  = useMyEnrollments()
   const { data: activity }     = useMyActivity(6)
   const { data: upcomingLive } = useUpcomingLiveClasses(4)
+  /* Drives the Join button on each live row — 1 s tick only near a booked
+     class's join boundary, 30 s otherwise. */
+  const now = useJoinClock(upcomingLive)
 
   const todos = useMemo(() => {
     if (!enrollments) return []
@@ -210,7 +215,7 @@ export function RightSidebar() {
                   <div className="px-3 pt-3 pb-2">
                     <SectionHeader icon={Video} title="Live classes" />
                     <div className="space-y-1">
-                      {upcomingLive.slice(0, 3).map((l, i) => <LiveRow key={l.id} live={l} index={i} />)}
+                      {upcomingLive.slice(0, 3).map((l, i) => <LiveRow key={l.id} live={l} index={i} now={now} />)}
                     </div>
                   </div>
                   <Divider />
@@ -403,38 +408,49 @@ function StatCell({ icon: Icon, value, label, tint, divider = false }: {
   )
 }
 
-function LiveRow({ live, index }: { live: LiveClass; index: number }) {
+/* The row opens the session's watch page (works for in-app and Meet classes
+   alike). A booked Meet class inside its join window gets the shared Join
+   button beside the row — as a sibling, not inside the link, so the two
+   targets never nest. Outside the window the row shows nothing extra. */
+function LiveRow({ live, now }: { live: LiveClass; index: number; now: number }) {
   const liveNow = isLive(live)
   const course  = typeof live.course === 'object' ? live.course : null
   const when    = new Date(live.scheduledStart).toLocaleString('en-US', {
     month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit',
   })
   return (
-    <a href={live.meetingUrl} target="_blank" rel="noreferrer noopener"
-      className="group flex items-center gap-2 rounded-xl px-2.5 py-2 transition-all hover:bg-[var(--color-hover)]"
-      style={{ border: '1px solid var(--color-border)', background: 'var(--color-bg-surface)' }}>
-      <div className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-lg"
-        style={{
-          background: liveNow ? 'rgba(239,68,68,0.08)' : 'rgba(99,102,241,0.08)',
-          border: `1px solid ${liveNow ? 'rgba(239,68,68,0.18)' : 'rgba(99,102,241,0.14)'}`,
-        }}>
-        {liveNow
-          ? <motion.div animate={{ opacity: [1, 0.4, 1] }} transition={{ duration: 1.4, repeat: Infinity }}>
-              <Radio size={10} style={{ color: 'var(--color-danger)' }} />
-            </motion.div>
-          : <Calendar size={10} style={{ color: '#6366F1' }} />}
-      </div>
-      <div className="min-w-0 flex-1">
-        <p className="truncate text-xs font-semibold leading-tight" style={{ color: 'var(--color-text-primary)' }}>{titleCase(live.title)}</p>
-        <p className="mt-0.5 text-[10px] leading-tight" style={{ color: 'var(--color-text-muted)' }}>
+    <div className="flex items-center gap-1.5">
+      <Link href={`/live-classes/${live.id}/watch`}
+        className="group flex min-w-0 flex-1 items-center gap-2 rounded-xl px-2.5 py-2 transition-all hover:bg-[var(--color-hover)]"
+        style={{ border: '1px solid var(--color-border)', background: 'var(--color-bg-surface)' }}>
+        <div className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-lg"
+          style={{
+            background: liveNow ? 'rgba(239,68,68,0.08)' : 'rgba(99,102,241,0.08)',
+            border: `1px solid ${liveNow ? 'rgba(239,68,68,0.18)' : 'rgba(99,102,241,0.14)'}`,
+          }}>
           {liveNow
-            ? <span style={{ color: 'var(--color-danger)', fontWeight: 700 }}>● LIVE NOW</span>
-            : <>{when}{course && ` · ${titleCase(course.title)}`}</>}
-        </p>
-      </div>
-      <ArrowUpRight size={9} className="flex-shrink-0 opacity-0 transition-opacity group-hover:opacity-60"
-        style={{ color: liveNow ? '#EF4444' : '#6366F1' }} />
-    </a>
+            ? <motion.div animate={{ opacity: [1, 0.4, 1] }} transition={{ duration: 1.4, repeat: Infinity }}>
+                <Radio size={10} style={{ color: 'var(--color-danger)' }} />
+              </motion.div>
+            : <Calendar size={10} style={{ color: '#6366F1' }} />}
+        </div>
+        <div className="min-w-0 flex-1">
+          <p className="truncate text-xs font-semibold leading-tight" style={{ color: 'var(--color-text-primary)' }}>{titleCase(live.title)}</p>
+          <p className="mt-0.5 text-[10px] leading-tight" style={{ color: 'var(--color-text-muted)' }}>
+            {liveNow
+              ? <span style={{ color: 'var(--color-danger)', fontWeight: 700 }}>● LIVE NOW</span>
+              : <>{when}{course && ` · ${titleCase(course.title)}`}</>}
+          </p>
+        </div>
+        <ArrowUpRight size={9} className="flex-shrink-0 opacity-0 transition-opacity group-hover:opacity-60"
+          style={{ color: liveNow ? '#EF4444' : '#6366F1' }} />
+      </Link>
+      <JoinMeetButton
+        sessionId={live.id} now={now} size="xs" showLines={false} accent="#EF4444"
+        isBooked={live.isBooked} joinOpensAt={live.joinOpensAt} joinClosesAt={live.joinClosesAt}
+        type={live.type} isOnline={live.isOnline} status={live.status}
+        className="flex-shrink-0 whitespace-nowrap" />
+    </div>
   )
 }
 

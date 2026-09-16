@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
   Video, Calendar, Clock, CheckCircle, XCircle,
@@ -8,6 +8,9 @@ import {
 } from 'lucide-react'
 import Link from 'next/link'
 import { useMyBookings, useCancelBooking, type BookingStatus, type MyBooking } from '@/lib/api/bookings'
+import { useAllLiveClasses, type LiveClass } from '@/lib/api/liveClasses'
+import { useJoinClock } from '@/hooks/useJoinClock'
+import JoinMeetButton from '@/components/live-classes/JoinMeetButton'
 import Spinner from '@/components/ui/Spinner'
 
 /* ── Helpers ─────────────────────────────────────────── */
@@ -38,14 +41,21 @@ function statusInfo(status: BookingStatus) {
 }
 
 /* ── Booking card ─────────────────────────────────────── */
-function BookingCard({ booking }: { booking: MyBooking }) {
+/* `live` is the matching /live-classes row: a booking row carries neither the
+   Meet link nor the join window, so the button reads the SERVER's window from
+   there. Absent while that list loads or if the class is gone — no button. */
+function BookingCard({ booking, live, now }: { booking: MyBooking; live?: LiveClass; now: number }) {
   const cancelMutation = useCancelBooking()
   const [confirming, setConfirming] = useState(false)
 
   const session   = booking.liveClassId
   const isPast    = new Date(session.scheduledStart) < new Date() || session.status === 'ended' || session.status === 'cancelled'
   const isLiveNow = session.status === 'live'
-  const isBooked  = booking.status === 'booked'
+  /* An attended seat is still a seat. The server releases the link to
+     'attended' as well as 'booked' — an admin taking the register mid-class
+     must not make the button vanish for someone whose call just dropped —
+     so this page must not be stricter than the gate behind it. */
+  const isBooked  = booking.status === 'booked' || booking.status === 'attended'
   const { label, color, bg, icon: StatusIcon } = statusInfo(booking.status)
   const isExternal = session.type === 'external'
 
@@ -109,13 +119,16 @@ function BookingCard({ booking }: { booking: MyBooking }) {
 
         {/* Actions */}
         <div className="flex flex-shrink-0 flex-col items-end gap-1.5">
-          {/* Join button for upcoming/live */}
-          {!isPast && isBooked && isExternal && session.meetingUrl && (
-            <a href={session.meetingUrl} target="_blank" rel="noreferrer"
-              className="flex items-center gap-1.5 rounded-xl px-3 py-1.5 text-xs font-bold text-white"
-              style={{ background: isLiveNow ? '#EF4444' : '#0057b8' }}>
-              <ExternalLink size={11} />Join
-            </a>
+          {/* Join — NOT gated on isPast: the Meet window is start → start+20
+              min, so the button must show precisely once the start has passed.
+              Before it, "Join opens at"; after, "Join link closed". */}
+          {isBooked && isExternal && live && (
+            <JoinMeetButton
+              sessionId={session.id} now={now} size="sm"
+              accent={isLiveNow ? '#EF4444' : '#0057b8'}
+              isBooked={live.isBooked ?? true}
+              joinOpensAt={live.joinOpensAt} joinClosesAt={live.joinClosesAt}
+              type={live.type} isOnline={live.isOnline} status={live.status} />
           )}
           {!isPast && isBooked && !isExternal && session.muxPlaybackId && (
             <a href={`/live-classes/${session.id}/watch`}
@@ -132,8 +145,12 @@ function BookingCard({ booking }: { booking: MyBooking }) {
               <FileText size={11} />Homework
             </Link>
           )}
-          {/* Cancel button for upcoming booked only */}
-          {!isPast && isBooked && (
+          {/* Cancel button for upcoming BOOKED seats only — not attended ones.
+              isBooked above deliberately includes 'attended' so the Join
+              button survives the register being taken; cancelling is a
+              different question, and the server refuses it for an attended
+              seat (CANNOT_CANCEL), so the button must not be offered. */}
+          {!isPast && booking.status === 'booked' && (
             confirming ? (
               <div className="flex items-center gap-1.5">
                 <button onClick={() => setConfirming(false)} className="text-[10px] font-medium" style={{ color: 'var(--color-text-muted)' }}>
@@ -173,12 +190,27 @@ export default function MyBookingsPage() {
 
   const statusParam = tab === 'upcoming' ? 'booked' : tab
   const { data, isLoading } = useMyBookings({ status: statusParam as BookingStatus, per_page: 50 })
+  /* The join window lives on the live-class row, not the booking row. */
+  const { data: classes }   = useAllLiveClasses()
+  const liveById = useMemo(() => {
+    const m = new Map<string, LiveClass>()
+    for (const c of classes ?? []) m.set(c.id, c)
+    return m
+  }, [classes])
+  const now = useJoinClock(classes)
 
   const bookings = data?.docs ?? []
 
-  /* For upcoming, further filter to sessions in the future */
+  /* For upcoming, keep a session until it ENDS, not until it starts: a
+     booked class that began five minutes ago is exactly the one whose Join
+     button must be on this screen. `status` here is the stored value, so
+     the end is computed from the schedule rather than trusted from it. */
   const filtered = tab === 'upcoming'
-    ? bookings.filter(b => new Date(b.liveClassId.scheduledStart) >= new Date() || b.liveClassId.status === 'live')
+    ? bookings.filter(b => {
+        const lc  = b.liveClassId
+        const end = new Date(lc.scheduledStart).getTime() + (lc.durationMins || 60) * 60_000
+        return end >= now || lc.status === 'live'
+      })
     : bookings
 
   return (
@@ -233,7 +265,7 @@ export default function MyBookingsPage() {
         <motion.div layout className="flex flex-col gap-3">
           <AnimatePresence mode="popLayout">
             {filtered.map(booking => (
-              <BookingCard key={booking.id} booking={booking} />
+              <BookingCard key={booking.id} booking={booking} live={liveById.get(booking.liveClassId.id)} now={now} />
             ))}
           </AnimatePresence>
         </motion.div>

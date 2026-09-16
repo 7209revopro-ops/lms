@@ -15,9 +15,12 @@ export interface MyBooking {
     scheduledStart: string
     durationMins:   number
     status:         string
-    meetingUrl?:    string
     muxPlaybackId?: string
     type:           string
+    isOnline?:      boolean
+    /* No meetingUrl and no join window on a booking row: the Join button on
+       My Classes reads the window from the matching /live-classes row and
+       fetches the link through POST /live-classes/:id/join. */
   }
 }
 
@@ -66,6 +69,8 @@ export function useCreateBooking() {
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: bookingKeys.all })
+      /* Live-class rows carry `isBooked`, which just changed. */
+      qc.invalidateQueries({ queryKey: ['live-classes'] })
     },
   })
 }
@@ -79,6 +84,7 @@ export function useCancelBooking() {
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: bookingKeys.all })
+      qc.invalidateQueries({ queryKey: ['live-classes'] })
     },
   })
 }
