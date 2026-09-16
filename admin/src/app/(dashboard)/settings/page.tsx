@@ -8,6 +8,7 @@ import {
   Zap, BookOpen, Users, Lock,
 } from 'lucide-react'
 import { useAdminStats } from '@/lib/api/stats'
+import { EmailNotificationsSection } from '@/components/settings/EmailNotificationsSection'
 
 /* ─── Section card ─────────────────────────────────────── */
 function Card({ title, icon: Icon, children }: { title: string; icon: React.ElementType; children: React.ReactNode }) {
@@ -188,6 +189,11 @@ export default function AdminSettingsPage() {
           value="development"
           badge={{ text: 'development', ok: false }}
         />
+      </Card>
+
+      {/* ── Email notifications (per-user) ──────────── */}
+      <Card title="Email Notifications" icon={Mail}>
+        <EmailNotificationsSection />
       </Card>
 
       {/* ── Database stats ──────────────────────────── */}

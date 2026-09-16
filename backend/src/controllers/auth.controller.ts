@@ -435,6 +435,19 @@ export class AuthController {
     }
   }
 
+  /* ── PATCH /admin/auth/me/email-preferences ───────
+     Every admin-side role (including sub_admin and support) manages its own
+     notification preferences, so this is guarded by the admin portal session
+     alone — no extra role gate. */
+  updateMyEmailPrefs = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    try {
+      const prefs = await this.service.updateEmailPrefs(req.user!.id, req.body ?? {})
+      sendSuccess(res, prefs, 'Notification preferences updated.')
+    } catch (err) {
+      next(err)
+    }
+  }
+
   /* ── POST /admin/auth/forgot-password ─────────────
      Same enumeration-safe behavior as the client flow, but the emailed reset
      link points at the admin portal and only staff accounts are served. The

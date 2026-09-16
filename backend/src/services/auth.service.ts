@@ -5,6 +5,7 @@ import { hashPassword, comparePassword } from '@/utils/hash.ts'
 import { generateTokenPair, verifyRefreshToken, type TokenAudience } from '@/utils/jwt.ts'
 import { logger } from '@/utils/logger.ts'
 import { sendPasswordReset, sendVerifyEmail, sendRegistrationAttempt, sendLoginCode, sendCourseInvite, sendDeviceApprovalRequest } from '@/services/email.service.ts'
+import { wantsStaffEmail, isStaffEmailCategory, type EmailPrefs } from '@/utils/emailPrefs.ts'
 import { TotpService } from '@/services/totp.service.ts'
 import { resolveDeviceForLogin, isDeviceApproved, type DeviceOutcome } from '@/services/device.service.ts'
 import { isDeviceLimitEnabled } from '@/services/settings.service.ts'
@@ -1095,6 +1096,31 @@ export class AuthService {
     logger.info({ userId: claimed.userId }, 'password reset')
   }
 
+  /* ── Staff email-notification preferences ───────────
+     Merge, never replace: only the keys the caller actually sent are written,
+     as dotted $set paths, so toggling one category can't clobber the others
+     (and never resurrects a category the user had switched off). */
+  async updateEmailPrefs(userId: string, patch: EmailPrefs): Promise<EmailPrefs> {
+    const { UserModel } = await import('@/models/schema.ts')
+    const set: Record<string, boolean> = {}
+    if (typeof patch.masterEnabled === 'boolean') set['emailPrefs.masterEnabled'] = patch.masterEnabled
+    for (const [key, value] of Object.entries(patch.categories ?? {})) {
+      if (isStaffEmailCategory(key) && typeof value === 'boolean') {
+        set[`emailPrefs.categories.${key}`] = value
+      }
+    }
+    const read = async () =>
+      (await UserModel.findById(userId).select('emailPrefs').lean<{ emailPrefs?: EmailPrefs }>())?.emailPrefs ?? {}
+
+    if (Object.keys(set).length === 0) return read()   // nothing recognised — no write
+
+    const updated = await UserModel.findByIdAndUpdate(userId, { $set: set }, { new: true })
+      .select('emailPrefs').lean<{ emailPrefs?: EmailPrefs }>()
+    if (!updated) throw new AuthError('USER_NOT_FOUND', 'Account not found.', 404)
+    logger.info({ userId, changed: Object.keys(set) }, 'email notification preferences updated')
+    return updated.emailPrefs ?? {}
+  }
+
   /* ── Verify email ────────────────────────────────── */
   async verifyEmail(rawToken: string): Promise<void> {
     const tokenHash = this.#hashToken(rawToken)
@@ -1160,17 +1186,18 @@ export class AuthService {
     const student = await UserModel.findById(userId).select('email').lean<{ email?: string }>()
     if (!student?.email) return
     const admins = await UserModel.find({
-      role: { $in: ['super_admin', 'admin'] },
+      role: { $in: ['super_admin', 'admin', 'sub_admin', 'support'] },
       isActive: true,
-    }).select('name email').lean()
+    }).select('name email role emailPrefs').lean()
+    const recipients = admins.filter(a => wantsStaffEmail(a as never, 'deviceApproval'))
     const reviewUrl = `${env.ADMIN_URL}/devices`
     await Promise.allSettled(
-      admins.map(a =>
+      recipients.map(a =>
         sendDeviceApprovalRequest(a['email'] as string, (a['name'] as string) ?? 'there', student.email!, deviceLabel, reviewUrl)
           .catch(() => undefined),
       ),
     )
-    logger.info({ userId, adminCount: admins.length }, 'Admin device-approval notifications sent')
+    logger.info({ userId, adminCount: recipients.length }, 'Admin device-approval notifications sent')
   }
 
   /* Issue a session for a fresh sign-in — gated on the device whitelist first.
@@ -1388,11 +1415,15 @@ export class AuthService {
   async #notifyAllAdmins(studentName: string, studentEmail: string): Promise<void> {
     const { UserModel } = await import('@/models/schema.ts')
     const admins = await UserModel.find({
-      role: { $in: ['super_admin', 'admin'] },
+      role: { $in: ['super_admin', 'admin', 'sub_admin', 'support'] },
       isActive: true,
-    }).select('name email').lean()
+    }).select('name email role emailPrefs').lean()
+    /* The preference gate lives HERE, on the staff notification loop — never
+       inside sendVerifyEmail, which is dual-use: it also delivers a student's
+       real email-verification link. Gating the sender would break signup. */
+    const recipients = admins.filter(a => wantsStaffEmail(a as never, 'enrollmentRequest'))
     await Promise.allSettled(
-      admins.map(a =>
+      recipients.map(a =>
         sendVerifyEmail(
           a['email'] as string,
           a['name'] as string,
@@ -1400,6 +1431,6 @@ export class AuthService {
         ).catch(() => undefined),
       ),
     )
-    logger.info({ studentEmail, adminCount: admins.length }, 'Admin enrollment notifications sent')
+    logger.info({ studentEmail, adminCount: recipients.length }, 'Admin enrollment notifications sent')
   }
 }

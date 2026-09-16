@@ -117,6 +117,22 @@ export interface IUser extends Document {
   /* Two-factor authentication (TOTP) */
   twoFactorEnabled: boolean
   twoFactorSecret?: string   // base32-encoded TOTP secret; select:false
+  /* Staff email-notification preferences (admin-side users). Deliberately has
+     NO schema defaults: an absent value means "send", so every existing account
+     keeps its current behaviour and no backfill is needed. Only an explicit
+     `false` silences a category. Roles that were never recipients of the admin
+     alerts (sub_admin, support) default to OFF for those two — the role-aware
+     default lives in utils/emailPrefs.ts. */
+  emailPrefs?: {
+    masterEnabled?: boolean
+    categories?: {
+      enrollmentRequest?:   boolean
+      deviceApproval?:      boolean
+      classScheduled?:      boolean
+      classReminder?:       boolean
+      assignmentSubmitted?: boolean
+    }
+  }
   /* Per-day AI chat usage (L-09). `day` is the local calendar date in the
      app's timezone (Asia/Dubai), so the allowance resets at local midnight
      rather than at an arbitrary UTC hour. */
@@ -187,6 +203,17 @@ const UserSchema = new Schema<IUser>(
     lastResetMailAt: { type: Date, select: false },
     twoFactorEnabled: { type: Boolean, default: false },
     twoFactorSecret:  { type: String, select: false },
+    /* No defaults on purpose — see IUser.emailPrefs. Absent ⇒ send. */
+    emailPrefs: {
+      masterEnabled: { type: Boolean },
+      categories: {
+        enrollmentRequest:   { type: Boolean },
+        deviceApproval:      { type: Boolean },
+        classScheduled:      { type: Boolean },
+        classReminder:       { type: Boolean },
+        assignmentSubmitted: { type: Boolean },
+      },
+    },
     aiUsage:          { day: { type: String }, count: { type: Number, default: 0 } },
     customRoleId:   { type: Schema.Types.ObjectId, ref: 'Role' },
     organizationId: { type: Schema.Types.ObjectId, ref: 'Organization' },

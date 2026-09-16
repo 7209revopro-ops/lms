@@ -79,6 +79,24 @@ router.get ('/auth/me',      authenticateAdmin, authCtrl.me)
    try to mutate courses they don't own. */
 router.use(authenticateAdmin, requireRole('super_admin', 'admin', 'sub_admin', 'support', 'instructor'), injectCategoryScope)
 
+/* ─── Own email-notification preferences ───────────────
+   Self-service for every admin-side role: the router.use above already proves
+   an admin-portal session and a staff role, and a user may only ever change
+   their OWN preferences (the id comes from the session, never the body).
+   Partial by design — send just the keys you want to change. */
+const emailPrefsSchema = z.object({
+  masterEnabled: z.boolean().optional(),
+  categories: z.object({
+    enrollmentRequest:   z.boolean().optional(),
+    deviceApproval:      z.boolean().optional(),
+    classScheduled:      z.boolean().optional(),
+    classReminder:       z.boolean().optional(),
+    assignmentSubmitted: z.boolean().optional(),
+  }).strict().optional(),
+}).strict()
+
+router.patch('/auth/me/email-preferences', validate(emailPrefsSchema), authCtrl.updateMyEmailPrefs)
+
 /* ─── Schemas ─────────────────────────────────────── */
 const courseCreateSchema = z.object({
   title:        z.string().min(3).max(255).trim(),

@@ -455,9 +455,11 @@ export class ClassAssignmentService {
       logger.error({ err, assignmentId: String(doc._id) }, 'assignment: instructor notification failed')
     }
     try {
-      const instructor = await UserModel.findById(doc.instructorId).select('name email').lean()
+      const instructor = await UserModel.findById(doc.instructorId).select('name email role emailPrefs').lean()
       const email = (instructor as { email?: string } | null)?.email
       if (!email) return
+      const { wantsStaffEmail } = await import('@/utils/emailPrefs.ts')
+      if (!wantsStaffEmail(instructor as never, 'assignmentSubmitted')) return
       const { sendAssignmentSubmitted } = await import('@/services/email.service.ts')
       await sendAssignmentSubmitted(
         email,

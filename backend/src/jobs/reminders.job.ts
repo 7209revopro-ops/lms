@@ -27,6 +27,7 @@ import {
   sendClassStartingReminder,
   sendInstructor15MinReminder,
 } from '@/services/email.service.ts'
+import { wantsStaffEmail } from '@/utils/emailPrefs.ts'
 
 const notifSvc = new NotificationService()
 
@@ -366,12 +367,21 @@ export async function runInstructor15MinReminders(): Promise<void> {
       reminderInstructor15MinSent: false,
       scheduledStart: { $gte: from, $lte: to },
     })
-      .populate<{ instructorId: { id: string; name: string; email: string } }>('instructorId', 'name email')
+      .populate<{ instructorId: { id: string; name: string; email: string } }>('instructorId', 'name email role emailPrefs')
       .lean({ virtuals: true })
 
     for (const cls of classes) {
       const instructor = cls.instructorId as any
       if (!instructor?.email || !cls.meetingUrl) continue
+
+      /* Instructor silenced this category. Mark the class handled anyway —
+         the flag is what takes it out of the query, so leaving it false would
+         make the job re-fetch and re-skip this class every cycle. */
+      if (!wantsStaffEmail(instructor, 'classReminder')) {
+        await LiveClassModel.findByIdAndUpdate(cls._id, { reminderInstructor15MinSent: true })
+        logger.debug({ classId: cls._id }, '[Reminders] Instructor 15-min skipped — opted out')
+        continue
+      }
 
       try {
         await sendInstructor15MinReminder(

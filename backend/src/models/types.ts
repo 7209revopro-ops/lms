@@ -54,6 +54,7 @@ const SAFE_USER_FIELDS = [
   'isVerified', 'isActive',
   'bio', 'headline', 'websiteUrl',
   'twoFactorEnabled',
+  'emailPrefs',
   'aiUsage',
   'customRoleId', 'organizationId', 'program',
   'category', 'categories',

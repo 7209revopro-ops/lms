@@ -6,6 +6,7 @@ import { verifyWebhookSignature } from '@/services/mux.service.ts'
 import { createGoogleMeetLink } from '@/services/googleMeet.service.ts'
 import { sendSuccess } from '@/utils/response.ts'
 import { sendInstructorClassScheduled } from '@/services/email.service.ts'
+import { wantsStaffEmail } from '@/utils/emailPrefs.ts'
 import { bookingClosesAt } from '@/utils/liveStatus.ts'
 import { parkCriticalMail, flushCriticalMail, isUrgent } from '@/jobs/criticalmail.job.ts'
 import type { CriticalKind } from '@/jobs/criticalmail.job.ts'
@@ -746,10 +747,10 @@ export class LiveClassController {
         try {
           const { UserModel, CourseModel } = await import('@/models/schema.ts')
           const [instructor, course] = await Promise.all([
-            UserModel.findById(live.instructorId).select('name email').lean(),
+            UserModel.findById(live.instructorId).select('name email role emailPrefs').lean(),
             CourseModel.findById(live.courseId).select('title').lean(),
           ])
-          if (instructor && (instructor as any).email) {
+          if (instructor && (instructor as any).email && wantsStaffEmail(instructor as never, 'classScheduled')) {
             await sendInstructorClassScheduled(
               (instructor as any).email,
               (instructor as any).name ?? 'Instructor',
