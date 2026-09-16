@@ -207,12 +207,12 @@ type ProgramFilter  = 'all'|'4x-trading'|'digital-marketing'|'ai'|'jura'
 type StatusFilter   = 'all'|'live'|'upcoming'|'ended'
 
 interface ClassGroup {
-  title:string; instructor:{id:string;name:string;avatarUrl?:string}|null
+  id:string; title:string; instructor:{id:string;name:string;avatarUrl?:string}|null
   slots:LiveClass[]; bookedSlot:LiveClass|undefined
   courseId?:string; courseTitle?:string; moduleTitle?:string
 }
 interface DateSection { dateKey:string; dateLabel:string; isToday:boolean; groups:ClassGroup[] }
-interface GroupKey { title:string; dateKey:string }
+interface GroupKey { id:string; dateKey:string }
 
 const PROGRAM_LABELS: Record<string,string> = {
   all:'All', '4x-trading':'FOREX', 'digital-marketing':'Digital Marketing', ai:'AI', jura:'JURA',
@@ -1475,13 +1475,19 @@ export default function ClassBookingsPage() {
 
   const allGroups = useMemo(():ClassGroup[]=>{
     const map = new Map<string,LiveClass[]>()
-    windowClasses.forEach(lc=>{const k=lc.title.trim();if(!map.has(k))map.set(k,[]);map.get(k)!.push(lc)})
+    /* Bucket by the class IDENTITY, not the title alone. Two sessions only
+       belong to the same card when their title, instructor, course AND module
+       all match — a real weekly repeat. Keying by title alone merged a class
+       for instructor A into instructor B's bucket, and slots[0] (the earliest)
+       then stamped B's name/course/module on the whole group. */
+    const secKey=(lc:LiveClass)=>{const s=lc.sectionId;return typeof s==='object'&&s?s.id:s??''}
+    windowClasses.forEach(lc=>{const k=[lc.title.trim(),lc.instructor?.id??'',lc.course?.id??'',secKey(lc)].join('|');if(!map.has(k))map.set(k,[]);map.get(k)!.push(lc)})
     const res:ClassGroup[] = []
-    map.forEach((slots,title)=>{
+    map.forEach((slots,id)=>{
       slots.sort((a,b)=>new Date(a.scheduledStart).getTime()-new Date(b.scheduledStart).getTime())
       const bookedSlot = slots.find(s=>bookingMap.get(s.id)?.status==='booked')
       const sec = slots[0].sectionId
-      res.push({title, instructor:slots[0].instructor??null, slots, bookedSlot,
+      res.push({id, title:slots[0].title.trim(), instructor:slots[0].instructor??null, slots, bookedSlot,
         courseId:slots[0].course?.id, courseTitle:slots[0].course?.title,
         moduleTitle:typeof sec==='object'&&sec?sec.title:undefined})
     })
@@ -1524,7 +1530,7 @@ export default function ClassBookingsPage() {
 
   const openGroup = useMemo(()=>{
     if(!openKey) return null
-    return dateSections.find(s=>s.dateKey===openKey.dateKey)?.groups.find(g=>g.title===openKey.title)??null
+    return dateSections.find(s=>s.dateKey===openKey.dateKey)?.groups.find(g=>g.id===openKey.id)??null
   },[openKey,dateSections])
 
   /* ── Stats ── */
@@ -1977,10 +1983,10 @@ export default function ClassBookingsPage() {
                       {/* Cards */}
                       <div className="grid grid-cols-2 gap-3 md:grid-cols-3">
                         {sec.groups.map((group,i)=>(
-                          <motion.div key={group.title} initial={{opacity:0,y:8}} animate={{opacity:1,y:0}}
+                          <motion.div key={group.id} initial={{opacity:0,y:8}} animate={{opacity:1,y:0}}
                             transition={{delay:si*0.04+i*0.03}} className="flex">
                             <ClassCard group={group} bookingMap={bookingMap}
-                              onClick={()=>setOpenKey({title:group.title,dateKey:sec.dateKey})}/>
+                              onClick={()=>setOpenKey({id:group.id,dateKey:sec.dateKey})}/>
                           </motion.div>
                         ))}
                       </div>
@@ -1995,7 +2001,7 @@ export default function ClassBookingsPage() {
         {/* ─── MODALS ───────────────────────────────────────────── */}
         <AnimatePresence>
           {openGroup&&(
-            <SlotModal key={openKey!.title+':'+openKey!.dateKey} group={openGroup} bookingMap={bookingMap}
+            <SlotModal key={openKey!.id+':'+openKey!.dateKey} group={openGroup} bookingMap={bookingMap}
               onBook={handleBook} onCancel={handleCancel} bookPending={bookPending} cancelPending={cancelPend}
               onClose={()=>setOpenKey(null)}/>
           )}
