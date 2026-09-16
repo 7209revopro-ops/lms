@@ -1037,31 +1037,46 @@ export class AuthService {
         logger.debug({ userId: user.id, role: user.role }, 'admin forgot-password: non-staff account, skipping')
         return
       }
-      /* Per-account throttle (admin only): at most one reset mail per
-         RESET_THROTTLE_MS (60s default), so a staff inbox can't be flooded
-         regardless of the source IP the shared limiter keys on. Returns the same
-         neutral result whether or not a mail went out, so it never becomes an
-         enumeration oracle. The client flow deliberately keeps its
-         "newest link wins" behavior and is left untouched. */
-      const RESET_THROTTLE_MS = Number(process.env['RESET_THROTTLE_MS'] ?? 60_000)
-      if (RESET_THROTTLE_MS > 0 && !(await this.userRepo.claimResetMailSlot(user.id, RESET_THROTTLE_MS))) {
-        logger.debug({ userId: user.id }, 'admin forgot-password: throttled — a fresh link was issued recently')
-        return
-      }
+    }
+    /* Per-account throttle (BOTH portals): at most one reset mail per
+       RESET_THROTTLE_MS (60s default), keyed on the account. Both endpoints
+       mint the same 'reset-password' token, so throttling only the admin path
+       left a staff inbox floodable through the un-throttled client path — this
+       caps it regardless of portal, email casing, or source IP. It is a full
+       no-op within the window (the previously issued link stays valid) and
+       returns the same neutral result, so it can never become an enumeration
+       oracle. RESET_THROTTLE_MS=0 disables it. */
+    const RESET_THROTTLE_MS = Number(process.env['RESET_THROTTLE_MS'] ?? 60_000)
+    if (RESET_THROTTLE_MS > 0 && !(await this.userRepo.claimResetMailSlot(user.id, RESET_THROTTLE_MS))) {
+      logger.debug({ userId: user.id }, 'forgot-password: throttled — a fresh link was issued recently')
+      return
     }
     const { raw } = await this.#issueAuthToken(user.id, 'reset-password', 60 * 60 * 1000)
     const base = portal === 'admin' ? env.ADMIN_URL : env.CLIENT_URL
     const resetUrl = `${base}/reset-password?token=${raw}`
+    /* The slot is claimed before the send, so if the mail cannot be dispatched
+       we release it — otherwise a transient SMTP failure would lock the account
+       out of retrying for the whole window with no mail delivered. */
+    const onSendFail = (err: unknown): void => {
+      logger.warn({ err, userId: user.id }, 'password-reset email failed to send')
+      void this.userRepo.releaseResetMailSlot(user.id).catch(() => {})
+    }
     if (portal === 'admin') {
       /* Fire-and-forget on the admin endpoint: because the STAFF_ROLES check
          fast-returns non-staff, awaiting the SMTP round trip would make the
          staff path measurably slower than the no-op paths, turning response
          latency into a staff-account enumeration oracle. Mirrors how register()
          dispatches its verification mail. */
-      void sendPasswordReset(user.email, user.name, resetUrl).catch(err =>
-        logger.warn({ err, userId: user.id }, 'password-reset email failed to send'))
+      void sendPasswordReset(user.email, user.name, resetUrl).catch(onSendFail)
     } else {
-      await sendPasswordReset(user.email, user.name, resetUrl)
+      /* Client keeps its awaited send. Still release the slot and stay
+         enumeration-safe (a neutral 200, not a 500) if the send fails. */
+      try {
+        await sendPasswordReset(user.email, user.name, resetUrl)
+      } catch (err) {
+        onSendFail(err)
+        return
+      }
     }
     logger.info({ userId: user.id, portal }, 'password-reset email sent')
   }

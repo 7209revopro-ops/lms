@@ -115,6 +115,13 @@ export class UserRepository extends BaseRepository<IUser> {
     return !!won
   }
 
+  /* Release a slot claimed by claimResetMailSlot when the mail could not be
+     dispatched, so a transient send failure doesn't lock the account out of
+     retrying for the whole window. */
+  async releaseResetMailSlot(id: string): Promise<void> {
+    await UserModel.findByIdAndUpdate(id, { $unset: { lastResetMailAt: 1 } }).exec()
+  }
+
   /* ── Check email exists ─────────────────────────── */
   async emailExists(email: string): Promise<boolean> {
     return this.exists({ email: email.toLowerCase().trim() })

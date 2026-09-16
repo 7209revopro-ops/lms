@@ -30,6 +30,10 @@ process.env.PORT         = '0'
 process.env.CLIENT_URL   = 'http://localhost:3000'
 process.env.EMAIL_OUTBOX = 'on'
 process.env.RATE_LIMIT_AUTH_MAX = '2000'
+/* Disable the per-account reset-mail throttle here so this suite can exercise
+   the "newest link wins" invalidation in isolation with rapid re-requests. The
+   throttle itself is covered by adminpasswordreset.suite. */
+process.env.RESET_THROTTLE_MS = '0'
 /* Force the local-disk fallback — never touch the production R2 bucket. */
 process.env.R2_ACCOUNT_ID        = ''
 process.env.R2_ACCESS_KEY_ID     = ''

@@ -180,7 +180,11 @@ const UserSchema = new Schema<IUser>(
     websiteUrl:   { type: String },
     failedLoginAttempts: { type: Number, default: 0 },
     lockedUntil:  { type: Date },
-    lastResetMailAt: { type: Date },
+    /* select:false — internal throttle timestamp, never surfaced in a default
+       query (the toJSON transform is a deny-list, so an un-hidden field would
+       ride along in e.g. GET /admin/users). claimResetMailSlot filters/writes it
+       explicitly, which select:false does not affect. */
+    lastResetMailAt: { type: Date, select: false },
     twoFactorEnabled: { type: Boolean, default: false },
     twoFactorSecret:  { type: String, select: false },
     aiUsage:          { day: { type: String }, count: { type: Number, default: 0 } },

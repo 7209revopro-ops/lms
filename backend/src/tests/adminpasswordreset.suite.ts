@@ -179,8 +179,8 @@ section('B. Admin forgot-password issues nothing for non-staff / inactive / unkn
   check('B7 malformed email → 422 validation', rBad.status === 422, `${rBad.status} ${rBad.code}`)
 }
 
-/* ═══════════ C — client forgot still works, links to CLIENT_URL ═══════════ */
-section('C. Client forgot-password is unaffected and links to CLIENT_URL')
+/* ═══════════ C — client forgot links to CLIENT_URL and shares the throttle ═══════════ */
+section('C. Client forgot-password links to CLIENT_URL and shares the per-account throttle')
 {
   const before = await tokenCount(student._id)
   const t0 = Date.now()
@@ -190,6 +190,13 @@ section('C. Client forgot-password is unaffected and links to CLIENT_URL')
   check('C1 client forgot for a student → 200', r.status === 200, `${r.status}`)
   check('C2 issues a reset token for the student', after === before + 1, `before=${before} after=${after}`)
   check('C3 email link points at CLIENT_URL (not admin)', !!mail.url && mail.url.startsWith('http://client.test/reset-password?token='), `${mail.url}`)
+  /* The throttle now applies to BOTH portals — closes the client-portal bypass
+     that would otherwise let a staff inbox be flooded via /auth/forgot-password. */
+  const before4 = await tokenCount(student._id)
+  const r4 = await call('POST', '/auth/forgot-password', undefined, { email: student.email })
+  const after4 = await tokenCount(student._id)
+  check('C4 an immediate second client request is throttled too (bypass closed)',
+    r4.status === 200 && after4 === before4, `${r4.status} before=${before4} after=${after4}`)
 }
 
 /* ═══════════ D — reset (admin) enforces policy + token floor ═══════════ */
