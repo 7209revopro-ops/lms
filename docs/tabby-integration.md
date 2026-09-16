@@ -81,7 +81,7 @@ production.
 |---|---|
 | Background pre-scoring | `POST /checkout/tabby/prescore` → `TabbyService.checkEligibility` |
 | Opens in the same window | `window.location.href = checkoutUrl` |
-| Total matches Tabby's checkout | Snippet amount comes from the **backend** `aedPriceFor()`, not the cart — see caveat below |
+| Total matches Tabby's checkout | Every path resolves through `aedPriceFor()` — `course.controller.ts` on read, `checkTabbyEligibility` for the snippet, `createTabbyOrder` for the session |
 | `lang` sent on session creation | `TabbyCheckoutRequest.lang` |
 | All required parameters sent | Full payload: `buyer`, `buyer_history`, `order`, `order_history`, `shipping_address` |
 | Sessions disposable, URL never reused | A fresh order + session per attempt |
@@ -298,13 +298,14 @@ Three things are **not** code and must be done by hand:
    a plain purple wordmark, which will not pass the "Tabby logo appears next to
    payment method name" check. The trademark is deliberately not redrawn here.
 
-2. **Set `priceAED` on every published course.** `coursePriceIn()` falls back to
-   the **USD** price when a course has no AED override, so the cart would show
-   `$199` while Tabby's checkout shows `AED 730.33`. QA checks "Checkout total
-   matches amount displayed on Tabby Checkout". The Tabby *snippets* already
-   quote the backend AED figure, so this only affects the cart's own price line —
-   but it is a visible mismatch. Setting `priceAED` in admin fixes it with no
-   code change.
+2. **Nothing to do for pricing.** An earlier draft of this document said every
+   published course needed a `priceAED` override or the cart would show USD
+   while Tabby showed AED. That was wrong: `course.controller.ts` resolves
+   `priceAED` through `aedPriceFor()` on every course read, so the API always
+   sends the AED figure whether or not the column is set, and the cart, the
+   snippet and the Tabby session all take the same number. An explicit
+   `priceAED` is only needed when an academy wants a price that is NOT the USD
+   figure at the configured rate.
 
 3. **Decide on Arabic.** The client has no i18n framework — it is English-only.
    Several checklist items ("snippets display correctly in Arabic and English",
