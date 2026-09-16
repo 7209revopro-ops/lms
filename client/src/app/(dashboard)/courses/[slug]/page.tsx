@@ -12,7 +12,9 @@ import {
 } from 'lucide-react'
 import { useCourse } from '@/lib/api/courses'
 import { useCourseProgress, useEnroll } from '@/lib/api/enrollments'
-import { useRazorpayCheckout, useTabbyCheckout, useAbzerCheckout, useTamaraCheckout, useGatewayConfig, useValidateCoupon } from '@/lib/api/checkout'
+import { useRazorpayCheckout, useTabbyCheckout, useAbzerCheckout, useTamaraCheckout, useGatewayConfig, useValidateCoupon, useTabbyPrescore } from '@/lib/api/checkout'
+import { TabbyProductPromo, TabbyCheckoutCard } from '@/components/payments/TabbyPromo'
+import { TabbyLogo } from '@/components/payments/TabbyLogo'
 import { formatPrice } from '@/lib/formatPrice'
 import { useCheckoutCurrency, coursePriceIn, discountedAmount } from '@/lib/coursePrice'
 import { CertificateButton } from '@/components/learn/CertificateButton'
@@ -64,6 +66,13 @@ function CourseDetailInner({ slug }: { slug: string }) {
   const abzerCheckout   = useAbzerCheckout({ onError: msg => setEnrollError(msg) })
   const tamaraCheckout  = useTamaraCheckout({ onError: msg => setEnrollError(msg) })
   const gateways        = gatewayConfig?.gateways ?? []
+
+  /* Tabby background pre-scoring — required by Tabby's QA before the option is
+     shown, and the source of the AED figure the snippets must quote. */
+  const tabbyOffered    = isUAE && gateways.includes('tabby')
+  const { data: tabbyScore } = useTabbyPrescore(data?.course.id ?? '', tabbyOffered)
+  const tabbyRejected   = tabbyScore?.available === false && !!tabbyScore?.message
+  const tabbyAmount     = tabbyScore?.amount ?? 0
 
   const [enrollError,   setEnrollError]   = useState<string | null>(null)
   const [couponOpen,    setCouponOpen]     = useState(false)
@@ -437,6 +446,11 @@ function CourseDetailInner({ slug }: { slug: string }) {
                     </p>
                   )}
                 </div>
+                {/* Product-page snippet. QA: shown for ALL items with no amount
+                    limits of ours — Tabby decides eligibility, not us. */}
+                {tabbyOffered && tabbyAmount > 0 && !isEnrolled && (
+                  <TabbyProductPromo price={tabbyAmount} currency={tabbyScore?.currency ?? 'AED'} />
+                )}
                 {isEnrolled && (
                   <span className="rounded-lg px-2 py-0.5 text-xs font-bold"
                     style={{ background: 'rgba(16,185,129,0.10)', color: 'var(--color-success)', border: '1px solid rgba(16,185,129,0.22)' }}>
@@ -488,18 +502,37 @@ function CourseDetailInner({ slug }: { slug: string }) {
                     </motion.button>
                   )}
 
-                  {/* Tabby BNPL */}
-                  {isUAE && gateways.includes('tabby') && (
-                    <motion.button
-                      onClick={() => { setEnrollError(null); tabbyCheckout.mutate({ courseId: course.id, slug: course.slug, couponCode: couponCode || undefined }) }}
-                      disabled={tabbyCheckout.isPending || abzerCheckout.isPending}
-                      whileHover={{ y: -1 }} whileTap={{ scale: 0.97 }}
-                      className="mt-2 flex w-full items-center justify-center gap-2 rounded-2xl py-3 text-sm font-semibold transition-all disabled:opacity-70"
-                      style={{ border: '1.5px solid #3D1D8E', color: '#3D1D8E' }}>
-                      {tabbyCheckout.isPending
-                        ? <><Spinner size={14} />Redirecting…</>
-                        : <><ShoppingCart size={14} />Pay in 4 with Tabby</>}
-                    </motion.button>
+                  {/* Tabby BNPL. Shown unless Tabby's own pre-scoring declined
+                      this customer — QA allows hiding on a decline, but requires
+                      Tabby's wording whenever it is hidden for that reason. */}
+                  {tabbyOffered && !tabbyRejected && (
+                    <>
+                      <motion.button
+                        onClick={() => { setEnrollError(null); tabbyCheckout.mutate({ courseId: course.id, slug: course.slug, couponCode: couponCode || undefined }) }}
+                        disabled={tabbyCheckout.isPending || abzerCheckout.isPending}
+                        whileHover={{ y: -1 }} whileTap={{ scale: 0.97 }}
+                        className="mt-2 flex w-full items-center justify-center gap-2 rounded-2xl py-3 text-sm font-semibold transition-all disabled:opacity-70"
+                        style={{ border: '1.5px solid #3D1D8E', color: '#3D1D8E' }}>
+                        {tabbyCheckout.isPending
+                          ? <><Spinner size={14} />Redirecting…</>
+                          : <>Pay in 4 with <TabbyLogo height={15} /></>}
+                      </motion.button>
+                      {/* TabbyCard sits under the payment method, per the
+                          "Checkout snippet displays under Tabby payment method"
+                          item on the QA checklist. */}
+                      {tabbyAmount > 0 && (
+                        <div className="mt-2">
+                          <TabbyCheckoutCard price={tabbyAmount} currency={tabbyScore?.currency ?? 'AED'} />
+                        </div>
+                      )}
+                    </>
+                  )}
+
+                  {tabbyRejected && (
+                    <p className="mt-2 flex items-start gap-1.5 text-xs" style={{ color: 'var(--color-text-muted)' }}>
+                      <TabbyLogo height={12} className="mt-px flex-shrink-0" />
+                      <span>{tabbyScore?.message}</span>
+                    </p>
                   )}
 
                   {/* Coupon code accordion */}

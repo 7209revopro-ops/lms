@@ -216,6 +216,36 @@ export const apiRateLimit = rateLimit({
   },
 })
 
+/* ─── Gateway session creation ──────────────────────
+   12 per minute per person  (override: RATE_LIMIT_CHECKOUT_MAX)
+
+   Creating a checkout session is not a normal read: it costs an authenticated
+   call to the payment provider, and the providers meter them merchant-wide.
+   Tabby allows 200 create-session calls per 10 seconds for the WHOLE merchant,
+   while the general API limit lets one signed-in student make 100 requests a
+   minute — so roughly a dozen students hammering the Pay button could exhaust
+   the shared budget and take checkout down for everybody, which is a far worse
+   outcome than the one person being slowed.
+
+   Pre-scoring counts too: it is the same create-session endpoint at Tabby, and
+   its 60-second server-side cache is keyed per course, so walking a list of
+   course ids walks straight past it.
+
+   Twelve a minute is far above anything a real purchase needs (a session per
+   attempt, a handful of retries) and far below a useful attack.
+───────────────────────────────────────────────────── */
+export const checkoutRateLimit = rateLimit({
+  windowMs:         60 * 1000,
+  max:              envInt('RATE_LIMIT_CHECKOUT_MAX', 12),
+  standardHeaders:  true,
+  legacyHeaders:    false,
+  keyGenerator:     clientKey,
+  skip:             rateLimitDisabled,
+  handler: (_req, res) => {
+    sendError(res, 'RATE_LIMITED', 'Too many checkout attempts. Please wait a moment and try again.', 429)
+  },
+})
+
 /* ─── Pre-registration document upload (M-05) ───────
    POST /uploads/signup-doc has no session behind it — it cannot, because it
    runs before the account exists. That makes it the only anonymous write into

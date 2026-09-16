@@ -72,11 +72,10 @@ async function bootstrap() {
        stops them lingering as permanently unscoped. */
     const { LearningPathModel } = await import('@/models/schema.ts')
 
-    const [users, courses, enrollments, orders, coupons, paths] = await Promise.all([
+    const [users, courses, enrollments, coupons, paths] = await Promise.all([
       UserModel.updateMany({ ...noOrg, role: { $ne: 'super_admin' } }, setOrg),
       CourseModel.updateMany(noOrg, setOrg),
       EnrollmentModel.updateMany(noOrg, setOrg),
-      OrderModel.updateMany(noOrg, setOrg),
       CouponModel.updateMany(noOrg, setOrg),
       LearningPathModel.updateMany(noOrg, setOrg),
     ])
@@ -104,6 +103,38 @@ async function bootstrap() {
       classCount = result.modifiedCount
     }
 
+    /* Orders are personal too, and the blanket Dubai stamp was actively wrong
+       for them — worse than leaving them unscoped. Nothing ever set
+       organizationId at creation, so EVERY order fell into this backfill and
+       was homed to Dubai regardless of who bought it. That is what the refund
+       route's tenancy check reads: a Dubai-scoped admin could then list and
+       issue real gateway refunds against Bangalore students' orders, while a
+       Bangalore admin could refund none of their own.
+
+       Same treatment as support tickets below: derive from the BUYER, and
+       REPAIR rows whose org disagrees with their buyer rather than only filling
+       empty ones — the existing rows are already mis-homed. Idempotent. Orders
+       whose buyer is gone or org-less are left alone (super admin sees them in
+       "All Orgs"). New orders are stamped at creation now, so this shrinks to
+       nothing over time. */
+    let orderCount = 0
+    const misfiled = await OrderModel.aggregate([
+      { $lookup: { from: 'users', localField: 'userId', foreignField: '_id', as: 'buyer' } },
+      { $unwind: '$buyer' },
+      { $match: {
+        'buyer.organizationId': { $exists: true, $ne: null },
+        $expr: { $ne: ['$organizationId', '$buyer.organizationId'] },
+      } },
+      { $project: { buyerOrg: '$buyer.organizationId' } },
+    ])
+    if (misfiled.length > 0) {
+      const result = await OrderModel.bulkWrite(misfiled.map(o => ({
+        updateOne: { filter: { _id: o._id }, update: { $set: { organizationId: o.buyerOrg } } },
+      })))
+      orderCount = result.modifiedCount
+      logger.info(`✅  Orders re-homed to their buyer's academy: ${orderCount}`)
+    }
+
     /* Support tickets are personal, so each one belongs to ITS OWNER's
        academy — never a blanket Dubai stamp. The blanket version mis-homed
        Bangalore students' pre-org tickets into the Dubai panel; this sync
@@ -129,7 +160,7 @@ async function bootstrap() {
     }
 
     const total = users.modifiedCount + courses.modifiedCount + classCount
-      + enrollments.modifiedCount + orders.modifiedCount + coupons.modifiedCount
+      + enrollments.modifiedCount + orderCount + coupons.modifiedCount
       + ticketCount + paths.modifiedCount
 
     if (total > 0) {
@@ -277,8 +308,22 @@ async function bootstrap() {
     }
   }
 
-  /* Register Tabby webhook (idempotent — safe to call every boot) */
-  void new TabbyService().registerWebhook()
+  /* Register the Tabby webhook. Idempotent within one process — it lists first
+     and only posts when ours is absent — but that check is not atomic ACROSS
+     processes, and ecosystem.config.js runs `instances: N` (tuned to core
+     count). On a deploy every instance boots at once, every one of them lists
+     an empty result, and every one posts. Tabby allows only FOUR webhooks per
+     merchant_code + key pair, so a 4-core box would exhaust the budget on the
+     first deploy and every later registration would fail.
+
+     `instanceId` is the same NODE_APP_INSTANCE the listen port is derived from
+     above, and it is 0 for a single process outside PM2 — so dev and tests
+     still register. */
+  if (instanceId === 0) {
+    void new TabbyService().registerWebhook()
+  } else {
+    logger.debug({ instanceId }, 'Tabby webhook registration skipped — handled by instance 0')
+  }
 
   /* 4. Graceful shutdown */
   const shutdown = (signal: string) => {

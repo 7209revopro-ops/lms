@@ -9,7 +9,9 @@ import {
   CheckCircle2, GraduationCap,
 } from 'lucide-react'
 import { useCartStore, type CartItem } from '@/store/cart.store'
-import { useRazorpayCheckout, useTabbyCheckout, useAbzerCheckout, useTamaraCheckout, useGatewayConfig, useValidateCoupon } from '@/lib/api/checkout'
+import { useRazorpayCheckout, useTabbyCheckout, useAbzerCheckout, useTamaraCheckout, useGatewayConfig, useValidateCoupon, useTabbyPrescore } from '@/lib/api/checkout'
+import { TabbyCartPromo } from '@/components/payments/TabbyPromo'
+import { TabbyLogo } from '@/components/payments/TabbyLogo'
 import Spinner from '@/components/ui/Spinner'
 import { useCheckoutCurrency, coursePriceIn } from '@/lib/coursePrice'
 import { formatPrice } from '@/lib/formatPrice'
@@ -78,7 +80,8 @@ function CouponRow({
 /* ── Single cart item card ───────────────────────────── */
 function CartItemCard({ item, onRemove }: { item: CartItem; onRemove: () => void }) {
   const checkout        = useRazorpayCheckout()
-  const tabbyCheckout   = useTabbyCheckout()
+  const [tabbyError, setTabbyError] = useState<string | null>(null)
+  const tabbyCheckout   = useTabbyCheckout({ onError: msg => setTabbyError(msg) })
   const abzerCheckout   = useAbzerCheckout()
   const tamaraCheckout  = useTamaraCheckout()
   const { data: gatewayConfig } = useGatewayConfig()
@@ -86,6 +89,15 @@ function CartItemCard({ item, onRemove }: { item: CartItem; onRemove: () => void
   const gateways        = gatewayConfig?.gateways ?? []
   const itemCurrency    = useCheckoutCurrency()
   const isFree          = item.isFree || !item.price || item.price === 0
+
+  /* Tabby background pre-scoring. QA requires it to run before the option is
+     offered, and requires us to add no availability rules of our own on top —
+     whether Tabby can be used is Tabby's answer, not ours. It also hands back
+     the AED figure Tabby will charge, which is what the snippet must quote. */
+  const tabbyOffered    = isUAE && gateways.includes('tabby') && !isFree
+  const { data: tabbyScore } = useTabbyPrescore(item.id, tabbyOffered)
+  const tabbyRejected   = tabbyScore?.available === false && !!tabbyScore?.message
+  const tabbyAmount     = tabbyScore?.amount ?? 0
   const [coupon,  setCoupon]  = useState<string | undefined>(undefined)
   const [buying,  setBuying]  = useState(false)
 
@@ -208,7 +220,7 @@ function CartItemCard({ item, onRemove }: { item: CartItem; onRemove: () => void
                       : <><ArrowRight size={11} />Pay in 3 · Tamara</>}
                   </button>
                 )}
-                {isUAE && gateways.includes('tabby') && (
+                {tabbyOffered && !tabbyRejected && (
                   <button
                     onClick={handleTabbyBuy}
                     disabled={tabbyCheckout.isPending}
@@ -216,7 +228,7 @@ function CartItemCard({ item, onRemove }: { item: CartItem; onRemove: () => void
                     style={{ border: '1.5px solid #3D1D8E', color: '#3D1D8E' }}>
                     {tabbyCheckout.isPending
                       ? <><Spinner size={11} />Processing…</>
-                      : <><ArrowRight size={11} />Pay in 4 · Tabby</>}
+                      : <>Pay in 4 with <TabbyLogo height={13} /></>}
                   </button>
                 )}
               </div>
@@ -224,6 +236,33 @@ function CartItemCard({ item, onRemove }: { item: CartItem; onRemove: () => void
           </div>
         </div>
       </div>
+
+      {/* Tabby on-site messaging. QA: the cart snippet must show for ALL
+          amounts with no limits of our own, and must track the amount as the
+          basket changes — TabbyCartPromo re-initialises whenever `price` moves.
+          The figure comes from pre-scoring rather than the cart, so it always
+          matches what Tabby's own checkout will quote. */}
+      {tabbyOffered && tabbyAmount > 0 && (
+        <div className="mt-2">
+          <TabbyCartPromo price={tabbyAmount} currency={tabbyScore?.currency ?? 'AED'} />
+        </div>
+      )}
+
+      {/* A Tabby decline is a business outcome, not an error — Tabby supplies
+          the exact wording and QA checks it is shown rather than swallowed. */}
+      {tabbyRejected && (
+        <p className="mt-2 flex items-start gap-1.5 text-xs" style={{ color: 'var(--color-text-muted)' }}>
+          <TabbyLogo height={12} className="mt-px flex-shrink-0" />
+          <span>{tabbyScore?.message}</span>
+        </p>
+      )}
+
+      {tabbyError && (
+        <p className="mt-2 flex items-start gap-1.5 text-xs" style={{ color: 'var(--color-text-muted)' }}>
+          <TabbyLogo height={12} className="mt-px flex-shrink-0" />
+          <span>{tabbyError}</span>
+        </p>
+      )}
 
       {/* Coupon row — only for paid courses */}
       {!isFree && (

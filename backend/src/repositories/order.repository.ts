@@ -2,9 +2,17 @@ import { OrderModel, type IOrder, type OrderGateway } from '@/models/schema.ts'
 
 export class OrderRepository {
 
+  /* `organizationId` is what makes the admin refund route's tenancy check real.
+     That check treats an order with no organizationId as grandfathered and
+     refundable by any academy's admin — a deliberate allowance for rows that
+     predate the field. But nothing ever SET the field, so every order matched
+     the grandfather clause and the guard passed for every order in every
+     academy: a Dubai admin could issue a real gateway refund against a
+     Bangalore order. Stamping it at creation is what closes that. */
   async create(data: {
     userId:                   string
     courseId:                 string
+    organizationId?:          string
     gateway:                  OrderGateway
     amount:                   number
     currency:                 string
@@ -79,9 +87,13 @@ export class OrderRepository {
   }
 
   /* Tabby fulfillment */
+  /* Only a PENDING order may become paid. `$ne: 'paid'` also matched
+     `refunded` and `cancelled`, so a replayed callback could resurrect an order
+     whose money had already been sent back — reinstating the enrolment and
+     leaving the books claiming revenue that no longer exists. */
   async fulfillTabby(id: string, paymentId: string): Promise<boolean> {
     const result = await OrderModel.updateOne(
-      { _id: id, status: { $ne: 'paid' } },
+      { _id: id, status: 'pending' },
       { $set: { status: 'paid', tabbyPaymentId: paymentId } },
     ).exec()
     return result.modifiedCount === 1

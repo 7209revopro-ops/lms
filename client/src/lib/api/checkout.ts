@@ -154,14 +154,24 @@ export function useTamaraPrescore(courseId: string) {
   })
 }
 
-/* ─── Tabby background pre-scoring (eligibility check) ─── */
-export function useTabbyPrescore(courseId: string) {
+/* ─── Tabby background pre-scoring (eligibility check) ───────────────────────
+   Tabby's QA requires this to run before the option is offered, and requires
+   the decline wording to be Tabby's own — the backend resolves `message` from
+   the rejection reason so the UI never invents its own copy. */
+export interface TabbyEligibility {
+  available:       boolean
+  rejectionReason: string | null
+  message:         string | null
+  /** AED amount the student will actually be charged, in major units. */
+  amount:          number
+  currency:        string
+}
+
+export function useTabbyPrescore(courseId: string, enabled = true) {
   return useQuery({
     queryKey: ['checkout', 'tabby-prescore', courseId],
-    queryFn:  () => apiPost<{ available: boolean; rejectionReason: string | null }>(
-      '/checkout/tabby/prescore', { courseId },
-    ),
-    enabled:  !!courseId,
+    queryFn:  () => apiPost<TabbyEligibility>('/checkout/tabby/prescore', { courseId }),
+    enabled:  !!courseId && enabled,
     staleTime: 5 * 60_000,
     retry:    false,
   })
@@ -178,6 +188,20 @@ interface UseTabbyCheckoutOptions {
   onError?: (msg: string) => void
 }
 
+/* Tabby's hosted checkout lives on these hosts only — .ai for UAE, .sa for KSA.
+   Parsed rather than prefix-matched, so `https://checkout.tabby.ai.evil.test/`
+   and `https://evil.test/?x=https://checkout.tabby.ai` both fail. */
+const TABBY_CHECKOUT_HOSTS = new Set(['checkout.tabby.ai', 'checkout.tabby.sa'])
+
+export function isTabbyCheckoutUrl(raw: string): boolean {
+  try {
+    const u = new URL(raw)
+    return u.protocol === 'https:' && TABBY_CHECKOUT_HOSTS.has(u.hostname.toLowerCase())
+  } catch {
+    return false
+  }
+}
+
 export function useTabbyCheckout(opts: UseTabbyCheckoutOptions = {}) {
   return useMutation({
     mutationFn: async ({ courseId, slug, couponCode }: { courseId: string; slug: string; couponCode?: string }) => {
@@ -185,7 +209,16 @@ export function useTabbyCheckout(opts: UseTabbyCheckoutOptions = {}) {
         '/checkout/tabby/create-order',
         { courseId, slug, couponCode },
       )
-      /* Redirect to Tabby hosted checkout page */
+      /* Redirect to Tabby's hosted checkout page.
+         The URL is server-supplied, but it is still the one place this app
+         navigates the browser somewhere it was told to. Pinning the
+         destination to Tabby's own checkout hosts means a compromised or
+         spoofed API response cannot turn the Pay button into a phishing
+         redirect — the student would land on a page asking for card details
+         that looks exactly like a legitimate checkout. */
+      if (!isTabbyCheckoutUrl(result.checkoutUrl)) {
+        throw new Error('Checkout could not be started securely. Please try another payment method.')
+      }
       window.location.href = result.checkoutUrl
     },
     onError: (err: Error) => {
@@ -300,7 +333,10 @@ export interface MyOrder {
 export function useVerifyTabbyReturn() {
   return useMutation({
     mutationFn: async (input: { orderId: string; paymentId?: string }) => {
-      const res = await apiPost<{ needsRegistration: boolean }>(
+      /* `paid` is the real outcome. A 200 here only means the request was
+         understood — fulfilment can still have been refused (payment not
+         authorised, or it did not belong to this order). */
+      const res = await apiPost<{ needsRegistration: boolean; paid: boolean }>(
         '/checkout/tabby/verify-return', input,
       )
       return res

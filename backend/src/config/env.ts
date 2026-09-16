@@ -59,9 +59,14 @@ const envSchema = z.object({
   MUX_TOKEN_SECRET:   opt(z.string().min(1)),
   MUX_WEBHOOK_SECRET: opt(z.string().min(1)),
 
-  /* Tabby — BNPL gateway for UAE (AED) */
-  TABBY_SECRET_KEY:      opt(z.string().min(1)),
-  TABBY_PUBLIC_KEY:      opt(z.string().min(1)),
+  /* Tabby — BNPL gateway for UAE (AED)
+     The prefixes are load-bearing. Tabby issues `sk_…` (secret, server only)
+     and `pk_…` (public, safe in a browser). Pasting them into each other's
+     slots is an easy mistake with two bad outcomes: every API call 401s, and
+     the real secret is one copy away from shipping in NEXT_PUBLIC_. Refuse to
+     boot rather than let either happen. */
+  TABBY_SECRET_KEY:      opt(z.string().min(1).regex(/^sk_/, 'TABBY_SECRET_KEY must start with sk_ (sk_test_… sandbox, sk_… live) — a pk_ value here means the keys are swapped')),
+  TABBY_PUBLIC_KEY:      opt(z.string().min(1).regex(/^pk_/, 'TABBY_PUBLIC_KEY must start with pk_ — an sk_ value here is the SECRET key and must never be exposed')),
   TABBY_MERCHANT_CODE:   opt(z.string().min(1)),
   TABBY_WEBHOOK_SECRET:  opt(z.string().min(1)),
   TABBY_CURRENCY:        z.string().length(3).default('AED'),

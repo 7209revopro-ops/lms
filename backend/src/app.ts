@@ -3,12 +3,42 @@ import * as Sentry from '@sentry/node'
 
 /* ─── Sentry — init before any other imports ──────────
    No-op when SENTRY_DSN is not set. Captures unhandled
-   exceptions and Express errors automatically.          */
+   exceptions and Express errors automatically.
+
+   Request data is stripped before it leaves the process.
+   Sentry's RequestData integration is on by default and its
+   DEFAULT_INCLUDE is { cookies: true, headers: true,
+   data: true } — only `ip` follows sendDefaultPii. On this
+   API that means every captured 500 ships `Cookie:
+   lms_at=<live 15-minute access JWT>` (path '/', so it rides
+   every request), or an admin's lms_admin_at, plus the parsed
+   JSON body — a plaintext password on a failed login. Vendor
+   -side scrubbing is an org toggle that runs only after the
+   data has crossed the network, so we do not rely on it.
+   url + method + query_string are enough to debug with.
+
+   Naming the integration replaces the default instance of
+   the same name; beforeSend is belt-and-braces for any other
+   path that attaches request data to an event.              */
 if (process.env['SENTRY_DSN']) {
   Sentry.init({
     dsn:              process.env['SENTRY_DSN'],
     environment:      process.env['NODE_ENV'] ?? 'development',
     tracesSampleRate: process.env['NODE_ENV'] === 'production' ? 0.2 : 1.0,
+    sendDefaultPii:   false,
+    integrations: [
+      Sentry.requestDataIntegration({
+        include: { cookies: false, headers: false, data: false, ip: false },
+      }),
+    ],
+    beforeSend(event) {
+      if (event.request) {
+        delete event.request.cookies
+        delete event.request.headers
+        delete event.request.data
+      }
+      return event
+    },
   })
 }
 

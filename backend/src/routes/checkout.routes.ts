@@ -2,7 +2,9 @@ import { Router } from 'express'
 import { z } from 'zod'
 import { authenticate, requireCheckoutEligibility } from '@/middleware/auth.middleware.ts'
 import { validate } from '@/middleware/validate.middleware.ts'
+import { checkoutRateLimit } from '@/middleware/rateLimit.middleware.ts'
 import { OrderService } from '@/services/order.service.ts'
+import { TABBY_ID_RE } from '@/services/tabby.service.ts'
 import { sendSuccess, sendError } from '@/utils/response.ts'
 import { env } from '@/config/env.ts'
 import type { Request, Response, NextFunction } from 'express'
@@ -16,7 +18,7 @@ const checkoutSchema = z.object({
   couponCode: z.string().trim().optional(),
 })
 
-router.post('/', authenticate, requireCheckoutEligibility, validate(checkoutSchema), async (req: Request, res: Response, next: NextFunction) => {
+router.post('/', authenticate, checkoutRateLimit, requireCheckoutEligibility, validate(checkoutSchema), async (req: Request, res: Response, next: NextFunction) => {
   if (!env.STRIPE_SECRET_KEY) {
     sendError(res, 'STRIPE_NOT_CONFIGURED', 'Payments are not configured on this server.', 503)
     return
@@ -34,7 +36,7 @@ const razorpayCreateSchema = z.object({
   couponCode: z.string().trim().optional(),
 })
 
-router.post('/razorpay/create-order', authenticate, requireCheckoutEligibility, validate(razorpayCreateSchema), async (req: Request, res: Response, next: NextFunction) => {
+router.post('/razorpay/create-order', authenticate, checkoutRateLimit, requireCheckoutEligibility, validate(razorpayCreateSchema), async (req: Request, res: Response, next: NextFunction) => {
   if (!env.RAZORPAY_KEY_ID || !env.RAZORPAY_KEY_SECRET) {
     sendError(res, 'RAZORPAY_NOT_CONFIGURED', 'Razorpay is not configured on this server.', 503)
     return
@@ -78,7 +80,7 @@ const tabbyPrescoreSchema = z.object({
   courseId: z.string().min(1),
 })
 
-router.post('/tabby/prescore', authenticate, requireCheckoutEligibility, validate(tabbyPrescoreSchema), async (req: Request, res: Response, next: NextFunction) => {
+router.post('/tabby/prescore', authenticate, checkoutRateLimit, requireCheckoutEligibility, validate(tabbyPrescoreSchema), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { courseId } = req.body as { courseId: string }
     const result = await orderSvc.checkTabbyEligibility(req.user!.id, courseId)
@@ -93,7 +95,7 @@ const tabbyCreateSchema = z.object({
   couponCode: z.string().trim().optional(),
 })
 
-router.post('/tabby/create-order', authenticate, requireCheckoutEligibility, validate(tabbyCreateSchema), async (req: Request, res: Response, next: NextFunction) => {
+router.post('/tabby/create-order', authenticate, checkoutRateLimit, requireCheckoutEligibility, validate(tabbyCreateSchema), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { courseId, slug, couponCode } = req.body as { courseId: string; slug: string; couponCode?: string }
     const result = await orderSvc.createTabbyOrder(req.user!.id, courseId, slug, couponCode)
@@ -102,9 +104,13 @@ router.post('/tabby/create-order', authenticate, requireCheckoutEligibility, val
 })
 
 /* ── Tabby — verify return URL + fulfill (webhook fallback) ─ */
+/* payment_id is forwarded by the student's BROWSER from Tabby's redirect, so it
+   is attacker-controlled. It ends up in the path of a request we authenticate
+   with the secret key; anything that is not a Tabby UUID is refused here and
+   again in the service. */
 const tabbyVerifyReturnSchema = z.object({
   orderId:   z.string().min(1),
-  paymentId: z.string().optional(),  // Tabby appends payment_id to the redirect URL
+  paymentId: z.string().regex(TABBY_ID_RE, 'paymentId must be a Tabby payment id').optional(),
 })
 
 router.post('/tabby/verify-return', authenticate, validate(tabbyVerifyReturnSchema), async (req: Request, res: Response, next: NextFunction) => {
@@ -122,7 +128,7 @@ const abzerCreateSchema = z.object({
   couponCode: z.string().trim().optional(),
 })
 
-router.post('/abzer/create-order', authenticate, requireCheckoutEligibility, validate(abzerCreateSchema), async (req: Request, res: Response, next: NextFunction) => {
+router.post('/abzer/create-order', authenticate, checkoutRateLimit, requireCheckoutEligibility, validate(abzerCreateSchema), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { courseId, slug, couponCode } = req.body as { courseId: string; slug: string; couponCode?: string }
     const result = await orderSvc.createAbzerOrder(req.user!.id, courseId, slug, couponCode)
@@ -150,7 +156,7 @@ router.post('/abzer/verify-return', authenticate, validate(abzerVerifyReturnSche
 /* ── Tamara — pre-checkout eligibility check ─────────── */
 const tamaraPrescoreSchema = z.object({ courseId: z.string().min(1) })
 
-router.post('/tamara/prescore', authenticate, requireCheckoutEligibility, validate(tamaraPrescoreSchema), async (req: Request, res: Response, next: NextFunction) => {
+router.post('/tamara/prescore', authenticate, checkoutRateLimit, requireCheckoutEligibility, validate(tamaraPrescoreSchema), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { courseId } = req.body as { courseId: string }
     const result = await orderSvc.checkTamaraEligibility(req.user!.id, courseId)
@@ -165,7 +171,7 @@ const tamaraCreateSchema = z.object({
   couponCode: z.string().trim().optional(),
 })
 
-router.post('/tamara/create-order', authenticate, requireCheckoutEligibility, validate(tamaraCreateSchema), async (req: Request, res: Response, next: NextFunction) => {
+router.post('/tamara/create-order', authenticate, checkoutRateLimit, requireCheckoutEligibility, validate(tamaraCreateSchema), async (req: Request, res: Response, next: NextFunction) => {
   if (!env.TAMARA_API_KEY) {
     sendError(res, 'TAMARA_NOT_CONFIGURED', 'Tamara is not configured on this server.', 503)
     return

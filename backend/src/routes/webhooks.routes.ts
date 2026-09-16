@@ -5,6 +5,7 @@ import { StripeService } from '@/services/stripe.service.ts'
 import { RazorpayService } from '@/services/razorpay.service.ts'
 import { AbzerService } from '@/services/abzer.service.ts'
 import { TamaraService } from '@/services/tamara.service.ts'
+import { isTabbyId } from '@/services/tabby.service.ts'
 import { env } from '@/config/env.ts'
 import { logger } from '@/utils/logger.ts'
 import type { Request, Response } from 'express'
@@ -227,7 +228,13 @@ router.post('/razorpay', async (req: Request, res: Response) => {
    registered with the webhook (if TABBY_WEBHOOK_SECRET set).
    The fulfillment itself calls getPayment() server-to-server
    to verify status before capturing — defence in depth.
-   Always responds 200 so Tabby doesn't retry on errors.
+
+   Responds 200 for anything Tabby should consider delivered, and
+   deliberately NON-200 for the one case Tabby documents as needing a
+   retry: the webhook overtaking our own order write. Tabby then
+   re-delivers up to 4 more times with 1–4 minute backoff, by which
+   point the order row exists. Answering 200 there would tell Tabby
+   the payment was handled and silently lose the purchase.
 ───────────────────────────────────────────────────── */
 router.post('/tabby', async (req: Request, res: Response) => {
   if (!requireWebhookSecret(res, env.TABBY_WEBHOOK_SECRET, 'Tabby', 'TABBY_WEBHOOK_SECRET')) return
@@ -259,14 +266,40 @@ router.post('/tabby', async (req: Request, res: Response) => {
     /* order.reference_id is our LMS order ID (set in checkout request) */
     const ourOrderId = asString(payload?.order?.reference_id)
 
+    /* The id goes into the path of an authenticated call to Tabby. A payload
+       that carries anything other than a Tabby UUID there is not one Tabby
+       sent, whatever the header says — acknowledge and drop it. */
+    if (paymentId && !isTabbyId(paymentId)) {
+      logger.warn({ paymentId }, 'Tabby webhook: payment id is not a Tabby id — ignoring')
+      res.status(200).json({ received: true })
+      return
+    }
+
     if ((status === 'AUTHORIZED' || status === 'CLOSED') && paymentId) {
-      await orderSvc.fulfillTabbyFromWebhook(paymentId, ourOrderId)
-      logger.info({ paymentId, ourOrderId }, 'Tabby: order fulfilled via webhook')
+      const outcome = await orderSvc.fulfillTabbyFromWebhook(paymentId, ourOrderId)
+      if (outcome === 'retry') {
+        logger.warn({ paymentId, ourOrderId }, 'Tabby webhook: asking Tabby to re-deliver')
+        res.status(503).json({ received: false, retry: true })
+        return
+      }
+      logger.info({ paymentId, ourOrderId, outcome }, 'Tabby webhook handled')
+    } else if ((status === 'REJECTED' || status === 'EXPIRED') && paymentId) {
+      /* Terminal failure — this session will never settle. Cancels the pending
+         order and hands back the coupon usage slot claimed at checkout, the
+         same as the Tamara handler does for ORDER_EXPIRED / ORDER_DECLINED.
+         Without it an abandoned BNPL session burned a limited-use promo code
+         permanently. */
+      await orderSvc.cancelTabbyFromWebhook(paymentId, ourOrderId)
+      logger.info({ paymentId, ourOrderId, status }, 'Tabby: order cancelled via webhook')
     } else {
       logger.debug({ status, paymentId }, 'Tabby webhook: ignored event')
     }
   } catch (err) {
-    logger.error({ err, payload }, 'Tabby webhook handler error')
+    /* An unexpected fault is also worth a redelivery — the payment is real and
+       we have not recorded it. */
+    logger.error({ err, payload }, 'Tabby webhook handler error — asking Tabby to re-deliver')
+    res.status(500).json({ received: false, retry: true })
+    return
   }
 
   res.status(200).json({ received: true })

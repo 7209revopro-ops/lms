@@ -1,6 +1,6 @@
 'use client'
 
-import { Suspense, useEffect, useRef } from 'react'
+import { Suspense, useEffect, useRef, useState } from 'react'
 import { useSearchParams, useRouter } from 'next/navigation'
 import { motion } from 'framer-motion'
 import Link from 'next/link'
@@ -11,6 +11,7 @@ import {
 import Spinner from '@/components/ui/Spinner'
 import { useVerifyAbzerReturn } from '@/lib/api/user'
 import { useVerifyTamaraReturn, useVerifyTabbyReturn } from '@/lib/api/checkout'
+import { useCartStore } from '@/store/cart.store'
 
 /* ── helpers ─────────────────────────────────────────── */
 function fmt(amount: string | null, currency: string | null) {
@@ -55,6 +56,10 @@ function ReturnContent() {
   const tamaraVerify = useVerifyTamaraReturn()
   const tabbyVerify  = useVerifyTabbyReturn()
   const calledRef    = useRef(false)
+  const clearCart    = useCartStore(st => st.clearCart)
+  /* Tabby redirected to the success URL but the payment has not settled —
+     shown instead of a thank-you the student has not earned. */
+  const [unsettled, setUnsettled] = useState(false)
 
   const verifyReturn = isAbzer ? abzerVerify : isTamara ? tamaraVerify : tabbyVerify
   const isVerifyPending = verifyReturn.isPending
@@ -68,7 +73,17 @@ function ReturnContent() {
     if (isTabby && !orderId) return
     calledRef.current = true
 
-    const handleResult = (data: { needsRegistration: boolean } | undefined) => {
+    const handleResult = (data: { needsRegistration: boolean; paid?: boolean } | undefined) => {
+      /* Only a CONFIRMED payment empties the basket. A 200 from verify-return
+         means the request was understood, not that the order settled — Tabby
+         can refuse an unauthorised payment, and the gateway can be unreachable.
+         `paid === false` means the student still owes for this course, so the
+         cart has to survive. Gateways without the flag keep the old behaviour.
+
+         Tabby's QA checks both halves: "Cart preserved after
+         cancellation/failure; cleared after successful payment". */
+      if (data?.paid !== false) clearCart()
+      if (data?.paid === false) setUnsettled(true)
       if (data?.needsRegistration) {
         router.replace('/complete-registration?from=payment')
       }
@@ -105,7 +120,82 @@ function ReturnContent() {
       )
     }
 
-    /* If verify-return failed, payment was received but enrollment may be pending */
+    /* Tabby sent us to the success URL, but the backend could not confirm the
+       order settled. Saying "thank you, you're enrolled" here would be a lie,
+       and the cart has deliberately been left intact so the student can retry. */
+    if (unsettled) {
+      return (
+        <div className="flex flex-col items-center text-center gap-6 max-w-md mx-auto">
+          <div className="w-24 h-24 rounded-full flex items-center justify-center"
+            style={{ background: 'var(--color-primary-light)', border: '2px solid #FCD34D' }}>
+            <AlertCircle size={44} style={{ color: '#D97706' }} strokeWidth={1.8} />
+          </div>
+          <div>
+            <h1 className="text-2xl font-bold mb-2" style={{ color: 'var(--color-text-primary)', fontFamily: 'Bricolage Grotesque, sans-serif' }}>
+              Payment Not Confirmed
+            </h1>
+            <p className="text-sm leading-relaxed" style={{ color: 'var(--color-text-muted)' }}>
+              We could not confirm this payment with the provider, so you have not been charged for
+              this course and it is still in your cart. If your provider tells you the payment did
+              go through, contact support and we will sort it out — do not pay twice.
+            </p>
+          </div>
+          <div className="flex flex-col gap-3 w-full">
+            <Link href="/cart"
+              className="flex items-center justify-center gap-2 rounded-2xl py-3 text-sm font-semibold text-white"
+              style={{ background: 'var(--color-primary)' }}>
+              <RotateCcw size={16} />Back to cart
+            </Link>
+            <Link href="/support"
+              className="flex items-center justify-center gap-2 rounded-2xl py-3 text-sm font-semibold"
+              style={{ border: '1.5px solid var(--color-border)', color: 'var(--color-text-primary)' }}>
+              Contact support
+            </Link>
+          </div>
+        </div>
+      )
+    }
+
+    /* A 4xx means the request itself was wrong — the order is not yours, or
+       does not exist. Telling that student "your payment was received" is both
+       false and alarming; it invites a support ticket about money that was
+       never taken from them. Only a server-side or network failure leaves the
+       genuine "paid, enrolment catching up" ambiguity worth reassuring about. */
+    const verifyStatus = (verifyReturn.error as { response?: { status?: number } } | null)?.response?.status
+    if (verifyReturn.isError && typeof verifyStatus === 'number' && verifyStatus >= 400 && verifyStatus < 500) {
+      return (
+        <div className="flex flex-col items-center text-center gap-6 max-w-md mx-auto">
+          <div className="w-24 h-24 rounded-full flex items-center justify-center"
+            style={{ background: 'var(--color-primary-light)', border: '2px solid #FCD34D' }}>
+            <AlertCircle size={44} style={{ color: '#D97706' }} strokeWidth={1.8} />
+          </div>
+          <div>
+            <h1 className="text-2xl font-bold mb-2" style={{ color: 'var(--color-text-primary)', fontFamily: 'Bricolage Grotesque, sans-serif' }}>
+              We Could Not Check This Order
+            </h1>
+            <p className="text-sm leading-relaxed" style={{ color: 'var(--color-text-muted)' }}>
+              This order could not be found on your account, so we cannot confirm a payment for it.
+              If you believe you were charged, contact support with the time of the attempt and we
+              will trace it.
+            </p>
+          </div>
+          <div className="flex flex-col gap-3 w-full">
+            <Link href="/cart"
+              className="flex items-center justify-center gap-2 rounded-2xl py-3 text-sm font-semibold text-white"
+              style={{ background: 'var(--color-primary)' }}>
+              <RotateCcw size={16} />Back to cart
+            </Link>
+            <Link href="/support"
+              className="flex items-center justify-center gap-2 rounded-2xl py-3 text-sm font-semibold"
+              style={{ border: '1.5px solid var(--color-border)', color: 'var(--color-text-primary)' }}>
+              Contact support
+            </Link>
+          </div>
+        </div>
+      )
+    }
+
+    /* Server-side or network failure: the payment may well have gone through. */
     if (verifyReturn.isError) {
       return (
         <div className="flex flex-col items-center text-center gap-6 max-w-md mx-auto">

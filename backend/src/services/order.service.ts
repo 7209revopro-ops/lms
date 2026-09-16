@@ -3,7 +3,10 @@ import { OrderRepository } from '@/repositories/order.repository.ts'
 import { CouponService } from '@/services/coupon.service.ts'
 import { StripeService } from '@/services/stripe.service.ts'
 import { RazorpayService } from '@/services/razorpay.service.ts'
-import { TabbyService } from '@/services/tabby.service.ts'
+import {
+  TabbyService, TabbyRejectedError, tabbySumFils,
+  type TabbyEligibility, type TabbyOrderHistoryEntry, type TabbyShippingAddress,
+} from '@/services/tabby.service.ts'
 import { AbzerService } from '@/services/abzer.service.ts'
 import { TamaraService } from '@/services/tamara.service.ts'
 import { EnrollmentService } from '@/services/enrollment.service.ts'
@@ -11,8 +14,17 @@ import { NotificationService } from '@/services/notification.service.ts'
 import { sendEnrollmentConfirmation } from '@/services/email.service.ts'
 import { CourseModel, UserModel } from '@/models/schema.ts'
 import { env } from '@/config/env.ts'
-import type { OrderGateway } from '@/models/schema.ts'
+import type { OrderGateway, IOrder } from '@/models/schema.ts'
 import { logger } from '@/utils/logger.ts'
+
+/* What a Tabby webhook delivery resulted in. `retry` is the one the HTTP layer
+   must act on: Tabby re-delivers up to 4 more times with backoff on a non-200,
+   which is how a webhook that overtook our own order write still lands. */
+export type TabbyFulfillOutcome =
+  | 'fulfilled'
+  | 'already-fulfilled'
+  | 'ignored'
+  | 'retry'
 
 export type GatewayConfig =
   | { gateways: ('tabby' | 'abzer' | 'tamara')[]; currency: 'AED' }
@@ -48,6 +60,33 @@ export function inrPriceFor(course: { price: number; priceINR?: number }): numbe
 export function aedPriceFor(course: { price: number; priceAED?: number }): number {
   return course.priceAED ?? Math.round(course.price * env.UAE_EXCHANGE_RATE * 100) / 100
 }
+
+/* ── A past order's value as Tabby will read it ────────────────────────────
+   Every order row is stored in whatever currency its own gateway charged —
+   USD for Stripe, INR for Razorpay, AED for the UAE gateways — but Tabby's
+   order_history entries carry NO currency field: Tabby reads each `amount` in
+   the checkout's currency, which is always AED here. Emitting the raw figure
+   therefore reports a ₹16,417 Razorpay order to a regulated lender as
+   AED 16,417 (~22x its real value) and a $199 Stripe order as AED 199 (~a
+   third). Convert at the same rates the checkout itself prices with, and
+   return null for a currency we have no rate for rather than assert a number
+   we cannot stand behind. All three currencies have exponent 2, so the /100 is
+   only the minor→major unit step. */
+export function tabbyHistoryAmountAED(amountMinor: number, currency: string): string | null {
+  const major = amountMinor / 100
+  switch (String(currency).trim().toUpperCase()) {
+    case 'AED': return major.toFixed(2)
+    case 'USD': return (major * env.UAE_EXCHANGE_RATE).toFixed(2)
+    case 'INR': return (major * env.UAE_EXCHANGE_RATE / env.INR_EXCHANGE_RATE).toFixed(2)
+    default:    return null
+  }
+}
+
+/* Tabby's payment_method enum is 'card' | 'cod' and the field is optional, so
+   a BNPL order is omitted rather than described as something it was not. */
+const TABBY_HISTORY_CARD_GATEWAYS: ReadonlySet<OrderGateway> = new Set<OrderGateway>([
+  'stripe', 'razorpay', 'abzer',
+])
 
 export class OrderService {
   private readonly orderRepo     = new OrderRepository()
@@ -169,6 +208,7 @@ export class OrderService {
       const order = await this.orderRepo.create({
         userId,
         courseId,
+        ...(await this._orgIdFor(userId)),
         gateway:                  'stripe',
         stripeCheckoutSessionId:  'pending',
         amount:   finalCents,
@@ -254,6 +294,7 @@ export class OrderService {
       const order = await this.orderRepo.create({
         userId,
         courseId,
+        ...(await this._orgIdFor(userId)),
         gateway:  'razorpay',
         amount:   finalPaise,
         currency: env.RAZORPAY_CURRENCY,
@@ -393,24 +434,126 @@ export class OrderService {
   }
 
   /* ─── Tabby background pre-scoring ──────────────────── */
+  /* Tabby's QA checklist requires this to run before the button is offered,
+     and requires the decline copy to come from Tabby rather than from us, so
+     the reason is resolved to a message here and passed straight through. */
+  /* ─── Is this student offered Tabby at all? ────────────────────────────────
+     getGatewayConfig() is what the cart reads to decide which buttons to draw.
+     It used to be the ONLY place the UAE-only rule lived, so a student outside
+     the UAE who called /checkout/tabby/* directly got a session anyway — the
+     gating was decorative. Tabby is licensed per country and their QA checks
+     that the method is offered only where the merchant is registered, so the
+     API now enforces the same answer the UI shows. */
+  private async assertTabbyOffered(userId: string): Promise<void> {
+    const cfg = await this.getGatewayConfig(userId)
+    if (!(cfg.gateways as string[]).includes('tabby')) {
+      throw new OrderError('GATEWAY_NOT_AVAILABLE', 'Tabby is not available for your account.', 403)
+    }
+  }
+
+  /* Pre-scoring is a create-session call against Tabby's rate budget (200 per
+     10 s on live keys) and it costs them a scoring decision each time. The
+     client caches for five minutes, but the client is not in charge — an
+     authenticated script can call this in a loop. Answers are held here per
+     student + course for a short window so a burst becomes one Tabby call. */
+  private static readonly prescoreCache = new Map<string, { until: number; value: TabbyEligibility & { amount: number; currency: string } }>()
+  private static readonly PRESCORE_TTL_MS = 60_000
+
   async checkTabbyEligibility(
     userId:   string,
     courseId: string,
-  ): Promise<{ available: boolean; rejectionReason: string | null }> {
+  ): Promise<TabbyEligibility & { amount: number; currency: string }> {
+    await this.assertTabbyOffered(userId)
+
+    const cacheKey = `${userId}:${courseId}`
+    const hit = OrderService.prescoreCache.get(cacheKey)
+    if (hit && hit.until > Date.now()) return hit.value
+
+    const value = await this._checkTabbyEligibilityUncached(userId, courseId)
+    OrderService.prescoreCache.set(cacheKey, { until: Date.now() + OrderService.PRESCORE_TTL_MS, value })
+    /* Bounded: evict anything expired once the map grows past a sane size. */
+    if (OrderService.prescoreCache.size > 5_000) {
+      const now = Date.now()
+      for (const [k, v] of OrderService.prescoreCache) if (v.until <= now) OrderService.prescoreCache.delete(k)
+    }
+    return value
+  }
+
+  private async _checkTabbyEligibilityUncached(
+    userId:   string,
+    courseId: string,
+  ): Promise<TabbyEligibility & { amount: number; currency: string }> {
     const course = await CourseModel.findById(courseId).select('priceAED price status isFree').exec()
     if (!course || course.status !== 'published' || course.isFree) {
-      return { available: false, rejectionReason: null }
+      return { available: false, rejectionReason: null, message: null, amount: 0, currency: env.TABBY_CURRENCY }
     }
+    /* The AED figure the student will actually be charged. Returned so the
+       on-site snippet quotes the same number Tabby's checkout will — the cart's
+       own `coursePriceIn` falls back to the USD price when a course has no
+       priceAED override, and QA checks "Checkout total matches amount displayed
+       on Tabby Checkout". */
     const priceAED = aedPriceFor(course as any)
     const user     = await UserModel.findById(userId).select('email phone').exec()
-    return this.tabbySvc.checkEligibility(priceAED, user?.email ?? '', (user as any)?.phone)
+    const score    = await this.tabbySvc.checkEligibility({
+      amountAED:  priceAED,
+      buyerEmail: user?.email ?? '',
+      buyerPhone: (user as any)?.phone,
+    })
+    return { ...score, amount: priceAED, currency: env.TABBY_CURRENCY }
+  }
+
+  /* A Tabby decline is a business outcome, not a server fault — QA is explicit
+     that rejected sessions must surface Tabby's own copy rather than a generic
+     error or a redirect. Translated to a distinct code so the client can render
+     the message inline next to the other payment options. */
+  private async _asTabbyOutcome<T>(work: () => Promise<T>): Promise<T> {
+    try {
+      return await work()
+    } catch (err) {
+      if (err instanceof TabbyRejectedError) {
+        throw new OrderError('TABBY_REJECTED', err.message, 422)
+      }
+      throw err
+    }
+  }
+
+  /* ─── Buyer / order history for Tabby scoring ───────────────────────────
+     Tabby scores on who the customer is and what they have bought before, and
+     QA verifies on a second order that both carry real values with ISO-8601
+     dates. This builds order_history from the student's own settled orders —
+     most recent first, capped because the payload is sent on every checkout. */
+  private async _tabbyOrderHistory(userId: string): Promise<TabbyOrderHistoryEntry[]> {
+    const past = await this.orderRepo.listForUser(userId)
+    return past
+      .filter(o => o.status === 'paid' || o.status === 'refunded')
+      .sort((a, b) => {
+        const at = (a as any).paidAt ?? (a as any).createdAt ?? 0
+        const bt = (b as any).paidAt ?? (b as any).createdAt ?? 0
+        return new Date(bt).getTime() - new Date(at).getTime()
+      })
+      /* Converted BEFORE the cap so an unconvertible row does not consume one
+         of the ten slots. */
+      .flatMap<TabbyOrderHistoryEntry>(o => {
+        const amount = tabbyHistoryAmountAED(o.amount, o.currency)
+        if (amount === null) return []
+        return [{
+          purchased_at: new Date((o as any).paidAt ?? (o as any).createdAt ?? Date.now()).toISOString(),
+          amount,
+          status:       o.status === 'refunded' ? 'refunded' : 'complete',
+          ...(TABBY_HISTORY_CARD_GATEWAYS.has(o.gateway) && { payment_method: 'card' as const }),
+        }]
+      })
+      .slice(0, 10)
   }
 
   /* ─── Create Tabby checkout (UAE) ───────────────────── */
+  /* `slug` is accepted for API compatibility with the client and the other
+     gateways, but deliberately unused — the course's own slug is authoritative.
+     See the courseUrl comment below. */
   async createTabbyOrder(
     userId:      string,
     courseId:    string,
-    slug:        string,
+    _slug:       string,
     couponCode?: string,
   ): Promise<{ checkoutUrl: string; checkoutId: string }> {
     if (!env.TABBY_SECRET_KEY || !env.TABBY_MERCHANT_CODE) {
@@ -419,6 +562,7 @@ export class OrderService {
     if (!Types.ObjectId.isValid(courseId)) {
       throw new OrderError('INVALID_COURSE_ID', 'Invalid course id', 400)
     }
+    await this.assertTabbyOffered(userId)
 
     const course = await CourseModel.findById(courseId).exec()
     if (!course || course.status !== 'published') {
@@ -457,6 +601,7 @@ export class OrderService {
       const order = await this.orderRepo.create({
         userId,
         courseId,
+        ...(await this._orgIdFor(userId)),
         gateway:  'tabby',
         amount:   finalFils,
         currency: env.TABBY_CURRENCY,
@@ -464,23 +609,47 @@ export class OrderService {
         ...(discountFils && { discountAmount: discountFils }),
       })
 
-      const user = await UserModel.findById(userId).select('name email phone').exec()
+      const user = await UserModel.findById(userId)
+        .select('name email phone createdAt emailVerified enrollmentApplication').exec()
       const successUrl = `${env.CLIENT_URL}/payment-return?gateway=tabby&orderId=${order.id}`
       const cancelUrl  = `${env.CLIENT_URL}/payment-return?gateway=tabby&status=cancelled`
       const failureUrl = `${env.CLIENT_URL}/payment-return?gateway=tabby&status=failed&orderId=${order.id}`
 
-      const result = await this.tabbySvc.createCheckout({
+      const app = (user as any)?.enrollmentApplication ?? {}
+      /* Sent only when the student actually has an address on file — Tabby's
+         QA asks for optional fields to be omitted rather than sent empty. */
+      const shippingAddress: TabbyShippingAddress | undefined =
+        app.city && (app.villa || app.addressCountry)
+          ? { city: String(app.city), address: String(app.villa || app.addressCountry) }
+          : undefined
+
+      const orderHistory = await this._tabbyOrderHistory(userId)
+
+      const result = await this._asTabbyOutcome(() => this.tabbySvc.createCheckout({
         amountAED:   finalAED,
         orderId:     order.id,
         courseTitle: course.title,
         courseId:    course.id,
+        /* The course's OWN slug, not the one the client sent. `slug` is a
+           request-body field validated only as a non-empty string, and it went
+           straight into the product_url Tabby shows in its app and emails — so
+           a student could point a link inside a trusted third party's UI
+           wherever they liked. We already hold the course; use it. */
+        courseUrl:   `${env.CLIENT_URL}/courses/${encodeURIComponent(course.slug)}`,
         buyerEmail:  user?.email ?? '',
         buyerName:   user?.name  ?? '',
-        buyerPhone:  (user as any)?.phone ?? '',
+        buyerPhone:  (user as any)?.phone ?? app.phone ?? '',
+        ...(app.dateOfBirth && { buyerDob: String(app.dateOfBirth).slice(0, 10) }),
+        /* The student's real signup date, not `now` — see tabby.service.ts. */
+        registeredSince: (user as any)?.createdAt ?? new Date(),
+        isEmailVerified: Boolean((user as any)?.emailVerified),
+        isPhoneVerified: Boolean((user as any)?.phone || app.phone),
+        ...(shippingAddress && { shippingAddress }),
+        orderHistory,
         successUrl,
         cancelUrl,
         failureUrl,
-      })
+      }))
 
       await patchTabbyCheckoutId(order.id, result.checkoutId, result.paymentId)
 
@@ -491,26 +660,30 @@ export class OrderService {
   /* ─── Tabby webhook fulfillment (idempotent) ─────────── */
   /* tabbyPaymentId  — from webhook payload.id
      ourOrderId      — from webhook payload.order.reference_id (our LMS order ID) */
-  async fulfillTabbyFromWebhook(tabbyPaymentId: string, ourOrderId?: string): Promise<void> {
+  async fulfillTabbyFromWebhook(tabbyPaymentId: string, ourOrderId?: string): Promise<TabbyFulfillOutcome> {
     /* 1. Server-to-server verification: confirm AUTHORIZED status with Tabby */
     /* FAIL CLOSED (P-03). This used to catch a failed lookup, log "proceeding
        without status check" and fall through — and because the guard below was
        written `if (verifiedStatus && …)`, an undefined status skipped it
        entirely. During any Tabby outage or credential rotation, every pending
        order could then be self-fulfilled through verify-return. A payment
-       check that cannot run has not passed. */
-    let verifiedStatus: string
+       check that cannot run has not passed.
+
+       `retry` rather than `ignored`: a lookup we could not perform is a
+       transient failure, and Tabby re-delivering is exactly what we want. */
+    let payment: Awaited<ReturnType<TabbyService['getPayment']>>
     try {
-      const payment = await this.tabbySvc.getPayment(tabbyPaymentId)
-      verifiedStatus = payment.status.toUpperCase()
+      payment = await this.tabbySvc.getPayment(tabbyPaymentId)
     } catch (err) {
       logger.error({ err, tabbyPaymentId }, 'Tabby: getPayment failed — refusing to fulfil unverified payment')
-      return
+      return 'retry'
     }
 
-    if (verifiedStatus !== 'AUTHORIZED' && verifiedStatus !== 'CLOSED') {
-      logger.warn({ tabbyPaymentId, verifiedStatus }, 'Tabby: payment not capturable')
-      return
+    /* getPayment reports UPPERCASE, webhooks lowercase; normalised in the
+       service so only one form reaches here. */
+    if (payment.status !== 'AUTHORIZED' && payment.status !== 'CLOSED') {
+      logger.warn({ tabbyPaymentId, status: payment.status }, 'Tabby: payment not capturable')
+      return 'ignored'
     }
 
     /* 2. Find order — prefer our orderId (reliable), fallback to tabbyPaymentId field */
@@ -518,46 +691,213 @@ export class OrderService {
       ? await this.orderRepo.findById(ourOrderId)
       : await this.orderRepo.findByTabbyPaymentId(tabbyPaymentId)
 
+    /* Tabby documents this race explicitly: the webhook can beat our own order
+       write. Answering 200 here would tell Tabby the payment is handled and it
+       would never re-deliver, silently losing the purchase. Asking for a retry
+       is the documented fix. */
     if (!order) {
-      logger.warn({ tabbyPaymentId, ourOrderId }, 'Tabby webhook: no matching order')
-      return
+      logger.warn({ tabbyPaymentId, ourOrderId }, 'Tabby webhook: no matching order yet — asking Tabby to retry')
+      return 'retry'
     }
     if (order.status === 'paid') {
       logger.info({ orderId: order.id }, 'Tabby webhook: already fulfilled')
-      return
+      return 'already-fulfilled'
     }
 
-    /* 3. Capture the payment (Tabby requires amount + idempotency key) */
-    const amountAED = (order.amount / 100).toFixed(2)
-    await this.tabbySvc.capturePayment(tabbyPaymentId, amountAED, order.id)
+    /* ── Bind this payment to THIS order ──────────────────────────────────────
+       getPayment() proves only that SOME Tabby payment is authorised. On its
+       own it says nothing about which order that payment paid for, and
+       `ourOrderId` arrives from outside — from webhook payload JSON, and from
+       the request body of /checkout/tabby/verify-return, which any student can
+       call with any payment id they have ever seen.
+
+       Without the checks below, one genuine cheap purchase becomes unlimited
+       free enrolments: replay its (now CLOSED) payment id against a fresh
+       pending order for any course, and not even Tabby is consulted a second
+       time, because captures[] is already populated so the capture step is
+       skipped. It also survives a refund — a refunded payment stays CLOSED.
+
+       Three independent bindings; any mismatch refuses to fulfil:
+         · the order must be a Tabby order at all;
+         · the payment must be the one created for this order — either the id
+           we recorded at checkout, or Tabby's own order.reference_id naming
+           this order;
+         · the money must match what we are about to hand a course over for. */
+    if (order.gateway !== 'tabby') {
+      logger.error({ orderId: order.id, gateway: order.gateway, tabbyPaymentId },
+        'Tabby: refusing to fulfil a non-Tabby order')
+      return 'ignored'
+    }
+
+    const recordedPaymentId = (order as any).tabbyPaymentId as string | undefined
+    const belongsToOrder =
+      (recordedPaymentId && recordedPaymentId === tabbyPaymentId) ||
+      (payment.orderReferenceId && payment.orderReferenceId === order.id)
+    if (!belongsToOrder) {
+      logger.error(
+        { orderId: order.id, tabbyPaymentId, recordedPaymentId, reportedOrder: payment.orderReferenceId },
+        'Tabby: payment does not belong to this order — refusing to fulfil (replay attempt?)',
+      )
+      return 'ignored'
+    }
+
+    /* Tabby reports decimal major units; our orders are stored in fils. */
+    const paidFils = Math.round(Number(payment.amount) * 100)
+    if (!Number.isFinite(paidFils) || paidFils !== order.amount) {
+      logger.error({ orderId: order.id, tabbyPaymentId, paidFils, orderAmount: order.amount },
+        'Tabby: authorised amount does not match the order — refusing to fulfil')
+      return 'ignored'
+    }
+    if (payment.currency && payment.currency.toUpperCase() !== String(order.currency).toUpperCase()) {
+      logger.error({ orderId: order.id, paymentCurrency: payment.currency, orderCurrency: order.currency },
+        'Tabby: currency mismatch — refusing to fulfil')
+      return 'ignored'
+    }
+
+    /* 3. Capture — but only if nothing has captured this payment already.
+       Tabby sends a second webhook to CONFIRM our capture, and that
+       confirmation is not a request for another one: "don't trigger a new one
+       if the captures array is already populated". The reference_id would make
+       a duplicate harmless anyway, but not sending it is cleaner and is what
+       QA looks for. */
+    const amountAED     = (order.amount / 100).toFixed(2)
+    const netHeldFils   = tabbySumFils(payment.captures) - tabbySumFils(payment.refunds)
+    const alreadyCaptured = tabbySumFils(payment.captures) > 0
+
+    /* CLOSED is terminal, and it covers three different endings: captured in
+       full, cancelled without capture, and captured-then-refunded. Only the
+       first is a payment. Treating the status alone as proof of payment means a
+       student who opens a checkout and then CANCELS it in the Tabby app gets a
+       closed, never-captured payment — which fell into the capture branch
+       below, failed there (a closed payment cannot be captured), and was
+       fulfilled anyway by the "funds are already committed" allowance.
+
+       That allowance is only true of AUTHORIZED. For CLOSED the question is
+       settled and answerable: do we actually hold the money? */
+    if (payment.status === 'CLOSED' && netHeldFils < order.amount) {
+      logger.error(
+        { tabbyPaymentId, orderId: order.id, netHeldFils, orderAmount: order.amount,
+          captured: tabbySumFils(payment.captures), refunded: tabbySumFils(payment.refunds) },
+        'Tabby: payment is CLOSED but the money is not held (cancelled or refunded) — refusing to fulfil',
+      )
+      return 'ignored'
+    }
+
+    if (alreadyCaptured) {
+      logger.info({ tabbyPaymentId, orderId: order.id }, 'Tabby: payment already captured, skipping capture')
+    } else {
+      const course   = await CourseModel.findById(order.courseId).select('title').lean()
+      const captured = await this.tabbySvc.capturePayment({
+        paymentId:   tabbyPaymentId,
+        amountAED,
+        orderId:     order.id,
+        courseTitle: (course as any)?.title ?? 'Delta Academy course',
+        courseId:    order.courseId.toString(),
+      })
+      /* Deliberately NOT a reason to withhold the course — but only because we
+         are here on an AUTHORIZED payment, where the customer's funds ARE
+         committed and the enrolment is genuinely owed. A failed capture is then
+         money we have not collected yet: a settlement problem to chase from the
+         logs, not something to punish the student for. The CLOSED case never
+         reaches this line; it is refused above. */
+      if (!captured) {
+        logger.error({ tabbyPaymentId, orderId: order.id }, 'Tabby: fulfilling an UNCAPTURED payment — collect manually')
+      }
+    }
 
     /* 4. Fulfill order — conditional flip, the return-URL verify may have raced us */
     const fulfilled = await this.orderRepo.fulfillTabby(order.id, tabbyPaymentId)
     if (!fulfilled) {
       logger.info({ orderId: order.id }, 'Tabby webhook: order fulfilled concurrently, skipping side effects')
-      return
+      return 'already-fulfilled'
     }
 
     await this._createEnrollment(order.userId.toString(), order.courseId.toString())
     await this._autoApproveViaPayment(order.userId.toString(), order.courseId.toString())
     void this._sendPostPaymentNotifications(order.userId.toString(), order.courseId.toString(), order.id)
     logger.info({ tabbyPaymentId, orderId: order.id }, 'Tabby: order fulfilled')
+    return 'fulfilled'
+  }
+
+  /* ─── Tabby webhook cancellation (rejected / expired) ─────────────────────
+     The mirror of cancelTamaraFromWebhook, which Tabby never had. Every
+     create*Order path claims the coupon usage slot BEFORE the gateway call,
+     and releasingOnFailure only hands it back when that call THROWS — so a
+     session the student simply abandons (BNPL drop-off is routine) left the
+     order `pending` and the slot spent for good, with no cron sweeping either.
+     Tabby tells us when a payment is rejected or expires; act on it.
+
+     Bound to the order the way fulfilment is, minus the network call: a cancel
+     may only touch an order that is a Tabby order AND already carries this
+     payment id. Nothing is taken on the payload's word alone. */
+  async cancelTabbyFromWebhook(tabbyPaymentId: string, ourOrderId?: string): Promise<void> {
+    const order = ourOrderId
+      ? await this.orderRepo.findById(ourOrderId)
+      : await this.orderRepo.findByTabbyPaymentId(tabbyPaymentId)
+
+    if (!order) {
+      logger.warn({ tabbyPaymentId, ourOrderId }, 'Tabby cancel-webhook: no matching order')
+      return
+    }
+    if (order.gateway !== 'tabby' || (order as any).tabbyPaymentId !== tabbyPaymentId) {
+      logger.error(
+        { orderId: order.id, gateway: order.gateway, tabbyPaymentId },
+        'Tabby cancel-webhook: payment does not belong to this order — ignoring',
+      )
+      return
+    }
+    /* Only cancel pending orders — don't touch already-paid or refunded ones */
+    if (order.status !== 'pending') {
+      logger.info({ orderId: order.id, status: order.status }, 'Tabby cancel-webhook: order not pending, skipping')
+      return
+    }
+
+    const cancelled = await this.orderRepo.markCancelled(order.id)
+    if (!cancelled) {
+      logger.info({ orderId: order.id }, 'Tabby cancel-webhook: order no longer pending, skipping')
+      return
+    }
+
+    /* Hand the coupon slot claimed at checkout back to the pool. Gated on the
+       conditional flip above, so a re-delivered webhook releases at most once. */
+    if (order.couponId) {
+      const couponId = order.couponId.toString()
+      void this.couponSvc.release(couponId).catch(err =>
+        logger.warn({ err, orderId: order.id, couponId }, 'Failed to release coupon reservation'),
+      )
+    }
+
+    logger.info({ tabbyPaymentId, orderId: order.id }, 'Tabby: order cancelled via webhook')
   }
 
   /* ─── Tabby return-URL verify + fulfill (webhook fallback) ─── */
   /* paymentId: Tabby appends ?payment_id=... to the success redirect URL */
-  async verifyTabbyReturn(userId: string, orderId: string, paymentId?: string): Promise<{ needsRegistration: boolean }> {
+  /* `paid` is the answer to the only question the return page actually has:
+     did this order settle? It used to report nothing but needsRegistration, so
+     the client treated ANY 200 as success — it emptied the basket and showed a
+     thank-you even when fulfilment had been refused (payment not authorised,
+     binding mismatch, Tabby unreachable). A student who abandoned the BNPL
+     agreement lost their cart and was told they had paid.
+
+     Tabby's QA checks the same behaviour from the other side: "Cart preserved
+     after cancellation/failure; cleared after successful payment." */
+  async verifyTabbyReturn(
+    userId: string, orderId: string, paymentId?: string,
+  ): Promise<{ needsRegistration: boolean; paid: boolean }> {
     const order = await this.orderRepo.findById(orderId)
     if (!order) throw new OrderError('ORDER_NOT_FOUND', 'Order not found', 404)
     if (order.userId.toString() !== userId) {
       throw new OrderError('FORBIDDEN', 'Order does not belong to you', 403)
     }
 
-    if (order.status !== 'paid') {
+    let paid = order.status === 'paid'
+
+    if (!paid) {
       /* Prefer payment_id from redirect URL, fall back to what was stored at checkout creation */
       const tabbyPaymentId = paymentId || ((order as any).tabbyPaymentId as string | undefined)
       if (tabbyPaymentId) {
-        await this.fulfillTabbyFromWebhook(tabbyPaymentId, orderId)
+        const outcome = await this.fulfillTabbyFromWebhook(tabbyPaymentId, orderId)
+        paid = outcome === 'fulfilled' || outcome === 'already-fulfilled'
       } else {
         logger.warn({ orderId }, 'Tabby verify-return: no payment_id available — awaiting webhook')
       }
@@ -565,7 +905,7 @@ export class OrderService {
 
     const user = await UserModel.findById(userId).select('signupType').lean()
     const needsRegistration = (user as any)?.signupType === 'express'
-    return { needsRegistration }
+    return { needsRegistration, paid }
   }
 
   /* ─── Create Abzer checkout (UAE) ───────────────────── */
@@ -616,6 +956,7 @@ export class OrderService {
       const order = await this.orderRepo.create({
         userId,
         courseId,
+        ...(await this._orgIdFor(userId)),
         gateway:  'abzer',
         amount:   finalFils,
         currency: env.ABZER_CURRENCY,
@@ -781,6 +1122,7 @@ export class OrderService {
       const order = await this.orderRepo.create({
         userId,
         courseId,
+        ...(await this._orgIdFor(userId)),
         gateway:  'tamara',
         amount:   finalFils,
         currency: env.TAMARA_CURRENCY,
@@ -939,8 +1281,10 @@ export class OrderService {
         throw new OrderError('NO_PAYMENT_ID', 'Cannot refund — no Razorpay payment id on record', 400)
       }
       await this.razorpaySvc.refundPayment(order.razorpayPaymentId)
-    } else if (order.gateway === 'tabby' || order.gateway === 'abzer' || order.gateway === 'tamara') {
-      const label = order.gateway === 'tabby' ? 'Tabby' : order.gateway === 'tamara' ? 'Tamara' : 'Abzer'
+    } else if (order.gateway === 'tabby') {
+      await this._refundTabby(order)
+    } else if (order.gateway === 'abzer' || order.gateway === 'tamara') {
+      const label = order.gateway === 'tamara' ? 'Tamara' : 'Abzer'
       throw new OrderError(
         'MANUAL_REFUND_REQUIRED',
         `${label} refunds must be processed via the gateway dashboard.`,
@@ -954,6 +1298,71 @@ export class OrderService {
     }
 
     await this.orderRepo.markRefunded(orderId)
+  }
+
+  /* ─── Tabby refund ────────────────────────────────────────────────────────
+     Tabby draws a hard line between two operations and QA tests both:
+
+       • money was captured  → REFUND it (only a CLOSED payment can be refunded)
+       • money was never captured → CLOSE the payment, which returns everything
+         the customer has paid. Refunding an uncaptured payment is rejected.
+
+     So the live payment is read first and the branch taken from what Tabby
+     itself reports, never from our own order row. Refund totals are validated
+     against the CAPTURED amount — not the authorized amount — and computed by
+     summing the arrays by value, because Tabby does not guarantee their order. */
+  private async _refundTabby(order: IOrder): Promise<void> {
+    const paymentId = (order as any).tabbyPaymentId as string | undefined
+    if (!paymentId) {
+      throw new OrderError('NO_PAYMENT_ID', 'Cannot refund — no Tabby payment id on record', 400)
+    }
+
+    let payment: Awaited<ReturnType<TabbyService['getPayment']>>
+    try {
+      payment = await this.tabbySvc.getPayment(paymentId)
+    } catch (err) {
+      logger.error({ err, paymentId, orderId: order.id }, 'Tabby refund: getPayment failed')
+      throw new OrderError('GATEWAY_UNAVAILABLE', 'Could not reach Tabby to verify the payment. Try again.', 502)
+    }
+
+    const capturedFils = tabbySumFils(payment.captures)
+    const refundedFils = tabbySumFils(payment.refunds)
+
+    /* Nothing captured: this is a cancellation, not a refund. */
+    if (capturedFils === 0) {
+      const closed = await this.tabbySvc.closePayment(paymentId)
+      if (!closed) {
+        throw new OrderError('REFUND_FAILED', 'Tabby refused to close this payment. Check the Tabby dashboard.', 502)
+      }
+      logger.info({ orderId: order.id, paymentId }, 'Tabby: uncaptured payment closed (full cancellation)')
+      return
+    }
+
+    const refundableFils = capturedFils - refundedFils
+    if (refundableFils <= 0) {
+      throw new OrderError('ALREADY_REFUNDED', 'This Tabby payment has already been fully refunded.', 409)
+    }
+
+    /* Refund what is left, capped at the captured total. */
+    const amountAED = (refundableFils / 100).toFixed(2)
+    const course    = await CourseModel.findById(order.courseId).select('title').lean()
+
+    const ok = await this.tabbySvc.refundPayment({
+      paymentId,
+      amountAED,
+      orderId:     order.id,
+      reason:      'Refunded by Delta Academy admin',
+      /* A reused reference_id replays the first refund rather than issuing a
+         second, so genuine repeat refunds need a distinct one. Derived from how
+         many refunds Tabby already holds — stable across retries of the SAME
+         refund, distinct for the next one. */
+      attempt:     payment.refunds.length + 1,
+      courseTitle: (course as any)?.title,
+      courseId:    order.courseId.toString(),
+    })
+    if (!ok) {
+      throw new OrderError('REFUND_FAILED', 'Tabby refused the refund. Check the Tabby dashboard.', 502)
+    }
   }
 
   /* ─── List orders (student) ─────────────────────────── */
@@ -981,6 +1390,20 @@ export class OrderService {
   }
 
   /* ─── Private helpers ───────────────────────────────── */
+  /* The academy an order belongs to, spread into orderRepo.create().
+
+     Every order was created without this, which quietly disarmed the admin
+     refund route: its tenancy check treats an order with no organizationId as
+     grandfathered and refundable by anyone, so with the field never set, one
+     academy's admin could issue a real gateway refund against another's order.
+     Returns {} when the buyer has no org, which keeps that grandfather path
+     working for genuinely old rows. */
+  private async _orgIdFor(userId: string): Promise<{ organizationId?: string }> {
+    const user = await UserModel.findById(userId).select('organizationId').lean()
+    const orgId = (user as { organizationId?: unknown } | null)?.organizationId
+    return orgId ? { organizationId: String(orgId) } : {}
+  }
+
   /* ── Provision an LMS student from an external (AI-academy website) purchase ──
      Server-to-server, called by the AI-academy integration. Idempotent on the
      external orderId (stored as Order.razorpayOrderId): a webhook retry returns
@@ -1209,8 +1632,21 @@ export class OrderService {
       /* Every caller of _createEnrollment is a settled payment — the gateway
          webhooks, the manual capture paths, and the AI-academy provisioning,
          which writes its own paid Order alongside. */
-      await enrollRepo.create_({ userId, courseId, source: 'purchase' })
-      await courseRepo.incrementEnrollment(courseId, 1)
+      try {
+        await enrollRepo.create_({ userId, courseId, source: 'purchase' })
+        await courseRepo.incrementEnrollment(courseId, 1)
+      } catch (err) {
+        /* check-then-create is not atomic: a webhook and a verify-return racing
+           for the same order both see "not enrolled". The unique index on
+           (userId, courseId) settles it, and the loser must not turn that into
+           a 500 — which the webhook would answer with a retry, hiding a
+           fulfilment that in fact succeeded. Only a duplicate is swallowed. */
+        if ((err as { code?: number })?.code === 11000) {
+          logger.info({ userId, courseId }, 'Enrolment already created concurrently — ignoring duplicate')
+        } else {
+          throw err
+        }
+      }
     }
   }
 
