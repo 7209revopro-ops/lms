@@ -15,6 +15,7 @@ import { useCourses } from '@/lib/api/courses'
 import { useCourseOutline } from '@/lib/api/outline'
 import { useUsers } from '@/lib/api/users'
 import { useCurrentUser } from '@/lib/api/user'
+import { datetimeLocalToISO } from '@/lib/timezone'
 import { EditLiveClassModal } from '@/components/live-classes/EditLiveClassModal'
 import { CreateOfflineClassModal } from '@/components/live-classes/CreateOfflineClassModal'
 import { Button } from '@/components/ui/button'
@@ -216,7 +217,7 @@ function QuickCreateModal({
       await createMutation.mutateAsync({
         courseId,
         title:           title.trim(),
-        scheduledStart:  new Date(start).toISOString(),
+        scheduledStart:  datetimeLocalToISO(start),
         durationMins,
         sessionCapacity: sessionCapacity !== '' ? sessionCapacity : undefined,
         type,

@@ -7,6 +7,7 @@ import {
   Users, Calendar, Clock, BookOpen, Globe, User, FileText,
 } from 'lucide-react'
 import { useCreateLiveClass } from '@/lib/api/liveClasses'
+import { datetimeLocalToISO } from '@/lib/timezone'
 import Spinner from '@/components/ui/Spinner'
 import { useCourses } from '@/lib/api/courses'
 import { useCourseOutline } from '@/lib/api/outline'
@@ -71,7 +72,7 @@ export function CreateOfflineClassModal({ onClose, onSuccess, categoryProgram, p
         courseId,
         title:           title.trim(),
         description:     description.trim() || undefined,
-        scheduledStart:  new Date(start).toISOString(),
+        scheduledStart:  datetimeLocalToISO(start),
         durationMins,
         sessionCapacity: sessionCapacity !== '' ? sessionCapacity : undefined,
         type:            'external',
