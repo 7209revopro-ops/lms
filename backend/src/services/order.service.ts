@@ -1100,6 +1100,104 @@ export class OrderService {
     return { userId, created, alreadyProcessed: false, enrolled }
   }
 
+  /**
+   * Grants a student one course by hand — the manual equivalent of a settled
+   * purchase for any course (not just AI-academy). Creates a passwordless
+   * account if needed, enrols + approves them, records a paid Order, and puts
+   * them under the academy that owns the course. Idempotent per (user, course).
+   * Does NOT email — the caller (script/route) sends the login link, so the
+   * link is built with that process's CLIENT_URL.
+   */
+  async provisionManualPurchase(input: {
+    email: string
+    name?: string
+    phone?: string
+    courseSlug: string
+    amount?: number
+  }): Promise<{
+    userId: string
+    created: boolean
+    courseSlug: string
+    courseTitle: string
+    organizationSlug: string | null
+  }> {
+    const { OrderModel, OrganizationModel } = await import('@/models/schema.ts')
+    const email = input.email.toLowerCase().trim()
+
+    const course = await CourseModel.findOne({ slug: input.courseSlug })
+      .select('_id slug title organizationId program').lean()
+    if (!course?._id) throw new Error(`No course with slug "${input.courseSlug}"`)
+    const courseId = String(course._id)
+
+    /* The student belongs to the academy that runs the course. */
+    const organizationId = (course as { organizationId?: unknown }).organizationId
+    const org = organizationId
+      ? await OrganizationModel.findById(organizationId as string).select('slug currency').lean()
+      : null
+
+    let user = await UserModel.findOne({ email })
+    let created = false
+    if (!user) {
+      user = await UserModel.create({
+        name: input.name?.trim() || email.split('@')[0],
+        email,
+        role: 'student',
+        ...(organizationId ? { organizationId } : {}),
+        ...(input.phone ? { enrollmentApplication: { phone: input.phone.trim() } } : {}),
+      })
+      created = true
+    } else {
+      const set: Record<string, unknown> = {}
+      if (input.name && !user.name) set['name'] = input.name.trim()
+      if (input.phone && !(user as { enrollmentApplication?: { phone?: string } }).enrollmentApplication?.phone) {
+        set['enrollmentApplication.phone'] = input.phone.trim()
+      }
+      if (organizationId && !(user as { organizationId?: unknown }).organizationId) {
+        set['organizationId'] = organizationId
+      }
+      if (Object.keys(set).length) await UserModel.updateOne({ _id: user._id }, { $set: set })
+    }
+    const userId = String(user._id)
+
+    await this._createEnrollment(userId, courseId)
+
+    /* Manual grants approve immediately — the point is to give access now. The
+       payment flow's _autoApproveViaPayment defers express accounts until they
+       finish registration, which isn't what a hand-provision wants. Still merge
+       the course's programme category so their access scope is right. */
+    const existing = user as { categories?: string[]; category?: string }
+    const cats = new Set<string>(existing.categories ?? (existing.category ? [existing.category] : []))
+    const courseCat = (course as { program?: string }).program
+    if (courseCat) cats.add(courseCat)
+    await UserModel.findByIdAndUpdate(userId, {
+      $set: {
+        enrollmentStatus: 'approved',
+        approvedByEmail: 'manual@system',
+        approvedByName: 'Manual Enrollment',
+        approvedByRole: 'system',
+        approvedAt: new Date(),
+        ...(cats.size ? { categories: [...cats], category: [...cats][0] } : {}),
+      },
+      $unset: { rejectionReason: '', enrollmentCancellationReason: '' },
+    })
+
+    await OrderModel.create({
+      userId, courseId,
+      gateway: 'razorpay', status: 'paid',
+      amount: input.amount ?? 0,
+      currency: ((org as { currency?: string })?.currency ?? 'AED').toLowerCase().slice(0, 3),
+    })
+
+    logger.info({ userId, courseSlug: input.courseSlug, created }, '✅ Manual course purchase provisioned')
+    return {
+      userId,
+      created,
+      courseSlug: (course as { slug: string }).slug,
+      courseTitle: (course as { title: string }).title,
+      organizationSlug: (org as { slug?: string })?.slug ?? null,
+    }
+  }
+
   private async _createEnrollment(userId: string, courseId: string): Promise<void> {
     const { EnrollmentRepository } = await import('@/repositories/enrollment.repository.ts')
     const { CourseRepository }     = await import('@/repositories/course.repository.ts')
