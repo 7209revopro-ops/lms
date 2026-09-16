@@ -97,6 +97,24 @@ export class UserRepository extends BaseRepository<IUser> {
     }).exec()
   }
 
+  /* Atomically claim a password-reset-mail slot for this account. Returns true
+     for the single caller that wins the window and false for everyone else, so
+     concurrent forgot-password bursts send at most one mail per windowMs. The
+     conditional findOneAndUpdate is atomic per document, so unlike a read-then-
+     write throttle there is no TOCTOU gap between checking and stamping. */
+  async claimResetMailSlot(id: string, windowMs: number): Promise<boolean> {
+    const cutoff = new Date(Date.now() - windowMs)
+    const won = await UserModel.findOneAndUpdate(
+      {
+        _id: id,
+        $or: [{ lastResetMailAt: { $exists: false } }, { lastResetMailAt: { $lte: cutoff } }],
+      },
+      { $set: { lastResetMailAt: new Date() } },
+      { new: false },
+    ).lean().exec()
+    return !!won
+  }
+
   /* ── Check email exists ─────────────────────────── */
   async emailExists(email: string): Promise<boolean> {
     return this.exists({ email: email.toLowerCase().trim() })

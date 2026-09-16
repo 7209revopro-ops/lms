@@ -52,8 +52,24 @@ const adminLoginTwoFactorSchema = z.object({
   code:           z.string().trim().length(6, 'Code must be 6 digits').regex(/^\d+$/, 'Code must be 6 digits'),
 })
 
+/* Forgot / reset password for the admin portal. forgot-password mails a link
+   into the ADMIN app (staff accounts only, enumeration-safe); reset-password
+   shares the client controller since the token is portal-agnostic. */
+const adminForgotSchema = z.object({
+  email: z.string().trim().email().toLowerCase(),
+})
+const adminResetSchema = z.object({
+  token:    z.string().min(32),
+  password: z.string()
+    .min(8, 'Password must be at least 8 characters')
+    .regex(/[A-Z]/, 'Must contain an uppercase letter')
+    .regex(/[0-9]/, 'Must contain a number'),
+})
+
 router.post('/auth/login',   authRateLimit, validate(adminLoginSchema), authCtrl.adminLogin)
 router.post('/auth/login/2fa', authRateLimit, validate(adminLoginTwoFactorSchema), authCtrl.adminLoginTwoFactor)
+router.post('/auth/forgot-password', authRateLimit, validate(adminForgotSchema), authCtrl.adminForgotPassword)
+router.post('/auth/reset-password',  authRateLimit, validate(adminResetSchema),  authCtrl.resetPassword)
 router.post('/auth/refresh', refreshRateLimit, authCtrl.adminRefresh)
 router.post('/auth/logout',  authRateLimit, authCtrl.adminLogout)
 router.get ('/auth/me',      authenticateAdmin, authCtrl.me)

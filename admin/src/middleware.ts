@@ -11,6 +11,10 @@ import type { NextRequest } from 'next/server'
  * Protected pages → redirect to /login when cookie is absent.
  * /login → redirect to / when cookie is present (already signed in).
  */
+/* Auth screens reachable without a session — a locked-out admin must be able
+   to load these while signed out. */
+const PUBLIC_PATHS = new Set(['/login', '/forgot-password', '/reset-password'])
+
 export function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl
 
@@ -44,7 +48,7 @@ export function middleware(req: NextRequest) {
   /* Unauthenticated users visiting any protected route → login.
      Forward ?sso= so SSO auto-login works when Root ERP opens the
      root URL with ?sso=TOKEN (middleware would otherwise drop the param). */
-  if (pathname !== '/login' && !hasToken) {
+  if (!PUBLIC_PATHS.has(pathname) && !hasToken) {
     const loginUrl = new URL('/login', req.url)
     const ssoParam = req.nextUrl.searchParams.get('sso')
     if (ssoParam) loginUrl.searchParams.set('sso', ssoParam)

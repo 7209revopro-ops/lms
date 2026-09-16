@@ -110,6 +110,10 @@ export interface IUser extends Document {
   /* Account safety */
   failedLoginAttempts: number
   lockedUntil?:  Date
+  /* Timestamp the last admin password-reset mail was issued — backs an atomic
+     per-account throttle so concurrent forgot-password bursts can't flood a
+     staff inbox. */
+  lastResetMailAt?: Date
   /* Two-factor authentication (TOTP) */
   twoFactorEnabled: boolean
   twoFactorSecret?: string   // base32-encoded TOTP secret; select:false
@@ -176,6 +180,7 @@ const UserSchema = new Schema<IUser>(
     websiteUrl:   { type: String },
     failedLoginAttempts: { type: Number, default: 0 },
     lockedUntil:  { type: Date },
+    lastResetMailAt: { type: Date },
     twoFactorEnabled: { type: Boolean, default: false },
     twoFactorSecret:  { type: String, select: false },
     aiUsage:          { day: { type: String }, count: { type: Number, default: 0 } },

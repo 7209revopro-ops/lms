@@ -2,6 +2,7 @@
 
 import { useState, type FormEvent } from 'react'
 import { useRouter } from 'next/navigation'
+import Link from 'next/link'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
@@ -301,9 +302,15 @@ export function AdminLoginForm() {
 
         {/* Password */}
         <motion.div custom={1} variants={fieldVariant} initial="hidden" animate="visible">
-          <label className="mb-1.5 block text-sm font-semibold" style={{ color: 'rgba(255,255,255,0.7)' }}>
-            Password
-          </label>
+          <div className="mb-1.5 flex items-center justify-between">
+            <label className="block text-sm font-semibold" style={{ color: 'rgba(255,255,255,0.7)' }}>
+              Password
+            </label>
+            <Link href="/forgot-password" className="text-xs font-semibold transition-opacity hover:opacity-70"
+              style={{ color: '#0057b8' }}>
+              Forgot password?
+            </Link>
+          </div>
           <div className="relative">
             <Lock size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2"
               style={{ color: errors.password ? '#EF4444' : 'rgba(255,255,255,0.3)' }} />

@@ -1018,7 +1018,7 @@ export class AuthService {
     return code
   }
 
-  async forgotPassword(email: string): Promise<void> {
+  async forgotPassword(email: string, portal: 'client' | 'admin' = 'client'): Promise<void> {
     /* Always succeed visibly (don't leak account existence).
        Only do work when an active account is found. */
     const user = await this.userRepo.findOne({ email: email.toLowerCase().trim() })
@@ -1026,10 +1026,44 @@ export class AuthService {
       logger.debug({ email }, 'forgot-password: no active account, silently skipping')
       return
     }
+    /* The admin-portal flow only serves staff. A student who requests it could
+       never sign in to the admin app, so an admin-scoped link is useless — skip
+       silently to stay enumeration-safe (they can still reset via the client). */
+    if (portal === 'admin') {
+      /* Admin resets are for staff only; a student who lands here could never
+         sign in to the admin app. Skip silently to stay enumeration-safe. */
+      const STAFF_ROLES = ['super_admin', 'admin', 'sub_admin', 'support', 'instructor']
+      if (!STAFF_ROLES.includes(user.role)) {
+        logger.debug({ userId: user.id, role: user.role }, 'admin forgot-password: non-staff account, skipping')
+        return
+      }
+      /* Per-account throttle (admin only): at most one reset mail per
+         RESET_THROTTLE_MS (60s default), so a staff inbox can't be flooded
+         regardless of the source IP the shared limiter keys on. Returns the same
+         neutral result whether or not a mail went out, so it never becomes an
+         enumeration oracle. The client flow deliberately keeps its
+         "newest link wins" behavior and is left untouched. */
+      const RESET_THROTTLE_MS = Number(process.env['RESET_THROTTLE_MS'] ?? 60_000)
+      if (RESET_THROTTLE_MS > 0 && !(await this.userRepo.claimResetMailSlot(user.id, RESET_THROTTLE_MS))) {
+        logger.debug({ userId: user.id }, 'admin forgot-password: throttled — a fresh link was issued recently')
+        return
+      }
+    }
     const { raw } = await this.#issueAuthToken(user.id, 'reset-password', 60 * 60 * 1000)
-    const resetUrl = `${env.CLIENT_URL}/reset-password?token=${raw}`
-    await sendPasswordReset(user.email, user.name, resetUrl)
-    logger.info({ userId: user.id }, 'password-reset email sent')
+    const base = portal === 'admin' ? env.ADMIN_URL : env.CLIENT_URL
+    const resetUrl = `${base}/reset-password?token=${raw}`
+    if (portal === 'admin') {
+      /* Fire-and-forget on the admin endpoint: because the STAFF_ROLES check
+         fast-returns non-staff, awaiting the SMTP round trip would make the
+         staff path measurably slower than the no-op paths, turning response
+         latency into a staff-account enumeration oracle. Mirrors how register()
+         dispatches its verification mail. */
+      void sendPasswordReset(user.email, user.name, resetUrl).catch(err =>
+        logger.warn({ err, userId: user.id }, 'password-reset email failed to send'))
+    } else {
+      await sendPasswordReset(user.email, user.name, resetUrl)
+    }
+    logger.info({ userId: user.id, portal }, 'password-reset email sent')
   }
 
   /* ── Reset password (token-based) ────────────────── */

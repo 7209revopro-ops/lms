@@ -2,13 +2,13 @@
 
 import { Suspense } from 'react'
 import { AuthShell } from '@/components/auth/AuthShell'
-import { AdminLoginForm } from '@/components/auth/AdminLoginForm'
+import { AdminResetPasswordForm } from '@/components/auth/AdminResetPasswordForm'
 
-export default function AdminLoginPage() {
+export default function AdminResetPasswordPage() {
   return (
     <AuthShell>
       <Suspense fallback={<div className="h-[420px]" />}>
-        <AdminLoginForm />
+        <AdminResetPasswordForm />
       </Suspense>
     </AuthShell>
   )

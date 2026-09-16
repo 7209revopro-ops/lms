@@ -435,6 +435,20 @@ export class AuthController {
     }
   }
 
+  /* ── POST /admin/auth/forgot-password ─────────────
+     Same enumeration-safe behavior as the client flow, but the emailed reset
+     link points at the admin portal and only staff accounts are served. The
+     reset step itself (resetPassword) is shared — the token is portal-agnostic. */
+  adminForgotPassword = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    try {
+      const { email } = req.body as { email: string }
+      await this.service.forgotPassword(email, 'admin')
+      sendSuccess(res, null, 'If a staff account exists with that email, a reset link has been sent.')
+    } catch (err) {
+      next(err)
+    }
+  }
+
   /* ── POST /auth/reset-password ──────────────────── */
   resetPassword = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     try {
