@@ -13,11 +13,15 @@
      · whether the widening leaked into any OTHER list;
      · determinism — the same assertions run twice against the same fixtures.
 
-   It also probes what class creation does NOT validate. That is deliberately
-   asserted as OBSERVED behaviour with a loud label rather than as a pass:
-   liveClass.service.create() casts instructorId straight to an ObjectId
+   It also covers what class creation validates about instructorId. Those
+   three cases were recorded here as OBSERVED behaviour first, because
+   liveClass.service.create() cast instructorId straight to an ObjectId
    without checking the academy, the role, or that the user exists at all.
-   That predates this feature and is reported, not silently accepted.
+   That predated this feature. It is now fixed in
+   liveClass.service.ts #assertInstructorUsable, and the observations have
+   become assertions, joined by the two behaviours the fix deliberately KEEPS:
+   a non-instructor staff caller may still host their own session, and a lent
+   instructor is still schedulable from the borrowing academy.
 
    Run: bun run test:crossorg:deep
 ───────────────────────────────────────────────────────────── */
@@ -108,6 +112,9 @@ try {
   const kept = await mk('kept@t.local', 'instructor', dubai, AI)
   const bOwn = await mk('b.own@t.local','instructor', blr,   AI)
   const bStudent = await mk('b.student@t.local', 'student', blr, { enrollmentStatus: 'approved', ...AI })
+  /* A Dubai student exists purely so the borrowing academy can try to probe
+     for them: a foreign record must answer exactly what a missing one does. */
+  const dStudent = await mk('d.student@t.local', 'student', dubai, { enrollmentStatus: 'approved', ...AI })
 
   /* A Bangalore course — the class the borrowing academy will schedule. */
   const bCourse = await CourseModel.create({
@@ -171,45 +178,100 @@ try {
       sub.status === 201, why(sub))
   }
 
-  /* ═══════════════════════════════════════════════════════
-     What class creation does NOT check — pre-existing, reported
-     ═══════════════════════════════════════════════════════ */
-  section('Pre-existing: instructorId is never validated on class creation')
+  /* ══════════════════════════════════════════════════════
+     What class creation checks about instructorId
+     ══════════════════════════════════════════════════════
+
+     These three were NOTEs until liveClass.service.ts grew
+     #assertInstructorUsable. The exact code is asserted, not just the refusal:
+     a cross-academy id and a missing id must be INDISTINGUISHABLE, or the
+     error message becomes an oracle for which ids exist in the other academy.
+     ══════════════════════════════════════════════════════ */
+  section('Class creation validates instructorId')
   {
     const unshared = await call('POST', '/admin/live-classes', { jar: B, body: {
       courseId: String(bCourse._id), title: 'Unshared cross-org instructor',
       scheduledStart: soon(), durationMins: 60, type: 'external',
       instructorId: keptId, language: 'English',
     } })
-    if (unshared.status === 201) {
-      observe('an UNSHARED cross-academy instructor can still be scheduled by id',
-        'liveClass.service.create() casts instructorId without checking the academy — predates this feature, and sharing does not make it worse')
-    } else {
-      check('an unshared cross-academy instructor is refused', true, why(unshared))
-    }
+    check('an UNSHARED cross-academy instructor is refused',
+      unshared.status === 404 && unshared.body?.error?.code === 'INSTRUCTOR_NOT_FOUND', why(unshared))
 
     const asStudent = await call('POST', '/admin/live-classes', { jar: B, body: {
       courseId: String(bCourse._id), title: 'A student as instructor',
       scheduledStart: soon(), durationMins: 60, type: 'external',
       instructorId: String(bStudent._id), language: 'English',
     } })
-    if (asStudent.status === 201) {
-      observe("a STUDENT's id is accepted as instructorId",
-        'no role check on create — same root cause; worth a separate fix')
-    } else {
-      check('a student id is refused as instructorId', true, why(asStudent))
-    }
+    check("a STUDENT's id is refused as instructorId",
+      asStudent.status === 400 && asStudent.body?.error?.code === 'INSTRUCTOR_NOT_STAFF', why(asStudent))
 
     const ghost = await call('POST', '/admin/live-classes', { jar: B, body: {
       courseId: String(bCourse._id), title: 'Nonexistent instructor',
       scheduledStart: soon(), durationMins: 60, type: 'external',
       instructorId: '6aaaaaaaaaaaaaaaaaaaaaaa', language: 'English',
     } })
-    if (ghost.status === 201) {
-      observe('an instructorId that matches NO user is accepted', 'existence is never checked either')
-    } else {
-      check('a nonexistent instructor id is refused', true, why(ghost))
+    check('an instructorId that matches NO user is refused',
+      ghost.status === 404 && ghost.body?.error?.code === 'INSTRUCTOR_NOT_FOUND', why(ghost))
+
+    check('a foreign id and a missing id are indistinguishable',
+      unshared.status === ghost.status &&
+      unshared.body?.error?.code === ghost.body?.error?.code, `${why(unshared)} vs ${why(ghost)}`)
+
+    /* The role rule must not answer before the tenancy rule. If it did, a
+       borrowing admin could tell "exists, and is a student in Dubai" from
+       "does not exist" by the error code alone. */
+    const foreignStudent = await call('POST', '/admin/live-classes', { jar: B, body: {
+      courseId: String(bCourse._id), title: 'Another academy-s student',
+      scheduledStart: soon(), durationMins: 60, type: 'external',
+      instructorId: String(dStudent._id), language: 'English',
+    } })
+    check("another academy's student is refused as NOT FOUND, not as NOT STAFF",
+      foreignStudent.status === ghost.status &&
+      foreignStudent.body?.error?.code === ghost.body?.error?.code,
+      `${why(foreignStudent)} vs ${why(ghost)}`)
+
+    const garbage = await call('POST', '/admin/live-classes', { jar: B, body: {
+      courseId: String(bCourse._id), title: 'Unparseable instructor',
+      scheduledStart: soon(), durationMins: 60, type: 'external',
+      instructorId: 'not-an-object-id', language: 'English',
+    } })
+    check('an unparseable instructorId is refused before Google is called',
+      garbage.status === 400 && garbage.body?.error?.code === 'INVALID_INSTRUCTOR_ID', why(garbage))
+
+    /* The bypass the create-side check would otherwise have. */
+    const ok = await call('POST', '/admin/live-classes', { jar: B, body: {
+      courseId: String(bCourse._id), title: 'Legitimate, then repointed',
+      scheduledStart: soon(), durationMins: 60, type: 'external',
+      instructorId: lentId, language: 'English',
+    } })
+    check('a lent instructor is still schedulable from the borrowing academy',
+      ok.status === 201, why(ok))
+
+    if (ok.status === 201) {
+      const id = String(ok.body?.data?.id ?? ok.body?.data?._id ?? '')
+      const repoint = await call('PATCH', `/admin/live-classes/${id}`, {
+        jar: B, body: { instructorId: String(bStudent._id) },
+      })
+      check('PATCH cannot repoint a class onto a student',
+        repoint.status === 400 && repoint.body?.error?.code === 'INSTRUCTOR_NOT_STAFF', why(repoint))
+
+      const repointForeign = await call('PATCH', `/admin/live-classes/${id}`, {
+        jar: B, body: { instructorId: keptId },
+      })
+      check('PATCH cannot repoint a class onto an unshared foreign instructor',
+        repointForeign.status === 404, why(repointForeign))
     }
+
+    /* KEPT ON PURPOSE. The rule is "not a student", not "is an instructor":
+       the admin form omits instructorId for a session the caller will host
+       themselves, and the controller defaults it to the caller's own id. */
+    const selfHosted = await call('POST', '/admin/live-classes', { jar: B, body: {
+      courseId: String(bCourse._id), title: 'Admin hosts this one',
+      scheduledStart: soon(), durationMins: 60, type: 'external',
+      language: 'English',
+    } })
+    check('an admin scheduling a session for themselves is still allowed',
+      selfHosted.status === 201, why(selfHosted))
   }
 
   /* ═══════════════════════════════════════════════════════ */

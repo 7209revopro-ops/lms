@@ -10,7 +10,7 @@ import * as muxSvc from '@/services/mux.service.ts'
 import { fetchMeetRecordingUrl } from '@/services/googleMeet.service.ts'
 import { logger } from '@/utils/logger.ts'
 import { env } from '@/config/env.ts'
-import { EnrollmentModel, LiveClassModel, type ILiveClass, type LiveClassType, type LiveClassProvider } from '@/models/schema.ts'
+import { EnrollmentModel, LiveClassModel, UserModel, type ILiveClass, type LiveClassType, type LiveClassProvider } from '@/models/schema.ts'
 import { roomNameFor } from '@/services/integrationTicket.service.ts'
 import { tryEnsureRoom } from '@/services/clt.service.ts'
 
@@ -145,6 +145,90 @@ export class LiveClassService {
       })
   }
 
+  /* ── Who may be named as the instructor on a class ──────────────────────
+     create() cast `instructorId` straight to an ObjectId and update() checked
+     only that the string parsed. Existence, role and academy were never
+     checked on either path, so all three of these were accepted:
+
+       · a student's id                         (no role check)
+       · an id matching no user at all          (no existence check)
+       · another academy's UNSHARED instructor  (no tenancy check)
+
+     All three are proven in crossorginstructor.deep.suite.ts, where they were
+     recorded as observations rather than failures. This is that fix.
+
+     THE ROLE RULE IS "NOT A STUDENT", NOT "IS AN INSTRUCTOR", DELIBERATELY.
+     liveClass.controller.ts #createOne defaults instructorId to the CALLER's
+     own id when the form omits it, and that caller is routinely an admin,
+     sub_admin or support scheduling a session they will host themselves.
+     Requiring role 'instructor' would refuse that everyday path. Every
+     non-student role already signs in to the admin portal and can hold a host
+     ticket (see liveClassJoin.service.ts), so the boundary that actually
+     matters here is the student one.
+
+     ACROSS ACADEMIES THE ANSWER IS 404, carrying the same code a missing user
+     gets. Same reasoning as requireSameOrgUser in utils/tenancy.ts: an admin
+     must not be able to discover which ids exist in the other academy by
+     reading the difference between two error codes.
+
+     A LENT INSTRUCTOR IS THE ONE EXCEPTION. `sharedAcrossOrgs` answers the
+     same SEE-and-USE question as sharedInstructorFilter() in utils/tenancy.ts,
+     which is what puts the instructor in the borrowing academy's picker in the
+     first place. Refusing them here would offer an instructor the admin then
+     could not schedule. The flag is unpersistable on a non-instructor (schema
+     validator), and the role is re-checked here rather than assumed. */
+  async #assertInstructorUsable(
+    instructorId: string,
+    classOrgId:   Types.ObjectId | null,
+  ): Promise<void> {
+    if (!Types.ObjectId.isValid(instructorId)) {
+      throw new LiveClassError('INVALID_INSTRUCTOR_ID', 'Invalid instructor id', 400)
+    }
+
+    const instructor = await UserModel.findById(instructorId)
+      .select('role organizationId sharedAcrossOrgs').lean() as
+        { role?: string; organizationId?: Types.ObjectId; sharedAcrossOrgs?: boolean } | null
+
+    if (!instructor) {
+      throw new LiveClassError('INSTRUCTOR_NOT_FOUND', 'Instructor not found', 404)
+    }
+
+    /* TENANCY BEFORE ROLE, and the order is the point. Every refusal about a
+       record the caller cannot see has to be the SAME refusal a missing record
+       gets, or the difference between two error codes enumerates the other
+       academy. Answering "that is a student" first would do exactly that: it
+       confirms the id exists, and that it belongs to a student, for an account
+       the caller has no business resolving at all.
+
+       Compare academies only when BOTH are known. A class with no academy, or
+       a staff account that predates organizationId, stays unscoped — the same
+       convention as callerMayAccess rule 3b in utils/tenancy.ts and the guard
+       in liveClass.controller.ts canManage. Refusing on a missing value would
+       reject legitimate legacy rows without closing anything the org scope
+       does not already cover. A super_admin carries no organizationId by
+       design (src/index.ts skips the role in the boot backfill, and
+       create-super-admin.ts never sets it), so this is never out of reach
+       for them rather than needing a role exemption. */
+    const instructorOrg = instructor.organizationId
+    const outOfReach =
+      classOrgId && instructorOrg &&
+      String(instructorOrg) !== String(classOrgId) &&
+      !(instructor.role === 'instructor' && instructor.sharedAcrossOrgs === true)
+
+    if (outOfReach) {
+      throw new LiveClassError('INSTRUCTOR_NOT_FOUND', 'Instructor not found', 404)
+    }
+
+    /* Only now, about a record the caller can legitimately see. */
+    if (instructor.role === 'student') {
+      throw new LiveClassError(
+        'INSTRUCTOR_NOT_STAFF',
+        'That account is a student and cannot be assigned to teach a class',
+        400,
+      )
+    }
+  }
+
   /* ── Admin/instructor create ──────────────────────── */
   async create(input: {
     courseId:         string
@@ -171,6 +255,20 @@ export class LiveClassService {
     }
     const course = await this.courseRepo.findById(input.courseId)
     if (!course) throw new LiveClassError('COURSE_NOT_FOUND', 'Course not found', 404)
+
+    /* The academy this class will belong to, resolved ONCE and reused at the
+       document build below. The caller's academy wins when it is present;
+       otherwise the class inherits its course's. Two independent resolutions
+       of the same value drift, and the instructor check immediately after has
+       to compare against exactly what gets stored. */
+    const classOrgId: Types.ObjectId | null =
+      input.organizationId && Types.ObjectId.isValid(input.organizationId)
+        ? new Types.ObjectId(input.organizationId)
+        : ((course as { organizationId?: Types.ObjectId }).organizationId ?? null)
+
+    /* Runs before the Mux stream is opened and before the caller's Meet link
+       is spent, so a refused instructor leaves no third-party room behind. */
+    await this.#assertInstructorUsable(input.instructorId, classOrgId)
 
     /* Validate meetingUrl is provided for online external sessions */
     if (input.type === 'external' && input.isOnline !== false) {
@@ -234,16 +332,13 @@ export class LiveClassService {
     }
     if (input.location) (doc as any).location = input.location.trim()
     if (input.room)     (doc as any).room     = input.room.trim()
-    if (input.organizationId && Types.ObjectId.isValid(input.organizationId)) {
-      ;(doc as any).organizationId = new Types.ObjectId(input.organizationId)
-    } else if ((course as { organizationId?: Types.ObjectId }).organizationId) {
-      /* No caller academy (super_admin browsing "All Orgs" sends no
-         X-Organization-Id). A class must live in its course's academy anyway —
-         every list students and org-scoped admins see filters on
-         organizationId with strict equality, so an unstamped class is
-         invisible to all of them until the boot backfill claims it. */
-      ;(doc as any).organizationId = (course as { organizationId?: Types.ObjectId }).organizationId
-    }
+    /* Resolved above, where the instructor was checked against it. No caller
+       academy (super_admin browsing "All Orgs" sends no X-Organization-Id)
+       means the class inherits its course's. A class must live in its course's
+       academy anyway — every list students and org-scoped admins see filters
+       on organizationId with strict equality, so an unstamped class is
+       invisible to all of them until the boot backfill claims it. */
+    if (classOrgId) (doc as any).organizationId = classOrgId
     if (input.seriesId && Types.ObjectId.isValid(input.seriesId)) {
       doc.seriesId = new Types.ObjectId(input.seriesId)
     }
@@ -642,11 +737,19 @@ export class LiveClassService {
 
     // Snapshot current doc so we can detect status transitions for recording poll
     // and a change of start time (which invalidates every reminder already sent)
-    const current = await LiveClassModel.findById(id).select('type status googleMeetCode recordingUrl scheduledStart').lean()
+    const current = await LiveClassModel.findById(id).select('type status googleMeetCode recordingUrl scheduledStart organizationId').lean()
 
     const patch: Partial<ILiveClass> = { ...(input as any) }
     if (input.instructorId != null) {
-      if (!Types.ObjectId.isValid(input.instructorId)) throw new LiveClassError('INVALID_ID', 'Invalid instructorId', 400)
+      /* Same rule as create(). Without it the create-side check is one PATCH
+         away from being bypassed: schedule with a real instructor, then move
+         the class onto a student's id. Compared against the academy the class
+         is ALREADY stamped with — organizationId is not a patchable field, so
+         a class cannot be walked into another academy on the way past. */
+      await this.#assertInstructorUsable(
+        input.instructorId,
+        ((current as { organizationId?: Types.ObjectId } | null)?.organizationId) ?? null,
+      )
       patch.instructorId = new Types.ObjectId(input.instructorId) as any
     }
     if (input.courseId != null) {

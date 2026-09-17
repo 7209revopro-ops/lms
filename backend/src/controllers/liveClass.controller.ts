@@ -1,4 +1,5 @@
 import type { Request, Response, NextFunction } from 'express'
+import { Types } from 'mongoose'
 import { logger } from '@/utils/logger.ts'
 import { LiveClassService } from '@/services/liveClass.service.ts'
 import { SectionService } from '@/services/section.service.ts'
@@ -676,6 +677,24 @@ export class LiveClassController {
     const sessionType  = dto.type ?? 'external'
     const isOnline      = dto.isOnline ?? true
     const instructorId  = dto.instructorId ?? req.user!.id
+
+    /* FORMAT ONLY, and only so an unparseable id never reaches the two calls
+       below. The real rule — the user exists, is not a student, and belongs to
+       this academy or is lent to it — lives in one place,
+       liveClass.service.ts #assertInstructorUsable, and runs inside create().
+
+       Without this the Meet lookup on the next line calls findById with a
+       malformed id, Mongoose raises a CastError, and the admin gets
+       "No record matches that _id." with a 404 — pointing at the class rather
+       than at the field they got wrong. For an internal class, where there is
+       no lookup, the same input correctly returned 400 from the service. Same
+       bad input, two different answers, depending on the class type. */
+    if (!Types.ObjectId.isValid(instructorId)) {
+      throw Object.assign(
+        new Error('Invalid instructor id'),
+        { statusCode: 400, code: 'INVALID_INSTRUCTOR_ID' },
+      )
+    }
 
     /* Auto-generate a Google Meet link for online external sessions */
     let meetingUrl: string | undefined
