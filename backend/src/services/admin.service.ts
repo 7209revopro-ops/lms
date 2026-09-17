@@ -7,6 +7,19 @@ import {
    AdminService — dashboard-level stats. Counts only;
    no PII surfaced.
 ───────────────────────────────────────────────────── */
+
+/* "Owned by this academy, or lent to it." Mirrors the widening in
+   user.repository.ts#listUsers so the dashboard tile and the list agree; an
+   unscoped caller (super_admin) keeps the plain role match. */
+function instructorCountFilter(orgMatch: Record<string, unknown>): Record<string, unknown> {
+  const orgId = orgMatch['organizationId']
+  if (!orgId) return { role: 'instructor' }
+  return {
+    role: 'instructor',
+    $or: [{ organizationId: orgId }, { sharedAcrossOrgs: true }],
+  }
+}
+
 export class AdminService {
   async getStats(organizationId?: string, program?: string): Promise<{
     totalCourses:     number
@@ -59,7 +72,13 @@ export class AdminService {
          dashboard is already about. */
       EnrollmentModel.distinct('userId', { courseId: { $in: scopedCourseIds } })
         .then(ids => ids.length),
-      UserModel.countDocuments({ ...orgMatch, role: 'instructor' }).exec(),
+      /* Instructors lent by the other academy count here too — the dashboard
+         tile has to agree with the instructor list, which is widened the same
+         way. `$and` rather than a spread: `orgMatch` may already carry its own
+         organizationId key, and a spread would let one silently win. */
+      UserModel.countDocuments(
+        instructorCountFilter(orgMatch as Record<string, unknown>),
+      ).exec(),
       EnrollmentModel.countDocuments({ courseId: { $in: scopedCourseIds } }).exec(),
       ReviewModel.countDocuments({}).exec(),
       OrderModel.aggregate([

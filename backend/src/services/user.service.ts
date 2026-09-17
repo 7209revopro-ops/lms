@@ -47,7 +47,8 @@ export class UserService {
      Deactivation also revokes all refresh tokens for that user. */
   async adminUpdate(
     id: string,
-    dto: { role?: UserRole; isActive?: boolean; isVerified?: boolean; name?: string; email?: string; category?: '4x-trading' | 'digital-marketing' | 'ai' | 'jura' | null; categories?: ('4x-trading' | 'digital-marketing' | 'ai' | 'jura')[]; avatarUrl?: string; headline?: string; bio?: string; program?: import('@/types/index.ts').ProgramType },
+    dto: {
+      sharedAcrossOrgs?: boolean; role?: UserRole; isActive?: boolean; isVerified?: boolean; name?: string; email?: string; category?: '4x-trading' | 'digital-marketing' | 'ai' | 'jura' | null; categories?: ('4x-trading' | 'digital-marketing' | 'ai' | 'jura')[]; avatarUrl?: string; headline?: string; bio?: string; program?: import('@/types/index.ts').ProgramType },
   ): Promise<IUser> {
     if (!Types.ObjectId.isValid(id)) {
       throw new UserError('INVALID_ID', 'Invalid user id', 400)
@@ -61,6 +62,11 @@ export class UserService {
     if (dto.headline   !== undefined) update.headline   = dto.headline || undefined
     if (dto.bio        !== undefined) update.bio        = dto.bio || undefined
     if (dto.program    !== undefined) update.program    = dto.program || undefined
+    /* Lending an instructor to the other academy. WHO may set this is gated in
+       the route (admin / super_admin only); the schema validator refuses it on
+       any non-instructor, so a bad payload fails loudly rather than widening a
+       student list. */
+    if (dto.sharedAcrossOrgs !== undefined) update.sharedAcrossOrgs = dto.sharedAcrossOrgs
     if (dto.categories !== undefined) {
       /* Multi-select path: set categories directly, keep category in sync with first */
       update.categories = dto.categories as any
@@ -111,6 +117,9 @@ export class UserService {
     approvedBy?:     string
     organizationId?: string
     program?:        import('@/types/index.ts').ProgramType
+    /* Lend this instructor to the other academy. Gated to admin/super_admin in
+       the route; the schema validator refuses it on any non-instructor. */
+    sharedAcrossOrgs?: boolean
   }): Promise<IUser> {
     const exists = await this.repo.emailExists(dto.email)
     if (exists) {
@@ -137,6 +146,12 @@ export class UserService {
     if (dto.bio)       patch.bio       = dto.bio
     if (dto.headline)  patch.headline  = dto.headline
     if (dto.avatarUrl) patch.avatarUrl = dto.avatarUrl
+    /* Only ever set on an instructor — the schema validator enforces the same
+       rule, so a mistaken payload fails loudly rather than silently widening
+       who can see a student. */
+    if (dto.sharedAcrossOrgs && dto.role === 'instructor') {
+      ;(patch as any).sharedAcrossOrgs = true
+    }
     if (dto.role === 'student' && dto.approvedBy) {
       const { Types } = await import('mongoose')
       ;(patch as any).enrollmentStatus = 'approved'

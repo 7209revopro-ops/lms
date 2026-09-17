@@ -271,6 +271,9 @@ const userUpdateSchema = z.object({
   avatarUrl:  z.string().url().or(z.literal('')).optional(),
   headline:   z.string().max(255).optional(),
   bio:        z.string().max(2000).optional(),
+  /* Lend this instructor to the other academy. Who may SET it is enforced in
+     the route, not here — a schema cannot see the caller's role. */
+  sharedAcrossOrgs: z.boolean().optional(),
 }).refine(d => Object.keys(d).length > 0, { message: 'Provide at least one field' })
 
 const userCreateSchema = z.object({
@@ -290,6 +293,8 @@ const userCreateSchema = z.object({
   categories: z.array(z.enum(['4x-trading', 'digital-marketing', 'ai', 'jura'])).optional(),
   avatarUrl:  z.string().url().or(z.literal('')).optional(),
   program:    z.enum(['ai', 'digital_marketing', 'forex', 'jura']).optional(),
+  /* Lend this instructor to the other academy — see userUpdateSchema. */
+  sharedAcrossOrgs: z.boolean().optional(),
   courses:    z.array(z.object({
     courseId:       z.string().min(1),
     blockedLessons: z.array(z.string()).default([]),
@@ -337,6 +342,26 @@ router.post ('/users', requirePermission('users','create'),          validate(us
        programme baked into the role, and injectCategoryScope now derives the
        same value from `program`. */
     if (req.user!.categoryScope) (req.body as any).category = req.user!.categoryScope
+
+    /* Lending an instructor to the other academy is an admin decision.
+       REJECTED, not silently dropped: a sub-admin who ticks the box and gets a
+       quiet success would believe the instructor is shared when they are not,
+       and only find out when the other academy cannot see them. */
+    const body = req.body as { sharedAcrossOrgs?: boolean; role?: string }
+    if (body.sharedAcrossOrgs) {
+      if (role !== 'admin' && role !== 'super_admin') {
+        res.status(403).json({ success: false, error: {
+          code: 'FORBIDDEN',
+          message: 'Only an admin or super admin can make an instructor available to both organizations.',
+        } }); return
+      }
+      if ((body.role ?? 'instructor') !== 'instructor') {
+        res.status(400).json({ success: false, error: {
+          code: 'INVALID_SHARED_ROLE',
+          message: 'Only instructors can be shared between organizations.',
+        } }); return
+      }
+    }
     next()
   },
   async (req: Request, res: Response, next: NextFunction) => {
@@ -454,6 +479,18 @@ router.patch ('/users/:id', requirePermission('users','update'),
     if (req.user!.role === 'admin' && (req.body as any).role === 'super_admin') {
       res.status(403).json({ success: false, error: { code: 'FORBIDDEN', message: 'Only super admins can grant super admin access.' } })
       return
+    }
+    /* Same rule as on create. This route is already requireAdmin, so a
+       sub-admin cannot reach it at all — the check is kept explicit so the
+       rule reads the same in both places and survives someone loosening the
+       route guard later. */
+    const patch = req.body as { sharedAcrossOrgs?: boolean }
+    if (patch.sharedAcrossOrgs !== undefined
+        && req.user!.role !== 'admin' && req.user!.role !== 'super_admin') {
+      res.status(403).json({ success: false, error: {
+        code: 'FORBIDDEN',
+        message: 'Only an admin or super admin can change cross-organization availability.',
+      } }); return
     }
     next()
   },

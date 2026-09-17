@@ -26,6 +26,10 @@ const schema = z.object({
   bio:      z.string().max(2000).optional(),
   role:     z.enum(['instructor', 'admin']).default('instructor'),
   category: z.enum(['4x-trading', 'digital-marketing', 'ai', 'jura'], { required_error: 'Please select a program category' }),
+  /* Lend this instructor to the other academy. Only an admin or super admin
+     may set it — the API rejects it from anyone else rather than silently
+     dropping it, so the form hides it instead of letting it fail. */
+  sharedAcrossOrgs: z.boolean().optional(),
 })
 type Values = z.infer<typeof schema>
 
@@ -129,6 +133,7 @@ export function AddInstructorModal({ open, onClose }: AddInstructorModalProps) {
       bio:      values.bio      || undefined,
       category: values.category,
       avatarUrl,
+      ...(values.sharedAcrossOrgs ? { sharedAcrossOrgs: true } : {}),
       ...(isSuper && orgId ? { organizationId: orgId } : {}),
     })
     setSuccess(true)
@@ -388,6 +393,33 @@ export function AddInstructorModal({ open, onClose }: AddInstructorModalProps) {
                     </button>
                   </div>
                 </DField>
+
+                {/* Available to both academies.
+
+                    Shown only to roles the API will actually accept it from —
+                    a sub-admin who ticked it would get a 403, so the control
+                    is hidden rather than offered and then refused. Instructors
+                    only: the API rejects it on any other role. */}
+                {(me?.role === 'admin' || me?.role === 'super_admin') && roleVal === 'instructor' && (
+                  <label
+                    className="flex items-start gap-3 rounded-xl px-3 py-3 cursor-pointer transition-colors"
+                    style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.08)' }}>
+                    <input
+                      type="checkbox"
+                      {...register('sharedAcrossOrgs')}
+                      className="mt-0.5 h-4 w-4 flex-shrink-0 cursor-pointer accent-[var(--color-primary,#0057B8)]"
+                    />
+                    <span className="min-w-0">
+                      <span className="block text-[13px] font-semibold" style={{ color: 'rgba(255,255,255,0.88)' }}>
+                        Available to both organizations
+                      </span>
+                      <span className="mt-0.5 block text-[11px] leading-relaxed" style={{ color: 'rgba(255,255,255,0.45)' }}>
+                        Both academies can see this instructor and schedule classes for them.
+                        This account still belongs to the academy creating it.
+                      </span>
+                    </span>
+                  </label>
+                )}
 
                 {/* Headline */}
                 <DField label="Headline" error={errors.headline?.message}>

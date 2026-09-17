@@ -96,6 +96,49 @@ export async function callerMayAccess(req: Request, recordOrg: unknown): Promise
 }
 
 /* ─────────────────────────────────────────────────────
+   sharedInstructorFilter(callerOrg)
+   ─────────────────────────────────────────────────────
+   THIS ANSWERS "MAY YOU SEE AND USE", NEVER "MAY YOU CHANGE".
+
+   If you are about to call this before a write, you want callerMayAccess()
+   above instead. The two are deliberately adjacent so that whoever reaches for
+   one reads the difference.
+
+   An instructor marked `sharedAcrossOrgs` is OWNED by the academy on their
+   `organizationId` and LENT to the other: both academies may list them and
+   schedule classes for them. Ownership is unchanged, which is what keeps
+   "whose instructor is this" answerable for reporting and for cascade rules.
+
+   Returns a Mongo clause, not a boolean, because the widening belongs inside
+   the query — filtering in application code after an unscoped read is how a
+   list endpoint ends up paginating another academy's rows.
+
+   COMPOSE THIS UNDER $and. Several callers already assign `filter.$or` for
+   search or category; assigning `$or` again silently drops those terms and the
+   endpoint quietly stops filtering. `role: 'instructor'` is part of the clause
+   rather than assumed, so the widening cannot leak onto students even if a
+   caller forgets to scope by role.
+───────────────────────────────────────────────────── */
+export function sharedInstructorFilter(callerOrg: string | null | undefined): Record<string, unknown> | null {
+  if (!callerOrg || !Types.ObjectId.isValid(callerOrg)) return null
+  return {
+    $or: [
+      { organizationId: new Types.ObjectId(callerOrg) },
+      { role: 'instructor', sharedAcrossOrgs: true },
+    ],
+  }
+}
+
+/* Attach a filter clause to `target` without clobbering an existing $or.
+   The trap this exists for: user.repository.ts builds `filter.$or` for search
+   and category before the org scope is applied. */
+export function andFilter(target: Record<string, unknown>, clause: Record<string, unknown> | null): void {
+  if (!clause) return
+  const existing = (target['$and'] as unknown[] | undefined) ?? []
+  target['$and'] = [...existing, clause]
+}
+
+/* ─────────────────────────────────────────────────────
    requireSameOrgUser(param)
    ─────────────────────────────────────────────────────
    Route guard for the ~10 admin endpoints that address a USER by id —
@@ -118,7 +161,9 @@ export function requireSameOrgUser(param: 'id' | 'userId' = 'id') {
       }
 
       const { UserModel } = await import('@/models/schema.ts')
-      const target = await UserModel.findById(id).select('organizationId').lean()
+      const target = await UserModel.findById(id)
+        .select('organizationId role sharedAcrossOrgs').lean() as
+          { organizationId?: unknown; role?: string; sharedAcrossOrgs?: boolean } | null
       if (!target) {
         res.status(404).json({
           success: false,
@@ -126,7 +171,30 @@ export function requireSameOrgUser(param: 'id' | 'userId' = 'id') {
         }); return
       }
 
-      if (!(await callerMayAccess(req, (target as { organizationId?: unknown }).organizationId))) {
+      /* ── The one carve-out ───────────────────────────────────────────────
+         An instructor lent to the other academy may be administered by EITHER
+         academy — but only by an `admin` or `super_admin`. Sub-admins and
+         support get view + schedule through the read-side widening and the
+         same 404 as before on anything that writes.
+
+         Narrow on purpose, in three independent ways, because this guard also
+         protects DELETE /users/:id and reset-2fa:
+           · the record must be role `instructor` AND `sharedAcrossOrgs` — a
+             shared student cannot exist (schema validator), so this cannot
+             widen to students even if the flag were set by some future path;
+           · the caller's role is an explicit allow-list, not a negation;
+           · everything else still routes through callerMayAccess untouched.
+
+         This is the product owner's decision, recorded in
+         docs/cross-org-instructor-plan.md. The default — and the behaviour for
+         every other record — remains strict owner equality. */
+      const isLentInstructor = target.role === 'instructor' && target.sharedAcrossOrgs === true
+      const callerRole       = req.user?.role
+      if (isLentInstructor && (callerRole === 'admin' || callerRole === 'super_admin')) {
+        next(); return
+      }
+
+      if (!(await callerMayAccess(req, target.organizationId))) {
         res.status(404).json({
           success: false,
           error: { code: 'NOT_FOUND', message: 'User not found' },

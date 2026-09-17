@@ -141,6 +141,8 @@ export interface IUser extends Document {
   customRoleId?: Types.ObjectId
   /* Multi-org — which academy this user belongs to (omitted for super_admin) */
   organizationId?: Types.ObjectId
+  /** Instructor lent to the other academy — see the schema comment. */
+  sharedAcrossOrgs?: boolean
   /* sub_admin program scope */
   program?: ProgramType
   /* Student program categories (multi) */
@@ -217,6 +219,14 @@ const UserSchema = new Schema<IUser>(
     aiUsage:          { day: { type: String }, count: { type: Number, default: 0 } },
     customRoleId:   { type: Schema.Types.ObjectId, ref: 'Role' },
     organizationId: { type: Schema.Types.ObjectId, ref: 'Organization' },
+    /* Lent to the other academy. `organizationId` still names the OWNER — this
+       only widens who may SEE the instructor and SCHEDULE classes for them.
+
+       Instructor-only by construction (see the validator below). A shared
+       STUDENT would widen student lists across academies, which is precisely
+       the class of leak N-07 was, so it is made unpersistable rather than left
+       to every write path to remember. */
+    sharedAcrossOrgs: { type: Boolean, default: false, index: true },
     program:        { type: String, enum: ['ai', 'digital_marketing', 'forex', 'jura'] },
     lastLoginAt:    { type: Date },
     category:         { type: String, enum: ['4x-trading', 'digital-marketing', 'ai', 'jura'] },
@@ -265,6 +275,21 @@ const UserSchema = new Schema<IUser>(
   },
   baseSchemaOptions,
 )
+
+/* Only an instructor may be lent. Enforced at the schema so no route, script or
+   import can persist a shared student — the widening in user.repository.ts is
+   guarded on role as well, but a validator is the one check that cannot be
+   forgotten at a new call site. */
+UserSchema.pre('validate', function (next) {
+  if (this.sharedAcrossOrgs && this.role !== 'instructor') {
+    next(new Error('sharedAcrossOrgs may only be set on an instructor'))
+    return
+  }
+  next()
+})
+
+/* The instructor picker reads "owned by this academy OR lent to it". */
+UserSchema.index({ role: 1, sharedAcrossOrgs: 1, organizationId: 1 })
 
 UserSchema.index({ provider: 1, providerId: 1 })
 

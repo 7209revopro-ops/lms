@@ -1,6 +1,7 @@
 import { Types } from 'mongoose'
 import { BaseRepository } from './base.repository.ts'
 import { UserModel, RefreshTokenModel, AuthTokenModel } from '@/models/schema.ts'
+import { sharedInstructorFilter, andFilter } from '@/utils/tenancy.ts'
 import type {
   IUser, IRefreshToken, IAuthToken, AuthTokenPurpose, RefreshTokenRevokeReason,
 } from '@/models/schema.ts'
@@ -205,7 +206,18 @@ export class UserRepository extends BaseRepository<IUser> {
     }
 
     if (params.organizationId && Types.ObjectId.isValid(params.organizationId)) {
-      filter['organizationId'] = new Types.ObjectId(params.organizationId)
+      /* Instructors may be LENT to the other academy, so an instructor list is
+         "owned by me OR shared". Every other role stays strictly scoped —
+         widening a student list across academies is the leak N-07 was.
+
+         Composed under $and, never assigned to $or: the search and category
+         clauses above already own `filter.$or`, and assigning it again here
+         would silently drop the caller's search terms. */
+      if (role === 'instructor') {
+        andFilter(filter, sharedInstructorFilter(params.organizationId))
+      } else {
+        filter['organizationId'] = new Types.ObjectId(params.organizationId)
+      }
     }
 
     return this.paginate(filter, params.page, params.perPage, { createdAt: -1 })
