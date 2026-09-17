@@ -69,3 +69,6 @@ public/uploads/
 # `git add .` can never publish a live merchant token.
 docs/API_TOKEN_*.txt
 docs/*credentials*
+
+# Internal ops notes — infrastructure detail, keep out of the repo
+SERVER.md
