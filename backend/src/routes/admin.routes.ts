@@ -1,4 +1,7 @@
 import { Router } from 'express'
+/* Type-only, and aliased: every handler below binds its own `Types` value
+   via `await import('mongoose')`, which would shadow the namespace. */
+import type { Types as MongoTypes } from 'mongoose'
 import { z } from 'zod'
 import { AdminController } from '@/controllers/admin.controller.ts'
 import { AuthController } from '@/controllers/auth.controller.ts'
@@ -1892,17 +1895,29 @@ router.get('/bookings', requireInstructor, requirePermission('bookings','list'),
 
     // Programme-scoped admins (sub_admin) only see their program's bookings
     const scope = (req.user as any)?.categoryScope as string | undefined
+    let scopedCourseIds: MongoTypes.ObjectId[] | null = null
     if (scope) {
       const { CourseModel } = await import('@/models/schema.ts')
       const scopedCourses = await CourseModel.find({ program: scope }, '_id').lean()
-      const scopedIds = scopedCourses.map((c: any) => c._id)
-      if (!q.courseId) {
-        lcFilter['courseId'] = { $in: scopedIds }
-      }
+      scopedCourseIds = scopedCourses.map((c: any) => c._id)
+      lcFilter['courseId'] = { $in: scopedCourseIds }
     }
 
+    /* Narrow to one course — but INTERSECT with the programme scope, never
+       replace it. This used to apply the scope only `if (!q.courseId)` and then
+       assign straight over `lcFilter.courseId`, so a programme-scoped sub_admin
+       who passed another programme's course id got that course's full roster,
+       with every student's name and email. Same rule as the liveClassId guard
+       below (P-04): "more specific" has to mean narrower, never wider. */
     if (q.courseId && Types.ObjectId.isValid(q.courseId)) {
-      lcFilter['courseId'] = new Types.ObjectId(q.courseId)
+      const requested = new Types.ObjectId(q.courseId)
+      const inScope   = !scopedCourseIds || scopedCourseIds.some(id => String(id) === String(requested))
+      if (!inScope) {
+        sendSuccess(res, [], undefined, 200,
+          buildPaginationMeta(0, Number(q.page) || 1, Number(q.per_page) || 50))
+        return
+      }
+      lcFilter['courseId'] = requested
     }
 
     if (q.language) {

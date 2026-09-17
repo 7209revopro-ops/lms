@@ -641,7 +641,8 @@ export class LiveClassService {
     }
 
     // Snapshot current doc so we can detect status transitions for recording poll
-    const current = await LiveClassModel.findById(id).select('type status googleMeetCode recordingUrl').lean()
+    // and a change of start time (which invalidates every reminder already sent)
+    const current = await LiveClassModel.findById(id).select('type status googleMeetCode recordingUrl scheduledStart').lean()
 
     const patch: Partial<ILiveClass> = { ...(input as any) }
     if (input.instructorId != null) {
@@ -658,6 +659,30 @@ export class LiveClassService {
     }
     const updated = await this.liveRepo.updateByIdPopulated(id, patch)
     if (!updated) throw new LiveClassError('LIVE_CLASS_NOT_FOUND', 'Live class not found', 404)
+
+    /* Rescheduling moves the class, which invalidates every reminder already
+       marked as sent — those flags describe a start time that no longer exists.
+       Left set, the student gets NOTHING at the new time because the chain
+       believes it already ran. Clear them so the reminders fire again against
+       the new start. Only booked seats matter; a cancelled one stays cancelled. */
+    const movedFrom = (current as { scheduledStart?: Date } | null)?.scheduledStart
+    if (input.scheduledStart && movedFrom &&
+        new Date(input.scheduledStart).getTime() !== new Date(movedFrom).getTime()) {
+      const { ClassBookingModel } = await import('@/models/schema.ts')
+      const reset = await ClassBookingModel.updateMany(
+        { liveClassId: new Types.ObjectId(id), status: 'booked' },
+        { $set: {
+          reminderDayBeforeSent:  false,
+          reminderDayOfSent:      false,
+          reminderPreSessionSent: false,
+          reminder5MinSent:       false,
+          reminderAtTimeSent:     false,
+        } },
+      )
+      await LiveClassModel.findByIdAndUpdate(id, { reminderInstructor15MinSent: false })
+      logger.info({ classId: id, bookings: reset.modifiedCount },
+        'live-class: rescheduled — reminder flags reset so the chain runs again')
+    }
 
     // When an external class with a Meet code is marked "ended", auto-poll for recording
     const isNewlyEnded = input.status === 'ended' && current?.status !== 'ended'

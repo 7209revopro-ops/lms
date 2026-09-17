@@ -51,7 +51,13 @@ const notifSvc = new NotificationService()
  */
 type BookingWithClass = BookingWithRefs & {
   liveClassId: NonNullable<BookingWithRefs['liveClassId']>
+  userId:      NonNullable<BookingWithRefs['userId']>
 }
+
+/* A class nobody should still be reminded about. The find() only constrains the
+   BOOKING's status, so a cancelled or finished class kept mailing its whole
+   roster "your class is starting" right on schedule. */
+const DEAD_CLASS_STATUSES = new Set(['cancelled', 'ended'])
 
 function dueBetween(bookings: BookingWithRefs[], from: Date, to: Date): BookingWithClass[] {
   /* A type predicate rather than a cast: every caller loops over the result
@@ -60,16 +66,26 @@ function dueBetween(bookings: BookingWithRefs[], from: Date, to: Date): BookingW
      reference nullable without it and tsc lights up twelve real dereferences —
      which is the bug, written out. */
   return bookings.filter((b): b is BookingWithClass => {
-    const at = b.liveClassId?.scheduledStart
-    if (!at) return false
-    const s = new Date(at)
+    /* A deleted student has nobody to notify. Skipping the row here keeps one
+       dangling reference from throwing mid-loop and costing everybody else
+       their reminder for this run. */
+    if (!b.userId?.email) return false
+    const lc = b.liveClassId
+    if (!lc?.scheduledStart) return false
+    if (lc.status && DEAD_CLASS_STATUSES.has(lc.status)) return false
+    const s = new Date(lc.scheduledStart)
     return s >= from && s <= to
   })
 }
 
 interface BookingWithRefs {
   _id:    any
-  userId: { _id: any; id: string; name: string; email: string }
+  /* NULL for the same reason liveClassId is: a deleted student leaves a
+     dangling reference that Mongoose populates as null. Typing it as
+     always-present is exactly what let one removed account throw inside the
+     dispatch loop and abort the whole batch — every other student's reminder
+     for that run lost with it. */
+  userId: { _id: any; id: string; name: string; email: string } | null
   /* NULL when the class was deleted after the booking was made. Mongoose
      populates a dangling reference as null; typing it as always-present is
      what let the crash below through in the first place. */
@@ -79,6 +95,9 @@ interface BookingWithRefs {
     scheduledStart: Date
     meetingUrl?:    string
     muxPlaybackId?: string
+    /* Needed to stop reminding people about a class that was cancelled or has
+       already ended — the query only filters the BOOKING's status. */
+    status?:        string
   } | null
   reminderDayBeforeSent:  boolean
   reminderDayOfSent:      boolean
@@ -89,8 +108,14 @@ interface BookingWithRefs {
 
 /* ── Helpers ─────────────────────────────────────────── */
 function getJoinUrl(lc: NonNullable<BookingWithRefs['liveClassId']>): string {
-  return lc.meetingUrl
-    ?? `${process.env['CLIENT_URL'] ?? 'http://localhost:3000'}/live-classes/${lc.id}/watch`
+  if (lc.meetingUrl) return lc.meetingUrl
+  const base = process.env['CLIENT_URL'] ?? 'http://localhost:3000'
+  /* `id` is a lean virtual and is not always materialised; falling through to
+     the template regardless produced "/live-classes/undefined/watch" — a link
+     that 404s — in every reminder for a class with no meeting URL. Fall back to
+     the schedule, which always works, rather than mailing a dead link. */
+  const id = lc.id ?? (lc as { _id?: unknown })._id
+  return id ? `${base}/live-classes/${String(id)}/watch` : `${base}/class-bookings`
 }
 
 function fmtFull(d: Date): string {
@@ -176,7 +201,7 @@ export async function runDayBeforeReminders(): Promise<void> {
       reminderDayBeforeSent: false,
     })
       .populate<{ userId: BookingWithRefs['userId'] }>('userId', 'name email')
-      .populate<{ liveClassId: BookingWithRefs['liveClassId'] }>('liveClassId', 'id title scheduledStart meetingUrl muxPlaybackId')
+      .populate<{ liveClassId: BookingWithRefs['liveClassId'] }>('liveClassId', 'id title scheduledStart meetingUrl muxPlaybackId status')
       .lean({ virtuals: true }) as unknown as BookingWithRefs[]
 
     const due = dueBetween(bookings, from, to)
@@ -212,7 +237,7 @@ export async function runDayOfReminders(): Promise<void> {
       reminderDayOfSent: false,
     })
       .populate<{ userId: BookingWithRefs['userId'] }>('userId', 'name email')
-      .populate<{ liveClassId: BookingWithRefs['liveClassId'] }>('liveClassId', 'id title scheduledStart meetingUrl muxPlaybackId')
+      .populate<{ liveClassId: BookingWithRefs['liveClassId'] }>('liveClassId', 'id title scheduledStart meetingUrl muxPlaybackId status')
       .lean({ virtuals: true }) as unknown as BookingWithRefs[]
 
     const due = dueBetween(bookings, start, end)
@@ -248,7 +273,7 @@ export async function runPreSessionReminders(): Promise<void> {
       reminderPreSessionSent: false,
     })
       .populate<{ userId: BookingWithRefs['userId'] }>('userId', 'name email')
-      .populate<{ liveClassId: BookingWithRefs['liveClassId'] }>('liveClassId', 'id title scheduledStart meetingUrl muxPlaybackId')
+      .populate<{ liveClassId: BookingWithRefs['liveClassId'] }>('liveClassId', 'id title scheduledStart meetingUrl muxPlaybackId status')
       .lean({ virtuals: true }) as unknown as BookingWithRefs[]
 
     const due = dueBetween(bookings, from, to)
@@ -283,7 +308,7 @@ export async function runFiveMinReminders(): Promise<void> {
       reminder5MinSent: false,
     })
       .populate<{ userId: BookingWithRefs['userId'] }>('userId', 'name email')
-      .populate<{ liveClassId: BookingWithRefs['liveClassId'] }>('liveClassId', 'id title scheduledStart meetingUrl muxPlaybackId')
+      .populate<{ liveClassId: BookingWithRefs['liveClassId'] }>('liveClassId', 'id title scheduledStart meetingUrl muxPlaybackId status')
       .lean({ virtuals: true }) as unknown as BookingWithRefs[]
 
     const due = dueBetween(bookings, from, to)
@@ -319,7 +344,7 @@ export async function runAtTimeReminders(): Promise<void> {
       reminderAtTimeSent: false,
     })
       .populate<{ userId: BookingWithRefs['userId'] }>('userId', 'name email')
-      .populate<{ liveClassId: BookingWithRefs['liveClassId'] }>('liveClassId', 'id title scheduledStart meetingUrl muxPlaybackId')
+      .populate<{ liveClassId: BookingWithRefs['liveClassId'] }>('liveClassId', 'id title scheduledStart meetingUrl muxPlaybackId status')
       .lean({ virtuals: true }) as unknown as BookingWithRefs[]
 
     const due = dueBetween(bookings, from, to)
@@ -455,29 +480,52 @@ async function runRecordingPoller(): Promise<void> {
    reminder for every student stopped, silently, for as long as it took
    somebody to notice. Exporting the jobs is what lets remindermails.suite.ts
    put a booking at each window and check the mail actually goes. */
+/* One run of a job at a time.
+
+   Every reminder job reads a batch, mails it, and only then writes the
+   `reminder*Sent` flags. A run that takes longer than its interval therefore
+   overlaps the next tick, and BOTH copies read the same still-unflagged
+   bookings — so the student gets the same reminder twice. A single slow SMTP
+   batch is enough to do it.
+
+   Deliberately explicit rather than the scheduler's own option: a guard that
+   silently stops working because an option was renamed is worse than none, and
+   this one is directly testable. */
+const inFlight = new Set<string>()
+export function exclusive(name: string, task: () => Promise<void>): () => Promise<void> {
+  return async () => {
+    if (inFlight.has(name)) {
+      logger.warn({ job: name }, '[Reminders] previous run still in flight — skipping this tick')
+      return
+    }
+    inFlight.add(name)
+    try { await task() } finally { inFlight.delete(name) }
+  }
+}
+
 export function startReminderJobs(): void {
   // Every hour at :00 — day-before reminders (23–25 h window)
-  cron.schedule('0 * * * *', runDayBeforeReminders)
+  cron.schedule('0 * * * *', exclusive('day-before', runDayBeforeReminders))
 
   // Every day at 7:00am — day-of reminders
-  cron.schedule('0 7 * * *', runDayOfReminders)
+  cron.schedule('0 7 * * *', exclusive('day-of', runDayOfReminders))
 
   // Every 5 min — pre-session reminders (25–35 min window, NO link).
   // Must run at the window's resolution; an hourly job would miss most sessions
   // because the 10-min window rarely lines up with a single :30 run.
-  cron.schedule('*/5 * * * *', runPreSessionReminders)
+  cron.schedule('*/5 * * * *', exclusive('pre-session', runPreSessionReminders))
 
   // Every 5 min — 5-min reminder WITH link (3–8 min window)
-  cron.schedule('*/5 * * * *', runFiveMinReminders)
+  cron.schedule('*/5 * * * *', exclusive('five-min', runFiveMinReminders))
 
   // Every 5 min — at-time reminder WITH link (0–5 min after start)
-  cron.schedule('*/5 * * * *', runAtTimeReminders)
+  cron.schedule('*/5 * * * *', exclusive('at-time', runAtTimeReminders))
 
   // Every 5 min — instructor 15-min reminder with Google Meet link (13–17 min window)
-  cron.schedule('*/5 * * * *', runInstructor15MinReminders)
+  cron.schedule('*/5 * * * *', exclusive('instructor-15min', runInstructor15MinReminders))
 
   // Every 15 min — poll Google Meet API for completed recordings (classes ended in last 48 h)
-  cron.schedule('*/15 * * * *', runRecordingPoller)
+  cron.schedule('*/15 * * * *', exclusive('recording-poller', runRecordingPoller))
 
   logger.info('[Reminders] Cron jobs scheduled')
 }
