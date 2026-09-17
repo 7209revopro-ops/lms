@@ -383,7 +383,9 @@ export interface AdminBookingParams {
   /* `booked` seats whose session has already run. A status AND a tense, so it
      cannot be expressed through `status` alone. */
   needsMarking?: 'true'
-  sort?:         '-bookedAt' | 'bookedAt' | 'status'
+  /* scheduledStart lives on the class, so the server resolves those two through
+     an aggregate. The console groups by session day, so it asks for them. */
+  sort?:         '-bookedAt' | 'bookedAt' | 'status' | 'scheduledStart' | '-scheduledStart'
   page?:         number
   per_page?:     number
 }

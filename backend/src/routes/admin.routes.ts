@@ -1881,10 +1881,12 @@ const bookingQuerySchema = z.object({
      In-person is isOnline === false; online is anything else, because older
      rows predate the field. */
   isOnline:     z.enum(['true', 'false']).optional(),
-  /* Booking-level ordering only. scheduledStart lives on LiveClass, so sorting
-     by it needs an aggregate — deliberately not done here; the UI no longer
-     claims an ordering the server did not produce. */
-  sort:         z.enum(['-bookedAt', 'bookedAt', 'status']).default('-bookedAt'),
+  /* scheduledStart lives on LiveClass, not on the booking, so ordering by it
+     needs an aggregate — see the two paths in GET /bookings. It matters because
+     the console GROUPS BY SESSION DAY: ordered by bookedAt, a day's seats are
+     scattered across pages, so the same date heading appears on page 1 and
+     page 3 with a different count each time. */
+  sort:         z.enum(['-bookedAt', 'bookedAt', 'status', 'scheduledStart', '-scheduledStart']).default('-bookedAt'),
   page:         z.coerce.number().int().min(1).default(1),
   per_page:     z.coerce.number().int().min(1).max(200).default(50),
 })
@@ -2056,23 +2058,75 @@ router.get('/bookings', requireInstructor, requirePermission('bookings','list'),
     const per_page = Number(q.per_page) || 50
     const skip     = (page - 1) * per_page
 
-    const [docs, total] = await Promise.all([
-      ClassBookingModel.find(filter)
-        .populate('userId', 'id name email avatarUrl')
-        .populate({
-          path:     'liveClassId',
-          select:   'id title scheduledStart durationMins language courseId sectionId instructorId isOnline location room',
-          populate: [
-            { path: 'courseId',     select: 'id title' },
-            { path: 'sectionId',    select: 'id title' },
-            { path: 'instructorId', select: 'id name avatarUrl' },
-          ],
-        })
-        .sort(q.sort === 'bookedAt' ? { bookedAt: 1 } : q.sort === 'status' ? { status: 1, bookedAt: -1 } : { bookedAt: -1 })
-        .skip(skip).limit(per_page)
-        .lean({ virtuals: true }),
-      ClassBookingModel.countDocuments(filter),
-    ])
+    /* One spec, used by both ordering paths below, so they can never drift into
+       returning differently-shaped rows. */
+    const POPULATE = [
+      { path: 'userId', select: 'id name email avatarUrl' },
+      {
+        path:     'liveClassId',
+        select:   'id title scheduledStart durationMins language courseId sectionId instructorId isOnline location room',
+        populate: [
+          { path: 'courseId',     select: 'id title' },
+          { path: 'sectionId',    select: 'id title' },
+          { path: 'instructorId', select: 'id name avatarUrl' },
+        ],
+      },
+    ] as any
+
+    const byStart = q.sort === 'scheduledStart' || q.sort === '-scheduledStart'
+
+    let docs: any[]
+    let total: number
+
+    if (byStart) {
+      /* scheduledStart is on the joined class, so the ordering has to happen in
+         an aggregate. Only ids are ordered and paged here; the rows themselves
+         are fetched through the same populate spec as the ordinary path, rather
+         than rebuilding that projection out of $lookup stages. */
+      const dir = q.sort === 'scheduledStart' ? 1 : -1
+      const ordered = await ClassBookingModel.aggregate([
+        { $match: filter },
+        { $lookup: {
+            from:     'liveclasses',
+            let:      { lc: '$liveClassId' },
+            pipeline: [
+              { $match: { $expr: { $eq: ['$_id', '$$lc'] } } },
+              { $project: { scheduledStart: 1 } },
+            ],
+            as: 'lc',
+        } },
+        { $addFields: { _start: { $first: '$lc.scheduledStart' } } },
+        /* _id breaks ties. Two seats on the SAME session share a start time, so
+           without it Mongo may order them differently between one page and the
+           next — which silently drops some rows from a paginated walk and
+           repeats others. The CSV export walks every page, so that would have
+           produced a file with duplicates and holes. */
+        { $sort: { _start: dir, _id: 1 } },
+        { $skip: skip }, { $limit: per_page },
+        { $project: { _id: 1 } },
+      ])
+
+      const ids = ordered.map((o: any) => o._id)
+      const fetched = ids.length
+        ? await ClassBookingModel.find({ _id: { $in: ids } }).populate(POPULATE).lean({ virtuals: true })
+        : []
+      /* $in does not preserve the order it was given, so restore the one the
+         aggregate decided. */
+      const byId = new Map(fetched.map((d: any) => [String(d._id), d]))
+      docs  = ids.map((i: any) => byId.get(String(i))).filter(Boolean)
+      total = await ClassBookingModel.countDocuments(filter)
+    } else {
+      const [rows, count] = await Promise.all([
+        ClassBookingModel.find(filter)
+          .populate(POPULATE)
+          .sort(q.sort === 'bookedAt' ? { bookedAt: 1 } : q.sort === 'status' ? { status: 1, bookedAt: -1 } : { bookedAt: -1 })
+          .skip(skip).limit(per_page)
+          .lean({ virtuals: true }),
+        ClassBookingModel.countDocuments(filter),
+      ])
+      docs  = rows
+      total = count
+    }
 
     const withId = (d: any) => ({ ...d, id: d.id ?? String(d._id) })
     /* sendSuccess, not res.json.

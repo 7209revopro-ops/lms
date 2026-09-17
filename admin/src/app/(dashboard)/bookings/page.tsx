@@ -12,7 +12,7 @@ import {
 import {
   useAdminBookings, useAdminBookingStats, useUpdateAttendance, useCancelBooking, useBulkAttendance,
   fetchAllAdminBookings,
-  type AdminBookingStats,
+  type AdminBookingStats, type AdminBookingParams,
   type ClassBooking, type BookingStatus,
 } from '@/lib/api/liveClasses'
 import { useCourses } from '@/lib/api/courses'
@@ -511,6 +511,10 @@ export default function BookingsPage() {
   const [statusFilter,     setStatusFilter]     = useState<BookingStatus | ''>('')
   const [deliveryFilter,   setDeliveryFilter]   = useState<'all' | 'online' | 'offline'>('all')
   const [needsMarking,     setNeedsMarking]     = useState(false)
+  /* Chronological by default. The table groups rows under a date heading, and
+     ordered by bookedAt those groups were built from an arbitrary slice — the
+     same day appeared on page 1 and page 3 with a different count each time. */
+  const [sort, setSort] = useState<NonNullable<AdminBookingParams['sort']>>('scheduledStart')
   const [courseFilter,     setCourseFilter]     = useState('')
   const [instructorFilter, setInstructorFilter] = useState('')
   const [langFilter,       setLangFilter]       = useState('')
@@ -544,7 +548,8 @@ export default function BookingsPage() {
     q:            debouncedSearch.length >= 2 ? debouncedSearch : undefined,
     isOnline:     deliveryFilter === 'all' ? undefined : deliveryFilter === 'online' ? 'true' as const : 'false' as const,
     needsMarking: needsMarking ? 'true' as const : undefined,
-  }), [dateFrom, dateTo, statusFilter, courseFilter, instructorFilter, langFilter, debouncedSearch, deliveryFilter, needsMarking])
+    sort,
+  }), [dateFrom, dateTo, statusFilter, courseFilter, instructorFilter, langFilter, debouncedSearch, deliveryFilter, needsMarking, sort])
 
   /* Narrowing the filter can leave you on a page that no longer exists, which
      renders as an empty table rather than "no results". */
@@ -639,21 +644,25 @@ export default function BookingsPage() {
       if (!map.has(key)) map.set(key, [])
       map.get(key)!.push(b)
     })
+    /* Follow the chosen ordering instead of always ascending. The group order was
+       hard-coded, so picking "latest first" re-sorted the page back to ascending
+       on screen — the control said one thing and the table showed another.
+       Cancelled keeps newest-cancellation-first, which is what that view is for. */
+    const desc = isCancelledView || sort.startsWith('-')
+    const keyOf = (b: ClassBooking) => new Date(
+      isCancelledView
+        ? (b.cancelledAt ?? b.bookedAt)
+        : ((b.liveClassId as typeof b.liveClassId | null)?.scheduledStart ?? b.bookedAt),
+    ).getTime()
+
     return Array.from(map.entries())
-      .sort(([a], [b]) => isCancelledView ? b.localeCompare(a) : a.localeCompare(b))
+      .sort(([a], [b]) => (desc ? b.localeCompare(a) : a.localeCompare(b)))
       .map(([date, rows]) => ({
         date,
         heading: fmtHeading(date),
-        rows: rows.sort((a, b) => {
-          if (isCancelledView) {
-            return new Date(b.cancelledAt ?? b.bookedAt).getTime() - new Date(a.cancelledAt ?? a.bookedAt).getTime()
-          }
-          const lca = (a.liveClassId as typeof a.liveClassId | null)?.scheduledStart ?? a.bookedAt
-          const lcb = (b.liveClassId as typeof b.liveClassId | null)?.scheduledStart ?? b.bookedAt
-          return new Date(lca).getTime() - new Date(lcb).getTime()
-        }),
+        rows: rows.sort((a, b) => (desc ? keyOf(b) - keyOf(a) : keyOf(a) - keyOf(b))),
       }))
-  }, [filtered, isCancelledView])
+  }, [filtered, isCancelledView, sort])
 
   const isSingleDay  = toYMD(dateFrom) === toYMD(dateTo)
   const isToday      = toYMD(dateFrom) === toYMD(new Date())
@@ -709,6 +718,13 @@ export default function BookingsPage() {
     { value: 'attended',  label: 'Attended'     },
     { value: 'missed',    label: 'Missed'       },
     { value: 'cancelled', label: 'Cancelled'    },
+  ]
+
+  const SORT_OPTS: { value: NonNullable<AdminBookingParams['sort']>; label: string }[] = [
+    { value: 'scheduledStart',  label: 'Session: earliest first' },
+    { value: '-scheduledStart', label: 'Session: latest first'   },
+    { value: '-bookedAt',       label: 'Recently booked'         },
+    { value: 'bookedAt',        label: 'Oldest booked'           },
   ]
 
   const LANG_OPTS = ['English', 'Arabic', 'Hindi', 'Malayalam', 'Urdu']
@@ -826,6 +842,16 @@ export default function BookingsPage() {
             options={STATUS_OPTS}
             placeholder="All statuses"
             minWidth={130}
+          />
+
+          {/* Sort — the server does the ordering; this no longer re-sorts the
+              page in the browser and calls it an ordering. */}
+          <FilterSelect
+            value={sort}
+            onChange={v => { setSort(v as NonNullable<AdminBookingParams['sort']>); setPage(1) }}
+            options={SORT_OPTS}
+            placeholder="Sort"
+            minWidth={165}
           />
 
           {/* Delivery filter — Online / In-Person */}

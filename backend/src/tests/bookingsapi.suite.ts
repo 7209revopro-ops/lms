@@ -391,6 +391,83 @@ section('H. bulk attendance marks a whole roster without widening scope')
   check('H10 bulk cannot be used to cancel', badStatus.status === 422, `${badStatus.status}`)
 }
 
+/* ═══════════ I — ordering by the SESSION, not the booking ═══════════ */
+section('I. sort=scheduledStart orders by the session and pages stably')
+{
+  const late = await mkClass('I Late',   { scheduledStart: new Date(Date.now() + 30 * 24 * 60 * MIN) })
+  const mid  = await mkClass('I Mid',    { scheduledStart: new Date(Date.now() + 20 * 24 * 60 * MIN) })
+  const soon = await mkClass('I Soon',   { scheduledStart: new Date(Date.now() + 10 * 24 * 60 * MIN) })
+
+  /* Booked in ASCENDING start order with explicit, distinct bookedAt stamps, so
+     newest-first bookedAt is the exact reverse of session order. Explicit stamps
+     because three creates can land in the same millisecond, and the order among
+     ties is undefined — which would make this test flaky rather than wrong. */
+  const seatAt = async (email: string, lc: any, minutesAgo: number) =>
+    ClassBookingModel.create({
+      userId: (await mk(email, 'student', orgA))._id, liveClassId: lc._id,
+      status: 'booked', bookedAt: new Date(Date.now() - minutesAgo * MIN),
+    })
+  await seatAt('ord1@ba.test', soon, 30)
+  await seatAt('ord2@ba.test', mid,  20)
+  await seatAt('ord3@ba.test', late, 10)
+
+  const titles = async (url: string) =>
+    ((await call('GET', url, adminJar)).body?.data ?? [])
+      .map((b: any) => b.liveClassId?.title).filter((x: any) => String(x ?? '').startsWith('I '))
+
+  const asc = await titles('/admin/bookings?sort=scheduledStart&dateFrom=2000-01-01&dateTo=2099-01-01&per_page=200')
+  check('I1 ascending puts the soonest session first',
+    JSON.stringify(asc) === JSON.stringify(['I Soon', 'I Mid', 'I Late']), JSON.stringify(asc))
+
+  const desc = await titles('/admin/bookings?sort=-scheduledStart&dateFrom=2000-01-01&dateTo=2099-01-01&per_page=200')
+  check('I2 descending reverses it',
+    JSON.stringify(desc) === JSON.stringify(['I Late', 'I Mid', 'I Soon']), JSON.stringify(desc))
+
+  /* The point of the whole exercise: bookedAt order is NOT session order, which
+     is why day-grouping the bookedAt-ordered page scattered a day across pages. */
+  const byBooked = await titles('/admin/bookings?sort=-bookedAt&dateFrom=2000-01-01&dateTo=2099-01-01&per_page=200')
+  check('I3 it genuinely differs from bookedAt ordering',
+    JSON.stringify(byBooked) !== JSON.stringify(asc), JSON.stringify(byBooked))
+
+  /* Many seats on ONE session all share a start time. Without an _id tiebreaker
+     Mongo may order those ties differently per page, so a paginated walk drops
+     some rows and repeats others — which is exactly what the CSV export does. */
+  const tied = await mkClass('I Tied', { scheduledStart: new Date(Date.now() + 15 * 24 * 60 * MIN) })
+  for (let i = 0; i < 12; i++) await seat(await mk(`tie${i}@ba.test`, 'student', orgA), tied)
+
+  const walk: string[] = []
+  for (let page = 1; page <= 6; page++) {
+    const r = await call('GET', `/admin/bookings?sort=scheduledStart&liveClassId=${tied._id}&page=${page}&per_page=2`, adminJar)
+    for (const b of (r.body?.data ?? [])) walk.push(String(b._id ?? b.id))
+  }
+  check('I4 a paged walk returns every seat exactly once', walk.length === 12, `got ${walk.length}`)
+  check('I5 …with no duplicates across page boundaries',
+    new Set(walk).size === 12, `${new Set(walk).size} unique of ${walk.length}`)
+
+  /* Repeating the same walk must give the same order, or pagination is a lie. */
+  const walk2: string[] = []
+  for (let page = 1; page <= 6; page++) {
+    const r = await call('GET', `/admin/bookings?sort=scheduledStart&liveClassId=${tied._id}&page=${page}&per_page=2`, adminJar)
+    for (const b of (r.body?.data ?? [])) walk2.push(String(b._id ?? b.id))
+  }
+  check('I6 the order is deterministic across identical requests',
+    JSON.stringify(walk) === JSON.stringify(walk2), 'order changed between runs')
+
+  /* The sorted path is a different code path — it must not lose the populate or
+     the scope that the ordinary path applies. */
+  const one = ((await call('GET', `/admin/bookings?sort=scheduledStart&liveClassId=${tied._id}&per_page=1`, adminJar)).body?.data ?? [])[0]
+  check('I7 the sorted path still populates the student and the session',
+    !!one?.userId?.email && !!one?.liveClassId?.title, JSON.stringify(one ?? null).slice(0, 160))
+  const foreignSorted = await call('GET', '/admin/bookings?sort=scheduledStart&dateFrom=2000-01-01&dateTo=2099-01-01', adminBJar)
+  check('I8 …and still scopes to the caller academy',
+    ((foreignSorted.body?.data ?? []) as any[]).every(b => !String(b.liveClassId?.title ?? '').startsWith('I ')),
+    JSON.stringify((foreignSorted.body?.data ?? []).map((b: any) => b.liveClassId?.title)))
+
+  const totalMeta = (await call('GET', `/admin/bookings?sort=scheduledStart&liveClassId=${tied._id}&per_page=2`, adminJar)).body?.meta
+  check('I9 the total counts the whole filter, not the page', totalMeta?.total_count === 12,
+    JSON.stringify(totalMeta))
+}
+
 } catch (err) {
   fail++
   lines.push(`\n  FATAL  ${(err as Error).stack ?? String(err)}`)
