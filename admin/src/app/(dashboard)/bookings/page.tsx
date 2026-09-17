@@ -11,6 +11,7 @@ import {
 } from 'lucide-react'
 import {
   useAdminBookings, useAdminBookingStats, useUpdateAttendance, useCancelBooking,
+  fetchAllAdminBookings,
   type AdminBookingStats,
   type ClassBooking, type BookingStatus,
 } from '@/lib/api/liveClasses'
@@ -18,6 +19,7 @@ import { useCourses } from '@/lib/api/courses'
 import { useUsers } from '@/lib/api/users'
 import { useCurrentUser } from '@/lib/api/user'
 import Spinner from '@/components/ui/Spinner'
+import { useToast } from '@/store/ui.store'
 
 /* ─── Custom dark dropdown ───────────────────────────────── */
 interface SelectOption { value: string; label: string }
@@ -451,6 +453,7 @@ function exportCSV(bookings: ClassBooking[], filename: string) {
 /* ─── Main page ──────────────────────────────────────────── */
 export default function BookingsPage() {
   const { data: me }    = useCurrentUser()
+  const toast           = useToast()
   const isInstructor    = me?.role === 'instructor'
   const userScope       = (me as any)?.categoryScope as string | undefined  // '4x-trading' | 'digital-marketing' | undefined
 
@@ -507,6 +510,32 @@ export default function BookingsPage() {
   const bookings: ClassBooking[] = data?.docs ?? []
   const totalPages  = data?.meta?.total_pages  ?? 1
   const totalCount  = data?.meta?.total_count  ?? 0
+
+  /* Export covers the whole filter, not the loaded page, so it has to fetch
+     before it can write. Disabled while running: a second click would start a
+     competing walk and hand over two half-files. */
+  const [exporting, setExporting] = useState<{ loaded: number; total: number } | null>(null)
+  async function handleExport() {
+    if (exporting) return
+    setExporting({ loaded: 0, total: totalCount })
+    try {
+      const { docs, truncated } = await fetchAllAdminBookings(query, {
+        onProgress: (loaded, total) => setExporting({ loaded, total }),
+      })
+      /* Rows whose class or student was deleted are hidden in the table; keep
+         them out of the file too, so the CSV and the screen agree. */
+      const rows = docs.filter(b => !!b.liveClassId && !!b.userId)
+      exportCSV(rows, `bookings-${toYMD(dateFrom)}-${toYMD(dateTo)}.csv`)
+      if (truncated) {
+        toast.info('Export truncated',
+          'The file holds the first 20,000 bookings. Narrow the date range and export again for the rest.')
+      }
+    } catch {
+      toast.error('Export failed', 'Nothing was downloaded. Please try again.')
+    } finally {
+      setExporting(null)
+    }
+  }
 
   const isCancelledView = statusFilter === 'cancelled'
 
@@ -781,11 +810,16 @@ export default function BookingsPage() {
               {totalCount.toLocaleString()} booking{totalCount !== 1 ? 's' : ''}{orphanCount > 0 && <span style={{ opacity: 0.45 }}> · {orphanCount} hidden (deleted class or student)</span>}
             </span>
             {filtered.length > 0 && (
-              <button type="button"
-                onClick={() => exportCSV(filtered, `bookings-${toYMD(dateFrom)}-${toYMD(dateTo)}.csv`)}
-                className="flex items-center gap-1.5 rounded-xl px-3 py-1.5 text-xs font-semibold transition-colors hover:brightness-110"
+              <button type="button" onClick={handleExport} disabled={!!exporting}
+                title={totalCount > bookings.length
+                  ? `Exports all ${totalCount.toLocaleString()} bookings matching these filters, not just this page`
+                  : 'Export these bookings as CSV'}
+                className="flex items-center gap-1.5 rounded-xl px-3 py-1.5 text-xs font-semibold transition-colors hover:brightness-110 disabled:cursor-progress disabled:opacity-60"
                 style={{ background: 'rgba(99,102,241,0.12)', border: '1px solid rgba(99,102,241,0.25)', color: '#818CF8' }}>
-                <Download size={12} /> Export CSV
+                <Download size={12} />
+                {exporting
+                  ? `Exporting ${exporting.loaded.toLocaleString()}/${(exporting.total || totalCount).toLocaleString()}…`
+                  : totalCount > bookings.length ? `Export all ${totalCount.toLocaleString()}` : 'Export CSV'}
               </button>
             )}
           </div>

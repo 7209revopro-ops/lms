@@ -388,6 +388,46 @@ export interface AdminBookingParams {
   per_page?:     number
 }
 
+/* Every booking matching a filter, not just the page on screen.
+
+   Export used to serialise the loaded array, so a filter matching 2,340 rows
+   produced a 150-row file with nothing to say it had been truncated — and
+   unlike a short page on screen, a short CSV leaves the building.
+
+   Paged rather than served as one server-side CSV because the admin renders
+   times in the ACTIVE ACADEMY's timezone, which only the browser knows; a CSV
+   built on the server would have to duplicate that rule and would drift from
+   what the table shows. `hardCap` keeps a runaway filter from exhausting
+   memory, and the caller is told when it bites. */
+export async function fetchAllAdminBookings(
+  params: AdminBookingParams,
+  opts: { onProgress?: (loaded: number, total: number) => void; hardCap?: number } = {},
+): Promise<{ docs: ClassBooking[]; total: number; truncated: boolean }> {
+  const PER  = 500
+  const cap  = opts.hardCap ?? 20_000
+  const docs: ClassBooking[] = []
+  let page  = 1
+  let total = 0
+
+  for (;;) {
+    const res = await api.get<{ success: true; data: ClassBooking[]; meta: BookingMeta }>(
+      '/admin/bookings', { params: { ...params, page, per_page: PER } },
+    )
+    const batch = res.data.data ?? []
+    total = res.data.meta?.total_count ?? batch.length
+    docs.push(...batch)
+    opts.onProgress?.(docs.length, total)
+
+    /* Stop on a short page as well as on the page count: if the two ever
+       disagree, trusting total_pages alone would spin forever. */
+    if (batch.length < PER) break
+    if (page >= (res.data.meta?.total_pages ?? 1)) break
+    if (docs.length >= cap) return { docs, total, truncated: true }
+    page++
+  }
+  return { docs, total, truncated: false }
+}
+
 export function useAdminBookings(params: AdminBookingParams = {}) {
   return useQuery({
     queryKey: bookingKeys.list(params),
