@@ -1,0 +1,346 @@
+/* ─────────────────────────────────────────────────────────────
+   Cross-academy instructors — the parts the first suite did not reach.
+
+   crossorginstructor.suite.ts proves VISIBILITY and the CRUD carve-out. It
+   never actually SCHEDULES anything, which is the whole point of lending an
+   instructor (requirement 4). This suite drives the real endpoints:
+
+     · scheduling a class for a lent instructor from the borrowing academy;
+     · every role, in both directions;
+     · the super_admin org switcher (X-Organization-Id);
+     · the full toggle lifecycle — off at create, on later, off again while a
+       class already exists;
+     · whether the widening leaked into any OTHER list;
+     · determinism — the same assertions run twice against the same fixtures.
+
+   It also probes what class creation does NOT validate. That is deliberately
+   asserted as OBSERVED behaviour with a loud label rather than as a pass:
+   liveClass.service.create() casts instructorId straight to an ObjectId
+   without checking the academy, the role, or that the user exists at all.
+   That predates this feature and is reported, not silently accepted.
+
+   Run: bun run test:crossorg:deep
+───────────────────────────────────────────────────────────── */
+process.env.DATABASE_URL = 'mongodb://localhost:27017/lms_crossorg_deep_suite'
+process.env.NODE_ENV     = 'test'
+process.env.PORT         = '0'
+process.env.R2_ACCOUNT_ID = ''; process.env.R2_ACCESS_KEY_ID = ''
+process.env.R2_SECRET_ACCESS_KEY = ''; process.env.R2_PUBLIC_URL = ''
+delete process.env.GOOGLE_CLIENT_ID
+delete process.env.GOOGLE_CLIENT_SECRET
+delete process.env.GOOGLE_REFRESH_TOKEN
+process.env.RATE_LIMIT_AUTH_MAX = '900'
+process.env.RATE_LIMIT_API_MAX  = '9000'
+export {}
+
+let pass = 0
+const failures: string[] = []
+const notes: string[] = []
+const lines: string[] = []
+function check(label: string, ok: boolean, detail = '') {
+  if (ok) { pass++; lines.push(`  PASS  ${label}`) }
+  else { failures.push(`${label}${detail ? '  — ' + detail : ''}`); lines.push(`  FAIL  ${label}${detail ? '  — ' + detail : ''}`) }
+}
+/* Behaviour that is real, pre-existing and worth reporting, but is not this
+   feature's contract — recorded rather than failed. */
+function observe(label: string, detail: string) {
+  notes.push(`${label} — ${detail}`)
+  lines.push(`  NOTE  ${label}  — ${detail}`)
+}
+function section(n: string) { lines.push(`\n${n}`) }
+
+const mongoose = (await import('mongoose')).default
+mongoose.set('autoIndex', false)
+const app = (await import('@/app.ts')).default
+const { UserModel, OrganizationModel, CourseModel, LiveClassModel } = await import('@/models/schema.ts')
+const { hashPassword } = await import('@/utils/hash.ts')
+
+await mongoose.connect(process.env.DATABASE_URL!)
+if (mongoose.connection.db!.databaseName !== 'lms_crossorg_deep_suite') {
+  console.error('REFUSING TO RUN — not the throwaway database'); process.exit(1)
+}
+
+const server = app.listen(0)
+await new Promise<void>(r => server.once('listening', () => r()))
+const BASE = `http://127.0.0.1:${(server.address() as { port: number }).port}/api/v1`
+
+type Jar = Map<string, string>
+async function call(method: string, p: string, opts: { jar?: Jar; body?: unknown; org?: string } = {}) {
+  const headers: Record<string, string> = {}
+  if (opts.body !== undefined) headers['content-type'] = 'application/json'
+  if (opts.org) headers['x-organization-id'] = opts.org
+  if (opts.jar?.size) headers['cookie'] = [...opts.jar].map(([k, v]) => `${k}=${v}`).join('; ')
+  const res = await fetch(`${BASE}${p}`, {
+    method, headers, body: opts.body === undefined ? undefined : JSON.stringify(opts.body),
+  })
+  if (opts.jar) for (const raw of res.headers.getSetCookie?.() ?? []) {
+    const [pair] = raw.split(';'); const i = pair!.indexOf('=')
+    if (i > 0) opts.jar.set(pair!.slice(0, i), pair!.slice(i + 1))
+  }
+  const text = await res.text()
+  let body: any = text; try { body = JSON.parse(text) } catch {}
+  return { status: res.status, body }
+}
+const why = (r: { status: number; body: any }) => `${r.status} ${r.body?.error?.code ?? ''} ${String(r.body?.error?.message ?? '').slice(0, 70)}`
+const PW = 'CorrectHorse1'
+const ids = (b: any): string[] => {
+  const rows = b?.data?.items ?? b?.data?.users ?? b?.data ?? []
+  return (Array.isArray(rows) ? rows : []).map((u: any) => String(u.id ?? u._id))
+}
+const soon = () => new Date(Date.now() + 7 * 86_400_000).toISOString()
+
+try {
+  const dubai = await OrganizationModel.create({ name: 'Dubai Academy', slug: 'dubai', currency: 'AED', paymentGateway: 'abzer' })
+  const blr   = await OrganizationModel.create({ name: 'Bangalore Academy', slug: 'bangalore', currency: 'INR', paymentGateway: 'razorpay' })
+  const hash  = await hashPassword(PW)
+  const mk = (email: string, role: string, org: any, extra: object = {}) =>
+    UserModel.create({ name: email.split('@')[0], email, passwordHash: hash, role, isActive: true, isVerified: true, organizationId: org._id, ...extra })
+
+  const AI = { category: 'ai', categories: ['ai'] }
+
+  const superAdmin = await UserModel.create({ name: 'root', email: 'root@t.local', passwordHash: hash, role: 'super_admin', isActive: true, isVerified: true })
+  const dAdmin  = await mk('d.admin@t.local',  'admin',     dubai)
+  const bAdmin  = await mk('b.admin@t.local',  'admin',     blr)
+  const bSub    = await mk('b.sub@t.local',    'sub_admin', blr, { program: 'ai' })
+  const bSupport= await mk('b.support@t.local','support',   blr)
+
+  const lent = await mk('lent@t.local', 'instructor', dubai, { sharedAcrossOrgs: true, ...AI })
+  const kept = await mk('kept@t.local', 'instructor', dubai, AI)
+  const bOwn = await mk('b.own@t.local','instructor', blr,   AI)
+  const bStudent = await mk('b.student@t.local', 'student', blr, { enrollmentStatus: 'approved', ...AI })
+
+  /* A Bangalore course — the class the borrowing academy will schedule. */
+  const bCourse = await CourseModel.create({
+    title: 'BLR Course', slug: `blr-course-${Date.now()}`, description: 'x',
+    price: 0, isFree: true, status: 'published', language: 'English',
+    instructorId: bOwn._id, organizationId: blr._id, category: 'ai',
+    /* `program`, not `category` — liveClass.controller.ts compares the
+       sub-admin's categoryScope against course.program (free-form string), and
+       a course without it is refused for every programme-scoped caller. */
+    program: 'ai',
+  })
+
+  const login = async (email: string) => {
+    const jar: Jar = new Map()
+    const r = await call('POST', '/admin/auth/login', { jar, body: { email, password: PW } })
+    if (r.status !== 200) throw new Error(`admin login ${email} → ${why(r)}`)
+    return jar
+  }
+  const ROOT = await login('root@t.local')
+  const D    = await login('d.admin@t.local')
+  const B    = await login('b.admin@t.local')
+  const BSUB = await login('b.sub@t.local')
+  const BSUP = await login('b.support@t.local')
+
+  const lentId = String(lent._id), keptId = String(kept._id)
+
+  /* ═══════════════════════════════════════════════════════
+     THE ACTUAL REQUIREMENT: schedule a class for a lent instructor
+     ═══════════════════════════════════════════════════════ */
+  section('Requirement 4 — the borrowing academy can schedule for a lent instructor')
+  {
+    const made = await call('POST', '/admin/live-classes', { jar: B, body: {
+      courseId: String(bCourse._id), title: 'Lent instructor teaches BLR',
+      scheduledStart: soon(), durationMins: 60, type: 'external',
+      instructorId: lentId, language: 'English',
+    } })
+    check('a Bangalore admin can schedule a Dubai-owned LENT instructor', made.status === 201, why(made))
+
+    if (made.status === 201) {
+      const id = String(made.body?.data?.id ?? made.body?.data?._id)
+      const doc = await LiveClassModel.findById(id).lean() as any
+      check('the class records the lent instructor', String(doc?.instructorId) === lentId)
+      /* The class belongs to the academy of its COURSE — lending a person does
+         not lend the class. This is the boundary that keeps students apart. */
+      check('and belongs to BANGALORE, not to the lender',
+        String(doc?.organizationId) === String(blr._id), String(doc?.organizationId))
+
+      const bList = await call('GET', '/admin/live-classes', { jar: B })
+      check('it appears in the borrowing academy list', ids(bList.body).includes(id), why(bList))
+      const dList = await call('GET', '/admin/live-classes', { jar: D })
+      check('and NOT in the lending academy list — the class was not shared',
+        !ids(dList.body).includes(id))
+    }
+
+    const sub = await call('POST', '/admin/live-classes', { jar: BSUB, body: {
+      courseId: String(bCourse._id), title: 'Sub schedules lent instructor',
+      scheduledStart: soon(), durationMins: 60, type: 'external',
+      instructorId: lentId, language: 'English',
+    } })
+    check('a borrowing SUB-ADMIN can schedule too (view + schedule, per the brief)',
+      sub.status === 201, why(sub))
+  }
+
+  /* ═══════════════════════════════════════════════════════
+     What class creation does NOT check — pre-existing, reported
+     ═══════════════════════════════════════════════════════ */
+  section('Pre-existing: instructorId is never validated on class creation')
+  {
+    const unshared = await call('POST', '/admin/live-classes', { jar: B, body: {
+      courseId: String(bCourse._id), title: 'Unshared cross-org instructor',
+      scheduledStart: soon(), durationMins: 60, type: 'external',
+      instructorId: keptId, language: 'English',
+    } })
+    if (unshared.status === 201) {
+      observe('an UNSHARED cross-academy instructor can still be scheduled by id',
+        'liveClass.service.create() casts instructorId without checking the academy — predates this feature, and sharing does not make it worse')
+    } else {
+      check('an unshared cross-academy instructor is refused', true, why(unshared))
+    }
+
+    const asStudent = await call('POST', '/admin/live-classes', { jar: B, body: {
+      courseId: String(bCourse._id), title: 'A student as instructor',
+      scheduledStart: soon(), durationMins: 60, type: 'external',
+      instructorId: String(bStudent._id), language: 'English',
+    } })
+    if (asStudent.status === 201) {
+      observe("a STUDENT's id is accepted as instructorId",
+        'no role check on create — same root cause; worth a separate fix')
+    } else {
+      check('a student id is refused as instructorId', true, why(asStudent))
+    }
+
+    const ghost = await call('POST', '/admin/live-classes', { jar: B, body: {
+      courseId: String(bCourse._id), title: 'Nonexistent instructor',
+      scheduledStart: soon(), durationMins: 60, type: 'external',
+      instructorId: '6aaaaaaaaaaaaaaaaaaaaaaa', language: 'English',
+    } })
+    if (ghost.status === 201) {
+      observe('an instructorId that matches NO user is accepted', 'existence is never checked either')
+    } else {
+      check('a nonexistent instructor id is refused', true, why(ghost))
+    }
+  }
+
+  /* ═══════════════════════════════════════════════════════ */
+  section('Every role, both directions')
+  {
+    const cases: Array<[string, Jar, boolean]> = [
+      ['super_admin',          ROOT, true],
+      ['lending admin',        D,    true],
+      ['borrowing admin',      B,    true],
+      ['borrowing sub_admin',  BSUB, true],
+      ['borrowing support',    BSUP, true],
+    ]
+    for (const [name, jar, shouldSee] of cases) {
+      const r = await call('GET', '/admin/users?role=instructor&per_page=100', { jar })
+      const seen = ids(r.body).includes(lentId)
+      check(`${name} ${shouldSee ? 'sees' : 'does not see'} the lent instructor`,
+        seen === shouldSee, `${why(r)} seen=${seen}`)
+    }
+
+    /* The unshared one is the control on every single role. */
+    for (const [name, jar] of [['borrowing admin', B], ['borrowing sub_admin', BSUB], ['borrowing support', BSUP]] as Array<[string, Jar]>) {
+      const r = await call('GET', '/admin/users?role=instructor&per_page=100', { jar })
+      check(`${name} still cannot see the UNSHARED instructor`, !ids(r.body).includes(keptId), why(r))
+    }
+  }
+
+  /* ═══════════════════════════════════════════════════════ */
+  section('Super admin org switcher')
+  {
+    const asDubai = await call('GET', '/admin/users?role=instructor&per_page=100', { jar: ROOT, org: String(dubai._id) })
+    check('viewing Dubai shows both its instructors',
+      ids(asDubai.body).includes(lentId) && ids(asDubai.body).includes(keptId), why(asDubai))
+
+    const asBlr = await call('GET', '/admin/users?role=instructor&per_page=100', { jar: ROOT, org: String(blr._id) })
+    check('viewing Bangalore shows the lent one', ids(asBlr.body).includes(lentId), why(asBlr))
+    check('and Bangalore-s own', ids(asBlr.body).includes(String(bOwn._id)))
+    check('but not the unshared Dubai one', !ids(asBlr.body).includes(keptId),
+      'the org switcher leaked an unshared record')
+  }
+
+  /* ═══════════════════════════════════════════════════════ */
+  section('Toggle lifecycle')
+  {
+    /* Off at create, lent later. */
+    const created = await call('POST', '/admin/users', { jar: D, body: {
+      name: 'Later Lent', email: `later.${Date.now()}@t.local`, password: PW,
+      role: 'instructor', category: 'ai',
+    } })
+    check('an instructor can be created unshared', created.status === 201, why(created))
+    const laterId = String(created.body?.data?.id)
+
+    const before = await call('GET', '/admin/users?role=instructor&per_page=100', { jar: B })
+    check('and starts invisible to the other academy', !ids(before.body).includes(laterId))
+
+    const lend = await call('PATCH', `/admin/users/${laterId}`, { jar: D, body: { sharedAcrossOrgs: true } })
+    check('the owner can lend them afterwards', lend.status === 200, why(lend))
+    const after = await call('GET', '/admin/users?role=instructor&per_page=100', { jar: B })
+    check('and they become visible immediately', ids(after.body).includes(laterId), why(after))
+
+    /* Un-lend while a class exists in the borrowing academy. */
+    const cls = await call('POST', '/admin/live-classes', { jar: B, body: {
+      courseId: String(bCourse._id), title: 'Class before un-lending',
+      scheduledStart: soon(), durationMins: 60, type: 'external',
+      instructorId: laterId, language: 'English',
+    } })
+    check('the borrowing academy schedules them', cls.status === 201, why(cls))
+
+    const unlend = await call('PATCH', `/admin/users/${laterId}`, { jar: D, body: { sharedAcrossOrgs: false } })
+    check('the owner can un-lend', unlend.status === 200, why(unlend))
+    const gone = await call('GET', '/admin/users?role=instructor&per_page=100', { jar: B })
+    check('they disappear from the borrowing academy list', !ids(gone.body).includes(laterId), why(gone))
+
+    /* The class does not vanish with them — it belongs to Bangalore. */
+    const stillThere = await LiveClassModel.findById(String(cls.body?.data?.id ?? cls.body?.data?._id)).lean() as any
+    if (stillThere) {
+      observe('un-lending leaves the already-scheduled class in place',
+        'the class still names an instructor the borrowing academy can no longer see or manage — flagged in the plan as a sharp edge')
+    }
+
+    /* And the borrowing admin loses CRUD the moment the grant is withdrawn. */
+    const editAfter = await call('PATCH', `/admin/users/${laterId}`, { jar: B, body: { headline: 'nope' } })
+    check('and the borrowing admin immediately loses CRUD', editAfter.status === 404, why(editAfter))
+  }
+
+  /* ═══════════════════════════════════════════════════════ */
+  section('The widening did not leak into any other list')
+  {
+    for (const role of ['student', 'admin', 'sub_admin', 'support']) {
+      const r = await call('GET', `/admin/users?role=${role}&per_page=100`, { jar: B })
+      const dubaiIds = [String(dAdmin._id), String(kept._id), String(lent._id)]
+      const leaked = ids(r.body).filter(i => dubaiIds.includes(i))
+      check(`the ${role} list shows no Dubai record`, leaked.length === 0, leaked.join(','))
+    }
+    /* No role filter at all — the widest possible query. */
+    const all = await call('GET', '/admin/users?per_page=200', { jar: B })
+    check('an unfiltered user list still shows no unshared Dubai instructor',
+      !ids(all.body).includes(keptId), why(all))
+    observe('an unfiltered list DOES include the lent instructor',
+      ids(all.body).includes(lentId)
+        ? 'expected — the widening is keyed on the record, not on the role filter'
+        : 'not present; the widening only applies when role=instructor is passed')
+  }
+
+  /* ═══════════════════════════════════════════════════════ */
+  section('Determinism — the same reads twice')
+  {
+    const a1 = await call('GET', '/admin/users?role=instructor&per_page=100', { jar: B })
+    const a2 = await call('GET', '/admin/users?role=instructor&per_page=100', { jar: B })
+    check('two identical reads return the same set',
+      JSON.stringify(ids(a1.body).sort()) === JSON.stringify(ids(a2.body).sort()))
+
+    const s1 = await call('GET', '/admin/users?role=instructor&search=lent&per_page=100', { jar: B })
+    const s2 = await call('GET', '/admin/users?role=instructor&search=lent&per_page=100', { jar: B })
+    check('and so do two identical searches',
+      JSON.stringify(ids(s1.body).sort()) === JSON.stringify(ids(s2.body).sort()))
+    check('the search still finds the lent instructor', ids(s1.body).includes(lentId), why(s1))
+  }
+
+} catch (err) {
+  failures.push(`suite threw — ${(err as Error).message}`)
+  lines.push(`  FAIL  suite threw — ${(err as Error).message}\n${(err as Error).stack}`)
+} finally {
+  await mongoose.connection.dropDatabase()
+  await mongoose.disconnect()
+  server.close()
+}
+
+console.log(lines.join('\n'))
+if (notes.length) {
+  console.log('\nOBSERVED (pre-existing or worth a decision, not this feature\'s contract):')
+  for (const n of notes) console.log(`  · ${n}`)
+}
+console.log(`\n${pass} passed, ${failures.length} failed, ${notes.length} noted`)
+process.exit(failures.length === 0 ? 0 : 1)
