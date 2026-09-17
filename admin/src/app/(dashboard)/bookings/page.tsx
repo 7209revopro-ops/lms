@@ -651,8 +651,8 @@ export default function BookingsPage() {
      no longer see — the count would say 12 while the screen showed 3. */
   useEffect(() => { setSelected(new Set()) }, [query, page])
 
-  const { data, isLoading } = useAdminBookings({ ...query, page, per_page: 150 })
-  const { data: stats }     = useAdminBookingStats(query)
+  const { data, isLoading, isError, refetch } = useAdminBookings({ ...query, page, per_page: 150 })
+  const { data: stats }                       = useAdminBookingStats(query)
 
   const bookings: ClassBooking[] = data?.docs ?? []
   const totalPages  = data?.meta?.total_pages  ?? 1
@@ -902,7 +902,7 @@ export default function BookingsPage() {
       </motion.div>
 
       {/* ── Stats ─────────────────────────────────────── */}
-      {!isLoading && (bookings.length > 0 || needsMarking) && (
+      {!isLoading && !isError && (bookings.length > 0 || needsMarking) && (
         <StatsStrip stats={stats} needsMarking={needsMarking}
           onNeedsMarking={on => { setNeedsMarking(on); setPage(1) }} />
       )}
@@ -1066,8 +1066,37 @@ export default function BookingsPage() {
         </div>
       )}
 
+      {/* ── Failed ───────────────────────────────────── */}
+      {/* A failed request used to fall through to the empty state, so a dead
+          API, an expired session or a rejected query all rendered as a
+          confident "No bookings found" — the one message that says the filter
+          worked and the answer is genuinely nothing. On a console used to
+          decide who attended a class, that is the worst available lie. */}
+      {!isLoading && isError && filtered.length === 0 && (
+        <motion.div
+          initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}
+          className="flex flex-col items-center gap-3 rounded-3xl py-20 text-center"
+          style={{ background: 'rgba(248,113,113,0.05)', border: '1px solid rgba(248,113,113,0.20)' }}>
+          <div className="flex h-14 w-14 items-center justify-center rounded-2xl"
+            style={{ background: 'rgba(248,113,113,0.10)', border: '1px solid rgba(248,113,113,0.25)' }}>
+            <AlertCircle size={24} style={{ color: '#F87171' }} />
+          </div>
+          <p className="font-bold text-white" style={{ fontFamily: 'Bricolage Grotesque, sans-serif' }}>
+            Could not load bookings
+          </p>
+          <p className="max-w-sm text-sm" style={{ color: 'rgba(255,255,255,0.45)' }}>
+            This is a loading failure, not an empty result — there may well be bookings here.
+          </p>
+          <button type="button" onClick={() => void refetch()}
+            className="mt-1 rounded-xl px-4 py-2 text-xs font-semibold transition-colors hover:brightness-110"
+            style={{ background: 'rgba(248,113,113,0.12)', border: '1px solid rgba(248,113,113,0.3)', color: '#F87171' }}>
+            Try again
+          </button>
+        </motion.div>
+      )}
+
       {/* ── Empty ─────────────────────────────────────── */}
-      {!isLoading && filtered.length === 0 && (
+      {!isLoading && !isError && filtered.length === 0 && (
         <motion.div
           initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}
           className="flex flex-col items-center gap-3 rounded-3xl py-20 text-center"
