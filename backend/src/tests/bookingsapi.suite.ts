@@ -35,7 +35,7 @@ process.env.R2_PUBLIC_URL = ''
 
 export {}
 
-import { rm } from 'fs/promises'
+import { rm, readdir, readFile } from 'fs/promises'
 
 let pass = 0, fail = 0
 const lines: string[] = []
@@ -78,6 +78,17 @@ async function call(method: string, p: string, jar?: Jar, body?: unknown) {
 
 const PW = 'Passw0rd!'
 const MIN = 60_000
+
+const MAILDIR = process.env.EMAIL_LOG_DIR!
+/* The cancel mail and its notification are fire-and-forget, so the 200 lands
+   before either exists. Settle first, or a negative assertion just races. */
+const settle = (ms = 600) => new Promise(r => setTimeout(r, ms))
+const readMails = async (): Promise<string[]> => {
+  try { return await readdir(MAILDIR) } catch { return [] }
+}
+const readMail = async (file: string): Promise<string> => {
+  try { return await readFile(`${MAILDIR}/${file}`, 'utf8') } catch { return '' }
+}
 
 try {
 
@@ -466,6 +477,67 @@ section('I. sort=scheduledStart orders by the session and pages stably')
   const totalMeta = (await call('GET', `/admin/bookings?sort=scheduledStart&liveClassId=${tied._id}&per_page=2`, adminJar)).body?.meta
   check('I9 the total counts the whole filter, not the page', totalMeta?.total_count === 12,
     JSON.stringify(totalMeta))
+}
+
+/* ═══════════ J — the export's page size must be one the server accepts ═══════════ */
+section('J. per_page contract: the CSV exporter and the API agree')
+{
+  /* The exporter walks the whole filter at a fixed page size. It asked for 500
+     while the schema capped per_page at 200, so EVERY export request was
+     rejected 422 and the feature never produced a file — a mismatch no
+     type-check could see, because the two numbers live in different projects. */
+  const EXPORT_PAGE_SIZE = 200   // must equal PER in admin fetchAllAdminBookings
+
+  const at = await call('GET', `/admin/bookings?per_page=${EXPORT_PAGE_SIZE}&dateFrom=2000-01-01&dateTo=2099-01-01`, adminJar)
+  check('J1 the exporter page size is accepted by the API', at.status === 200,
+    `per_page=${EXPORT_PAGE_SIZE} -> ${at.status} ${at.code}`)
+
+  const over = await call('GET', '/admin/bookings?per_page=201', adminJar)
+  check('J2 one above the cap is refused, so the cap is real and 200 is its edge',
+    over.status === 422, `${over.status}`)
+
+  /* The stats endpoint shares the same schema, and the exporter reuses the same
+     filter object, so it has to accept the page size too. */
+  const st = await call('GET', `/admin/bookings/stats?per_page=${EXPORT_PAGE_SIZE}`, adminJar)
+  check('J3 stats accepts it as well', st.status === 200, `${st.status}`)
+}
+
+/* ═══════════ K — what an admin-cancelled student is actually told ═══════════ */
+section('K. an admin cancel reaches the student, legibly')
+{
+  const { NotificationModel } = await import('@/models/schema.ts')
+  const cls = await mkClass('K Cancel Notice')
+  const stu = await mk('kcancel@ba.test', 'student', orgA)
+  const bk  = await seat(stu, cls)
+
+  const before = await readMails()
+  const r = await call('PATCH', `/admin/bookings/${bk._id}/cancel`, adminJar)
+  check('K1 the cancel succeeds', r.status === 200, `${r.status} ${r.code}`)
+
+  /* Fire-and-forget: the response lands before the mail and notification. */
+  await settle()
+
+  /* The student path always creates an in-app notification; this path created
+     none at all, so an admin-released seat left no trace in the bell. */
+  const notes = await NotificationModel.find({ userId: stu._id, kind: 'booking-cancelled' }).lean()
+  check('K2 an in-app booking-cancelled notification is created', notes.length === 1,
+    `found ${notes.length}`)
+  check('K3 …and it links somewhere useful',
+    String((notes[0] as any)?.link ?? '') === '/class-bookings', JSON.stringify(notes[0] ?? null))
+
+  const fresh = (await readMails()).filter(m => !before.includes(m))
+  const mail  = fresh.find(m => m.includes('kcancel@ba.test'))
+  check('K4 a cancellation email is sent to the student', !!mail, fresh.join(','))
+
+  /* The template re-parses its sessionStart argument with new Date(). Passing
+     an already-localized label produced 'Invalid Date at Invalid Date' in the
+     body — a defect the types could not catch, because the parameter accepts
+     both a Date and a string. */
+  const body = mail ? await readMail(mail) : ''
+  check('K5 the email does NOT say "Invalid Date"', !/Invalid Date/.test(body),
+    (body.match(/.{0,80}Invalid Date.{0,40}/) ?? [''])[0])
+  check('K6 …it names the real session date', /2026|2027/.test(body),
+    body.slice(0, 200))
 }
 
 } catch (err) {

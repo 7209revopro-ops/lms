@@ -405,7 +405,7 @@ export async function fetchAllAdminBookings(
   params: AdminBookingParams,
   opts: { onProgress?: (loaded: number, total: number) => void; hardCap?: number } = {},
 ): Promise<{ docs: ClassBooking[]; total: number; truncated: boolean }> {
-  const PER  = 500
+  const PER  = 200
   const cap  = opts.hardCap ?? 20_000
   const docs: ClassBooking[] = []
   let page  = 1

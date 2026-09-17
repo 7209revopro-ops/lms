@@ -2265,13 +2265,38 @@ router.patch('/bookings/:id/cancel', requireInstructor, requirePermission('booki
           UserModel.findById(existing.userId).select('name email').lean(),
           LiveClassModel.findById(existing.liveClassId).select('title scheduledStart').lean(),
         ])
+        const title = (lc as any)?.title ?? 'Session'
+        const start = (lc as any)?.scheduledStart ? new Date((lc as any).scheduledStart) : null
+
+        /* In-app notification FIRST, and unconditionally. The student path
+           (afterBookingCancelled in bookings.routes.ts) always creates one, and
+           this path created none at all — so a seat released by an admin left no
+           trace in the bell, and a student with no working mailbox had no way to
+           learn about it. It also does not depend on a mail server being up. */
+        const dateLabel = start
+          ? start.toLocaleString('en-US', { dateStyle: 'full', timeStyle: 'short', timeZone: 'Asia/Dubai' })
+          : 'its scheduled date'
+        const { NotificationService: NotifSvc } = await import('@/services/notification.service.ts')
+        await new NotifSvc().create(String(existing.userId), {
+          kind:  'booking-cancelled',
+          title: `Booking cancelled: ${title}`,
+          body:  `Your booking for ${title} on ${dateLabel} has been cancelled.`,
+          link:  '/class-bookings',
+        }).catch(() => { /* non-fatal */ })
+
         if (!student || !(student as any).email) return
         const { sendCancelledNotification } = await import('@/services/email.service.ts')
+        /* The raw Date, NOT a formatted string. This argument is typed
+           `Date | string` and the template re-parses it with new Date()
+           (email.service.ts:1238). A localized label like "Thursday, September
+           17, 2026 at 10:00 PM" is not a parseable date, so the mail went out
+           reading "your scheduled class on Invalid Date at Invalid Date has
+           been cancelled". The type accepted it; only the output showed it. */
         await sendCancelledNotification(
           (student as any).email,
           (student as any).name ?? '',
-          (lc as any)?.title ?? 'Session',
-          new Date((lc as any)?.scheduledStart ?? Date.now()).toLocaleString('en-US', { dateStyle: 'full', timeStyle: 'short' }),
+          title,
+          start ?? new Date(),
         )
       } catch {
         /* Non-fatal: the seat is already released and the caller already has
