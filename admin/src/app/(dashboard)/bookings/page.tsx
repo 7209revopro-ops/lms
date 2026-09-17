@@ -169,6 +169,10 @@ const LANG_FLAG: Record<string, string> = {
   Urdu:      '🇵🇰',
 }
 
+/* The allowed sort values, shared by the control and the URL parser so the two
+   can never disagree about what is valid. */
+const SORT_VALUES = ['scheduledStart', '-scheduledStart', '-bookedAt', 'bookedAt'] as const
+
 /* ─── Status palette ─────────────────────────────────────── */
 const STATUS_PAL: Record<BookingStatus, { bg: string; color: string; label: string }> = {
   booked:    { bg: 'rgba(16,185,129,0.12)',  color: '#34D399', label: 'Booked'    },
@@ -520,6 +524,67 @@ export default function BookingsPage() {
   const [langFilter,       setLangFilter]       = useState('')
   const [search,           setSearch]           = useState('')
   const [page,             setPage]             = useState(1)
+
+  /* The whole filter lives in the URL, so a view can be bookmarked, shared with
+     a colleague, and survives a refresh or a back-button. It used to reset to
+     the default range on every reload, which on a console people keep open all
+     day meant re-applying the same four filters over and over.
+
+     Read in an effect rather than a useState initializer: the date helpers
+     resolve against the ACTIVE ACADEMY zone, which TimezoneScope sets during
+     render, so parsing a day at initializer time could land a day out for a
+     Bangalore admin. `hydrated` gates the writer so the mount write cannot
+     clobber the URL before it has been read.
+     It is STATE, not a ref: a ref flips synchronously, so the writer would run
+     in the same commit as the reader — seeing the still-default state, because
+     the setters below only take effect on the next render — and overwrite the
+     URL with defaults before it had been applied. As state it forces the writer
+     to wait one render, by which time the parsed values are actually in place. */
+  const [hydrated, setHydrated] = useState(false)
+
+  useEffect(() => {
+    if (typeof window === 'undefined') { setHydrated(true); return }
+    const sp = new URLSearchParams(window.location.search)
+    /* [0-9] rather than a backslash-d class: this file is edited by script and
+       a lost backslash would silently reject every valid date. */
+    const ymd = /^[0-9]{4}-[0-9]{2}-[0-9]{2}$/
+
+    /* Shape-valid is NOT date-valid. "2026-13-99" matches the pattern above but
+       is not a real day, and the academy-zone helpers run it through
+       Intl.formatToParts, which THROWS on an Invalid Date rather than returning
+       one — so a hand-edited or stale link took the whole page down with it,
+       during the mount effect, leaving it stuck on the auth spinner. Reject
+       anything Date itself cannot parse before the helpers ever see it. */
+    const parseDay = (v: string | null, endOfDay: boolean): Date | null => {
+      if (!v || !ymd.test(v)) return null
+      if (Number.isNaN(new Date(`${v}T00:00:00Z`).getTime())) return null
+      return endOfDay ? ymdToEnd(v) : ymdToStart(v)
+    }
+    const from = parseDay(sp.get('from'), false)
+    const to   = parseDay(sp.get('to'),   true)
+    if (from) setDateFrom(from)
+    if (to)   setDateTo(to)
+
+    /* Every value is validated against the same list the control offers. A URL
+       is user-editable, and a bogus one would otherwise be forwarded to the API
+       and answered 422 with an empty table and no explanation. */
+    const st = sp.get('status')
+    if (st && (['booked', 'attended', 'missed', 'cancelled'] as const).includes(st as BookingStatus)) setStatusFilter(st as BookingStatus)
+    const dv = sp.get('delivery')
+    if (dv === 'online' || dv === 'offline') setDeliveryFilter(dv)
+    const so = sp.get('sort')
+    if (so && (SORT_VALUES as readonly string[]).includes(so)) setSort(so as NonNullable<AdminBookingParams['sort']>)
+    if (sp.get('unmarked') === '1') setNeedsMarking(true)
+    if (sp.get('course'))     setCourseFilter(sp.get('course')!)
+    if (sp.get('instructor')) setInstructorFilter(sp.get('instructor')!)
+    if (sp.get('lang'))       setLangFilter(sp.get('lang')!)
+    if (sp.get('q'))          setSearch(sp.get('q')!)
+    const pg = Number(sp.get('page'))
+    if (Number.isInteger(pg) && pg > 1) setPage(pg)
+
+    setHydrated(true)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
   const [showFilters,      setShowFilters]       = useState(false)
 
   /* Supporting data for filter dropdowns — course list scoped to this admin's program */
@@ -550,6 +615,32 @@ export default function BookingsPage() {
     needsMarking: needsMarking ? 'true' as const : undefined,
     sort,
   }), [dateFrom, dateTo, statusFilter, courseFilter, instructorFilter, langFilter, debouncedSearch, deliveryFilter, needsMarking, sort])
+
+  /* Mirror the live filter into the URL. replaceState rather than router.push:
+     typing in the search box changes this on nearly every keystroke, and each
+     one would otherwise become a separate history entry, so Back would walk
+     letter by letter instead of leaving the page. */
+  useEffect(() => {
+    if (!hydrated || typeof window === 'undefined') return
+    const sp = new URLSearchParams()
+    /* Only non-defaults, so a clean view has a clean URL. */
+    sp.set('from', toYMD(dateFrom))
+    sp.set('to',   toYMD(dateTo))
+    if (statusFilter)             sp.set('status', statusFilter)
+    if (deliveryFilter !== 'all') sp.set('delivery', deliveryFilter)
+    if (sort !== 'scheduledStart') sp.set('sort', sort)
+    if (needsMarking)             sp.set('unmarked', '1')
+    if (courseFilter)             sp.set('course', courseFilter)
+    if (instructorFilter)         sp.set('instructor', instructorFilter)
+    if (langFilter)               sp.set('lang', langFilter)
+    if (search.trim())            sp.set('q', search.trim())
+    if (page > 1)                 sp.set('page', String(page))
+    const next = `${window.location.pathname}?${sp.toString()}`
+    if (next !== window.location.pathname + window.location.search) {
+      window.history.replaceState(null, '', next)
+    }
+  }, [hydrated, dateFrom, dateTo, statusFilter, deliveryFilter, sort, needsMarking,
+      courseFilter, instructorFilter, langFilter, search, page])
 
   /* Narrowing the filter can leave you on a page that no longer exists, which
      renders as an empty table rather than "no results". */
