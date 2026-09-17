@@ -20,6 +20,7 @@ import { useUsers } from '@/lib/api/users'
 import { useCurrentUser } from '@/lib/api/user'
 import Spinner from '@/components/ui/Spinner'
 import { useToast } from '@/store/ui.store'
+import { datetimeLocalToISO } from '@/lib/timezone'
 
 /* ─── Custom dark dropdown ───────────────────────────────── */
 interface SelectOption { value: string; label: string }
@@ -105,6 +106,35 @@ function toYMD(d: Date): string {
     year: 'numeric', month: '2-digit', day: '2-digit',
   }).format(d)
 }
+
+/* The inverse of toYMD, and it has to be: toYMD formats in the ACADEMY zone
+   while `new Date('2026-09-17T00:00:00')` parses in the DEVICE zone, so the
+   two did not round-trip. An admin on a device east of the academy — Dubai
+   academy, Singapore laptop — picked a day and watched the input snap back to
+   the day before, then got that wrong day's bookings, because the same value
+   is what goes to the server. Both directions now speak the academy zone, so
+   toYMD(ymdToStart(x)) === x for every x. */
+/* On a DST spring-forward day the local midnight does not exist, and the
+   conversion lands on the day before — filtering the wrong day. Neither
+   supported academy zone observes DST, but ORG_TIMEZONES is the kind of map
+   that grows, so step to the nearest hour that does exist instead of
+   inheriting a silent off-by-one the day an academy opens in one. */
+function onSameDay(ymd: string, wall: string): Date | null {
+  const d = new Date(datetimeLocalToISO(`${ymd}T${wall}`))
+  return toYMD(d) === ymd ? d : null
+}
+function ymdToStart(ymd: string): Date {
+  return onSameDay(ymd, '00:00') ?? onSameDay(ymd, '01:00') ?? new Date(datetimeLocalToISO(`${ymd}T12:00`))
+}
+function ymdToEnd(ymd: string): Date {
+  return onSameDay(ymd, '23:59') ?? onSameDay(ymd, '22:59') ?? new Date(datetimeLocalToISO(`${ymd}T12:00`))
+}
+
+/* Start/end of the academy-zone day that `d` falls in. Anchoring to the
+   academy day (rather than setHours, which is the device day) keeps the
+   presets and the arrows on the same grid as the pickers. */
+const dayStart = (d: Date) => ymdToStart(toYMD(d))
+const dayEnd   = (d: Date) => ymdToEnd(toYMD(d))
 
 function fmtHeading(ymd: string): string {
   const today     = toYMD(new Date())
@@ -458,8 +488,8 @@ export default function BookingsPage() {
   const userScope       = (me as any)?.categoryScope as string | undefined  // '4x-trading' | 'digital-marketing' | undefined
 
   /* Date range — default: past 30 days to 90 days ahead (shows upcoming bookings) */
-  const [dateFrom, setDateFrom] = useState<Date>(() => { const d = addDays(new Date(), -30); d.setHours(0,0,0,0);       return d })
-  const [dateTo,   setDateTo]   = useState<Date>(() => { const d = addDays(new Date(),  90); d.setHours(23,59,59,999); return d })
+  const [dateFrom, setDateFrom] = useState<Date>(() => dayStart(addDays(new Date(), -30)))
+  const [dateTo,   setDateTo]   = useState<Date>(() => dayEnd(addDays(new Date(),  90)))
 
   /* Filters */
   const [statusFilter,     setStatusFilter]     = useState<BookingStatus | ''>('')
@@ -581,18 +611,15 @@ export default function BookingsPage() {
   const isToday      = toYMD(dateFrom) === toYMD(new Date())
   const hasFilters   = !!(search || statusFilter || deliveryFilter !== 'all' || courseFilter || instructorFilter || langFilter || needsMarking)
 
-  function shiftDay(n: number) { setDateFrom(d => addDays(d, n)); setDateTo(d => addDays(d, n)); setPage(1) }
+  function shiftDay(n: number) { setDateFrom(d => dayStart(addDays(d, n))); setDateTo(d => dayEnd(addDays(d, n))); setPage(1) }
   function goToday() {
-    const s = new Date(); s.setHours(0,0,0,0)
-    const e = new Date(); e.setHours(23,59,59,999)
-    setDateFrom(s); setDateTo(e); setPage(1)
+    setDateFrom(dayStart(new Date())); setDateTo(dayEnd(new Date())); setPage(1)
   }
   function clearFilters() {
     setSearch(''); setStatusFilter(''); setDeliveryFilter('all'); setCourseFilter(''); setInstructorFilter(''); setLangFilter(''); setNeedsMarking(false); setPage(1)
     // Restore default range: -30 days to +90 days
-    const s = addDays(new Date(), -30); s.setHours(0,0,0,0)
-    const e = addDays(new Date(),  90); e.setHours(23,59,59,999)
-    setDateFrom(s); setDateTo(e)
+    setDateFrom(dayStart(addDays(new Date(), -30)))
+    setDateTo(dayEnd(addDays(new Date(),  90)))
   }
 
   function handleStatusChange(val: BookingStatus | '') {
@@ -610,8 +637,8 @@ export default function BookingsPage() {
   }
 
   const setDateRange = (from: string, to: string) => {
-    setDateFrom(new Date(from + 'T00:00:00'))
-    setDateTo(new Date(to + 'T23:59:59'))
+    setDateFrom(ymdToStart(from))
+    setDateTo(ymdToEnd(to))
     setPage(1)
   }
 
@@ -688,11 +715,11 @@ export default function BookingsPage() {
           </div>
 
           <input type="date" value={toYMD(dateFrom)}
-            onChange={e => { setDateFrom(new Date(e.target.value + 'T00:00:00')); setPage(1) }}
+            onChange={e => { if (!e.target.value) return; setDateFrom(ymdToStart(e.target.value)); setPage(1) }}
             className={inputCls} style={inputStyle} />
           <span className="text-xs" style={{ color: 'rgba(255,255,255,0.30)' }}>to</span>
           <input type="date" value={toYMD(dateTo)}
-            onChange={e => { setDateTo(new Date(e.target.value + 'T23:59:59')); setPage(1) }}
+            onChange={e => { if (!e.target.value) return; setDateTo(ymdToEnd(e.target.value)); setPage(1) }}
             className={inputCls} style={inputStyle} />
 
           {isSingleDay && (
