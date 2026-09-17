@@ -2231,6 +2231,65 @@ const attendanceUpdateSchema = z.object({
   status: z.enum(['attended', 'missed']),
 })
 
+/* ── Mark a whole selection at once ─────────────────────
+   Attendance could only be set one seat at a time, so a session that ran with
+   thirty students meant thirty clicks — which is why so many past sessions were
+   simply never marked (see the `unmarked` bucket in /bookings/stats).
+
+   Not a loop over the single-seat route: that would re-run the tenancy check
+   per booking, and a partial failure halfway through would leave the roster
+   split between marked and unmarked with no way to tell where it stopped. */
+const bulkAttendanceSchema = z.object({
+  /* Capped so one request cannot be turned into an unbounded scan. The UI
+     selects at most a page. */
+  ids:    z.array(z.string()).min(1).max(200),
+  status: z.enum(['attended', 'missed']),
+})
+
+router.patch('/bookings/bulk-attendance', requireInstructor, requirePermission('bookings', 'update'),
+  validate(bulkAttendanceSchema),
+  audit('booking.bulkAttendance', 'ClassBooking', () => 'bulk'),
+  async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { ClassBookingModel } = await import('@/models/schema.ts')
+    const { Types } = await import('mongoose')
+    const { ids, status } = req.body as { ids: string[]; status: 'attended' | 'missed' }
+
+    const valid = [...new Set(ids)].filter(i => Types.ObjectId.isValid(i)).map(i => new Types.ObjectId(i))
+    if (valid.length === 0) { sendSuccess(res, { updated: 0, skipped: ids.length }, 'Nothing to update'); return }
+
+    const docs = await ClassBookingModel.find({ _id: { $in: valid } }, '_id liveClassId status').lean()
+
+    /* Check each SESSION once, not each booking: a bulk mark is nearly always
+       one class's roster and callerMayManageSession costs a query apiece. */
+    const bySession = new Map<string, boolean>()
+    for (const d of docs) {
+      const key = String((d as any).liveClassId ?? '')
+      if (!bySession.has(key)) bySession.set(key, await callerMayManageSession(req, (d as any).liveClassId))
+    }
+
+    /* Only seats that are still undecided. Sweeping a CANCELLED seat back to
+       'attended' would resurrect a booking the student released and re-consume
+       the capacity that was given back — and 'attended' feeds the 2x-attendance
+       cap, so it can lock them out of a class they never took. Out-of-scope ids
+       are skipped rather than refused, matching the 404-not-403 rule: the
+       response must not confirm that an id exists in another academy. */
+    const allowed = docs
+      .filter(d => bySession.get(String((d as any).liveClassId ?? '')) === true && (d as any).status === 'booked')
+      .map(d => (d as any)._id)
+
+    /* `status: 'booked'` repeated in the filter, so a seat cancelled between
+       the read above and this write is still not swept up. */
+    const result = allowed.length
+      ? await ClassBookingModel.updateMany({ _id: { $in: allowed }, status: 'booked' }, { status })
+      : { modifiedCount: 0 }
+    const updated = result.modifiedCount ?? 0
+
+    sendSuccess(res, { updated, skipped: ids.length - updated },
+      updated === 0 ? 'Nothing to update' : `Marked ${updated} ${status}`)
+  } catch (err) { next(err) }
+})
+
 router.patch('/bookings/:id/attendance', requireInstructor, requirePermission('bookings','update'), validate(attendanceUpdateSchema), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { ClassBookingModel } = await import('@/models/schema.ts')

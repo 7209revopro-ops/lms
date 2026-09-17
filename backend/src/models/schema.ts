@@ -1774,6 +1774,7 @@ export type AuditAction =
   | 'user.impersonate.client'
   | 'recording.view'
   | 'booking.cancel'
+  | 'booking.bulkAttendance'
   | 'review.delete'
   | 'coupon.create'   | 'coupon.delete'
   | 'order.refund'

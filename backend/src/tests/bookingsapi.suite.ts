@@ -338,6 +338,59 @@ section('G. needsMarking narrows to booked-and-already-run, and never widens')
     JSON.stringify(foreign.body?.data))
 }
 
+/* ═══════════ H — bulk attendance ═══════════ */
+section('H. bulk attendance marks a whole roster without widening scope')
+{
+  const cls  = await mkClass('Bulk Roster', { scheduledStart: new Date(Date.now() - 2 * 24 * 60 * MIN) })
+  const s1 = await seat(await mk('bulk1@ba.test', 'student', orgA), cls)
+  const s2 = await seat(await mk('bulk2@ba.test', 'student', orgA), cls)
+  const s3 = await seat(await mk('bulk3@ba.test', 'student', orgA), cls)
+
+  /* A seat the student already released. Sweeping it back to `attended` would
+     resurrect a cancelled booking and re-consume the capacity given back. */
+  await call('PATCH', `/admin/bookings/${s3._id}/cancel`, adminJar)
+
+  /* And a seat belonging to another academy entirely. */
+  const clsB  = await mkClass('Other Academy', {}, orgB)
+  const sB    = await seat(await mk('bulkb@bb.test', 'student', orgB), clsB)
+
+  const r = await call('PATCH', '/admin/bookings/bulk-attendance', adminJar,
+    { ids: [String(s1._id), String(s2._id), String(s3._id), String(sB._id)], status: 'attended' })
+  check('H1 returns 200', r.status === 200, `${r.status} ${r.code}`)
+  check('H2 only the two eligible seats are marked', r.body?.data?.updated === 2,
+    JSON.stringify(r.body?.data))
+
+  const after = await ClassBookingModel.find({ _id: { $in: [s1._id, s2._id, s3._id, sB._id] } }, '_id status').lean()
+  const st = (id: any) => (after.find((x: any) => String(x._id) === String(id)) as any)?.status
+  check('H3 the two booked seats are attended', st(s1._id) === 'attended' && st(s2._id) === 'attended',
+    `${st(s1._id)}/${st(s2._id)}`)
+  check('H4 the cancelled seat is NOT resurrected', st(s3._id) === 'cancelled', String(st(s3._id)))
+  check('H5 a seat in another academy is untouched', st(sB._id) === 'booked', String(st(sB._id)))
+
+  /* Skipped, not refused: a 403 would confirm the foreign id exists. */
+  const onlyForeign = await call('PATCH', '/admin/bookings/bulk-attendance', adminJar,
+    { ids: [String(sB._id)], status: 'missed' })
+  check('H6 an out-of-scope id is skipped, not refused',
+    onlyForeign.status === 200 && onlyForeign.body?.data?.updated === 0,
+    `${onlyForeign.status} ${JSON.stringify(onlyForeign.body?.data)}`)
+
+  /* Re-running must not double-count: the seats are no longer `booked`. */
+  const again = await call('PATCH', '/admin/bookings/bulk-attendance', adminJar,
+    { ids: [String(s1._id), String(s2._id)], status: 'attended' })
+  check('H7 re-marking already-decided seats updates nothing', again.body?.data?.updated === 0,
+    JSON.stringify(again.body?.data))
+
+  /* The stats bucket the button exists to drain must actually drain. */
+  const stats = (await call('GET', `/admin/bookings/stats?liveClassId=${cls._id}`, adminJar)).body?.data
+  check('H8 the unmarked bucket is drained', stats?.unmarked === 0, JSON.stringify(stats))
+
+  const bad = await call('PATCH', '/admin/bookings/bulk-attendance', adminJar, { ids: [], status: 'attended' })
+  check('H9 an empty selection is rejected by validation', bad.status === 422, `${bad.status}`)
+  const badStatus = await call('PATCH', '/admin/bookings/bulk-attendance', adminJar,
+    { ids: [String(s1._id)], status: 'cancelled' })
+  check('H10 bulk cannot be used to cancel', badStatus.status === 422, `${badStatus.status}`)
+}
+
 } catch (err) {
   fail++
   lines.push(`\n  FATAL  ${(err as Error).stack ?? String(err)}`)

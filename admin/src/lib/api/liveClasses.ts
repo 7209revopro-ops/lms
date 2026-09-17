@@ -480,6 +480,22 @@ export function useUpdateAttendance() {
   })
 }
 
+/* Mark a whole selection in one request.
+
+   Not a loop of useUpdateAttendance: a partial failure halfway through would
+   leave the roster split between marked and unmarked with nothing to say where
+   it stopped, and the cache would be invalidated once per seat. */
+export function useBulkAttendance() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ ids, status }: { ids: string[]; status: 'attended' | 'missed' }) =>
+      apiPatch<{ updated: number; skipped: number }>('/admin/bookings/bulk-attendance', { ids, status }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['admin', 'bookings'] })
+    },
+  })
+}
+
 /* Release a seat on a student's behalf. There was no admin path to do this at
    all, so a seat taken by mistake kept a session full for ever. */
 export function useCancelBooking() {

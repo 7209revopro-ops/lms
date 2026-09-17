@@ -10,7 +10,7 @@ import {
   Filter, ChevronDown, Check, Wifi, Building2, MapPin,
 } from 'lucide-react'
 import {
-  useAdminBookings, useAdminBookingStats, useUpdateAttendance, useCancelBooking,
+  useAdminBookings, useAdminBookingStats, useUpdateAttendance, useCancelBooking, useBulkAttendance,
   fetchAllAdminBookings,
   type AdminBookingStats,
   type ClassBooking, type BookingStatus,
@@ -342,7 +342,12 @@ function StatsStrip({ stats, needsMarking, onNeedsMarking }: {
 }
 
 /* ─── Booking row ────────────────────────────────────────── */
-function BookingRow({ booking, index }: { booking: ClassBooking; index: number }) {
+function BookingRow({ booking, index, selectable, selected, onToggle }: {
+  booking: ClassBooking; index: number
+  selectable: boolean
+  selected: boolean
+  onToggle: (id: string) => void
+}) {
   const lc         = booking.liveClassId as typeof booking.liveClassId | null
   const student    = booking.userId
   if (!lc || !student) return null   // live class or user was deleted
@@ -363,6 +368,17 @@ function BookingRow({ booking, index }: { booking: ClassBooking; index: number }
       onMouseEnter={e => (e.currentTarget.style.background = isOffline ? 'rgba(16,185,129,0.04)' : 'rgba(0,87,184,0.03)')}
       onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
     >
+      {/* Select — only seats that are still undecided can be marked, so the
+          rest render an empty cell rather than a checkbox that does nothing. */}
+      <td className="py-3 pl-5 pr-0 align-middle">
+        {selectable ? (
+          <input type="checkbox" checked={selected}
+            onChange={() => onToggle(booking.id)}
+            aria-label={`Select ${student.name}`}
+            className="h-3.5 w-3.5 cursor-pointer accent-indigo-400" />
+        ) : <span className="block h-3.5 w-3.5" />}
+      </td>
+
       {/* Student */}
       <td className="py-3 pr-3" style={{ paddingLeft: 0 }}>
         <div className="flex items-center gap-2.5 min-w-0">
@@ -534,6 +550,11 @@ export default function BookingsPage() {
      renders as an empty table rather than "no results". */
   useEffect(() => { setPage(1) }, [query])
 
+  /* A selection must never outlive the rows it was made on. Keeping it across
+     a filter or page change would let a bulk mark hit seats the operator can
+     no longer see — the count would say 12 while the screen showed 3. */
+  useEffect(() => { setSelected(new Set()) }, [query, page])
+
   const { data, isLoading } = useAdminBookings({ ...query, page, per_page: 150 })
   const { data: stats }     = useAdminBookingStats(query)
 
@@ -545,6 +566,33 @@ export default function BookingsPage() {
      before it can write. Disabled while running: a second click would start a
      competing walk and hand over two half-files. */
   const [exporting, setExporting] = useState<{ loaded: number; total: number } | null>(null)
+
+  async function markSelected(status: 'attended' | 'missed') {
+    const ids = [...selected]
+    if (ids.length === 0 || bulk.isPending) return
+    try {
+      const r = await bulk.mutateAsync({ ids, status })
+      setSelected(new Set())
+      /* Report what the SERVER did, not what was asked. A seat cancelled in
+         another tab is skipped, and claiming otherwise would be a lie the
+         operator only discovers later. */
+      if (r.updated === 0) toast.info('Nothing to update', 'Those seats were already marked or are no longer bookable.')
+      else if (r.skipped > 0) toast.success(`Marked ${r.updated} ${status}`, `${r.skipped} skipped — already marked or no longer bookable.`)
+      else toast.success(`Marked ${r.updated} ${status}`)
+    } catch {
+      toast.error('Could not update attendance', 'Nothing was changed. Please try again.')
+    }
+  }
+
+  /* Bulk selection. Only undecided seats are selectable — marking an already
+     attended seat is a no-op and marking a cancelled one would resurrect it. */
+  const [selected, setSelected] = useState<Set<string>>(new Set())
+  const bulk = useBulkAttendance()
+  const toggleOne = (id: string) => setSelected(prev => {
+    const next = new Set(prev)
+    next.has(id) ? next.delete(id) : next.add(id)
+    return next
+  })
   async function handleExport() {
     if (exporting) return
     setExporting({ loaded: 0, total: totalCount })
@@ -979,6 +1027,29 @@ export default function BookingsPage() {
                     <table className="w-full min-w-[720px]">
                       <thead>
                         <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.07)' }}>
+                          {(() => {
+                            /* Scoped to THIS day, not the whole result set: a
+                               header box that silently selected rows on other
+                               days would be a trap. */
+                            const ids  = group.rows.filter(r => r.status === 'booked').map(r => r.id)
+                            const on   = ids.length > 0 && ids.every(id => selected.has(id))
+                            const some = ids.some(id => selected.has(id))
+                            return (
+                              <th className="py-2.5 pl-5 pr-0 w-8"
+                                style={{ background: 'rgba(255,255,255,0.02)' }}>
+                                <input type="checkbox" checked={on} disabled={ids.length === 0}
+                                  ref={el => { if (el) el.indeterminate = !on && some }}
+                                  aria-label={`Select all bookings on ${group.heading}`}
+                                  onChange={() => setSelected(prev => {
+                                    const next = new Set(prev)
+                                    if (on) ids.forEach(id => next.delete(id))
+                                    else    ids.forEach(id => next.add(id))
+                                    return next
+                                  })}
+                                  className="h-3.5 w-3.5 cursor-pointer accent-indigo-400 disabled:opacity-25" />
+                              </th>
+                            )
+                          })()}
                           {TH_COLS.map((col, ci) => (
                             <th key={ci}
                               className={`py-2.5 px-3 text-left text-[10px] font-semibold uppercase tracking-widest first:pl-5 last:pr-5 ${col.cls ?? ''}`}
@@ -992,7 +1063,10 @@ export default function BookingsPage() {
                       </thead>
                       <tbody>
                         {group.rows.map((b, i) => (
-                          <BookingRow key={b.id} booking={b} index={i} />
+                          <BookingRow key={b.id} booking={b} index={i}
+                            selectable={b.status === 'booked'}
+                            selected={selected.has(b.id)}
+                            onToggle={toggleOne} />
                         ))}
                       </tbody>
                     </table>
@@ -1000,6 +1074,39 @@ export default function BookingsPage() {
                 </div>
               </div>
             ))}
+
+            {/* Bulk action bar — only while something is selected. Sticky at the
+                bottom so it stays reachable on a long day list. */}
+            <AnimatePresence>
+              {selected.size > 0 && (
+                <motion.div
+                  initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 12 }}
+                  transition={{ type: 'spring', stiffness: 380, damping: 30 }}
+                  className="sticky bottom-4 z-20 mx-auto flex w-fit items-center gap-2 rounded-2xl px-3 py-2 backdrop-blur"
+                  style={{ background: 'rgba(18,18,22,0.92)', border: '1px solid rgba(255,255,255,0.12)', boxShadow: '0 8px 32px rgba(0,0,0,0.45)' }}>
+                  <span className="px-1 text-xs font-semibold" style={{ color: 'rgba(255,255,255,0.75)' }}>
+                    {selected.size} selected
+                  </span>
+                  <span className="h-4 w-px" style={{ background: 'rgba(255,255,255,0.12)' }} />
+                  <button type="button" onClick={() => markSelected('attended')} disabled={bulk.isPending}
+                    className="flex items-center gap-1.5 rounded-xl px-3 py-1.5 text-xs font-semibold transition-colors hover:brightness-125 disabled:opacity-50"
+                    style={{ background: 'rgba(99,102,241,0.15)', border: '1px solid rgba(99,102,241,0.3)', color: '#818CF8' }}>
+                    <CheckCircle2 size={12} /> Mark attended
+                  </button>
+                  <button type="button" onClick={() => markSelected('missed')} disabled={bulk.isPending}
+                    className="flex items-center gap-1.5 rounded-xl px-3 py-1.5 text-xs font-semibold transition-colors hover:brightness-125 disabled:opacity-50"
+                    style={{ background: 'rgba(245,158,11,0.15)', border: '1px solid rgba(245,158,11,0.3)', color: '#FCD34D' }}>
+                    <XCircle size={12} /> Mark missed
+                  </button>
+                  <button type="button" onClick={() => setSelected(new Set())} disabled={bulk.isPending}
+                    aria-label="Clear selection"
+                    className="rounded-xl px-2 py-1.5 transition-colors hover:bg-white/10 disabled:opacity-50"
+                    style={{ color: 'rgba(255,255,255,0.45)' }}>
+                    <X size={13} />
+                  </button>
+                </motion.div>
+              )}
+            </AnimatePresence>
 
             {/* Pagination */}
             {totalPages > 1 && (
