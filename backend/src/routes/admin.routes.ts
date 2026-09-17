@@ -1873,6 +1873,10 @@ const bookingQuerySchema = z.object({
      student whose booking sat on page 2 answered "No bookings found" for a
      booking that plainly exists. */
   q:            z.string().trim().min(2).max(120).optional(),
+  /* The actionable slice of `booked`: sessions that have already run and were
+     never marked. Deliberately NOT a member of the status enum — it is a
+     status AND a tense, and no single stored field carries both. */
+  needsMarking: z.enum(['true']).optional(),
   /* Delivery. Same story as `q`: the toggle filtered the loaded page only.
      In-person is isOnline === false; online is anything else, because older
      rows predate the field. */
@@ -1905,114 +1909,146 @@ function escapeRegex(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }
 
+/* The ONE place the bookings scope is computed.
+
+   The list and the stats endpoint must apply IDENTICAL organisation,
+   instructor and programme scoping. A second hand-rolled copy is exactly how
+   the courseId bypass got in, so there is deliberately only one.
+
+   Returns null when the caller asked for something outside their scope; both
+   routes answer that as an empty result rather than a 403, which would confirm
+   the resource exists. */
+async function buildBookingFilter(
+  req: Request,
+  q: z.infer<typeof bookingQuerySchema>,
+): Promise<Record<string, any> | null> {
+  const { LiveClassModel, UserModel } = await import('@/models/schema.ts')
+  const { Types } = await import('mongoose')
+
+  /* ── Step 1: Build live-class filter (instructor scope + date + courseId) ── */
+  const lcFilter: Record<string, any> = {}
+
+  // Org isolation — scoped users only see their org's classes
+  if (req.user!.organizationId && Types.ObjectId.isValid(req.user!.organizationId)) {
+    lcFilter['organizationId'] = new Types.ObjectId(req.user!.organizationId)
+  }
+
+  // Instructors only see their own classes
+  if (req.user!.role === 'instructor') {
+    lcFilter['instructorId'] = new Types.ObjectId(req.user!.id)
+  } else if (q.instructorId && Types.ObjectId.isValid(q.instructorId)) {
+    lcFilter['instructorId'] = new Types.ObjectId(q.instructorId)
+  }
+
+  // Programme-scoped admins (sub_admin) only see their program's bookings
+  const scope = (req.user as any)?.categoryScope as string | undefined
+  let scopedCourseIds: MongoTypes.ObjectId[] | null = null
+  if (scope) {
+    const { CourseModel } = await import('@/models/schema.ts')
+    const scopedCourses = await CourseModel.find({ program: scope }, '_id').lean()
+    scopedCourseIds = scopedCourses.map((c: any) => c._id)
+    lcFilter['courseId'] = { $in: scopedCourseIds }
+  }
+
+  /* Narrow to one course — but INTERSECT with the programme scope, never
+     replace it. This used to apply the scope only `if (!q.courseId)` and then
+     assign straight over `lcFilter.courseId`, so a programme-scoped sub_admin
+     who passed another programme's course id got that course's full roster,
+     with every student's name and email. Same rule as the liveClassId guard
+     below (P-04): "more specific" has to mean narrower, never wider. */
+  if (q.courseId && Types.ObjectId.isValid(q.courseId)) {
+    const requested = new Types.ObjectId(q.courseId)
+    const inScope   = !scopedCourseIds || scopedCourseIds.some(id => String(id) === String(requested))
+    if (!inScope) return null   // out of scope → caller sees an empty result
+    lcFilter['courseId'] = requested
+  }
+
+  if (q.language) {
+    lcFilter['language'] = q.language
+  }
+
+  /* In-person is isOnline === false. Online is "not false" rather than true,
+     because rows created before the field existed have it unset. */
+  if (q.isOnline === 'false')     lcFilter['isOnline'] = false
+  else if (q.isOnline === 'true') lcFilter['isOnline'] = { $ne: false }
+
+  // For cancelled bookings the date range applies to cancelledAt (not scheduledStart)
+  if ((q.dateFrom || q.dateTo) && q.status !== 'cancelled') {
+    lcFilter['scheduledStart'] = dayRangeBounds(q.dateFrom, q.dateTo)
+  }
+
+  /* Spread the existing bound rather than assigning over it: both this and the
+     date range above write `scheduledStart`, and an overwrite would silently
+     drop whichever ran first — widening the result instead of narrowing it. */
+  if (q.needsMarking === 'true') {
+    lcFilter['scheduledStart'] = { ...(lcFilter['scheduledStart'] as object ?? {}), $lt: new Date() }
+  }
+
+  /* ── Step 2: Resolve live-class IDs if needed ── */
+  const filter: Record<string, any> = {}
+  if (Object.keys(lcFilter).length > 0) {
+    const matchingLcIds = await LiveClassModel.find(lcFilter, '_id').lean()
+    filter['liveClassId'] = { $in: matchingLcIds.map((l: any) => l._id) }
+  }
+
+  /* Narrow to one session — but INTERSECT with the scoped set, never replace
+     it (P-04). This used to assign straight over `filter['liveClassId']`,
+     discarding the organisation and instructor scoping resolved above, so
+     passing another academy's session id returned its full roster with every
+     student's name and email. "More specific" has to mean narrower. */
+  if (q.liveClassId && Types.ObjectId.isValid(q.liveClassId)) {
+    const requested = new Types.ObjectId(q.liveClassId)
+    const scoped    = filter['liveClassId'] as { $in?: unknown[] } | undefined
+    const inScope   = !scoped?.$in || scoped.$in.some(id => String(id) === String(requested))
+    if (!inScope) return null   // out of scope → caller sees an empty result
+    filter['liveClassId'] = requested
+  }
+  if (q.userId && Types.ObjectId.isValid(q.userId)) filter['userId'] = new Types.ObjectId(q.userId)
+  if (q.status) filter['status'] = q.status
+
+  /* needsMarking IS `booked`, narrowed to the past by the lcFilter above.
+     Pairing it with any other status is a contradiction, so answer empty
+     rather than letting one of the two quietly win. */
+  if (q.needsMarking === 'true') {
+    if (q.status && q.status !== 'booked') return null
+    filter['status'] = 'booked'
+  }
+
+  // Cancelled bookings: apply date range to cancelledAt instead of scheduledStart
+  if (q.status === 'cancelled' && (q.dateFrom || q.dateTo)) {
+    filter['cancelledAt'] = dayRangeBounds(q.dateFrom, q.dateTo)
+  }
+
+  /* Free-text search, server-side so it sees the whole result set and not
+     just the page the browser happens to hold. Matches the student's name or
+     email, OR the session title. The title arm is intersected with lcFilter
+     first, so a search can only ever narrow what the caller may already see —
+     it can never reach outside their organisation or programme scope. */
+  if (q.q) {
+    const rx = new RegExp(escapeRegex(q.q), 'i')
+    const [people, titled] = await Promise.all([
+      UserModel.find({ $or: [{ name: rx }, { email: rx }] }, '_id').limit(1000).lean(),
+      LiveClassModel.find({ ...lcFilter, title: rx }, '_id').lean(),
+    ])
+    filter['$or'] = [
+      { userId:      { $in: people.map((u: any) => u._id) } },
+      { liveClassId: { $in: titled.map((l: any) => l._id) } },
+    ]
+  }
+
+  return filter
+}
+
 router.get('/bookings', requireInstructor, requirePermission('bookings','list'), validate(bookingQuerySchema, 'query'), async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { ClassBookingModel, LiveClassModel, UserModel } = await import('@/models/schema.ts')
-    const { Types } = await import('mongoose')
+    const { ClassBookingModel } = await import('@/models/schema.ts')
     const q = req.query as unknown as z.infer<typeof bookingQuerySchema>
 
-    /* ── Step 1: Build live-class filter (instructor scope + date + courseId) ── */
-    const lcFilter: Record<string, any> = {}
-
-    // Org isolation — scoped users only see their org's classes
-    if (req.user!.organizationId && Types.ObjectId.isValid(req.user!.organizationId)) {
-      lcFilter['organizationId'] = new Types.ObjectId(req.user!.organizationId)
-    }
-
-    // Instructors only see their own classes
-    if (req.user!.role === 'instructor') {
-      lcFilter['instructorId'] = new Types.ObjectId(req.user!.id)
-    } else if (q.instructorId && Types.ObjectId.isValid(q.instructorId)) {
-      lcFilter['instructorId'] = new Types.ObjectId(q.instructorId)
-    }
-
-    // Programme-scoped admins (sub_admin) only see their program's bookings
-    const scope = (req.user as any)?.categoryScope as string | undefined
-    let scopedCourseIds: MongoTypes.ObjectId[] | null = null
-    if (scope) {
-      const { CourseModel } = await import('@/models/schema.ts')
-      const scopedCourses = await CourseModel.find({ program: scope }, '_id').lean()
-      scopedCourseIds = scopedCourses.map((c: any) => c._id)
-      lcFilter['courseId'] = { $in: scopedCourseIds }
-    }
-
-    /* Narrow to one course — but INTERSECT with the programme scope, never
-       replace it. This used to apply the scope only `if (!q.courseId)` and then
-       assign straight over `lcFilter.courseId`, so a programme-scoped sub_admin
-       who passed another programme's course id got that course's full roster,
-       with every student's name and email. Same rule as the liveClassId guard
-       below (P-04): "more specific" has to mean narrower, never wider. */
-    if (q.courseId && Types.ObjectId.isValid(q.courseId)) {
-      const requested = new Types.ObjectId(q.courseId)
-      const inScope   = !scopedCourseIds || scopedCourseIds.some(id => String(id) === String(requested))
-      if (!inScope) {
-        sendSuccess(res, [], undefined, 200,
-          buildPaginationMeta(0, Number(q.page) || 1, Number(q.per_page) || 50))
-        return
-      }
-      lcFilter['courseId'] = requested
-    }
-
-    if (q.language) {
-      lcFilter['language'] = q.language
-    }
-
-    /* In-person is isOnline === false. Online is "not false" rather than true,
-       because rows created before the field existed have it unset. */
-    if (q.isOnline === 'false')     lcFilter['isOnline'] = false
-    else if (q.isOnline === 'true') lcFilter['isOnline'] = { $ne: false }
-
-    // For cancelled bookings the date range applies to cancelledAt (not scheduledStart)
-    if ((q.dateFrom || q.dateTo) && q.status !== 'cancelled') {
-      lcFilter['scheduledStart'] = dayRangeBounds(q.dateFrom, q.dateTo)
-    }
-
-    /* ── Step 2: Resolve live-class IDs if needed ── */
-    const filter: Record<string, any> = {}
-    if (Object.keys(lcFilter).length > 0) {
-      const matchingLcIds = await LiveClassModel.find(lcFilter, '_id').lean()
-      filter['liveClassId'] = { $in: matchingLcIds.map((l: any) => l._id) }
-    }
-
-    /* Narrow to one session — but INTERSECT with the scoped set, never replace
-       it (P-04). This used to assign straight over `filter['liveClassId']`,
-       discarding the organisation and instructor scoping resolved above, so
-       passing another academy's session id returned its full roster with every
-       student's name and email. "More specific" has to mean narrower. */
-    if (q.liveClassId && Types.ObjectId.isValid(q.liveClassId)) {
-      const requested = new Types.ObjectId(q.liveClassId)
-      const scoped    = filter['liveClassId'] as { $in?: unknown[] } | undefined
-      const inScope   = !scoped?.$in || scoped.$in.some(id => String(id) === String(requested))
-      if (!inScope) {
-        sendSuccess(res, [], undefined, 200,
-          buildPaginationMeta(0, Number(q.page) || 1, Number(q.per_page) || 50))
-        return
-      }
-      filter['liveClassId'] = requested
-    }
-    if (q.userId && Types.ObjectId.isValid(q.userId)) filter['userId'] = new Types.ObjectId(q.userId)
-    if (q.status) filter['status'] = q.status
-
-    // Cancelled bookings: apply date range to cancelledAt instead of scheduledStart
-    if (q.status === 'cancelled' && (q.dateFrom || q.dateTo)) {
-      filter['cancelledAt'] = dayRangeBounds(q.dateFrom, q.dateTo)
-    }
-
-    /* Free-text search, server-side so it sees the whole result set and not
-       just the page the browser happens to hold. Matches the student's name or
-       email, OR the session title. The title arm is intersected with lcFilter
-       first, so a search can only ever narrow what the caller may already see —
-       it can never reach outside their organisation or programme scope. */
-    if (q.q) {
-      const rx = new RegExp(escapeRegex(q.q), 'i')
-      const [people, titled] = await Promise.all([
-        UserModel.find({ $or: [{ name: rx }, { email: rx }] }, '_id').limit(1000).lean(),
-        LiveClassModel.find({ ...lcFilter, title: rx }, '_id').lean(),
-      ])
-      filter['$or'] = [
-        { userId:      { $in: people.map((u: any) => u._id) } },
-        { liveClassId: { $in: titled.map((l: any) => l._id) } },
-      ]
+    const filter = await buildBookingFilter(req, q)
+    if (!filter) {
+      sendSuccess(res, [], undefined, 200,
+        buildPaginationMeta(0, Number(q.page) || 1, Number(q.per_page) || 50))
+      return
     }
 
     /* ── Step 3: Fetch bookings with rich populate ── */
@@ -2052,6 +2088,78 @@ router.get('/bookings', requireInstructor, requirePermission('bookings','list'),
        returning a different meta shape from every paginated route beside it.
        The type checker only noticed once it went through the typed helper. */
     sendSuccess(res, docs.map(withId), undefined, 200, buildPaginationMeta(total, page, per_page))
+  } catch (err) { next(err) }
+})
+
+/* ── Stats for the CURRENT filter, not the current page ───
+   The console's stats strip, its row counter and its CSV were all computed from
+   the array the browser held — one page, capped at per_page — so a filter
+   matching 2,340 bookings proudly reported "150", and paging forward reported
+   "150" again. total_count was already in the response meta and simply never
+   read. This returns the real figures for the whole filtered set in one $group,
+   using the SAME scope builder as the list so the two can never disagree. */
+router.get('/bookings/stats', requireInstructor, requirePermission('bookings', 'list'),
+  validate(bookingQuerySchema, 'query'), async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { ClassBookingModel } = await import('@/models/schema.ts')
+    const q = req.query as unknown as z.infer<typeof bookingQuerySchema>
+
+    const empty = { total: 0, booked: 0, upcoming: 0, unmarked: 0, attended: 0, missed: 0, cancelled: 0, attendanceRate: 0 }
+    const filter = await buildBookingFilter(req, q)
+    if (!filter) { sendSuccess(res, empty); return }
+
+    /* `booked` is a status, not a tense: a seat stays `booked` forever if nobody
+       ever marks attendance. Counting all of them as "upcoming" made a console
+       full of un-marked past sessions look perfectly healthy, which is exactly
+       backwards — those are the rows that need an admin. So split the bucket on
+       the session's own start time. `scheduledStart` lives on the class, not the
+       booking, so join it in; the projection keeps that join to one field. */
+    const now = new Date()
+    const grouped = await ClassBookingModel.aggregate([
+      { $match: filter },
+      { $lookup: {
+          from:     'liveclasses',
+          let:      { lc: '$liveClassId' },
+          pipeline: [
+            { $match: { $expr: { $eq: ['$_id', '$$lc'] } } },
+            { $project: { scheduledStart: 1 } },
+          ],
+          as: 'lc',
+      } },
+      /* $gt against a missing start date is false, so a class row without one
+         lands in the past bucket rather than escaping both. (A booking whose
+         class was deleted outright never reaches here — buildBookingFilter
+         resolves class ids up front, so it is already out of the filter.) */
+      { $group: {
+          _id: {
+            status: '$status',
+            future: { $gt: [{ $first: '$lc.scheduledStart' }, now] },
+          },
+          n: { $sum: 1 },
+      } },
+    ])
+
+    const sum = (pred: (id: any) => boolean) =>
+      grouped.reduce((acc: number, g: any) => acc + (pred(g._id) ? g.n : 0), 0)
+
+    const by       = (s: string) => sum(id => id.status === s)
+    const attended = by('attended')
+    const missed   = by('missed')
+    /* Of the seats whose outcome is actually known. Dividing by `total` would
+       drag the rate down with every future booking that simply has not happened
+       yet, which reads as a collapsing attendance rate. */
+    const decided  = attended + missed
+    sendSuccess(res, {
+      total:     grouped.reduce((s: number, g: any) => s + g.n, 0),
+      booked:    by('booked'),
+      /* booked === upcoming + unmarked, always. */
+      upcoming:  sum(id => id.status === 'booked' && id.future === true),
+      unmarked:  sum(id => id.status === 'booked' && id.future !== true),
+      attended,
+      missed,
+      cancelled: by('cancelled'),
+      attendanceRate: decided ? Math.round((attended / decided) * 100) : 0,
+    })
   } catch (err) { next(err) }
 })
 

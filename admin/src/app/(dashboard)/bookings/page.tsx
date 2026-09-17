@@ -6,11 +6,12 @@ import {
   ChevronLeft, ChevronRight, Calendar, Clock,
   CheckCircle2, XCircle, Search,
   BookOpen, User, GraduationCap, LayoutList, X,
-  Download, TrendingUp, Users,
+  Download, TrendingUp, Users, AlertCircle,
   Filter, ChevronDown, Check, Wifi, Building2, MapPin,
 } from 'lucide-react'
 import {
-  useAdminBookings, useUpdateAttendance,
+  useAdminBookings, useAdminBookingStats, useUpdateAttendance, useCancelBooking,
+  type AdminBookingStats,
   type ClassBooking, type BookingStatus,
 } from '@/lib/api/liveClasses'
 import { useCourses } from '@/lib/api/courses'
@@ -195,30 +196,106 @@ function AttendanceToggle({ booking }: { booking: ClassBooking }) {
   )
 }
 
+/* Release a seat on the student's behalf.
+
+   There was no admin path to cancel a booking anywhere in the product, so a
+   seat taken by mistake kept a session full for ever. Only offered while the
+   seat is actually live — a past or already-cancelled booking has nothing to
+   release, and the server refuses it. Two-step, because a misclick here removes
+   a student from a class they are expecting to attend. */
+function CancelBookingButton({ booking }: { booking: ClassBooking }) {
+  const cancel = useCancelBooking()
+  const [confirming, setConfirming] = useState(false)
+  if (booking.status !== 'booked') return null
+  if (new Date(booking.liveClassId.scheduledStart) < new Date()) return null
+
+  if (confirming) {
+    return (
+      <div className="flex items-center gap-1">
+        <button onClick={() => { cancel.mutate(booking.id); setConfirming(false) }}
+          disabled={cancel.isPending}
+          className="rounded-lg px-2 py-0.5 text-[10px] font-bold transition-opacity disabled:opacity-50"
+          style={{ background: 'rgba(239,68,68,0.18)', color: '#F87171' }}>
+          {cancel.isPending ? '…' : 'Release'}
+        </button>
+        <button onClick={() => setConfirming(false)} className="px-1 text-[10px]"
+          style={{ color: 'rgba(255,255,255,0.35)' }}>
+          Keep
+        </button>
+      </div>
+    )
+  }
+  return (
+    <button onClick={() => setConfirming(true)} title="Cancel this booking and release the seat"
+      className="flex h-6 w-6 items-center justify-center rounded-lg transition-colors"
+      style={{ background: 'rgba(255,255,255,0.04)', color: 'rgba(255,255,255,0.25)' }}
+      onMouseEnter={e => { e.currentTarget.style.background = 'rgba(239,68,68,0.15)'; e.currentTarget.style.color = '#F87171' }}
+      onMouseLeave={e => { e.currentTarget.style.background = 'rgba(255,255,255,0.04)'; e.currentTarget.style.color = 'rgba(255,255,255,0.25)' }}>
+      <X size={13} />
+    </button>
+  )
+}
+
+function RowActions({ booking }: { booking: ClassBooking }) {
+  return (
+    <div className="flex items-center justify-end gap-1">
+      <AttendanceToggle booking={booking} />
+      <CancelBookingButton booking={booking} />
+    </div>
+  )
+}
+
 /* ─── Stats strip ────────────────────────────────────────── */
-function StatsStrip({ bookings }: { bookings: ClassBooking[] }) {
-  const total     = bookings.length
-  const attended  = bookings.filter(b => b.status === 'attended').length
-  const missed    = bookings.filter(b => b.status === 'missed').length
-  const booked    = bookings.filter(b => b.status === 'booked').length
-  const concluded = attended + missed
-  const rate      = concluded > 0 ? Math.round((attended / concluded) * 100) : null
+/* Fed by /admin/bookings/stats — the totals for the WHOLE filtered set.
+   Deriving these from the loaded array meant a filter matching 2,340 bookings
+   reported "150", and reported "150" again on the next page. */
+function StatsStrip({ stats, needsMarking, onNeedsMarking }: {
+  stats?: AdminBookingStats
+  needsMarking: boolean
+  onNeedsMarking: (on: boolean) => void
+}) {
+  const total     = stats?.total ?? 0
+  const attended  = stats?.attended ?? 0
+  const booked    = stats?.booked ?? 0
+  const concluded = attended + (stats?.missed ?? 0)
+  const rate      = concluded > 0 ? (stats?.attendanceRate ?? 0) : null
+  /* A seat still `booked` after its session has run is not upcoming — it is a
+     session nobody took attendance for. Showing the whole `booked` bucket as
+     "Upcoming" hid exactly the rows that need an admin. Fall back to the old
+     meaning only for a cached response that predates the split. */
+  const upcoming  = stats?.upcoming ?? booked
+  const unmarked  = stats?.unmarked ?? 0
 
   const pills = [
     { label: 'Total',         value: String(total),            icon: <Users size={13} />,    color: 'rgba(255,255,255,0.75)', bg: 'rgba(255,255,255,0.04)',  border: 'rgba(255,255,255,0.08)' },
-    { label: 'Upcoming',      value: String(booked),           icon: <Calendar size={13} />, color: '#34D399',                bg: 'rgba(16,185,129,0.08)',   border: 'rgba(16,185,129,0.18)' },
+    { label: 'Upcoming',      value: String(upcoming),         icon: <Calendar size={13} />, color: '#34D399',                bg: 'rgba(16,185,129,0.08)',   border: 'rgba(16,185,129,0.18)' },
+    /* Only worth a tile when there is something to act on. */
+    /* Worth a tile only when there is something to act on — and then it is a
+       button, because a count of work with no way to reach it is just nagging.
+       Stays mounted while the filter is on, so it can be switched back off. */
+    ...(unmarked > 0 || needsMarking
+      ? [{ label: 'Needs marking', value: String(unmarked), icon: <AlertCircle size={13} />, color: '#FCD34D', bg: 'rgba(245,158,11,0.08)', border: 'rgba(245,158,11,0.22)',
+          onClick: () => onNeedsMarking(!needsMarking), active: needsMarking }]
+      : []),
     { label: 'Attended',      value: String(attended),         icon: <CheckCircle2 size={13} />, color: '#818CF8',            bg: 'rgba(99,102,241,0.08)',   border: 'rgba(99,102,241,0.18)' },
     { label: 'Attendance %',  value: rate !== null ? `${rate}%` : '—', icon: <TrendingUp size={13} />, color: rate !== null && rate >= 70 ? '#34D399' : rate !== null && rate >= 40 ? '#FCD34D' : '#F87171', bg: 'rgba(255,255,255,0.04)', border: 'rgba(255,255,255,0.08)' },
   ]
 
   return (
-    <div className="mb-5 grid grid-cols-2 gap-3 sm:grid-cols-4">
+    /* Column count follows the pill count, or the fifth tile orphans onto a
+       row of its own. */
+    <div className={`mb-5 grid grid-cols-2 gap-3 ${pills.length === 5 ? 'sm:grid-cols-3 lg:grid-cols-5' : 'sm:grid-cols-4'}`}>
       {pills.map((p, i) => (
         <motion.div key={p.label}
           initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }}
           transition={{ delay: i * 0.05, type: 'spring', stiffness: 320, damping: 28 }}
-          className="rounded-2xl px-4 py-3"
-          style={{ background: p.bg, border: `1px solid ${p.border}` }}>
+          {...(p.onClick ? { role: 'button', tabIndex: 0, onClick: p.onClick,
+            onKeyDown: (e: React.KeyboardEvent) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); p.onClick!() } },
+            title: p.active ? 'Showing only sessions that need marking — click to clear' : 'Show only sessions that need marking' } : {})}
+          className={`rounded-2xl px-4 py-3 ${p.onClick ? 'cursor-pointer transition-[filter,box-shadow] hover:brightness-125' : ''}`}
+          style={{ background: p.bg,
+            border: `1px solid ${p.active ? p.color : p.border}`,
+            boxShadow: p.active ? `0 0 0 1px ${p.color}` : undefined }}>
           <div className="mb-1 flex items-center gap-1.5" style={{ color: 'rgba(255,255,255,0.30)' }}>
             {p.icon}
             <span className="text-[10px] font-semibold uppercase tracking-widest">{p.label}</span>
@@ -338,7 +415,7 @@ function BookingRow({ booking, index }: { booking: ClassBooking; index: number }
 
       {/* Actions */}
       <td className="py-3 pl-3 pr-5">
-        <AttendanceToggle booking={booking} />
+        <RowActions booking={booking} />
       </td>
     </motion.tr>
   )
@@ -350,8 +427,8 @@ function exportCSV(bookings: ClassBooking[], filename: string) {
   const rows = bookings.map(b => {
     const lc = b.liveClassId as typeof b.liveClassId | null
     return [
-      b.userId.name,
-      b.userId.email,
+      (b.userId?.name ?? '(deleted student)'),
+      (b.userId?.email ?? ''),
       lc?.title ?? '(deleted session)',
       lc ? new Date(lc.scheduledStart).toLocaleDateString('en-US') : '',
       lc ? fmtTime(lc.scheduledStart) : '',
@@ -384,6 +461,7 @@ export default function BookingsPage() {
   /* Filters */
   const [statusFilter,     setStatusFilter]     = useState<BookingStatus | ''>('')
   const [deliveryFilter,   setDeliveryFilter]   = useState<'all' | 'online' | 'offline'>('all')
+  const [needsMarking,     setNeedsMarking]     = useState(false)
   const [courseFilter,     setCourseFilter]     = useState('')
   const [instructorFilter, setInstructorFilter] = useState('')
   const [langFilter,       setLangFilter]       = useState('')
@@ -397,42 +475,50 @@ export default function BookingsPage() {
   const courses     = coursesData?.docs ?? []
   const instructors = instructorsData?.docs ?? []
 
-  /* Main data fetch */
-  const { data, isLoading } = useAdminBookings({
+  /* Debounced, because search now runs on the SERVER — bound directly, every
+     keystroke would be a round trip. The server requires two characters. */
+  const [debouncedSearch, setDebouncedSearch] = useState('')
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedSearch(search.trim()), 300)
+    return () => clearTimeout(t)
+  }, [search])
+
+  /* One object, so the list and the stats strip can never describe different
+     filters — the strip used to be computed from the loaded page instead. */
+  const query = useMemo(() => ({
     dateFrom:     toYMD(dateFrom),
     dateTo:       toYMD(dateTo),
     status:       statusFilter || undefined,
     courseId:     courseFilter || undefined,
     instructorId: instructorFilter || undefined,
     language:     langFilter || undefined,
-    page,
-    per_page: 150,
-  })
+    q:            debouncedSearch.length >= 2 ? debouncedSearch : undefined,
+    isOnline:     deliveryFilter === 'all' ? undefined : deliveryFilter === 'online' ? 'true' as const : 'false' as const,
+    needsMarking: needsMarking ? 'true' as const : undefined,
+  }), [dateFrom, dateTo, statusFilter, courseFilter, instructorFilter, langFilter, debouncedSearch, deliveryFilter, needsMarking])
+
+  /* Narrowing the filter can leave you on a page that no longer exists, which
+     renders as an empty table rather than "no results". */
+  useEffect(() => { setPage(1) }, [query])
+
+  const { data, isLoading } = useAdminBookings({ ...query, page, per_page: 150 })
+  const { data: stats }     = useAdminBookingStats(query)
 
   const bookings: ClassBooking[] = data?.docs ?? []
-  const totalPages = data?.meta?.total_pages ?? 1
+  const totalPages  = data?.meta?.total_pages  ?? 1
+  const totalCount  = data?.meta?.total_count  ?? 0
 
   const isCancelledView = statusFilter === 'cancelled'
 
-  /* Client-side search + delivery filter */
-  const filtered = useMemo(() => {
-    return bookings.filter(b => {
-      const lc = b.liveClassId as typeof b.liveClassId | null
-      // Delivery filter
-      if (deliveryFilter === 'online'  && lc?.isOnline === false) return false
-      if (deliveryFilter === 'offline' && lc?.isOnline !== false) return false
-      // Search
-      if (!search.trim()) return true
-      const q = search.toLowerCase()
-      return (
-        b.userId.name.toLowerCase().includes(q)
-        || b.userId.email.toLowerCase().includes(q)
-        || (lc?.title.toLowerCase().includes(q) ?? false)
-        || (lc?.courseId?.title.toLowerCase().includes(q) ?? false)
-        || (lc?.instructorId?.name.toLowerCase().includes(q) ?? false)
-      )
-    })
-  }, [bookings, search, deliveryFilter])
+  /* Search and delivery are server-side now. All this does is drop rows whose
+     class or student was deleted: BookingRow renders null for those, but they
+     still counted toward every "N bookings" badge, so a day heading could read
+     "5 bookings" above four rows. */
+  const filtered = useMemo(
+    () => bookings.filter(b => !!b.liveClassId && !!b.userId),
+    [bookings],
+  )
+  const orphanCount = bookings.length - filtered.length
 
   /* Group by date — cancelled bookings group by cancelledAt, others by scheduledStart */
   const dateGroups = useMemo(() => {
@@ -464,7 +550,7 @@ export default function BookingsPage() {
 
   const isSingleDay  = toYMD(dateFrom) === toYMD(dateTo)
   const isToday      = toYMD(dateFrom) === toYMD(new Date())
-  const hasFilters   = !!(search || statusFilter || deliveryFilter !== 'all' || courseFilter || instructorFilter || langFilter)
+  const hasFilters   = !!(search || statusFilter || deliveryFilter !== 'all' || courseFilter || instructorFilter || langFilter || needsMarking)
 
   function shiftDay(n: number) { setDateFrom(d => addDays(d, n)); setDateTo(d => addDays(d, n)); setPage(1) }
   function goToday() {
@@ -473,7 +559,7 @@ export default function BookingsPage() {
     setDateFrom(s); setDateTo(e); setPage(1)
   }
   function clearFilters() {
-    setSearch(''); setStatusFilter(''); setDeliveryFilter('all'); setCourseFilter(''); setInstructorFilter(''); setLangFilter(''); setPage(1)
+    setSearch(''); setStatusFilter(''); setDeliveryFilter('all'); setCourseFilter(''); setInstructorFilter(''); setLangFilter(''); setNeedsMarking(false); setPage(1)
     // Restore default range: -30 days to +90 days
     const s = addDays(new Date(), -30); s.setHours(0,0,0,0)
     const e = addDays(new Date(),  90); e.setHours(23,59,59,999)
@@ -605,7 +691,10 @@ export default function BookingsPage() {
       </motion.div>
 
       {/* ── Stats ─────────────────────────────────────── */}
-      {!isLoading && bookings.length > 0 && <StatsStrip bookings={filtered} />}
+      {!isLoading && (bookings.length > 0 || needsMarking) && (
+        <StatsStrip stats={stats} needsMarking={needsMarking}
+          onNeedsMarking={on => { setNeedsMarking(on); setPage(1) }} />
+      )}
 
       {/* ── Filter bar ───────────────────────────────── */}
       <div className="mb-5 space-y-2">
@@ -689,7 +778,7 @@ export default function BookingsPage() {
           <div className="ml-auto flex items-center gap-2">
             <span className="flex items-center gap-1.5 text-xs" style={{ color: 'rgba(255,255,255,0.30)' }}>
               <LayoutList size={13} />
-              {filtered.length} booking{filtered.length !== 1 ? 's' : ''}
+              {totalCount.toLocaleString()} booking{totalCount !== 1 ? 's' : ''}{orphanCount > 0 && <span style={{ opacity: 0.45 }}> · {orphanCount} hidden (deleted class or student)</span>}
             </span>
             {filtered.length > 0 && (
               <button type="button"
@@ -861,7 +950,7 @@ export default function BookingsPage() {
                   <ChevronLeft size={14} style={{ color: 'rgba(255,255,255,0.60)' }} />
                 </button>
                 <span className="text-xs font-medium" style={{ color: 'rgba(255,255,255,0.40)' }}>
-                  Page {page} of {totalPages}
+                  {totalCount === 0 ? 'No results' : `Showing ${(page - 1) * 150 + 1}–${Math.min(page * 150, totalCount)} of ${totalCount.toLocaleString()}`}
                 </span>
                 <button type="button" onClick={() => setPage(p => Math.min(totalPages, p + 1))}
                   disabled={page === totalPages}

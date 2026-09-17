@@ -366,7 +366,10 @@ export interface BookingMeta {
   total_pages: number
 }
 
-export function useAdminBookings(params: {
+/* Search and delivery are SERVER-side parameters. They used to be applied in
+   the browser over the single page it held, so a student whose booking sat on
+   page 2 came back as "No bookings found". */
+export interface AdminBookingParams {
   liveClassId?:  string
   userId?:       string
   status?:       BookingStatus
@@ -375,9 +378,17 @@ export function useAdminBookings(params: {
   language?:     string
   dateFrom?:     string
   dateTo?:       string
+  q?:            string
+  isOnline?:     'true' | 'false'
+  /* `booked` seats whose session has already run. A status AND a tense, so it
+     cannot be expressed through `status` alone. */
+  needsMarking?: 'true'
+  sort?:         '-bookedAt' | 'bookedAt' | 'status'
   page?:         number
   per_page?:     number
-} = {}) {
+}
+
+export function useAdminBookings(params: AdminBookingParams = {}) {
   return useQuery({
     queryKey: bookingKeys.list(params),
     queryFn:  async () => {
@@ -390,11 +401,51 @@ export function useAdminBookings(params: {
   })
 }
 
+export interface AdminBookingStats {
+  total: number; booked: number; attended: number; missed: number
+  cancelled: number; attendanceRate: number
+  /* `booked` split by the session's start time: upcoming + unmarked === booked.
+     Optional because a cached response from before the split has neither. */
+  upcoming?: number; unmarked?: number
+}
+
+/* Totals for the CURRENT FILTER, computed server-side.
+
+   The stats strip used to be derived from the loaded page, so a filter matching
+   2,340 bookings reported "150" — and reported "150" again on the next page. */
+export function useAdminBookingStats(params: AdminBookingParams = {}) {
+  /* Paging cannot change a total, so it is not part of the key — otherwise
+     every page turn refetched identical numbers. */
+  const { page: _p, per_page: _pp, ...filters } = params
+  return useQuery({
+    queryKey: ['admin', 'bookings', 'stats', filters],
+    queryFn:  async () => {
+      const res = await api.get<{ success: true; data: AdminBookingStats }>(
+        '/admin/bookings/stats', { params: filters },
+      )
+      return res.data.data
+    },
+    staleTime: 30_000,
+  })
+}
+
 export function useUpdateAttendance() {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: ({ id, status }: { id: string; status: 'attended' | 'missed' }) =>
       apiPatch<ClassBooking>(`/admin/bookings/${id}/attendance`, { status }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['admin', 'bookings'] })
+    },
+  })
+}
+
+/* Release a seat on a student's behalf. There was no admin path to do this at
+   all, so a seat taken by mistake kept a session full for ever. */
+export function useCancelBooking() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (id: string) => apiPatch<null>(`/admin/bookings/${id}/cancel`, {}),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['admin', 'bookings'] })
     },

@@ -213,6 +213,131 @@ section('D. Both ends of a date range are built the same way')
   check('D3 and nothing outside the day leaks in', r.rows.length === 2, `rows=${r.rows.length}`)
 }
 
+/* ═══════════ E — stats describe the FILTER, not the page ═══════════ */
+section('E. /bookings/stats reports the whole filtered set, never just the loaded page')
+{
+  /* By now: 13 on the online class + 1 in-person + 1 cancelled + 2 on the
+     date-range day = 17 bookings, of which 1 is cancelled. */
+  const all = await call('GET', '/admin/bookings/stats', adminJar)
+  check('E1 stats returns 200', all.status === 200, `${all.status}`)
+  check('E2 total counts every matching booking, not per_page',
+    all.body?.data?.total === 17, JSON.stringify(all.body?.data))
+  check('E3 it breaks down by status', all.body?.data?.booked === 16 && all.body?.data?.cancelled === 1,
+    JSON.stringify(all.body?.data))
+
+  /* The bug this replaces: the strip was fed the loaded array, so it reported
+     the page size. Asking for a tiny page must not change the totals. */
+  const paged = await call('GET', '/admin/bookings/stats?per_page=5&page=1', adminJar)
+  check('E4 per_page does NOT change the totals', paged.body?.data?.total === 17,
+    JSON.stringify(paged.body?.data))
+
+  const searched = await call('GET', '/admin/bookings/stats?q=zorana', adminJar)
+  check('E5 stats honour the same search as the list', searched.body?.data?.total === 1,
+    JSON.stringify(searched.body?.data))
+
+  const offline = await call('GET', '/admin/bookings/stats?isOnline=false', adminJar)
+  check('E6 …and the delivery filter', offline.body?.data?.total === 1, JSON.stringify(offline.body?.data))
+
+  /* Attendance rate is over DECIDED seats, so it does not collapse as future
+     bookings pile up. */
+  const lc = await mkClass('Attendance Math')
+  const a1 = await seat(await mk('att1@ba.test', 'student', orgA), lc)
+  await seat(await mk('att2@ba.test', 'student', orgA), lc)
+  await seat(await mk('att3@ba.test', 'student', orgA), lc)   // still just booked
+  await call('PATCH', `/admin/bookings/${a1._id}/attendance`, adminJar, { status: 'attended' })
+  const cls = await call('GET', `/admin/bookings/stats?liveClassId=${lc._id}`, adminJar)
+  check('E7 attendance rate uses decided seats only (1 of 1 = 100%), not 1-of-3',
+    cls.body?.data?.attendanceRate === 100, JSON.stringify(cls.body?.data))
+
+  const foreign = await call('GET', '/admin/bookings/stats', adminBJar)
+  check('E8 another academy sees none of it', foreign.body?.data?.total === 0, JSON.stringify(foreign.body?.data))
+}
+
+/* ═══════════ F — "upcoming" is a tense, not a status ═══════════ */
+section('F. booked splits into upcoming vs unmarked by the session start time')
+{
+  /* Seats on a session that already ran and was never marked, against seats on
+     one still to come. Both are status `booked` — the status alone cannot tell
+     them apart, which is what made the strip read "Upcoming 8" for a console
+     of nothing but un-marked history. */
+  const past   = await mkClass('Already Ran', { scheduledStart: new Date(Date.now() - 3 * 24 * 60 * MIN) })
+  const future = await mkClass('Still To Come')
+  await seat(await mk('split1@ba.test', 'student', orgA), past)
+  await seat(await mk('split2@ba.test', 'student', orgA), past)
+  await seat(await mk('split3@ba.test', 'student', orgA), future)
+
+  const p = (await call('GET', `/admin/bookings/stats?liveClassId=${past._id}`, adminJar)).body?.data
+  check('F1 a past un-marked seat is NOT upcoming', p?.upcoming === 0, JSON.stringify(p))
+  check('F2 …it is counted as needing attendance', p?.unmarked === 2, JSON.stringify(p))
+  check('F3 …and is still reported under booked', p?.booked === 2, JSON.stringify(p))
+
+  const f = (await call('GET', `/admin/bookings/stats?liveClassId=${future._id}`, adminJar)).body?.data
+  check('F4 a future seat IS upcoming', f?.upcoming === 1 && f?.unmarked === 0, JSON.stringify(f))
+
+  /* The invariant the strip is built on: the split partitions `booked`, so no
+     seat is double-counted across the two tiles and none falls between them. */
+  const tot = (await call('GET', '/admin/bookings/stats', adminJar)).body?.data
+  check('F5 upcoming + unmarked === booked, always',
+    tot.upcoming + tot.unmarked === tot.booked,
+    `${tot.upcoming} + ${tot.unmarked} !== ${tot.booked}`)
+
+  /* Marking attendance moves a seat out of the un-marked bucket — that is the
+     whole point of surfacing it. */
+  const row = (await call('GET', `/admin/bookings?liveClassId=${past._id}`, adminJar)).body?.data?.[0]
+  await call('PATCH', `/admin/bookings/${row._id ?? row.id}/attendance`, adminJar, { status: 'attended' })
+  const after = (await call('GET', `/admin/bookings/stats?liveClassId=${past._id}`, adminJar)).body?.data
+  check('F6 marking attendance clears it from unmarked', after?.unmarked === 1, JSON.stringify(after))
+}
+
+/* ═══════════ G — ?needsMarking=true is a real filter ═══════════ */
+section('G. needsMarking narrows to booked-and-already-run, and never widens')
+{
+  const ran   = await mkClass('G Ran', { scheduledStart: new Date(Date.now() - 4 * 24 * 60 * MIN) })
+  const ahead = await mkClass('G Ahead')
+  await seat(await mk('g1@ba.test', 'student', orgA), ran)
+  await seat(await mk('g2@ba.test', 'student', orgA), ahead)
+
+  const r = await call('GET', '/admin/bookings?needsMarking=true&dateFrom=2000-01-01&dateTo=2099-01-01', adminJar)
+  const got: any[] = r.body?.data ?? []
+  check('G1 returns 200', r.status === 200, `${r.status} ${r.code}`)
+  check('G2 every row is still booked', got.every(b => b.status === 'booked'),
+    JSON.stringify(got.map(b => b.status)))
+  check('G3 every row has already started', got.every(b => new Date(b.liveClassId.scheduledStart) < new Date()),
+    JSON.stringify(got.map(b => b.liveClassId?.scheduledStart)))
+  check('G4 the future seat is excluded', !got.some(b => b.liveClassId?.title === 'G Ahead'),
+    JSON.stringify(got.map(b => b.liveClassId?.title)))
+  check('G5 the past un-marked seat is included', got.some(b => b.liveClassId?.title === 'G Ran'),
+    JSON.stringify(got.map(b => b.liveClassId?.title)))
+
+  /* It has to agree with the tile that offers it — a button whose count does
+     not match what clicking it shows is worse than no button. */
+  const st = (await call('GET', '/admin/bookings/stats?dateFrom=2000-01-01&dateTo=2099-01-01', adminJar)).body?.data
+  const fl = (await call('GET', '/admin/bookings/stats?needsMarking=true&dateFrom=2000-01-01&dateTo=2099-01-01', adminJar)).body?.data
+  check('G6 the filtered total equals the unmarked count the tile shows',
+    fl.total === st.unmarked, `filtered=${fl.total} tile=${st.unmarked}`)
+
+  /* A contradiction must answer empty, not pick a winner — `attended` and
+     `needsMarking` cannot both hold. Silently dropping one would show attended
+     rows under a "needs marking" filter. */
+  const clash = await call('GET', '/admin/bookings?needsMarking=true&status=attended', adminJar)
+  check('G7 needsMarking + a conflicting status is empty, not one-or-the-other',
+    clash.status === 200 && (clash.body?.data ?? []).length === 0,
+    `${clash.status} n=${(clash.body?.data ?? []).length}`)
+
+  /* The date range and needsMarking both constrain scheduledStart. The narrower
+     one must survive: a range entirely in the future can yield nothing. */
+  const tomorrow = new Date(Date.now() + 24 * 60 * MIN).toISOString().slice(0, 10)
+  const future   = new Date(Date.now() + 9 * 24 * 60 * MIN).toISOString().slice(0, 10)
+  const both = await call('GET', `/admin/bookings?needsMarking=true&dateFrom=${tomorrow}&dateTo=${future}`, adminJar)
+  check('G8 a future date range intersects with needsMarking instead of overwriting it',
+    (both.body?.data ?? []).length === 0, JSON.stringify((both.body?.data ?? []).map((b: any) => b.liveClassId?.title)))
+
+  /* Scope still wins over the new param. */
+  const foreign = await call('GET', '/admin/bookings?needsMarking=true&dateFrom=2000-01-01&dateTo=2099-01-01', adminBJar)
+  check('G9 another academy sees none of it', (foreign.body?.data ?? []).length === 0,
+    JSON.stringify(foreign.body?.data))
+}
+
 } catch (err) {
   fail++
   lines.push(`\n  FATAL  ${(err as Error).stack ?? String(err)}`)
