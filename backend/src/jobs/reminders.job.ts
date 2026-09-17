@@ -382,8 +382,18 @@ export async function runInstructor15MinReminders(): Promise<void> {
   try {
     const { LiveClassModel } = await import('@/models/schema.ts')
     const now  = new Date()
-    const from = new Date(now.getTime() + 13 * 60 * 1000)   // 13 min from now
-    const to   = new Date(now.getTime() + 17 * 60 * 1000)   // 17 min from now
+    /* The window must be AT LEAST as wide as the poll interval, or start times
+       fall between ticks and are never seen at all. This was [13,17] — four
+       minutes against a five-minute cron — which covers only 80% of possible start times,
+       so roughly one instructor in five simply never got their reminder. The
+       miss is silent: nothing errors, the flag just stays false for ever.
+
+       Every sibling job already satisfies this (day-before 2h/1h, pre-session
+       10m/5m, five-min 5m/5m, at-time 5m/5m); this one did not. Eight minutes
+       against a five-minute tick leaves margin for a late tick, and the
+       reminderInstructor15MinSent flag still guarantees exactly one send. */
+    const from = new Date(now.getTime() + 12 * 60 * 1000)   // 12 min from now
+    const to   = new Date(now.getTime() + 20 * 60 * 1000)   // 20 min from now
 
     const classes = await LiveClassModel.find({
       status:  'scheduled',

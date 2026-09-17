@@ -270,9 +270,9 @@ section('D. The instructor 15-min reminder honours the preference and still mark
     title: 'Forex', slug: 'forex-ep', description: 'd', instructorId: instructor._id,
     price: 0, isFree: true, status: 'published', language: 'English', organizationId: org._id,
   })
-  const mkClass = () => LiveClassModel.create({
+  const mkClass = (minutesAhead = 15) => LiveClassModel.create({
     title: 'Session', courseId: course._id, instructorId: instructor._id, organizationId: org._id,
-    scheduledStart: new Date(Date.now() + 15 * 60 * 1000), durationMins: 60,
+    scheduledStart: new Date(Date.now() + minutesAhead * 60 * 1000), durationMins: 60,
     type: 'external', isOnline: true, status: 'scheduled', language: 'English',
     sessionCapacity: 30, bookedCount: 0, meetingUrl: 'https://meet.google.com/ep-test',
     reminderInstructor15MinSent: false,
@@ -297,6 +297,38 @@ section('D. The instructor 15-min reminder honours the preference and still mark
   check('D3 after opting out, NO reminder is sent', (await mailsTo('instr@ep.test', t0)) === 0)
   check('D4 …but the class is still marked handled (no re-fetch every cycle)',
     (await LiveClassModel.findById(c2._id).lean())?.reminderInstructor15MinSent === true)
+
+  /* The window has to be at least as wide as the poll interval, or a start time
+     can fall between two ticks and never be seen at all. It was [now+13,now+17]
+     — four minutes against a five-minute cron — which covers only 80% of
+     possible start times, so about one instructor in five was never reminded.
+     The miss is silent: nothing errors, the flag just stays false for ever.
+     18 and 12.5 minutes out are both inside the poll interval but were outside
+     the old window, so these fail against it. */
+  await setPref({ masterEnabled: true, categories: { classReminder: true } })
+  const far = await mkClass(18)
+  t0 = Date.now()
+  await runInstructor15MinReminders(); await settle()
+  check('W1 a class 18 min out is still reminded (old 13-17 window missed it)',
+    (await mailsTo('instr@ep.test', t0)) === 1)
+  check('W2 …and is marked handled',
+    (await LiveClassModel.findById(far._id).lean())?.reminderInstructor15MinSent === true)
+
+  const near = await mkClass(12.5)
+  t0 = Date.now()
+  await runInstructor15MinReminders(); await settle()
+  check('W3 a class 12.5 min out is reminded too (the other edge)',
+    (await mailsTo('instr@ep.test', t0)) === 1)
+  check('W4 …and is marked handled',
+    (await LiveClassModel.findById(near._id).lean())?.reminderInstructor15MinSent === true)
+
+  /* Still bounded: the widening must not sweep in classes hours away. */
+  const distant = await mkClass(90)
+  t0 = Date.now()
+  await runInstructor15MinReminders(); await settle()
+  check('W5 a class 90 min out is NOT reminded yet', (await mailsTo('instr@ep.test', t0)) === 0)
+  check('W6 …and is left unmarked for its own tick',
+    (await LiveClassModel.findById(distant._id).lean())?.reminderInstructor15MinSent === false)
 
   /* Master off silences it too, even with the category left on. */
   await setPref({ masterEnabled: false, categories: { classReminder: true } })
