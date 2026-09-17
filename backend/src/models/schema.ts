@@ -1773,6 +1773,7 @@ export type AuditAction =
   | 'user.impersonate.revoke'
   | 'user.impersonate.client'
   | 'recording.view'
+  | 'booking.cancel'
   | 'review.delete'
   | 'coupon.create'   | 'coupon.delete'
   | 'order.refund'

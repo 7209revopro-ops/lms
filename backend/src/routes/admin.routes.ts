@@ -1868,13 +1868,46 @@ const bookingQuerySchema = z.object({
      occurred" instead of telling the caller the date was wrong. */
   dateFrom:     z.string().refine(s => !Number.isNaN(Date.parse(s)), 'Invalid date').optional(),
   dateTo:       z.string().refine(s => !Number.isNaN(Date.parse(s)), 'Invalid date').optional(),
+  /* Free-text across the student (name/email) and the session title. Used to
+     live only in the browser, over the ONE page already loaded — so searching a
+     student whose booking sat on page 2 answered "No bookings found" for a
+     booking that plainly exists. */
+  q:            z.string().trim().min(2).max(120).optional(),
+  /* Delivery. Same story as `q`: the toggle filtered the loaded page only.
+     In-person is isOnline === false; online is anything else, because older
+     rows predate the field. */
+  isOnline:     z.enum(['true', 'false']).optional(),
+  /* Booking-level ordering only. scheduledStart lives on LiveClass, so sorting
+     by it needs an aggregate — deliberately not done here; the UI no longer
+     claims an ordering the server did not produce. */
+  sort:         z.enum(['-bookedAt', 'bookedAt', 'status']).default('-bookedAt'),
   page:         z.coerce.number().int().min(1).default(1),
   per_page:     z.coerce.number().int().min(1).max(200).default(50),
 })
 
+/* Both ends of a day range, built the same way.
+
+   dateFrom went through `new Date('2026-09-17')` — UTC midnight — while dateTo
+   used setHours(23,59,59,999), which is the SERVER's local midnight. East of
+   UTC the two boundaries disagreed by the offset, so early-morning classes fell
+   through the gap between one day's end and the next day's start. */
+function dayRangeBounds(from?: string, to?: string): { $gte?: Date; $lte?: Date } {
+  const out: { $gte?: Date; $lte?: Date } = {}
+  const dateOnly = (s: string) => /^\d{4}-\d{2}-\d{2}$/.test(s)
+  if (from) out.$gte = dateOnly(from) ? new Date(`${from}T00:00:00.000Z`) : new Date(from)
+  if (to)   out.$lte = dateOnly(to)   ? new Date(`${to}T23:59:59.999Z`)   : new Date(to)
+  return out
+}
+
+/* A user-supplied string going into a RegExp is a wildcard until it is escaped:
+   ".*" would match every student on the platform. */
+function escapeRegex(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
 router.get('/bookings', requireInstructor, requirePermission('bookings','list'), validate(bookingQuerySchema, 'query'), async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { ClassBookingModel, LiveClassModel } = await import('@/models/schema.ts')
+    const { ClassBookingModel, LiveClassModel, UserModel } = await import('@/models/schema.ts')
     const { Types } = await import('mongoose')
     const q = req.query as unknown as z.infer<typeof bookingQuerySchema>
 
@@ -1924,17 +1957,14 @@ router.get('/bookings', requireInstructor, requirePermission('bookings','list'),
       lcFilter['language'] = q.language
     }
 
+    /* In-person is isOnline === false. Online is "not false" rather than true,
+       because rows created before the field existed have it unset. */
+    if (q.isOnline === 'false')     lcFilter['isOnline'] = false
+    else if (q.isOnline === 'true') lcFilter['isOnline'] = { $ne: false }
+
     // For cancelled bookings the date range applies to cancelledAt (not scheduledStart)
-    if (q.dateFrom || q.dateTo) {
-      if (q.status !== 'cancelled') {
-        lcFilter['scheduledStart'] = {}
-        if (q.dateFrom) lcFilter['scheduledStart']['$gte'] = new Date(q.dateFrom)
-        if (q.dateTo) {
-          const end = new Date(q.dateTo)
-          end.setHours(23, 59, 59, 999)
-          lcFilter['scheduledStart']['$lte'] = end
-        }
-      }
+    if ((q.dateFrom || q.dateTo) && q.status !== 'cancelled') {
+      lcFilter['scheduledStart'] = dayRangeBounds(q.dateFrom, q.dateTo)
     }
 
     /* ── Step 2: Resolve live-class IDs if needed ── */
@@ -1965,10 +1995,24 @@ router.get('/bookings', requireInstructor, requirePermission('bookings','list'),
 
     // Cancelled bookings: apply date range to cancelledAt instead of scheduledStart
     if (q.status === 'cancelled' && (q.dateFrom || q.dateTo)) {
-      const cf: Record<string, any> = {}
-      if (q.dateFrom) cf['$gte'] = new Date(q.dateFrom)
-      if (q.dateTo)   { const e = new Date(q.dateTo); e.setHours(23,59,59,999); cf['$lte'] = e }
-      filter['cancelledAt'] = cf
+      filter['cancelledAt'] = dayRangeBounds(q.dateFrom, q.dateTo)
+    }
+
+    /* Free-text search, server-side so it sees the whole result set and not
+       just the page the browser happens to hold. Matches the student's name or
+       email, OR the session title. The title arm is intersected with lcFilter
+       first, so a search can only ever narrow what the caller may already see —
+       it can never reach outside their organisation or programme scope. */
+    if (q.q) {
+      const rx = new RegExp(escapeRegex(q.q), 'i')
+      const [people, titled] = await Promise.all([
+        UserModel.find({ $or: [{ name: rx }, { email: rx }] }, '_id').limit(1000).lean(),
+        LiveClassModel.find({ ...lcFilter, title: rx }, '_id').lean(),
+      ])
+      filter['$or'] = [
+        { userId:      { $in: people.map((u: any) => u._id) } },
+        { liveClassId: { $in: titled.map((l: any) => l._id) } },
+      ]
     }
 
     /* ── Step 3: Fetch bookings with rich populate ── */
@@ -1988,7 +2032,7 @@ router.get('/bookings', requireInstructor, requirePermission('bookings','list'),
             { path: 'instructorId', select: 'id name avatarUrl' },
           ],
         })
-        .sort({ bookedAt: -1 })
+        .sort(q.sort === 'bookedAt' ? { bookedAt: 1 } : q.sort === 'status' ? { status: 1, bookedAt: -1 } : { bookedAt: -1 })
         .skip(skip).limit(per_page)
         .lean({ virtuals: true }),
       ClassBookingModel.countDocuments(filter),
@@ -2008,6 +2052,70 @@ router.get('/bookings', requireInstructor, requirePermission('bookings','list'),
        returning a different meta shape from every paginated route beside it.
        The type checker only noticed once it went through the typed helper. */
     sendSuccess(res, docs.map(withId), undefined, 200, buildPaginationMeta(total, page, per_page))
+  } catch (err) { next(err) }
+})
+
+/* ── Cancel a booking on a student's behalf ───────────────
+   There was no admin path to cancel a booking anywhere in the product: the
+   only cancel is DELETE /bookings/:id, which is student-only and matches on
+   {_id, userId}. So a seat taken by mistake, or by a student who has since lost
+   access, could never be released and the session stayed full.
+
+   Mirrors the student route exactly — atomic booked→cancelled so a repeated
+   cancel releases the seat once, then a floor-guarded decrement — and reuses
+   the attendance route's tenancy rule (404 across an academy boundary, never a
+   403 that would confirm the id exists elsewhere). */
+router.patch('/bookings/:id/cancel', requireInstructor, requirePermission('bookings', 'update'),
+  audit('booking.cancel', 'ClassBooking', r => String(r.params['id'] ?? '')),
+  async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { ClassBookingModel, LiveClassModel, UserModel } = await import('@/models/schema.ts')
+    const id = String(req.params['id'] ?? '')
+
+    const existing = await ClassBookingModel.findById(id).select('liveClassId userId status').lean()
+    if (!existing || !(await callerMayManageSession(req, existing.liveClassId))) {
+      res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Booking not found' } }); return
+    }
+    if (existing.status !== 'booked') {
+      res.status(400).json({ success: false, error: { code: 'CANNOT_CANCEL', message: 'Only active bookings can be cancelled' } }); return
+    }
+
+    const cancelled = await ClassBookingModel.updateOne(
+      { _id: id, status: 'booked' },
+      { status: 'cancelled', cancelledAt: new Date() },
+    )
+    if (cancelled.modifiedCount === 0) {
+      res.status(400).json({ success: false, error: { code: 'CANNOT_CANCEL', message: 'Only active bookings can be cancelled' } }); return
+    }
+
+    await LiveClassModel.updateOne(
+      { _id: existing.liveClassId, bookedCount: { $gt: 0 } },
+      { $inc: { bookedCount: -1 } },
+    )
+
+    sendSuccess(res, null, 'Booking cancelled')
+
+    /* Tell the student, non-blocking — an admin cancelling silently is how a
+       student turns up to a class they no longer hold a seat for. */
+    void (async () => {
+      try {
+        const [student, lc] = await Promise.all([
+          UserModel.findById(existing.userId).select('name email').lean(),
+          LiveClassModel.findById(existing.liveClassId).select('title scheduledStart').lean(),
+        ])
+        if (!student || !(student as any).email) return
+        const { sendCancelledNotification } = await import('@/services/email.service.ts')
+        await sendCancelledNotification(
+          (student as any).email,
+          (student as any).name ?? '',
+          (lc as any)?.title ?? 'Session',
+          new Date((lc as any)?.scheduledStart ?? Date.now()).toLocaleString('en-US', { dateStyle: 'full', timeStyle: 'short' }),
+        )
+      } catch {
+        /* Non-fatal: the seat is already released and the caller already has
+           its 200. A failed courtesy email must not undo a completed cancel. */
+      }
+    })()
   } catch (err) { next(err) }
 })
 
