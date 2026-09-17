@@ -285,14 +285,34 @@ async function bootstrap() {
      (0,1,2,…) per fork. Running the scheduler on every instance would fire
      each reminder N times, so we pin it to instance 0. When unset (single
      process / dev), it defaults to '0' and jobs run normally. */
-  if ((process.env.NODE_APP_INSTANCE ?? '0') === '0') {
+  /* ENABLE_CRON is the explicit switch (set in ecosystem.config.js). When it is
+     unset we fall back to the historic rule — instance 0 — so dev and older
+     deployments keep behaving exactly as before.
+
+     The flag exists because pinning the scheduler to instance 0 silently tied it
+     to "whichever fork wins the base port". When that port turned out to belong
+     to another app on the host, instance 0 crash-looped and EVERY job stopped —
+     class reminders, reschedule/cancellation notices, digests and the failed-
+     email retry drain — for months, announced only by one info line. */
+  const cronEnabled = process.env.ENABLE_CRON !== undefined
+    ? process.env.ENABLE_CRON === 'true'
+    : (process.env.NODE_APP_INSTANCE ?? '0') === '0'
+
+  if (cronEnabled) {
     startReminderJobs()
     startEmailOutboxJob()
     startDigestJob()
     startCriticalMailJob()
-    logger.info('⏰  Reminder cron jobs started (primary instance)')
+    logger.info('⏰  Scheduler started (reminders, critical mail, digests, email outbox)')
   } else {
-    logger.info(`⏸️   Reminder cron jobs skipped (instance ${process.env.NODE_APP_INSTANCE})`)
+    /* WARN, not info. If this is true of every process the platform quietly
+       sends no reminders and no class-change notices at all, and nothing else
+       in the logs says so. */
+    logger.warn(
+      { instance: process.env.NODE_APP_INSTANCE ?? null, enableCron: process.env.ENABLE_CRON ?? null },
+      '⏸️   Scheduler NOT started in this process — reminders, critical mail, digests and email ' +
+      'retries will not run here. Exactly ONE process must have ENABLE_CRON=true.',
+    )
   }
 
   /* H-11 — identity scans must live in storage with no public access.

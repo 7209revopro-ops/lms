@@ -40,7 +40,18 @@ module.exports = {
       script: 'src/index.ts',
       interpreter: 'bun', // ← absolute path if not on PATH, e.g. '/root/.bun/bin/bun'
       exec_mode: 'fork', // cluster mode is NOT supported with the Bun interpreter
-      instances: 2, // ← set to (CPU cores - 1); must match nginx upstream
+      /* ONE instance, and it must be instance 0.
+         The scheduler (reminders, critical mail, digests, outbox drain) only
+         starts on NODE_APP_INSTANCE 0. With `instances: 2` and a base port of
+         4000 — which the exam-tracker API owns — instance 0 could never bind,
+         so it crash-looped and instance 1 served alone with EVERY cron job
+         silently skipped: no class reminders, no reschedule/cancellation
+         notices, no email retries, for months.
+         Base port is now 4001 so the single fork is instance 0, binds the port
+         nginx already proxies to, and runs the jobs. To scale the web tier
+         later, add a SEPARATE pm2 app for jobs (ENABLE_CRON=true, instances 1)
+         rather than relying on which fork wins a port. */
+      instances: 1, // ← must match the nginx `upstream lms_backend` block
       // NOTE: no `increment_var` — the app derives its listen port from
       // NODE_APP_INSTANCE (see backend/src/index.ts). All forks share PORT=4000
       // as the BASE; instance N listens on 4000+N (4000..4001). Matches nginx upstream.
@@ -63,7 +74,11 @@ module.exports = {
       kill_timeout: 10000, // give in-flight requests 10s to drain on reload (matches graceful shutdown)
       env: {
         NODE_ENV: 'production',
-        PORT: 4000, // base port; incremented per instance — MUST match nginx upstream (4000..4001)
+        /* Base port. Instance N listens on PORT+N, so with instances:1 this is
+           exactly 4001 — the only server in the nginx upstream. NOT 4000: that
+           belongs to the exam-tracker API on this host. */
+        PORT: 4001,
+        ENABLE_CRON: 'true', // this app owns the scheduler (see src/index.ts)
       },
       out_file: './logs/backend-out.log',
       error_file: './logs/backend-error.log',
