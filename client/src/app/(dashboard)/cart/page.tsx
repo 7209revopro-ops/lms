@@ -9,8 +9,9 @@ import {
   CheckCircle2, GraduationCap,
 } from 'lucide-react'
 import { useCartStore, type CartItem } from '@/store/cart.store'
-import { useRazorpayCheckout, useTabbyCheckout, useAbzerCheckout, useTamaraCheckout, useGatewayConfig, useValidateCoupon, useTabbyPrescore } from '@/lib/api/checkout'
+import { useRazorpayCheckout, useTabbyCheckout, useAbzerCheckout, useTamaraCheckout, useGatewayConfig, useValidateCoupon, useTabbyPrescore, useTamaraPrescore } from '@/lib/api/checkout'
 import { TabbyCartPromo } from '@/components/payments/TabbyPromo'
+import { TamaraCartWidget } from '@/components/payments/TamaraWidget'
 import { TabbyLogo } from '@/components/payments/TabbyLogo'
 import Spinner from '@/components/ui/Spinner'
 import { useCheckoutCurrency, coursePriceIn } from '@/lib/coursePrice'
@@ -98,6 +99,14 @@ function CartItemCard({ item, onRemove }: { item: CartItem; onRemove: () => void
   const { data: tabbyScore } = useTabbyPrescore(item.id, tabbyOffered)
   const tabbyRejected   = tabbyScore?.available === false && !!tabbyScore?.message
   const tabbyAmount     = tabbyScore?.amount ?? 0
+
+  /* Same gate for Tamara — eligibility decides whether the option is offered
+     at all, and the AED figure comes back with it so the widget quotes the
+     number the student will actually be charged. */
+  const tamaraOffered   = isUAE && gateways.includes('tamara') && !isFree
+  const { data: tamaraScore } = useTamaraPrescore(item.id, tamaraOffered)
+  const tamaraRejected  = tamaraScore?.available === false
+  const tamaraAmount    = tamaraScore?.amount ?? 0
   const [coupon,  setCoupon]  = useState<string | undefined>(undefined)
   const [buying,  setBuying]  = useState(false)
 
@@ -209,7 +218,7 @@ function CartItemCard({ item, onRemove }: { item: CartItem; onRemove: () => void
                       ? <><ArrowRight size={11} />Pay · Abzer</>
                       : <><ArrowRight size={11} />Checkout</>}
                 </motion.button>
-                {isUAE && gateways.includes('tamara') && (
+                {tamaraOffered && !tamaraRejected && (
                   <button
                     onClick={handleTamaraBuy}
                     disabled={tamaraCheckout.isPending}
@@ -246,6 +255,18 @@ function CartItemCard({ item, onRemove }: { item: CartItem; onRemove: () => void
         <div className="mt-2">
           <TabbyCartPromo price={tabbyAmount} currency={tabbyScore?.currency ?? 'AED'} />
         </div>
+      )}
+
+      {tamaraOffered && !tamaraRejected && tamaraAmount > 0 && (
+        <div className="mt-2">
+          <TamaraCartWidget price={tamaraAmount} />
+        </div>
+      )}
+
+      {tamaraRejected && tamaraScore?.message && (
+        <p className="mt-2 text-xs" style={{ color: 'var(--color-text-muted)' }}>
+          {tamaraScore.message}
+        </p>
       )}
 
       {/* A Tabby decline is a business outcome, not an error — Tabby supplies

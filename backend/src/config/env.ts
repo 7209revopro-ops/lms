@@ -79,9 +79,19 @@ const envSchema = z.object({
   ABZER_BASE_URL:        z.string().default('https://billxpro.com/as/api/v100'),
   ABZER_CURRENCY:        z.string().length(3).default('AED'),
 
-  /* Tamara — BNPL gateway for UAE/GCC (AED) */
-  TAMARA_API_KEY:           opt(z.string().min(1)),
+  /* Tamara — BNPL gateway for UAE/GCC (AED)
+     THREE separate credentials, none interchangeable:
+       API token          — bearer auth on outbound calls
+       Notification token — HS256 secret for verifying inbound webhook JWTs
+       Public key         — the on-site widgets only
+     Using the API token to verify a webhook silently fails every check. */
+  TAMARA_API_KEY:            opt(z.string().min(1)),
   TAMARA_NOTIFICATION_TOKEN: opt(z.string().min(1)),
+  TAMARA_PUBLIC_KEY:         opt(z.string().min(1)),
+  /* Tamara offers no "list webhooks" endpoint — only GET/PUT/DELETE by id — so
+     registration cannot be made idempotent by inspection. Record the id the
+     first registration returns here and boot stops re-registering. */
+  TAMARA_WEBHOOK_ID:         opt(z.string().min(1)),
   /* Production: https://api.tamara.co  |  Sandbox/QA: https://api-sandbox.tamara.co */
   TAMARA_BASE_URL:          z.string().default('https://api-sandbox.tamara.co'),
   TAMARA_CURRENCY:          z.string().length(3).default('AED'),

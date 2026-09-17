@@ -6,6 +6,7 @@ import { RazorpayService } from '@/services/razorpay.service.ts'
 import { AbzerService } from '@/services/abzer.service.ts'
 import { TamaraService } from '@/services/tamara.service.ts'
 import { isTabbyId } from '@/services/tabby.service.ts'
+import { isTamaraId } from '@/services/tamara.service.ts'
 import { env } from '@/config/env.ts'
 import { logger } from '@/utils/logger.ts'
 import type { Request, Response } from 'express'
@@ -364,32 +365,46 @@ router.post('/abzer', async (req: Request, res: Response) => {
 
 /* ─────────────────────────────────────────────────────
    Tamara webhook
-   Tamara fires ORDER_APPROVED when the customer completes
-   the BNPL agreement. Tamara authenticates by attaching a
-   JWT (HS256, signed with TAMARA_NOTIFICATION_TOKEN) as:
+   ─────────────────────────────────────────────────────
+   Tamara authenticates ITSELF to us with an HS256 JWT it
+   calls the Notification Token, sent twice on every call:
      Authorization: Bearer <tamaraToken>
      ?tamaraToken=<tamaraToken>
-   Always responds 200 so Tamara doesn't retry on errors.
+
+   That JWT carries only exp/iat/iss — no order id, no event
+   type, no body hash. It proves the caller holds our
+   notification token and NOTHING about the payload, so a
+   valid token with a tampered body verifies. Every event
+   here is therefore re-read from Tamara's own order API
+   before anything is acted on; this handler only decides
+   WHICH order to go and look at.
+
+   Event names are lowercase snake_case (`order_approved`).
+   They were previously matched UPPERCASE, so nothing ever
+   matched and the webhook path was silently dead.
+
+   Answers 200 for anything Tamara should consider handled,
+   and 503 for the one case worth re-delivering: the webhook
+   overtaking our own order write.
 ───────────────────────────────────────────────────── */
 router.post('/tamara', async (req: Request, res: Response) => {
   if (!requireWebhookSecret(res, env.TAMARA_NOTIFICATION_TOKEN, 'Tamara', 'TAMARA_NOTIFICATION_TOKEN')) return
 
-  /* Verify JWT when notification token is configured */
   if (env.TAMARA_NOTIFICATION_TOKEN) {
-    const authHeader = asString(req.headers['authorization'])
-    const queryToken = asString(req.query['tamaraToken'])
-    const tamaraToken = authHeader?.startsWith('Bearer ')
-      ? authHeader.slice(7)
-      : queryToken
+    const authHeader  = asString(req.headers['authorization'])
+    const queryToken  = asString(req.query['tamaraToken'])
+    const tamaraToken = authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : queryToken
 
     if (!tamaraToken) {
-      logger.warn('Tamara webhook: missing tamaraToken in Authorization header or query param')
+      logger.warn('Tamara webhook: no tamaraToken in the Authorization header or query string')
       res.status(200).json({ received: true })
       return
     }
-    const valid = tamaraSvc.verifyWebhookJwt(tamaraToken, env.TAMARA_NOTIFICATION_TOKEN)
-    if (!valid) {
-      logger.warn('Tamara webhook: JWT verification failed')
+    /* `exp` is enforced inside verifyWebhookJwt — a 15-minute token that never
+       expires on our side is a replayable credential. */
+    const check = tamaraSvc.verifyWebhookJwt(tamaraToken, env.TAMARA_NOTIFICATION_TOKEN)
+    if (!check.valid) {
+      logger.warn({ reason: check.reason }, 'Tamara webhook: JWT rejected')
       res.status(200).json({ received: true })
       return
     }
@@ -405,27 +420,78 @@ router.post('/tamara', async (req: Request, res: Response) => {
   }
 
   try {
-    /*
-     * Tamara ORDER_APPROVED payload:
-     *   event_type:         'ORDER_APPROVED'
-     *   order_id:           Tamara internal order ID
-     *   order_reference_id: our order ID (set in merchant_url notification)
-     */
-    const eventType     = asString(payload?.event_type)
+    const eventType     = asString(payload?.event_type)?.toLowerCase()
     const tamaraOrderId = asString(payload?.order_id)
     const ourOrderId    = asString(payload?.order_reference_id)
 
-    if (eventType === 'ORDER_APPROVED' && tamaraOrderId) {
-      await orderSvc.fulfillTamaraFromWebhook(tamaraOrderId, ourOrderId)
-      logger.info({ tamaraOrderId, ourOrderId }, 'Tamara: order fulfilled via webhook')
-    } else if ((eventType === 'ORDER_EXPIRED' || eventType === 'ORDER_DECLINED') && tamaraOrderId) {
-      await orderSvc.cancelTamaraFromWebhook(tamaraOrderId, ourOrderId)
-      logger.info({ tamaraOrderId, ourOrderId, eventType }, 'Tamara: order cancelled via webhook')
-    } else {
-      logger.debug({ eventType, tamaraOrderId }, 'Tamara webhook: ignored event')
+    if (!tamaraOrderId || !isTamaraId(tamaraOrderId)) {
+      logger.warn({ tamaraOrderId, eventType }, 'Tamara webhook: missing or malformed order id — ignoring')
+      res.status(200).json({ received: true })
+      return
+    }
+
+    switch (eventType) {
+      /* Money-positive events. All of them route to the same status-driven
+         path, which re-reads the order from Tamara and decides for itself —
+         so a spoofed `order_captured` cannot fulfil anything that Tamara does
+         not agree is captured. `order_approved` is the one Tamara marks
+         mandatory, because the 72-hour authorise clock starts at it. */
+      case 'order_approved':
+      case 'order_authorised':
+      case 'order_captured': {
+        const outcome = await orderSvc.fulfillTamaraFromWebhook(tamaraOrderId, ourOrderId)
+        if (outcome === 'retry') {
+          logger.warn({ tamaraOrderId, ourOrderId, eventType }, 'Tamara webhook: asking Tamara to re-deliver')
+          res.status(503).json({ received: false, retry: true })
+          return
+        }
+        logger.info({ tamaraOrderId, ourOrderId, eventType, outcome }, 'Tamara webhook handled')
+        break
+      }
+
+      /* Terminal failures — release the pending order and its coupon slot. */
+      case 'order_declined':
+      case 'order_expired': {
+        await orderSvc.cancelTamaraFromWebhook(tamaraOrderId, ourOrderId)
+        logger.info({ tamaraOrderId, ourOrderId, eventType,
+          declinedReason: asString(payload?.data?.declined_reason),
+          declinedCode:   asString(payload?.data?.declined_code),
+          declineType:    asString(payload?.data?.decline_type),
+        }, 'Tamara: order cancelled via webhook')
+        break
+      }
+
+      /* `order_canceled` covers BOTH a real cancellation and Tamara's
+         `updated` status, which means PARTIALLY cancelled and still live —
+         it flows on to capture. Acting on the event name alone would strip a
+         paying student of their course after a partial adjustment, so the
+         decision is deferred to the order's real status. */
+      case 'order_canceled': {
+        await orderSvc.reconcileTamaraCancellation(tamaraOrderId, ourOrderId)
+        break
+      }
+
+      /* A refund is an accounting fact, not a fulfilment one. Recorded, but it
+         does not by itself revoke access — that is a policy decision the admin
+         refund flow owns. */
+      case 'order_refunded': {
+        logger.info({ tamaraOrderId, ourOrderId,
+          refundId:       asString(payload?.data?.refund_id),
+          captureId:      asString(payload?.data?.capture_id),
+          refundedAmount: payload?.data?.refunded_amount,
+        }, 'Tamara: refund notification received')
+        break
+      }
+
+      default:
+        logger.debug({ eventType, tamaraOrderId }, 'Tamara webhook: unhandled event')
     }
   } catch (err) {
-    logger.error({ err, payload }, 'Tamara webhook handler error')
+    /* An unexpected fault is worth a redelivery — the order is real and we
+       have not recorded it. */
+    logger.error({ err, payload }, 'Tamara webhook handler error — asking Tamara to re-deliver')
+    res.status(500).json({ received: false, retry: true })
+    return
   }
 
   res.status(200).json({ received: true })

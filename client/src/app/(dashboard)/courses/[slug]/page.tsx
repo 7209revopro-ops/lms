@@ -12,8 +12,9 @@ import {
 } from 'lucide-react'
 import { useCourse } from '@/lib/api/courses'
 import { useCourseProgress, useEnroll } from '@/lib/api/enrollments'
-import { useRazorpayCheckout, useTabbyCheckout, useAbzerCheckout, useTamaraCheckout, useGatewayConfig, useValidateCoupon, useTabbyPrescore } from '@/lib/api/checkout'
+import { useRazorpayCheckout, useTabbyCheckout, useAbzerCheckout, useTamaraCheckout, useGatewayConfig, useValidateCoupon, useTabbyPrescore, useTamaraPrescore } from '@/lib/api/checkout'
 import { TabbyProductPromo, TabbyCheckoutCard } from '@/components/payments/TabbyPromo'
+import { TamaraProductWidget, TamaraCheckoutWidget } from '@/components/payments/TamaraWidget'
 import { TabbyLogo } from '@/components/payments/TabbyLogo'
 import { formatPrice } from '@/lib/formatPrice'
 import { useCheckoutCurrency, coursePriceIn, discountedAmount } from '@/lib/coursePrice'
@@ -72,6 +73,14 @@ function CourseDetailInner({ slug }: { slug: string }) {
   const tabbyOffered    = isUAE && gateways.includes('tabby')
   const { data: tabbyScore } = useTabbyPrescore(data?.course.id ?? '', tabbyOffered)
   const tabbyRejected   = tabbyScore?.available === false && !!tabbyScore?.message
+
+  /* Tamara's own status-flow diagram models eligibility as the gate BEFORE a
+     session exists — an ineligible customer has the option greyed out rather
+     than being sent to the hosted page to be refused there. */
+  const tamaraOffered   = isUAE && gateways.includes('tamara')
+  const { data: tamaraScore } = useTamaraPrescore(data?.course.id ?? '', tamaraOffered)
+  const tamaraRejected  = tamaraScore?.available === false
+  const tamaraAmount    = tamaraScore?.amount ?? 0
   const tabbyAmount     = tabbyScore?.amount ?? 0
 
   const [enrollError,   setEnrollError]   = useState<string | null>(null)
@@ -451,6 +460,9 @@ function CourseDetailInner({ slug }: { slug: string }) {
                 {tabbyOffered && tabbyAmount > 0 && !isEnrolled && (
                   <TabbyProductPromo price={tabbyAmount} currency={tabbyScore?.currency ?? 'AED'} />
                 )}
+                {tamaraOffered && !tamaraRejected && tamaraAmount > 0 && !isEnrolled && (
+                  <TamaraProductWidget price={tamaraAmount} />
+                )}
                 {isEnrolled && (
                   <span className="rounded-lg px-2 py-0.5 text-xs font-bold"
                     style={{ background: 'rgba(16,185,129,0.10)', color: 'var(--color-success)', border: '1px solid rgba(16,185,129,0.22)' }}>
@@ -489,7 +501,7 @@ function CourseDetailInner({ slug }: { slug: string }) {
                   </motion.button>
 
                   {/* Tamara BNPL */}
-                  {isUAE && gateways.includes('tamara') && (
+                  {tamaraOffered && !tamaraRejected && (
                     <motion.button
                       onClick={() => { setEnrollError(null); tamaraCheckout.mutate({ courseId: course.id, slug: course.slug, couponCode: couponCode || undefined }) }}
                       disabled={tamaraCheckout.isPending || abzerCheckout.isPending}
@@ -500,6 +512,16 @@ function CourseDetailInner({ slug }: { slug: string }) {
                         ? <><Spinner size={14} />Redirecting…</>
                         : <><ShoppingCart size={14} />Pay in 3 with Tamara</>}
                     </motion.button>
+                  )}
+                  {tamaraOffered && !tamaraRejected && tamaraAmount > 0 && (
+                    <div className="mt-2">
+                      <TamaraCheckoutWidget price={tamaraAmount} />
+                    </div>
+                  )}
+                  {tamaraRejected && tamaraScore?.message && (
+                    <p className="mt-2 text-xs" style={{ color: 'var(--color-text-muted)' }}>
+                      {tamaraScore.message}
+                    </p>
                   )}
 
                   {/* Tabby BNPL. Shown unless Tabby's own pre-scoring declined

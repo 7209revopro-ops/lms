@@ -8,7 +8,10 @@ import {
   type TabbyEligibility, type TabbyOrderHistoryEntry, type TabbyShippingAddress,
 } from '@/services/tabby.service.ts'
 import { AbzerService } from '@/services/abzer.service.ts'
-import { TamaraService } from '@/services/tamara.service.ts'
+import {
+  TamaraService, isTamaraId, isTamaraStatus, tamaraStatusIsPaid, tamaraStatusIsDead,
+  type TamaraEligibility,
+} from '@/services/tamara.service.ts'
 import { EnrollmentService } from '@/services/enrollment.service.ts'
 import { NotificationService } from '@/services/notification.service.ts'
 import { sendEnrollmentConfirmation } from '@/services/email.service.ts'
@@ -419,18 +422,43 @@ export class OrderService {
     void this._sendPostPaymentNotifications(order.userId.toString(), order.courseId.toString(), order.id)
   }
 
-  /* ─── Tamara pre-checkout eligibility check ─────────── */
+  /* ─── Tamara pre-checkout eligibility check ──────────────────────────────
+     Tamara's own status-flow diagram models this as the gate BEFORE a session
+     exists: an ineligible customer has the option greyed out rather than being
+     sent to the hosted page to be refused there.
+
+     Returns the AED figure alongside, so the on-site widget quotes the number
+     the student will actually be charged rather than deriving its own. */
   async checkTamaraEligibility(
     userId:   string,
     courseId: string,
-  ): Promise<{ available: boolean; rejectionReason: string | null }> {
+  ): Promise<TamaraEligibility & { amount: number; currency: string }> {
+    await this.assertTamaraOffered(userId)
+
     const course = await CourseModel.findById(courseId).select('priceAED price status isFree').exec()
     if (!course || course.status !== 'published' || course.isFree) {
-      return { available: false, rejectionReason: null }
+      return { available: false, rejectionReason: null, message: null, amount: 0, currency: env.TAMARA_CURRENCY }
     }
     const priceAED = aedPriceFor(course as any)
-    const user     = await UserModel.findById(userId).select('phone').exec()
-    return this.tamaraSvc.checkEligibility(priceAED, (user as any)?.phone)
+    const user     = await UserModel.findById(userId).select('phone email enrollmentApplication').exec()
+    const app      = (user as any)?.enrollmentApplication ?? {}
+
+    const score = await this.tamaraSvc.checkEligibility({
+      amountAED: priceAED,
+      phone:     (user as any)?.phone ?? app.phone,
+      email:     user?.email,
+    })
+    return { ...score, amount: priceAED, currency: env.TAMARA_CURRENCY }
+  }
+
+  /* Tamara is licensed per country and, like Tabby, must be enforced on the
+     API rather than only in the UI — otherwise the gating is decorative and a
+     student outside the market can drive the routes directly. */
+  private async assertTamaraOffered(userId: string): Promise<void> {
+    const cfg = await this.getGatewayConfig(userId)
+    if (!(cfg.gateways as string[]).includes('tamara')) {
+      throw new OrderError('GATEWAY_NOT_AVAILABLE', 'Tamara is not available for your account.', 403)
+    }
   }
 
   /* ─── Tabby background pre-scoring ──────────────────── */
@@ -1087,6 +1115,7 @@ export class OrderService {
     if (!Types.ObjectId.isValid(courseId)) {
       throw new OrderError('INVALID_COURSE_ID', 'Invalid course id', 400)
     }
+    await this.assertTamaraOffered(userId)
 
     const course = await CourseModel.findById(courseId).exec()
     if (!course || course.status !== 'published') {
@@ -1154,59 +1183,155 @@ export class OrderService {
     })
   }
 
-  /* ─── Tamara webhook fulfillment (idempotent) ────────── */
-  async fulfillTamaraFromWebhook(tamaraOrderId: string, ourOrderId?: string): Promise<void> {
-    /* Tamara sends both order_id (their ID) and order_reference_id (our ID) */
+  /* ─── Tamara fulfilment ──────────────────────────────────────────────────
+     Driven by the order's ACTUAL state at Tamara, not by whatever a webhook
+     body or a request parameter claimed. Both entry points — the webhook and
+     the student-callable verify-return — funnel through here.
+
+     Tamara's notification JWT authenticates the caller but signs nothing about
+     the payload: its only claims are exp/iat/iss. So the event name and any
+     amounts in the body are untrusted, and the first thing this does is ask
+     Tamara what is actually true.
+
+     Written status-driven rather than sequence-driven because auto-authorise
+     and auto-capture are account-level flags we do not control: the same code
+     has to be correct whether we drive each step or Tamara has already. */
+  async fulfillTamaraFromWebhook(tamaraOrderId: string, ourOrderId?: string): Promise<TabbyFulfillOutcome> {
+    if (!isTamaraId(tamaraOrderId)) {
+      logger.warn({ tamaraOrderId }, 'Tamara: malformed order id — ignoring')
+      return 'ignored'
+    }
+
+    /* 1. Source of truth. A lookup we could not perform has not passed, so a
+          failure asks for redelivery rather than being treated as a decline. */
+    let remote: Awaited<ReturnType<TamaraService['getOrder']>>
+    try {
+      remote = await this.tamaraSvc.getOrder(tamaraOrderId)
+    } catch (err) {
+      logger.error({ err, tamaraOrderId }, 'Tamara: getOrder failed — refusing to fulfil unverified order')
+      return 'retry'
+    }
+
+    /* 2. Find our order. */
     const order = ourOrderId
       ? await this.orderRepo.findById(ourOrderId)
       : await this.orderRepo.findByTamaraOrderId(tamaraOrderId)
 
+    /* Tamara can beat our own write. Answering "handled" would lose the sale. */
     if (!order) {
-      logger.warn({ tamaraOrderId, ourOrderId }, 'Tamara webhook: no matching order')
-      return
+      logger.warn({ tamaraOrderId, ourOrderId }, 'Tamara webhook: no matching order yet — asking for retry')
+      return 'retry'
     }
     if (order.status === 'paid') {
       logger.info({ orderId: order.id }, 'Tamara webhook: already fulfilled')
-      return
+      return 'already-fulfilled'
     }
 
-    /* Authorise with Tamara (approved → authorised) then capture (authorised → fully_captured).
-
-       FULFILMENT IS GATED ON THE AUTHORISE (P-02). Both calls used to be
-       fire-and-forget `void`s that logged failures as "(non-fatal)", so the
-       order was marked paid whatever Tamara answered — which made
-       /checkout/tamara/verify-return a free-course button for the buyer.
-       A successful authorise is the point at which funds are committed, so it
-       is the honest gate. A failed capture after a successful authorise is a
-       settlement problem to chase, not a reason to withhold a course the
-       customer has already committed to. */
-    const authorised = await this.tamaraSvc.authoriseOrder(tamaraOrderId)
-    if (!authorised) {
-      logger.warn({ tamaraOrderId, orderId: order.id }, 'Tamara: authorise refused — not fulfilling')
-      return
+    /* 3. Bind the Tamara order to THIS order — the lesson from the Tabby
+          audit. `ourOrderId` arrives from outside on both entry points, so
+          without this a student could point any order of theirs at a Tamara
+          order that was genuinely paid for something cheaper. Tamara's own
+          order_reference_id is the authoritative link. */
+    if (order.gateway !== 'tamara') {
+      logger.error({ orderId: order.id, gateway: order.gateway }, 'Tamara: refusing to fulfil a non-Tamara order')
+      return 'ignored'
+    }
+    const recordedId = (order as any).tamaraOrderId as string | undefined
+    const bound =
+      (recordedId && recordedId === tamaraOrderId) ||
+      (remote.orderReferenceId && remote.orderReferenceId === order.id)
+    if (!bound) {
+      logger.error(
+        { orderId: order.id, tamaraOrderId, recordedId, reportedRef: remote.orderReferenceId },
+        'Tamara: order does not belong to this purchase — refusing to fulfil (replay attempt?)',
+      )
+      return 'ignored'
+    }
+    if (remote.totalFils !== order.amount) {
+      logger.error({ orderId: order.id, remoteFils: remote.totalFils, orderAmount: order.amount },
+        'Tamara: amount does not match the order — refusing to fulfil')
+      return 'ignored'
+    }
+    if (remote.currency.toUpperCase() !== String(order.currency).toUpperCase()) {
+      logger.error({ orderId: order.id, remote: remote.currency, ours: order.currency },
+        'Tamara: currency mismatch — refusing to fulfil')
+      return 'ignored'
     }
 
-    /* Fetch course details for capture request */
-    const course = await CourseModel.findById(order.courseId).select('title priceAED price').lean()
-    const amountAED = (order.amount / 100).toFixed(2)
-    await this.tamaraSvc.captureOrder({
-      tamaraOrderId,
-      amountAED,
-      courseTitle: (course as any)?.title ?? 'Course',
-      courseId:    order.courseId.toString(),
-    })
+    /* 4. Act on the real status. */
+    if (!isTamaraStatus(remote.status)) {
+      logger.error({ orderId: order.id, status: remote.status },
+        'Tamara: unrecognised order status — refusing to guess')
+      return 'ignored'
+    }
+    if (tamaraStatusIsDead(remote.status)) {
+      logger.info({ orderId: order.id, status: remote.status }, 'Tamara: order is terminal, not fulfilling')
+      return 'ignored'
+    }
 
-    /* Conditional flip — the return-URL verify may have raced us */
+    const course      = await CourseModel.findById(order.courseId).select('title').lean()
+    const courseTitle = (course as any)?.title ?? 'Delta Academy course'
+    const amountAED   = order.amount / 100
+    /* Widened deliberately: the authorise call below can move this on to a
+       status Tamara chooses (`authorised`, or `fully_captured` when
+       account-level auto-capture is on). */
+    let   status: string = remote.status
+
+    /* `approved` is NOT paid — the customer has paid Tamara a first
+       instalment but we hold nothing. Authorise is what commits the funds,
+       and it has a 72-hour fuse. */
+    if (status === 'approved') {
+      const auth = await this.tamaraSvc.authoriseOrder(tamaraOrderId)
+      if (!auth.ok) {
+        /* Retry rather than ignore: the customer HAS paid, and letting this
+           lapse silently is how an order expires with their money taken. */
+        logger.error({ tamaraOrderId, orderId: order.id }, 'Tamara: authorise refused — will retry')
+        return 'retry'
+      }
+      status = auth.status || 'authorised'
+    }
+
+    if (!tamaraStatusIsPaid(status)) {
+      logger.warn({ orderId: order.id, status }, 'Tamara: order not in a paid state — not fulfilling')
+      return 'ignored'
+    }
+
+    /* Capture is what puts the money in a settlement; `authorised` alone never
+       pays out. A course is delivered instantly, so capture now rather than
+       waiting for Tamara's 21-day auto-capture. Skipped when it already
+       happened — either because account-level auto-capture is on, or because a
+       redelivered webhook is walking the same path a second time. */
+    const alreadyCaptured = remote.capturedFils > 0 || status === 'fully_captured' || status === 'partially_captured'
+    if (!alreadyCaptured) {
+      const captured = await this.tamaraSvc.captureOrder({
+        tamaraOrderId,
+        amountAED,
+        courseTitle,
+        courseId:     order.courseId.toString(),
+        shippedAtIso: new Date().toISOString(),
+      })
+      /* Deliberately not a reason to withhold the course: at `authorised` the
+         funds are committed and the enrolment is owed. An uncaptured payment
+         is money not yet collected — a settlement problem to chase from the
+         logs, and loud rather than silent. */
+      if (!captured) {
+        logger.error({ tamaraOrderId, orderId: order.id },
+          'Tamara: fulfilling an UNCAPTURED order — collect manually before the 21-day auto-capture')
+      }
+    }
+
+    /* 5. Conditional flip — the return-URL verify may have raced us. */
     const fulfilled = await this.orderRepo.fulfillTamara(order.id, tamaraOrderId)
     if (!fulfilled) {
-      logger.info({ orderId: order.id }, 'Tamara webhook: order fulfilled concurrently, skipping side effects')
-      return
+      logger.info({ orderId: order.id }, 'Tamara: order fulfilled concurrently, skipping side effects')
+      return 'already-fulfilled'
     }
 
     await this._createEnrollment(order.userId.toString(), order.courseId.toString())
     await this._autoApproveViaPayment(order.userId.toString(), order.courseId.toString())
     void this._sendPostPaymentNotifications(order.userId.toString(), order.courseId.toString(), order.id)
-    logger.info({ tamaraOrderId, orderId: order.id }, 'Tamara: order fulfilled via webhook')
+    logger.info({ tamaraOrderId, orderId: order.id, status }, 'Tamara: order fulfilled')
+    return 'fulfilled'
   }
 
   /* ─── Tamara webhook cancellation (ORDER_EXPIRED / ORDER_DECLINED) ───────── */
@@ -1242,21 +1367,66 @@ export class OrderService {
     logger.info({ tamaraOrderId, orderId: order.id }, 'Tamara: order cancelled via webhook')
   }
 
+  /* ─── Tamara `order_canceled` reconciliation ─────────────────────────────
+     This one event covers two opposite outcomes, which is the single most
+     dangerous ambiguity in the Tamara API:
+
+       • status `canceled` — the order really was cancelled before capture.
+         Release it and hand the coupon slot back.
+       • status `updated`  — PARTIALLY cancelled. Tamara's own state diagram
+         routes `updated` onward to capture, so the order is still live and
+         will still settle. A naive `if (event === 'order_canceled') revoke()`
+         would strip a paying student of a course they still own.
+
+     The event name decides nothing; the order's real status does. */
+  async reconcileTamaraCancellation(tamaraOrderId: string, ourOrderId?: string): Promise<void> {
+    if (!isTamaraId(tamaraOrderId)) return
+
+    let remote: Awaited<ReturnType<TamaraService['getOrder']>>
+    try {
+      remote = await this.tamaraSvc.getOrder(tamaraOrderId)
+    } catch (err) {
+      logger.error({ err, tamaraOrderId }, 'Tamara cancel-webhook: getOrder failed — leaving the order untouched')
+      return
+    }
+
+    if (remote.status === 'updated') {
+      logger.warn({ tamaraOrderId, ourOrderId, canceledFils: remote.canceledFils },
+        'Tamara: PARTIAL cancellation (status `updated`) — order is still live, access left intact')
+      return
+    }
+    if (remote.status !== 'canceled') {
+      logger.info({ tamaraOrderId, status: remote.status },
+        'Tamara cancel-webhook: order is not cancelled at Tamara, ignoring')
+      return
+    }
+    await this.cancelTamaraFromWebhook(tamaraOrderId, ourOrderId)
+  }
+
   /* ─── Tamara return-URL verify + fulfill (called by client after redirect) ── */
+  /* `paid` is the only question the return page actually has. Reporting just
+     needsRegistration let the client treat any 200 as success — emptying the
+     cart and showing a thank-you even when fulfilment had been refused.
+
+     Note this route never accepts a Tamara order id from the caller: it uses
+     the one recorded at checkout. That is deliberate, and is what stops the
+     replay that the equivalent Tabby route had to be hardened against. */
   async verifyTamaraReturn(
     userId:  string,
     orderId: string,
-  ): Promise<{ needsRegistration: boolean }> {
+  ): Promise<{ needsRegistration: boolean; paid: boolean }> {
     const order = await this.orderRepo.findById(orderId)
     if (!order) throw new OrderError('ORDER_NOT_FOUND', 'Order not found', 404)
     if (order.userId.toString() !== userId) {
       throw new OrderError('FORBIDDEN', 'Order does not belong to you', 403)
     }
 
-    if (order.status !== 'paid') {
+    let paid = order.status === 'paid'
+    if (!paid) {
       const tamaraOrderId = (order as any).tamaraOrderId as string | undefined
       if (tamaraOrderId) {
-        await this.fulfillTamaraFromWebhook(tamaraOrderId, orderId)
+        const outcome = await this.fulfillTamaraFromWebhook(tamaraOrderId, orderId)
+        paid = outcome === 'fulfilled' || outcome === 'already-fulfilled'
       } else {
         logger.warn({ orderId }, 'Tamara verify-return: no tamaraOrderId stored — cannot authorise')
       }
@@ -1265,7 +1435,7 @@ export class OrderService {
     const user = await UserModel.findById(userId).select('signupType').lean()
     const needsRegistration = (user as any)?.signupType === 'express'
 
-    return { needsRegistration }
+    return { needsRegistration, paid }
   }
 
   /* ─── Refund (gateway-aware) ────────────────────────── */
@@ -1283,11 +1453,12 @@ export class OrderService {
       await this.razorpaySvc.refundPayment(order.razorpayPaymentId)
     } else if (order.gateway === 'tabby') {
       await this._refundTabby(order)
-    } else if (order.gateway === 'abzer' || order.gateway === 'tamara') {
-      const label = order.gateway === 'tamara' ? 'Tamara' : 'Abzer'
+    } else if (order.gateway === 'tamara') {
+      await this._refundTamara(order)
+    } else if (order.gateway === 'abzer') {
       throw new OrderError(
         'MANUAL_REFUND_REQUIRED',
-        `${label} refunds must be processed via the gateway dashboard.`,
+        'Abzer refunds must be processed via the gateway dashboard.',
         422,
       )
     } else {
@@ -1362,6 +1533,68 @@ export class OrderService {
     })
     if (!ok) {
       throw new OrderError('REFUND_FAILED', 'Tabby refused the refund. Check the Tabby dashboard.', 502)
+    }
+  }
+
+  /* ─── Tamara refund ──────────────────────────────────────────────────────
+     Tamara draws a hard line that the API will enforce for us if we get it
+     wrong, so the branch is taken from the order's REAL state at Tamara:
+
+       • captured  → REFUND. The refund edge in Tamara's state machine runs
+         only from a captured status; refunding an authorised-but-uncaptured
+         order is rejected.
+       • authorised, nothing captured → CANCEL. That is the documented unwind
+         for an order whose money has not yet been moved into a settlement.
+
+     Refund totals are validated against what Tamara says was captured, never
+     against our own row. */
+  private async _refundTamara(order: IOrder): Promise<void> {
+    const tamaraOrderId = (order as any).tamaraOrderId as string | undefined
+    if (!tamaraOrderId) {
+      throw new OrderError('NO_PAYMENT_ID', 'Cannot refund — no Tamara order id on record', 400)
+    }
+
+    let remote: Awaited<ReturnType<TamaraService['getOrder']>>
+    try {
+      remote = await this.tamaraSvc.getOrder(tamaraOrderId)
+    } catch (err) {
+      logger.error({ err, tamaraOrderId, orderId: order.id }, 'Tamara refund: getOrder failed')
+      throw new OrderError('GATEWAY_UNAVAILABLE', 'Could not reach Tamara to verify the order. Try again.', 502)
+    }
+
+    /* Nothing captured yet: this is a cancellation, not a refund. */
+    if (remote.capturedFils === 0) {
+      if (remote.status !== 'authorised') {
+        throw new OrderError('NOT_REFUNDABLE',
+          `Tamara order is ${remote.status || 'in an unknown state'} — nothing to refund or cancel.`, 409)
+      }
+      const cancelled = await this.tamaraSvc.cancelOrder({
+        tamaraOrderId, amountAED: order.amount / 100, orderId: order.id,
+      })
+      if (!cancelled) {
+        throw new OrderError('REFUND_FAILED', 'Tamara refused to cancel this order. Check the Tamara portal.', 502)
+      }
+      logger.info({ orderId: order.id, tamaraOrderId }, 'Tamara: uncaptured order cancelled')
+      return
+    }
+
+    const refundableFils = remote.capturedFils - remote.refundedFils
+    if (refundableFils <= 0) {
+      throw new OrderError('ALREADY_REFUNDED', 'This Tamara order has already been fully refunded.', 409)
+    }
+
+    const ok = await this.tamaraSvc.refundOrder({
+      tamaraOrderId,
+      amountAED: refundableFils / 100,
+      orderId:   order.id,
+      comment:   'Refunded by Delta Academy admin',
+      /* Tamara's merchant_refund_id is the nearest thing to an idempotency
+         key. Derived from how many refunds Tamara already holds, so a retry of
+         the SAME refund reuses it and a genuine second one does not. */
+      attempt:   remote.refundedFils > 0 ? 2 : 1,
+    })
+    if (!ok) {
+      throw new OrderError('REFUND_FAILED', 'Tamara refused the refund. Check the Tamara portal.', 502)
     }
   }
 

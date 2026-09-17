@@ -142,13 +142,20 @@ export function useGatewayConfig() {
 }
 
 /* ─── Tamara pre-checkout eligibility check ─────────── */
-export function useTamaraPrescore(courseId: string) {
+export interface TamaraEligibility {
+  available:       boolean
+  rejectionReason: string | null
+  message:         string | null
+  /** AED amount the student will actually be charged, in major units. */
+  amount:          number
+  currency:        string
+}
+
+export function useTamaraPrescore(courseId: string, enabled = true) {
   return useQuery({
     queryKey: ['checkout', 'tamara-prescore', courseId],
-    queryFn:  () => apiPost<{ available: boolean; rejectionReason: string | null }>(
-      '/checkout/tamara/prescore', { courseId },
-    ),
-    enabled:  !!courseId,
+    queryFn:  () => apiPost<TamaraEligibility>('/checkout/tamara/prescore', { courseId }),
+    enabled:  !!courseId && enabled,
     staleTime: 5 * 60_000,
     retry:    false,
   })
@@ -264,6 +271,22 @@ interface UseTamaraCheckoutOptions {
   onError?: (msg: string) => void
 }
 
+/* Tamara's hosted checkout. `checkout` for production, `checkout-sandbox` for
+   the test environment; parsed rather than prefix-matched so
+   `https://checkout.tamara.co.evil.test/` fails. */
+const TAMARA_CHECKOUT_HOSTS = new Set([
+  'checkout.tamara.co', 'checkout-sandbox.tamara.co', 'checkout.tamara.sa',
+])
+
+export function isTamaraCheckoutUrl(raw: string): boolean {
+  try {
+    const u = new URL(raw)
+    return u.protocol === 'https:' && TAMARA_CHECKOUT_HOSTS.has(u.hostname.toLowerCase())
+  } catch {
+    return false
+  }
+}
+
 export function useTamaraCheckout(opts: UseTamaraCheckoutOptions = {}) {
   return useMutation({
     mutationFn: async ({ courseId, slug, couponCode }: { courseId: string; slug: string; couponCode?: string }) => {
@@ -271,6 +294,13 @@ export function useTamaraCheckout(opts: UseTamaraCheckoutOptions = {}) {
         '/checkout/tamara/create-order',
         { courseId, slug, couponCode },
       )
+      /* Same reasoning as the Tabby redirect: this is the one place the app
+         sends the browser somewhere it was told to, so the destination is
+         pinned to Tamara's own hosts. A spoofed API response cannot turn the
+         Pay button into a page that asks for card details. */
+      if (!isTamaraCheckoutUrl(result.checkoutUrl)) {
+        throw new Error('Checkout could not be started securely. Please try another payment method.')
+      }
       window.location.href = result.checkoutUrl
     },
     onError: (err: Error) => {
@@ -348,7 +378,10 @@ export function useVerifyTabbyReturn() {
 export function useVerifyTamaraReturn() {
   return useMutation({
     mutationFn: async (input: { orderId: string }) => {
-      const res = await apiPost<{ needsRegistration: boolean }>(
+      /* `paid` is the real outcome — a 200 only means the request was
+         understood. Tamara can leave an order at `approved` (not paid) or
+         refuse the authorise entirely. */
+      const res = await apiPost<{ needsRegistration: boolean; paid: boolean }>(
         '/checkout/tamara/verify-return', input,
       )
       return res

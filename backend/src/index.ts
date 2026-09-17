@@ -9,6 +9,7 @@ import { startDigestJob } from '@/jobs/digest.job.ts'
 import { startCriticalMailJob } from '@/jobs/criticalmail.job.ts'
 import { startEmailOutboxJob } from '@/jobs/emailOutbox.job.ts'
 import { TabbyService } from '@/services/tabby.service.ts'
+import { TamaraService } from '@/services/tamara.service.ts'
 import { seedDefaultRoles } from '@/utils/seedRoles.ts'
 import { seedOrganizations } from '@/utils/seedOrganizations.ts'
 import { UserModel, OrganizationModel, CourseModel, LiveClassModel, EnrollmentModel, OrderModel, CouponModel, SupportTicketModel } from '@/models/schema.ts'
@@ -321,8 +322,30 @@ async function bootstrap() {
      still register. */
   if (instanceId === 0) {
     void new TabbyService().registerWebhook()
+
+    /* Tamara, same single-instance rule. Unlike Tabby there is no way to LIST
+       existing webhooks — only GET/PUT/DELETE by id — so registration cannot
+       be made idempotent by inspection. Once TAMARA_WEBHOOK_ID is set we stop
+       registering and just confirm the stored one still resolves. */
+    void (async () => {
+      const tamara = new TamaraService()
+      if (!tamara.isConfigured) return
+      const url = `${env.BACKEND_PUBLIC_URL}/api/v1/webhooks/tamara`
+
+      if (env.TAMARA_WEBHOOK_ID) {
+        const existing = await tamara.getWebhook(env.TAMARA_WEBHOOK_ID)
+        if (existing?.url === url) {
+          logger.info({ webhookId: env.TAMARA_WEBHOOK_ID }, 'Tamara webhook already registered')
+        } else {
+          logger.warn({ webhookId: env.TAMARA_WEBHOOK_ID, registered: existing?.url, expected: url },
+            'Tamara webhook id is set but does not point at this server — update or clear TAMARA_WEBHOOK_ID')
+        }
+        return
+      }
+      await tamara.registerWebhook(url)
+    })().catch(err => logger.warn({ err }, 'Tamara webhook setup error (non-fatal)'))
   } else {
-    logger.debug({ instanceId }, 'Tabby webhook registration skipped — handled by instance 0')
+    logger.debug({ instanceId }, 'Gateway webhook registration skipped — handled by instance 0')
   }
 
   /* 4. Graceful shutdown */

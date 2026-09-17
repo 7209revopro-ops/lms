@@ -63,3 +63,9 @@ public/uploads/
 *.tmp
 *.bak
 *.orig
+
+# Gateway credential drops. These arrive as raw token files from the provider
+# and are NOT config — the real values belong in backend/.env. Ignored so a
+# `git add .` can never publish a live merchant token.
+docs/API_TOKEN_*.txt
+docs/*credentials*
