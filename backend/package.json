@@ -38,6 +38,7 @@
     "test:classchange": "bun src/tests/classchange.suite.ts",
     "test:adminpwreset": "bun src/tests/adminpasswordreset.suite.ts",
     "test:emailprefs": "bun src/tests/emailprefs.suite.ts",
+    "suppress-stale-mail": "bun src/scripts/suppress-stale-mail.ts",
     "test:instructormismatch": "bun src/tests/instructormismatch.suite.ts",
     "test:instructormismatch-prop": "bun src/tests/instructormismatch.property.suite.ts",
     "test:assignments": "bun src/tests/assignments.suite.ts",

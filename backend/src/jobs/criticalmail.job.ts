@@ -61,6 +61,10 @@ export const DEBOUNCE_MINS = (() => {
    above any normal day: a student booked on three sessions that all move is
    a bad day, not a bug. Beyond it, the change still reaches them — in-app
    immediately, and in tonight's digest — just not as its own mail. 0 = off. */
+/* How late a critical notice may still be sent. Past this it is suppressed
+   rather than delivered — see the query below. Set 0 to disable. */
+export const MAX_AGE_HOURS = Number(process.env['CRITICAL_MAIL_MAX_AGE_HOURS'] ?? 6)
+
 export const DAILY_CAP = (() => {
   const raw = Number(process.env['CRITICAL_MAIL_CAP'])
   return Number.isFinite(raw) && raw >= 0 && raw <= 100 ? Math.floor(raw) : 6
@@ -219,8 +223,42 @@ export async function flushCriticalMail(opts: {
   const { CriticalMailModel } = await import('@/models/schema.ts')
 
   const query: Record<string, unknown> = { sentAt: null, supersededAt: null }
-  if (opts.liveClassId) query['liveClassId'] = opts.liveClassId
-  else                  query['dueAt']       = { $lte: now }
+  if (opts.liveClassId) {
+    query['liveClassId'] = opts.liveClassId
+  } else {
+    /* A floor as well as a ceiling.
+
+       `dueAt <= now` on its own means that after an outage every notice that
+       fell due while the sender was down becomes due simultaneously — and
+       these are the most time-sensitive mail in the system. Telling a student
+       at 9am that yesterday's 2pm class moved is worse than telling them
+       nothing: the class has already happened, and the mail reads as though
+       it has not.
+
+       The window is short on purpose. These notices exist to reach somebody
+       BEFORE a session; once that has passed there is nothing to act on.
+       Stale rows are swept below so the queue does not carry them forever. */
+    query['dueAt'] = MAX_AGE_HOURS > 0
+      ? { $lte: now, $gte: new Date(now.getTime() - MAX_AGE_HOURS * 3600 * 1000) }
+      : { $lte: now }
+  }
+
+  /* Retire anything that fell outside the window while we were not running, so
+     it is not carried forever and is not counted as a live backlog. Kept, not
+     deleted — `supersededAt` is the field this queue already uses for "no
+     longer relevant". */
+  if (!opts.liveClassId && MAX_AGE_HOURS > 0) {
+    const staleBefore = new Date(now.getTime() - MAX_AGE_HOURS * 3600 * 1000)
+    const swept = await CriticalMailModel.updateMany(
+      { sentAt: null, supersededAt: null, dueAt: { $lt: staleBefore } },
+      { $set: { supersededAt: now } },
+    )
+    if (swept.modifiedCount > 0) {
+      tally.dropped += swept.modifiedCount
+      logger.warn({ dropped: swept.modifiedCount, olderThanHours: MAX_AGE_HOURS },
+        'critical mail: suppressed notices about sessions that have already passed')
+    }
+  }
 
   const rows = await CriticalMailModel.find(query).sort({ queuedAt: 1 }).lean() as any[]
   if (rows.length === 0) return tally

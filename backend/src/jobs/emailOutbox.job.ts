@@ -21,13 +21,49 @@ import { logger } from '@/utils/logger.ts'
    ~83/hour, so 25 a minute is far more headroom than the mailboxes have. */
 const BATCH = Number(process.env['EMAIL_OUTBOX_BATCH'] ?? 25)
 
+/* How far back the drain will reach.
+
+   Without a floor, the query "every pending row due before now" means that
+   after an outage every message that fell due while the sender was down is due
+   at once — and goes out as one burst of mail about things that already
+   happened. That is how a restart turns a queue into a flood of yesterday's
+   reminders.
+
+   24h is deliberately generous: an SMTP outage or a mailbox cap can legitimately
+   hold a welcome mail or an enrolment receipt for most of a day, and those are
+   still worth delivering late. Time-critical class notices have their own,
+   much shorter window in criticalmail.job.ts. Set 0 to disable the cutoff. */
+const MAX_AGE_HOURS = Number(process.env['EMAIL_OUTBOX_MAX_AGE_HOURS'] ?? 24)
+
 let running = false
+
+/* Retire anything past the cutoff instead of leaving it pending forever —
+   otherwise the backlog count never falls and the hourly health check cries
+   wolf about rows nobody intends to send. Rows are kept, not deleted, so the
+   suppression is auditable. */
+async function expireStale(now: Date): Promise<number> {
+  if (MAX_AGE_HOURS <= 0) return 0
+  const cutoff = new Date(now.getTime() - MAX_AGE_HOURS * 3600 * 1000)
+  const r = await EmailOutboxModel.updateMany(
+    { status: 'pending', createdAt: { $lt: cutoff } },
+    { $set: { status: 'failed', lastError: `expired: queued more than ${MAX_AGE_HOURS}h ago, not sent` } },
+  )
+  if (r.modifiedCount > 0) {
+    logger.warn({ expired: r.modifiedCount, olderThanHours: MAX_AGE_HOURS },
+      'email outbox: retired stale backlog rather than sending mail about the past')
+  }
+  return r.modifiedCount
+}
 
 export async function drainOutboxOnce(): Promise<{ sent: number; retry: number; failed: number }> {
   const tally = { sent: 0, retry: 0, failed: 0 }
 
+  const now = new Date()
+  /* Before selecting work, drop anything too old to be worth sending. */
+  await expireStale(now)
+
   const due = await EmailOutboxModel
-    .find({ status: 'pending', nextAttemptAt: { $lte: new Date() } })
+    .find({ status: 'pending', nextAttemptAt: { $lte: now } })
     .sort({ nextAttemptAt: 1 })
     .limit(BATCH)
     .lean()
