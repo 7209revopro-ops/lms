@@ -1,5 +1,10 @@
 # LMS ↔ CLT Connect — Build Plan & Progress
 
+> **Other workstreams** — this file covers the CLT Connect build only.
+> For the payment gateways (Tabby, Tamara), the mail-backlog fix and the
+> cross-academy instructor work, see [`docs/work-status.md`](docs/work-status.md):
+> what is done, what is blocked and on whom, and the next actions.
+
 **Working plan.** Derived from `LMS_CLT_INTEGRATION_PLAN.md` (the design), this file
 tracks what is actually built. Update the status boxes as work lands.
 
