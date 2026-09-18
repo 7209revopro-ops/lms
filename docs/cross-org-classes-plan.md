@@ -9,30 +9,41 @@ under "Why classes are not in this plan", and the decision `docs/work-status.md`
 
 ## Implementation status
 
-| Phase | State |
-|---|---|
-| 0 — resolve the caller's academy | **done** () |
-| 1 — extract the entitlement predicate | **done** () |
-| 2 — schema and authoring, inert | **done** |
-| 3 — seats | not started |
-| 4 — roster, homework and attendance split | not started |
-| 5 — mail clocks | not started |
-| 6a — narrow the browse feed, alone | not started |
-| 6b — open it | not started |
+| Phase | State | Commit |
+|---|---|---|
+| 0 — resolve the caller's academy | **done** | `18f8128` |
+| 1 — extract the entitlement predicate | **done** | `18f8128` |
+| 2 — schema and authoring, inert | **done** | `6e11c41` |
+| 3 — seats | not started | |
+| 4 — roster, homework and attendance split | not started | |
+| 5 — mail clocks | not started | |
+| 6a — narrow the browse feed, alone | not started | |
+| 6b — open it | not started | |
 
-Guest cohorts are read only when , which is off. A
+Guest cohorts are read only when `CROSS_ORG_CLASSES=true`, and it is off. A
 cohort can be authored today and no guest student can book, see or enter the
-class. That is phase 2's contract and  pins it.
+class. That is phase 2's contract, and `backend/src/tests/crossorgclass.suite.ts`
+pins it — including the case that matters most: a Bangalore student correctly
+enrolled in the Bangalore course, on a class that names their cohort, is still
+refused while the flag is off.
 
-Phase 2 also closed a hole that predates this work:  and
- validated only that  parsed, so a class could be gated
-to a module of a DIFFERENT course — an id that appears in nobody's
- for the course, so the module gate never fired.
+Phase 2 also closed a hole that predates this work. `create()` and `update()`
+validated only that `sectionId` PARSED, so a class could be gated to a module of
+a **different** course — an id that appears in nobody's `blockedLessons` for the
+class's own course, so the module gate silently never fired. A design keyed on
+(course, module) pairs cannot inherit that, so it is fixed for the host pair as
+well as for every guest cohort.
 
-Not built in phase 2, and needed before the admin form is usable: the Zod
-schema and admin route do not accept  yet, so cohorts are
-authorable only through the service. The form itself is listed under phase 2 in
-this plan and has not been built.
+**Not built in phase 2, and needed before the feature can be authored by a
+human:** the admin route and its Zod schema do not accept `guestCohorts`, so a
+cohort can only be created through the service layer. The admin form listed
+under phase 2 in this plan has not been built either. Neither blocks phase 3.
+
+**Phase 3 is the next step and it is the one to be careful with.** Twelve
+reserve/release sites must move to the seat helper in one change; miss one and a
+seat leaks out of an academy's floor with nothing to reconcile it. The phase also
+carries three riders that are easy to drop: the `userCascade` booking-deletion
+fix, `reconcile-class-seats.ts`, and the capacity/floor edit guards.
 
 ---
 
