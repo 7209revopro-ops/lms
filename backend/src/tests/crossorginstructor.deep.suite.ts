@@ -127,6 +127,15 @@ try {
     program: 'ai',
   })
 
+  /* A Dubai course. The lent instructor needs a class in BOTH academies for
+     the next section to mean anything: one at home, one where they are lent. */
+  const dCourse = await CourseModel.create({
+    title: 'DXB Course', slug: `dxb-course-${Date.now()}`, description: 'x',
+    price: 0, isFree: true, status: 'published', language: 'English',
+    instructorId: kept._id, organizationId: dubai._id, category: 'ai',
+    program: 'ai',
+  })
+
   const login = async (email: string) => {
     const jar: Jar = new Map()
     const r = await call('POST', '/admin/auth/login', { jar, body: { email, password: PW } })
@@ -376,6 +385,117 @@ try {
   }
 
   /* ═══════════════════════════════════════════════════════ */
+  /* ═══════════════════════════════════════════════════════
+     THE LENT INSTRUCTOR'S OWN VIEW
+
+     Lending an instructor is pointless if the person lent cannot see, open or
+     run the class they were lent out to teach. Every guard below used to ask
+     the ACADEMY question before the ASSIGNMENT question, and a lent
+     instructor's borrowed-academy sessions sit on the far side of their own
+     academy by design — so the list hid them, the studio 404'd, and
+     attendance could not be marked.
+
+     The rule these now share is instructorOwnsSession() in utils/tenancy.ts:
+     for the instructor a session NAMES, assignment is the authority. The
+     negatives at the end of this block are the point — the carve-out is
+     assignment-gated, not role-gated, and it widens nothing else.
+     ═══════════════════════════════════════════════════════ */
+  section('A lent instructor can see and run their borrowed-academy class')
+  {
+    /* Home academy: Dubai owns the lent instructor and schedules for them. */
+    const atHome = await call('POST', '/admin/live-classes', { jar: D, body: {
+      courseId: String(dCourse._id), title: 'Lent instructor teaches DXB',
+      scheduledStart: soon(), durationMins: 60, type: 'external',
+      instructorId: lentId, language: 'English',
+    } })
+    check('the owning academy can schedule its own instructor', atHome.status === 201, why(atHome))
+
+    /* Borrowing academy: Bangalore schedules the same person. */
+    const borrowed = await call('POST', '/admin/live-classes', { jar: B, body: {
+      courseId: String(bCourse._id), title: 'Lent instructor teaches BLR again',
+      scheduledStart: soon(), durationMins: 60, type: 'external',
+      instructorId: lentId, language: 'English',
+    } })
+    check('the borrowing academy can schedule the lent instructor', borrowed.status === 201, why(borrowed))
+
+    const homeId     = String(atHome.body?.data?.id   ?? atHome.body?.data?._id   ?? '')
+    const borrowedId = String(borrowed.body?.data?.id ?? borrowed.body?.data?._id ?? '')
+
+    const LENT = await login('lent@t.local')
+    const OWN  = await login('b.own@t.local')
+
+    /* ── The reported symptom ── */
+    const mine = await call('GET', '/admin/live-classes', { jar: LENT })
+    const mineIds = (mine.body?.data ?? []).map((c: any) => String(c.id ?? c._id))
+    check('the lent instructor sees their OWN academy-s class',
+      mineIds.includes(homeId), why(mine))
+    check('the lent instructor ALSO sees the borrowing academy-s class',
+      mineIds.includes(borrowedId), `${why(mine)} got ${mineIds.length} rows`)
+
+    /* ── Opening and editing it ── */
+    const open = await call('GET', `/admin/live-classes/${borrowedId}`, { jar: LENT })
+    check('the lent instructor can open the borrowed class', open.status === 200, why(open))
+
+    const edit = await call('PATCH', `/admin/live-classes/${borrowedId}`, {
+      jar: LENT, body: { title: 'Renamed by the lent instructor' },
+    })
+    check('the lent instructor can edit the borrowed class', edit.status === 200, why(edit))
+
+    /* ── The roster and attendance ── */
+    const { ClassBookingModel } = await import('@/models/schema.ts')
+    const seat = await ClassBookingModel.create({
+      userId: bStudent._id, liveClassId: borrowedId, status: 'booked',
+    })
+
+    const roster = await call('GET', `/admin/bookings?liveClassId=${borrowedId}`, { jar: LENT })
+    const rosterIds = (roster.body?.data ?? []).map((b: any) => String(b.id ?? b._id))
+    check('the lent instructor can see who booked the borrowed class',
+      roster.status === 200 && rosterIds.includes(String(seat._id)), why(roster))
+
+    const mark = await call('PATCH', `/admin/bookings/${String(seat._id)}/attendance`, {
+      jar: LENT, body: { status: 'attended' },
+    })
+    check('the lent instructor can mark attendance on the borrowed class',
+      mark.status === 200, why(mark))
+
+    /* ══ NEGATIVES — the carve-out is assignment-gated, not role-gated ══ */
+
+    /* Another academy's instructor, not assigned, must still be walled out. */
+    const theirs = await call('GET', '/admin/live-classes', { jar: OWN })
+    const theirIds = (theirs.body?.data ?? []).map((c: any) => String(c.id ?? c._id))
+    check('an UNASSIGNED instructor does not see the lent instructor-s classes',
+      !theirIds.includes(homeId) && !theirIds.includes(borrowedId), why(theirs))
+
+    const peek = await call('GET', `/admin/live-classes/${homeId}`, { jar: OWN })
+    check('an UNASSIGNED instructor cannot open a class in the other academy',
+      peek.status === 404, why(peek))
+
+    const peekSame = await call('GET', `/admin/live-classes/${borrowedId}`, { jar: OWN })
+    check('nor a colleague-s class inside their OWN academy',
+      peekSame.status === 403, why(peekSame))
+
+    const steal = await call('PATCH', `/admin/bookings/${String(seat._id)}/attendance`, {
+      jar: OWN, body: { status: 'missed' },
+    })
+    check('an UNASSIGNED instructor cannot mark attendance on it',
+      steal.status === 404, why(steal))
+
+    /* The academy wall still stands for ADMINS — this is the clause that was
+       dropped for instructors, and dropping it for admins would hand each
+       academy the other-s timetable. */
+    const bAdminList = await call('GET', '/admin/live-classes', { jar: B })
+    const bAdminIds = (bAdminList.body?.data ?? []).map((c: any) => String(c.id ?? c._id))
+    check('a borrowing-academy ADMIN still cannot see the Dubai class',
+      !bAdminIds.includes(homeId), why(bAdminList))
+    check('but does see the class in their own academy',
+      bAdminIds.includes(borrowedId), why(bAdminList))
+
+    const dAdminList = await call('GET', '/admin/live-classes', { jar: D })
+    const dAdminIds = (dAdminList.body?.data ?? []).map((c: any) => String(c.id ?? c._id))
+    check('a lending-academy ADMIN still cannot see the Bangalore class',
+      !dAdminIds.includes(borrowedId), why(dAdminList))
+  }
+
   section('Determinism — the same reads twice')
   {
     const a1 = await call('GET', '/admin/users?role=instructor&per_page=100', { jar: B })

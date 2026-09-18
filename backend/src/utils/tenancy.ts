@@ -129,6 +129,56 @@ export function sharedInstructorFilter(callerOrg: string | null | undefined): Re
   }
 }
 
+/* ─────────────────────────────────────────────────────
+   instructorOwnsSession(req, live)
+   ─────────────────────────────────────────────────────
+   ASSIGNMENT IS THE AUTHORITY, AND IT IS NARROWER THAN THE ACADEMY.
+
+   The academy wall exists so staff cannot reach into the OTHER academy's
+   records. It was never meant to answer "may I teach the class I was booked
+   to teach". For the instructor named on a session those are different
+   questions, and only one of them is about tenancy.
+
+   This matters because an instructor can be LENT. `sharedAcrossOrgs` exists so
+   the borrowing academy can schedule them, and `organizationId` still names the
+   OWNER — so a lent instructor's borrowed-academy sessions sit, correctly, on
+   the other side of their own academy wall. Every guard that asked the academy
+   question BEFORE the assignment question therefore answered 404 for the exact
+   classes the feature was built to create: the list hid them, the studio would
+   not open them, attendance could not be marked on them.
+
+   liveClassJoin.service.ts already had this right — it computes `isAssigned`
+   and only falls back to the academy check when the caller is NOT the assigned
+   instructor. This helper is that same rule, extracted so the three guards
+   that had it backwards share one implementation rather than three copies,
+   which is how N-07, N-10 and N-11 happened in the first place.
+
+   WHAT THIS DOES NOT WIDEN. It answers true only for the instructor the
+   session itself names. A colleague's session, any session in a course they do
+   not teach, and every non-instructor role all fall straight through to the
+   ordinary academy check. Students, orders, enrolments and documents are not
+   reachable from here at all.
+
+   The parent course's owner is consulted only when the session names nobody,
+   which is legacy data from before instructorId was populated (N-10). */
+export async function instructorOwnsSession(
+  req: Request,
+  live: { instructorId?: unknown; courseId?: unknown } | null | undefined,
+): Promise<boolean> {
+  if (!live) return false
+  if (req.user?.role !== 'instructor') return false
+
+  const userId = String(req.user.id)
+  if (live.instructorId) return String(live.instructorId) === userId
+
+  if (live.courseId) {
+    const { CourseModel } = await import('@/models/schema.ts')
+    const course = await CourseModel.findById(String(live.courseId)).select('instructorId').lean()
+    return String((course as { instructorId?: unknown } | null)?.instructorId ?? '') === userId
+  }
+  return false
+}
+
 /* Attach a filter clause to `target` without clobbering an existing $or.
    The trap this exists for: user.repository.ts builds `filter.$or` for search
    and category before the org scope is applied. */

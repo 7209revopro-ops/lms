@@ -17,7 +17,7 @@ import { AssignmentService } from '@/services/assignment.service.ts'
 import { SectionService } from '@/services/section.service.ts'
 import { OrderService } from '@/services/order.service.ts'
 import { CouponService } from '@/services/coupon.service.ts'
-import { requireSameOrgUser, callerMayAccess } from '@/utils/tenancy.ts'
+import { requireSameOrgUser, callerMayAccess, instructorOwnsSession } from '@/utils/tenancy.ts'
 import { documentRef } from '@/utils/documentRef.ts'
 import { UserService } from '@/services/user.service.ts'
 import { adminListDevices, adminApproveDevice, adminRevokeDevice } from '@/services/device.service.ts'
@@ -780,19 +780,21 @@ async function callerMayManageSession(req: Request, liveClassId: unknown): Promi
     .select('instructorId courseId organizationId').lean()
   if (!live) return false
 
-  if (!(await callerMayAccess(req, (live as { organizationId?: unknown }).organizationId))) {
+  /* Assignment first. For the instructor this session NAMES, the academy wall
+     is asking the wrong question — a LENT instructor's borrowed-academy
+     sessions sit on the far side of their own academy by design, so checking
+     tenancy first refused attendance, cancellation and feedback on exactly the
+     classes lending them exists to create. See instructorOwnsSession in
+     utils/tenancy.ts. Anyone who is NOT the assigned instructor, including an
+     instructor holding a colleague's session id, still meets the wall. */
+  const owns = await instructorOwnsSession(req, live)
+
+  if (!owns && !(await callerMayAccess(req, (live as { organizationId?: unknown }).organizationId))) {
     return false
   }
 
   if (req.user!.role !== 'instructor') return true
-
-  const userId = String(req.user!.id)
-  if (live.instructorId) return String(live.instructorId) === userId
-  if (live.courseId) {
-    const course = await CourseModel.findById(String(live.courseId)).select('instructorId').lean()
-    return String((course as any)?.instructorId ?? '') === userId
-  }
-  return false
+  return owns
 }
 
 /* ── May this caller act on this student's records? ───────────────
@@ -1967,16 +1969,27 @@ async function buildBookingFilter(
   /* ── Step 1: Build live-class filter (instructor scope + date + courseId) ── */
   const lcFilter: Record<string, any> = {}
 
-  // Org isolation — scoped users only see their org's classes
-  if (req.user!.organizationId && Types.ObjectId.isValid(req.user!.organizationId)) {
-    lcFilter['organizationId'] = new Types.ObjectId(req.user!.organizationId)
-  }
-
   // Instructors only see their own classes
-  if (req.user!.role === 'instructor') {
+  const isInstructor = req.user!.role === 'instructor'
+  if (isInstructor) {
     lcFilter['instructorId'] = new Types.ObjectId(req.user!.id)
   } else if (q.instructorId && Types.ObjectId.isValid(q.instructorId)) {
     lcFilter['instructorId'] = new Types.ObjectId(q.instructorId)
+  }
+
+  /* Org isolation — scoped users only see their own academy's classes.
+
+     NOT stacked on top of the instructor clause above. That clause already
+     narrows to sessions naming the caller, and assignment is narrower than the
+     academy, so adding this one can only subtract rows that are genuinely
+     theirs — which emptied the roster, the stats strip and the CSV export for
+     a LENT instructor's borrowing-academy class. See instructorOwnsSession in
+     utils/tenancy.ts.
+
+     Kept for every other role, including when an admin filters by some other
+     instructor via q.instructorId: there the academy is still the only wall. */
+  if (!isInstructor && req.user!.organizationId && Types.ObjectId.isValid(req.user!.organizationId)) {
+    lcFilter['organizationId'] = new Types.ObjectId(req.user!.organizationId)
   }
 
   // Programme-scoped admins (sub_admin) only see their program's bookings
@@ -2454,11 +2467,16 @@ router.get('/reports/attendance', requireInstructor, requirePermission('reports'
        narrows them to their own classes. Reports is admin-only in the sidebar,
        so this closes the direct-API path without changing any screen. */
     const lcScope: Record<string, unknown> = {}
-    if (req.user!.organizationId && Types.ObjectId.isValid(req.user!.organizationId)) {
-      lcScope['organizationId'] = new Types.ObjectId(req.user!.organizationId)
-    }
-    if (req.user!.role === 'instructor') {
+    const reportingInstructor = req.user!.role === 'instructor'
+    if (reportingInstructor) {
       lcScope['instructorId'] = new Types.ObjectId(req.user!.id)
+    }
+    /* Same reasoning as buildBookingFilter: the instructor clause above is
+       already the narrower of the two, so stacking the academy on top only
+       drops a LENT instructor's own borrowing-academy sessions and silently
+       under-reports their students. Every other role keeps the academy. */
+    if (!reportingInstructor && req.user!.organizationId && Types.ObjectId.isValid(req.user!.organizationId)) {
+      lcScope['organizationId'] = new Types.ObjectId(req.user!.organizationId)
     }
     if (Object.keys(lcScope).length > 0) {
       const scopedClassIds = await LiveClassModel.find(lcScope, '_id').lean()

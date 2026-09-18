@@ -10,6 +10,7 @@ import { LessonRepository } from '@/repositories/lesson.repository.ts'
 import { SectionRepository } from '@/repositories/section.repository.ts'
 import { sendSuccess, buildPaginationMeta, parsePagination } from '@/utils/response.ts'
 import { toCourseDTO } from '@/utils/courseDTO.ts'
+import { instructorOwnsSession } from '@/utils/tenancy.ts'
 import { signAccessToken, toSeconds } from '@/utils/jwt.ts'
 import type { UserRole } from '@/types/index.ts'
 
@@ -1076,33 +1077,27 @@ export class AdminController {
         res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Live class not found' } }); return
       }
 
-      /* Tenancy first — the RTMP key is the session itself. An admin of one
-         academy must not be able to pull the other's stream key by id.
-         Mirrors LiveClassController.#canManage. */
-      const callerOrg = req.user!.organizationId
-      const liveOrg   = (live as { organizationId?: unknown }).organizationId
-      if (callerOrg && liveOrg && String(liveOrg) !== String(callerOrg)) {
-        res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Live class not found' } }); return
+      /* Resolved first: the instructor this session names is the one person
+         whose right to its stream key does not depend on which academy owns
+         it. A LENT instructor broadcasting into the borrowing academy's class
+         is the feature working, not a boundary crossing. See
+         instructorOwnsSession in utils/tenancy.ts. */
+      const owns = await instructorOwnsSession(req, live)
+
+      /* Tenancy — the RTMP key IS the session. An admin of one academy must
+         not be able to pull the other's stream key by id. Mirrors
+         LiveClassController.#canManage, including the assigned-instructor
+         carve-out: an instructor holding a colleague's id still gets the 404. */
+      if (!owns) {
+        const callerOrg = req.user!.organizationId
+        const liveOrg   = (live as { organizationId?: unknown }).organizationId
+        if (callerOrg && liveOrg && String(liveOrg) !== String(callerOrg)) {
+          res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Live class not found' } }); return
+        }
       }
 
       /* Non-teaching admin roles pass once tenancy is satisfied. */
       if (role !== 'instructor') { next(); return }
-
-      const userId = String(req.user!.id)
-
-      /* Same rule as LiveClassController.#instructorOwns: the session's own
-         instructor is the sole authority. Owning the parent course does not
-         grant access to a colleague's session inside it. The course owner is
-         consulted only when the session names nobody (legacy rows). */
-      let owns: boolean
-      if (live.instructorId) {
-        owns = String(live.instructorId) === userId
-      } else if (live.courseId) {
-        const course = await CourseModel.findById(String(live.courseId)).select('instructorId').lean()
-        owns = String((course as any)?.instructorId ?? '') === userId
-      } else {
-        owns = false
-      }
 
       if (!owns) {
         res.status(403).json({ success: false, error: { code: 'FORBIDDEN', message: 'You can only fetch stream credentials for your own live classes.' } }); return

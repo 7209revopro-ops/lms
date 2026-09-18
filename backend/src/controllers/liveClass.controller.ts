@@ -1,5 +1,6 @@
 import type { Request, Response, NextFunction } from 'express'
 import { Types } from 'mongoose'
+import { instructorOwnsSession } from '@/utils/tenancy.ts'
 import { logger } from '@/utils/logger.ts'
 import { LiveClassService } from '@/services/liveClass.service.ts'
 import { SectionService } from '@/services/section.service.ts'
@@ -508,37 +509,33 @@ export class LiveClassController {
       res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Live class not found' } }); return false
     }
 
+    /* Resolved BEFORE the academy check, because for the instructor this
+       session names, assignment is the authority and the academy wall is
+       asking the wrong question — it is about reaching into someone else's
+       records, not about teaching your own class. A LENT instructor's
+       borrowed-academy sessions sit on the far side of their own wall by
+       design, so asking tenancy first answered 404 for every class the
+       lending feature exists to create. See instructorOwnsSession in
+       utils/tenancy.ts. */
+    const owns = await instructorOwnsSession(req, live)
+
     /* 1. Tenancy. A caller with no academy on record, or a session that
        predates the field, stays unscoped — same convention as every other
-       org guard in this codebase. */
-    const callerOrg = req.user?.organizationId
-    const liveOrg   = (live as { organizationId?: unknown }).organizationId
-    if (callerOrg && liveOrg && String(liveOrg) !== String(callerOrg)) {
-      res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Live class not found' } }); return false
+       org guard in this codebase.
+
+       Skipped only for the assigned instructor. Everyone else, including an
+       instructor holding someone else's session id, still gets the 404 that
+       refuses to confirm the class exists elsewhere. */
+    if (!owns) {
+      const callerOrg = req.user?.organizationId
+      const liveOrg   = (live as { organizationId?: unknown }).organizationId
+      if (callerOrg && liveOrg && String(liveOrg) !== String(callerOrg)) {
+        res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Live class not found' } }); return false
+      }
     }
 
     /* 2. Ownership applies only to teaching staff. */
     if (role !== 'instructor') return true
-
-    const userId = String(req.user!.id)
-
-    /* A session names its own instructor, and that is the ONLY authority.
-       Owning the parent course does not grant control over a colleague's
-       session inside it — an admin who assigns Bob to teach one slot of
-       Alice's course must not thereby hand Alice the power to rewrite or
-       delete it.
-
-       The course owner is consulted only when the session names nobody,
-       which is legacy data from before instructorId was set. */
-    let owns: boolean
-    if (live.instructorId) {
-      owns = String(live.instructorId) === userId
-    } else if (live.courseId) {
-      const course = await CourseModel.findById(String(live.courseId)).select('instructorId').lean()
-      owns = String((course as any)?.instructorId ?? '') === userId
-    } else {
-      owns = false
-    }
 
     if (!owns) {
       res.status(403).json({ success: false, error: { code: 'FORBIDDEN', message: 'You can only manage your own live classes.' } }); return false
@@ -567,7 +564,18 @@ export class LiveClassController {
         status,
         limit,
         courseIds,
-        organizationId: req.user?.organizationId,
+        /* An instructor's list is ALREADY narrowed to sessions that name them,
+           and assignment is narrower than the academy: every row this can
+           return is one they are booked to teach. Stacking the academy clause
+           on top can only SUBTRACT classes that are genuinely theirs, which is
+           precisely what hid a LENT instructor's borrowing-academy sessions —
+           the sessions lending them exists to create. See
+           instructorOwnsSession in utils/tenancy.ts for the rule.
+
+           Every OTHER role keeps the clause, and must: for them instructorId
+           is unset, so the academy is the only tenancy narrowing in this
+           query and dropping it would hand each academy the other's timetable. */
+        organizationId: isInstructor ? undefined : req.user?.organizationId,
         instructorId:   isInstructor ? req.user?.id : undefined,
       })
       sendSuccess(res, docs.map(d => toDTO(d)))
