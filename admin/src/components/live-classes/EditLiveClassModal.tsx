@@ -14,11 +14,14 @@ import {
 import { useCourses } from '@/lib/api/courses'
 import { useCourseOutline } from '@/lib/api/outline'
 import { useUsers } from '@/lib/api/users'
-import { isoToDatetimeLocal, datetimeLocalToISO } from '@/lib/timezone'
+import { isoToDatetimeLocal, datetimeLocalToISO, zoneOf, foreignZoneTag } from '@/lib/timezone'
 import Spinner from '@/components/ui/Spinner'
 
-/* ── Helpers ──────────────────────────────────────────── */
-const toLocalDatetime = isoToDatetimeLocal
+/* ── Helpers ──────────────────────────────────────────────
+   No bare alias for isoToDatetimeLocal any more, on purpose. It and
+   datetimeLocalToISO are a matched pair and BOTH must be given this class's
+   zone; an alias that hides one half is how they drift apart. See the comment
+   on tzOffsetMs in lib/timezone.ts for what drifting costs. */
 
 /* ── Props ──────────────────────────────────────────────── */
 interface Props {
@@ -49,8 +52,15 @@ export function EditLiveClassModal({ live, onClose, onSuccess }: Props) {
 
   const [title,            setTitle]            = useState(live.title)
   const [description,      setDescription]      = useState(live.description ?? '')
-  const [start,            setStart]            = useState(() => toLocalDatetime(live.scheduledStart))
-  const [originalStart]                         = useState(() => toLocalDatetime(live.scheduledStart))
+  /* The academy whose wall clock this class is READ AND WRITTEN in. For a
+     lent instructor editing a borrowed class this is NOT the panel's zone: the
+     class runs on the borrowing academy's clock, and that is the clock the
+     person scheduling it is thinking in. */
+  const classZone = zoneOf(live.organizationSlug)
+  const zoneTag   = foreignZoneTag(live.organizationSlug)
+
+  const [start,            setStart]            = useState(() => isoToDatetimeLocal(live.scheduledStart, classZone))
+  const [originalStart]                         = useState(() => isoToDatetimeLocal(live.scheduledStart, classZone))
   const [durationMins,     setDurationMins]     = useState(live.durationMins)
   const [isOnline,         setIsOnline]         = useState<boolean>((live as any).isOnline ?? true)
   const [type,             setType]             = useState<LiveClassType>(live.type)
@@ -107,7 +117,10 @@ export function EditLiveClassModal({ live, onClose, onSuccess }: Props) {
         data: {
           title:            title.trim(),
           description:      description.trim() || undefined,
-          scheduledStart:   datetimeLocalToISO(start),
+          /* Same zone the picker was filled from. If these two ever disagree,
+             every save shifts the class by the offset between the academies —
+             including a save that only touched the title. */
+          scheduledStart:   datetimeLocalToISO(start, classZone),
           durationMins,
           type,
           isOnline,
@@ -293,9 +306,19 @@ export function EditLiveClassModal({ live, onClose, onSuccess }: Props) {
           <div className="grid grid-cols-3 gap-3">
             <div>
               <label className="mb-1 block text-[10px] font-semibold uppercase tracking-widest"
-                style={{ color: 'rgba(255,255,255,0.35)' }}>Start time</label>
+                style={{ color: 'rgba(255,255,255,0.35)' }}>
+                Start time{zoneTag && <span style={{ color: '#FBBF24' }}> · {zoneTag}</span>}
+              </label>
               <input type="datetime-local" value={start} onChange={e => setStart(e.target.value)}
                 required className={base} style={iStyle} />
+              {/* Only when this class runs on the OTHER academy's clock. The
+                  field is read and written in that clock, so saying so is the
+                  difference between scheduling and mis-scheduling. */}
+              {zoneTag && (
+                <p className="mt-1 text-[10px]" style={{ color: 'rgba(251,191,36,0.75)' }}>
+                  This class belongs to the other academy — times here are {zoneTag}.
+                </p>
+              )}
             </div>
             <div>
               <label className="mb-1 block text-[10px] font-semibold uppercase tracking-widest"

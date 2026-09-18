@@ -14,7 +14,7 @@ import {
 } from 'lucide-react'
 import { useAllLiveClasses, useCreateLiveClass, type LiveClass, type LiveClassType } from '@/lib/api/liveClasses'
 import { CLASS_LANGUAGES } from '@/lib/languages'
-import { datetimeLocalToISO } from '@/lib/timezone'
+import { datetimeLocalToISO, zoneOf, foreignZoneTag } from '@/lib/timezone'
 import { useCourses } from '@/lib/api/courses'
 import { useCourseOutline } from '@/lib/api/outline'
 import { useUsers } from '@/lib/api/users'
@@ -321,17 +321,31 @@ function LanguageDropdown({ value, onChange }: {
 }
 
 /* ── Helpers ─────────────────────────────────────────── */
-function fmtDate(iso: string): string {
+/* ─────────────────────────────────────────────────────────
+   A CLASS IS SHOWN IN ITS OWN ACADEMY'S CLOCK.
+
+   Everything else on this screen stays in the viewer's zone, deliberately.
+   Only the rendered TIME of a class moves, never the day-grouping keys: the
+   calendar cells, the day dividers and the month headings all stay in one zone
+   so the grid remains one grid. Bucket per class instead and a Bangalore class
+   at 01:00 IST files under the 19th while the Dubai class thirty minutes later
+   files under the 18th, and the list reads backwards with nothing on screen to
+   explain it.
+
+   The tz argument is always zoneOf(...), never orgTimeZone(...): an unresolved
+   academy must fall back to the viewer's zone, not to Dubai.
+───────────────────────────────────────────────────────── */
+function fmtDate(iso: string, tz?: string): string {
   const d = new Date(iso)
   const today    = new Date()
   const tomorrow = new Date(Date.now() + 86_400_000)
   if (d.toDateString() === today.toDateString())    return 'Today'
   if (d.toDateString() === tomorrow.toDateString()) return 'Tomorrow'
-  return d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })
+  return d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', ...(tz ? { timeZone: tz } : {}) })
 }
 
-function fmtTime(iso: string): string {
-  return new Date(iso).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })
+function fmtTime(iso: string, tz?: string): string {
+  return new Date(iso).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', ...(tz ? { timeZone: tz } : {}) })
 }
 
 function fmtDuration(mins: number): string {
@@ -553,11 +567,11 @@ function TableRow({ live, index, showInstructor }: { live: LiveClass; index: num
           <div className="flex flex-col gap-0.5">
             <span className="flex items-center gap-1">
               <Calendar size={11} style={{ color: 'rgba(255,255,255,0.3)' }} />
-              {fmtDate(live.scheduledStart)}
+              {fmtDate(live.scheduledStart, zoneOf(live.organizationSlug))}
             </span>
             <span className="flex items-center gap-1 text-xs" style={{ color: 'rgba(255,255,255,0.35)' }}>
               <Clock size={10} />
-              {fmtTime(live.scheduledStart)} · {fmtDuration(live.durationMins)}
+              {fmtTime(live.scheduledStart, zoneOf(live.organizationSlug))}{foreignZoneTag(live.organizationSlug) && <span style={{ color: '#FBBF24' }}> {foreignZoneTag(live.organizationSlug)}</span>} · {fmtDuration(live.durationMins)}
             </span>
           </div>
         </td>
@@ -863,7 +877,7 @@ function CalendarView({ items, onSlotClick }: { items: LiveClass[]; onSlotClick:
                           className="w-full text-left rounded-md px-2 py-1 h-auto hover:brightness-125"
                           style={{ background: c.bg, border: `1px solid ${c.border}` }}>
                           <p className="truncate text-[10px] font-semibold leading-tight" style={{ color: c.color }}>
-                            {fmtTime(s.scheduledStart)} · {s.title}
+                            {fmtTime(s.scheduledStart, zoneOf(s.organizationSlug))} · {s.title}
                           </p>
                         </Button>
                       )
@@ -989,7 +1003,7 @@ function DaySessionsModal({
                       className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left transition-colors hover:bg-white/[0.05]"
                       style={{ border: '1px solid rgba(255,255,255,0.07)' }}>
                       <span className="w-14 flex-shrink-0 text-xs font-bold" style={{ color: c.color }}>
-                        {fmtTime(s.scheduledStart)}
+                        {fmtTime(s.scheduledStart, zoneOf(s.organizationSlug))}{foreignZoneTag(s.organizationSlug) && <span style={{ color: '#FBBF24' }}> {foreignZoneTag(s.organizationSlug)}</span>}
                       </span>
                       <span className="min-w-0 flex-1">
                         <span className="block truncate text-sm font-semibold text-white">{s.title}</span>
@@ -1438,10 +1452,10 @@ function GridCalendarView({ items, onEditClick }: { items: LiveClass[]; onEditCl
                     {/* Date · time · duration */}
                     <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs" style={{ color: 'rgba(255,255,255,0.40)' }}>
                       <span className="flex items-center gap-1">
-                        <Calendar size={10} />{fmtDate(live.scheduledStart)}
+                        <Calendar size={10} />{fmtDate(live.scheduledStart, zoneOf(live.organizationSlug))}
                       </span>
                       <span className="flex items-center gap-1">
-                        <Clock size={10} />{fmtTime(live.scheduledStart)}
+                        <Clock size={10} />{fmtTime(live.scheduledStart, zoneOf(live.organizationSlug))}{foreignZoneTag(live.organizationSlug) && <span style={{ color: '#FBBF24' }}> {foreignZoneTag(live.organizationSlug)}</span>}
                       </span>
                       <span style={{ color: 'rgba(255,255,255,0.25)' }}>{fmtDuration(live.durationMins)}</span>
                     </div>

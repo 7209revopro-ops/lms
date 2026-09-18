@@ -1,4 +1,5 @@
 'use client'
+import { zoneOf, foreignZoneTag } from '@/lib/timezone'
 
 import { use } from 'react'
 import { motion } from 'framer-motion'
@@ -109,7 +110,12 @@ export default function AttendancePage({ params }: { params: Promise<{ id: strin
                 {new Date(session.scheduledStart).toLocaleString('en-US', {
                   weekday: 'short', month: 'short', day: 'numeric',
                   hour: 'numeric', minute: '2-digit',
-                })}
+                  /* This class's own academy clock — a lent instructor reads
+                     the borrowing academy's schedule here, not their own. */
+                  timeZone: zoneOf(session.organizationSlug),
+                })}{foreignZoneTag(session.organizationSlug) && (
+                  <span style={{ color: '#FBBF24' }}> {foreignZoneTag(session.organizationSlug)}</span>
+                )}
               </span>
               <span style={{ color: dim }}>·</span>
               <span>{session.durationMins}m</span>

@@ -142,10 +142,13 @@ function useCountdown(scheduledStart: string | undefined): string {
   return label
 }
 
-function fmtDateTime(iso: string) {
+import { zoneOf, foreignZoneTag } from '@/lib/timezone'
+
+function fmtDateTime(iso: string, tz?: string) {
   return new Date(iso).toLocaleString('en-US', {
     weekday: 'short', month: 'short', day: 'numeric',
     hour: 'numeric', minute: '2-digit',
+    ...(tz ? { timeZone: tz } : {}),
   })
 }
 
@@ -354,7 +357,9 @@ export default function MonitorPage({ params }: { params: Promise<{ id: string }
             <div className="text-center">
               <p className="flex items-center gap-1.5 text-sm font-semibold text-white">
                 <Calendar size={14} style={{ color: '#818CF8' }} />
-                {fmtDateTime(live.scheduledStart)}
+                {fmtDateTime(live.scheduledStart, zoneOf(live.organizationSlug))}{foreignZoneTag(live.organizationSlug) && (
+                  <span style={{ color: '#FBBF24' }}> {foreignZoneTag(live.organizationSlug)}</span>
+                )}
               </p>
               <p className="mt-0.5 text-xs" style={{ color: '#0057b8' }}>{countdown}</p>
             </div>

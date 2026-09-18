@@ -41,6 +41,49 @@ export function orgTimeZone(slug?: string | null): string {
   return (slug && ORG_TIMEZONES[slug]) || DEFAULT_TIMEZONE
 }
 
+/* ─────────────────────────────────────────────────────────
+   Per-record zones — a class is read in ITS OWN academy's clock
+
+   Everything above pins the whole panel to one zone. That holds for a viewer
+   whose every record belongs to their own academy, and stops holding the
+   moment an instructor is LENT: their borrowed-academy classes are then shown
+   in the lending academy's clock, so a 9:00 AM Bangalore class reads 7:30 AM
+   to the person teaching it.
+
+   zoneOf() is the safe way to ask for a record's zone. It differs from
+   orgTimeZone() in exactly one way that matters: an unknown or missing slug
+   falls back to the ACTIVE zone rather than to Asia/Dubai. That keeps a class
+   the backend could not resolve looking exactly as it does today, instead of
+   silently relabelling a Bangalore class as Dubai — which is this very bug,
+   wearing a fix.
+───────────────────────────────────────────────────────── */
+
+/** A record's own academy zone, falling back to the viewer's. */
+export function zoneOf(orgSlug?: string | null): string {
+  return (orgSlug && ORG_TIMEZONES[orgSlug]) || getActiveTimeZone()
+}
+
+/** True when this record is read in a different clock from the rest of the UI. */
+export function isForeignZone(orgSlug?: string | null): boolean {
+  return zoneOf(orgSlug) !== getActiveTimeZone()
+}
+
+/* A short tag to print beside a time that is NOT in the viewer's zone. Without
+   it the fix looks like a bug: two classes an hour apart can show times that
+   run backwards, and nothing on screen explains why. Only rendered when the
+   zones actually differ, so the ordinary single-academy panel is unchanged. */
+const ZONE_TAGS: Record<string, string> = {
+  'Asia/Dubai':   'GST',
+  'Asia/Kolkata': 'IST',
+}
+
+/** 'IST' when the record is in another academy's clock, '' when it is not. */
+export function foreignZoneTag(orgSlug?: string | null): string {
+  if (!isForeignZone(orgSlug)) return ''
+  const tz = zoneOf(orgSlug)
+  return ZONE_TAGS[tz] ?? tz
+}
+
 let activeTimeZone = DEFAULT_TIMEZONE
 
 export function setActiveTimeZone(tz: string | undefined | null): void {
@@ -110,10 +153,26 @@ installAppTimezone()
    in GST, regardless of the device.
 ───────────────────────────────────────────────────────── */
 
-/** Offset (active-zone wall time − UTC), in ms, for the given instant. */
-function tzOffsetMs(date: Date): number {
+/* THE ZONE PARAMETER IS NOT OPTIONAL POLISH — IT IS THE CORRUPTION GUARD.
+
+   These two are a matched pair. isoToDatetimeLocal fills the picker, and
+   datetimeLocalToISO reads it back on save, and EditLiveClassModal sends
+   scheduledStart on EVERY save, not only when the time was touched. While both
+   halves read the same zone the round-trip is lossless, so today's wrong
+   DISPLAY is only a wrong label.
+
+   Fix the read half alone — the visible half, the one a tester reports — and
+   the pair stops agreeing: every save of a borrowed-academy class then rewrites
+   it 1.5 hours off, including a save that only corrected a typo in the title.
+   A display bug becomes silent data loss on a real scheduled class.
+
+   So both take the zone, both default to the active one, and any caller that
+   passes a zone must pass it to BOTH. */
+
+/** Offset (zone wall time − UTC), in ms, for the given instant. */
+function tzOffsetMs(date: Date, tz: string): number {
   const parts = new Intl.DateTimeFormat('en-US', {
-    timeZone: activeTimeZone, hour12: false,
+    timeZone: tz, hour12: false,
     year: 'numeric', month: '2-digit', day: '2-digit',
     hour: '2-digit', minute: '2-digit', second: '2-digit',
   }).formatToParts(date)
@@ -125,18 +184,18 @@ function tzOffsetMs(date: Date): number {
 }
 
 /** Picker value (academy wall-clock "YYYY-MM-DDTHH:mm") → UTC ISO string for the API. */
-export function datetimeLocalToISO(wall: string): string {
+export function datetimeLocalToISO(wall: string, tz: string = activeTimeZone): string {
   if (!wall) return ''
   const naiveUTC = new Date(`${wall}:00.000Z`).getTime()  // parse the digits as if UTC
-  const offset   = tzOffsetMs(new Date(naiveUTC))         // Dubai +4h / Kolkata +5:30 (neither has DST)
+  const offset   = tzOffsetMs(new Date(naiveUTC), tz)     // Dubai +4h / Kolkata +5:30 (neither has DST)
   return new Date(naiveUTC - offset).toISOString()
 }
 
 /** Stored UTC ISO → picker value showing the academy wall-clock. */
-export function isoToDatetimeLocal(iso: string): string {
+export function isoToDatetimeLocal(iso: string, tz: string = activeTimeZone): string {
   if (!iso) return ''
   const parts = new Intl.DateTimeFormat('en-CA', {
-    timeZone: activeTimeZone, hour12: false,
+    timeZone: tz, hour12: false,
     year: 'numeric', month: '2-digit', day: '2-digit',
     hour: '2-digit', minute: '2-digit',
   }).formatToParts(new Date(iso))

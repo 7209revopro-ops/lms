@@ -15,7 +15,7 @@ import { useCourses } from '@/lib/api/courses'
 import { useCourseOutline } from '@/lib/api/outline'
 import { useUsers } from '@/lib/api/users'
 import { useCurrentUser } from '@/lib/api/user'
-import { datetimeLocalToISO } from '@/lib/timezone'
+import { datetimeLocalToISO, zoneOf, foreignZoneTag } from '@/lib/timezone'
 import { EditLiveClassModal } from '@/components/live-classes/EditLiveClassModal'
 import { CreateOfflineClassModal } from '@/components/live-classes/CreateOfflineClassModal'
 import { Button } from '@/components/ui/button'
@@ -120,11 +120,11 @@ function EventPopover({
         <div className="mt-3 space-y-1.5 text-xs" style={{ color: 'rgba(255,255,255,0.5)' }}>
           <p className="flex items-center gap-2">
             <Calendar size={11} style={{ color: '#818CF8' }} />
-            {start.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })}
+            {start.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', timeZone: zoneOf(live.organizationSlug) })}
           </p>
           <p className="flex items-center gap-2">
             <Clock size={11} style={{ color: '#818CF8' }} />
-            {start.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })} · {live.durationMins}m
+            {start.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', timeZone: zoneOf(live.organizationSlug) })}{foreignZoneTag(live.organizationSlug) && ' ' + foreignZoneTag(live.organizationSlug)} · {live.durationMins}m
           </p>
           {live.viewerCount > 0 && (
             <p className="flex items-center gap-2">
@@ -638,7 +638,7 @@ export default function TimetablePage() {
                           <p className="flex items-center gap-1 truncate text-[10px] font-semibold leading-tight"
                             style={{ color: c.color }}>
                             {isOffline && <Building2 size={8} className="flex-shrink-0" />}
-                            {new Date(s.scheduledStart).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}
+                            {new Date(s.scheduledStart).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', timeZone: zoneOf(s.organizationSlug) })}
                             {' · '}{s.title}
                           </p>
                         </Button>

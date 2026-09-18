@@ -1,4 +1,5 @@
 'use client'
+import { zoneOf, foreignZoneTag } from '@/lib/timezone'
 
 import React, { useState, useEffect, useRef } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
@@ -61,10 +62,14 @@ export function BookForStudentModal({ live, onClose, onSuccess }: Props) {
     )
   }
 
+  /* The session this student is being booked into. Showing it in the wrong
+     academy's clock is a mistake that reaches the student, so it is read in
+     the class's own zone and tagged when that differs from the panel's. */
   const scheduledDate = new Date(live.scheduledStart).toLocaleString('en-US', {
     weekday: 'short', month: 'short', day: 'numeric',
     hour: 'numeric', minute: '2-digit',
-  })
+    timeZone: zoneOf(live.organizationSlug),
+  }) + (foreignZoneTag(live.organizationSlug) ? ' ' + foreignZoneTag(live.organizationSlug) : '')
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4" onClick={onClose}>

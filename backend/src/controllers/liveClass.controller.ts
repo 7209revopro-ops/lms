@@ -1,6 +1,7 @@
 import type { Request, Response, NextFunction } from 'express'
 import { Types } from 'mongoose'
 import { instructorOwnsSession } from '@/utils/tenancy.ts'
+import { ensureOrgSlugs, orgSlugFor } from '@/utils/orgSlugs.ts'
 import { logger } from '@/utils/logger.ts'
 import { LiveClassService } from '@/services/liveClass.service.ts'
 import { SectionService } from '@/services/section.service.ts'
@@ -93,6 +94,26 @@ function toDTO(doc: any, entitled = true) {
     rescheduledReason: j.rescheduledReason,
 
     seriesId:       j.seriesId ? String(j.seriesId) : undefined,
+
+    /* WHICH ACADEMY'S WALL CLOCK THIS CLASS IS READ IN.
+
+       The admin panel renders every timestamp in one academy's zone, chosen
+       from the VIEWER's academy. That was indistinguishable from correct while
+       every class a viewer could see was their own academy's. A LENT
+       instructor now sees both academies' classes in one list, so the viewer's
+       zone is the wrong question: a 9:00 AM Bangalore class rendered in Dubai
+       time reads as 7:30 AM to the person teaching it.
+
+       Sending the slug rather than the id keeps the slug-to-zone map in the
+       one place that already owns it, admin/src/lib/timezone.ts, instead of
+       giving the backend a second opinion about what Asia/Kolkata means.
+
+       undefined when the class carries no academy, or before the cache is
+       warm. Every consumer falls back to the viewer's zone on undefined, which
+       is exactly today's behaviour — so this degrades to the old rendering
+       rather than to a wrong one. */
+    organizationId:   j.organizationId ? String(j.organizationId) : undefined,
+    organizationSlug: orgSlugFor(j.organizationId),
 
     createdAt:      j.createdAt,
     updatedAt:      j.updatedAt,
@@ -560,6 +581,7 @@ export class LiveClassController {
         // No courses in this category → return empty, don't leak other categories' sessions
         if (courseIds.length === 0) { sendSuccess(res, []); return }
       }
+      await ensureOrgSlugs()
       const docs = await this.service.listAll({
         status,
         limit,
@@ -586,6 +608,7 @@ export class LiveClassController {
     try {
       const id    = String(req.params['id'] ?? '')
       if (!(await this.#canManage(req, res, id))) return
+      await ensureOrgSlugs()
       const live  = await this.service.getById(id)
 
       /* Programme scope keeps a scoped ADMIN out of another programme's
@@ -631,6 +654,7 @@ export class LiveClassController {
           res.status(403).json({ success: false, error: { code: 'FORBIDDEN', message: 'Access denied.' } }); return
         }
       }
+      await ensureOrgSlugs()
       const docs = await this.service.listForCourseId(courseId)
 
       /* An instructor sees only their own sessions, even inside a course they

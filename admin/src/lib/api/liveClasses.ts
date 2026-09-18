@@ -57,6 +57,21 @@ export interface LiveClass {
      the same "repeat weekly" action. Absent on one-off classes. */
   seriesId?:      string
 
+  /* WHICH ACADEMY'S WALL CLOCK THIS CLASS IS READ IN.
+
+     The panel pins all formatting to ONE zone — the viewer's academy — which
+     was indistinguishable from correct while every class a viewer could see
+     was their own academy's. A LENT instructor sees both academies' classes in
+     one list, so the viewer's zone is the wrong frame for the borrowed ones.
+
+     Pass it through zoneOf() in lib/timezone, never straight into
+     orgTimeZone(): an unknown or absent value must fall back to the viewer's
+     zone, and orgTimeZone() falls back to Asia/Dubai instead. Never use
+     organizationId here — it is an id, orgTimeZone is keyed by SLUG, and an id
+     resolves silently to the Dubai default. */
+  organizationId?:   string
+  organizationSlug?: 'dubai' | 'bangalore'
+
   createdAt:      string
   updatedAt:      string
 }
