@@ -81,7 +81,9 @@ export class ClassAssignmentService {
       userId:      caller.id,
       liveClassId: input.liveClassId,
       status:      { $in: ['booked', 'attended'] },
-    }).lean()
+    }).select('seatOrganizationId seatCourseId seatSectionId').lean() as {
+      seatOrganizationId?: unknown; seatCourseId?: unknown; seatSectionId?: unknown
+    } | null
     if (!booking) {
       throw new ClassAssignmentError('NOT_BOOKED', 'You can only submit work for a class you booked.', 403)
     }
@@ -107,13 +109,25 @@ export class ClassAssignmentService {
       )
     }
 
+    /* FILED AGAINST THE DOOR THE STUDENT CAME THROUGH, not the class's own.
+
+       These three were copied from the session. On a class shared with another
+       academy that files a guest student's submitted work — title, note and
+       uploaded files — into the HOST academy's review queue, against the host's
+       course, invisible to the staff who actually teach them. And
+       ClassAssignment.courseId is required, so it is not a field anyone can
+       leave empty and fix later.
+
+       The seat stamp carries the answer. Absent, it falls back to the session's
+       own values, which is every submission that exists today — so the output
+       is byte-identical for any class that is not shared. */
     const created = await ClassAssignmentModel.create({
       studentId:      caller.id,
       liveClassId:    input.liveClassId,
-      courseId:       session.courseId,
-      sectionId:      session.sectionId,
+      courseId:       booking.seatCourseId       ?? session.courseId,
+      sectionId:      booking.seatSectionId      ?? session.sectionId,
       instructorId:   session.instructorId,
-      organizationId: session.organizationId,
+      organizationId: booking.seatOrganizationId ?? session.organizationId,
       title:          input.title.trim(),
       note:           input.note?.trim(),
       files:          input.files,

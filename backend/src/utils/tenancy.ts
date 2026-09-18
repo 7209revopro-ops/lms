@@ -130,6 +130,44 @@ export function sharedInstructorFilter(callerOrg: string | null | undefined): Re
 }
 
 /* ─────────────────────────────────────────────────────
+   servedClassFilter(callerOrg)  /  classServesOrg(live, callerOrg)
+   ─────────────────────────────────────────────────────
+   THIS ANSWERS "MAY YOU SEE AND USE", NEVER "MAY YOU CHANGE".
+
+   If you are about to call either of these before a write, you want
+   callerMayAccess() or callerMayManageSession() instead. Same rule, same
+   reason, as sharedInstructorFilter above: conflating the two is how N-07,
+   N-10 and N-11 happened.
+
+   A live class belongs to the academy on its `organizationId` and may ALSO
+   serve guest academies named in `guestCohorts`, each through that academy's
+   own course and module. A class SERVES an academy if it is the owner or names
+   it as a guest. Serving is about reaching the room; ownership still decides
+   who may move, edit or cancel it.
+
+   COMPOSE THE FILTER UNDER $and VIA andFilter(), NEVER BY ASSIGNING $or. This
+   is mandatory rather than stylistic: liveClass.repository.ts assigns
+   `query.$or` for the live/ended status buckets, and the admin bookings filter
+   assigns `filter.$or` for roster search. A second $or assignment silently
+   deletes the first — which is the P-04 shape, twice over, and the symptom is
+   a filter that quietly stops filtering. */
+export function servedClassFilter(callerOrg: string | null | undefined): Record<string, unknown> | null {
+  if (!callerOrg || !Types.ObjectId.isValid(callerOrg)) return null
+  const oid = new Types.ObjectId(callerOrg)
+  return { $or: [{ organizationId: oid }, { 'guestCohorts.organizationId': oid }] }
+}
+
+/** The same question about one already-loaded class. */
+export function classServesOrg(
+  live:      { organizationId?: unknown; guestCohorts?: Array<{ organizationId?: unknown }> } | null | undefined,
+  callerOrg: string | null | undefined,
+): boolean {
+  if (!live || !callerOrg) return false
+  if (live.organizationId && String(live.organizationId) === String(callerOrg)) return true
+  return (live.guestCohorts ?? []).some(c => String(c.organizationId) === String(callerOrg))
+}
+
+/* ─────────────────────────────────────────────────────
    callerOrgForRead(req)
    ─────────────────────────────────────────────────────
    For the guards that compare the caller's academy against a RECORD's, and

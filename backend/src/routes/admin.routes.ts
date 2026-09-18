@@ -18,7 +18,10 @@ import { AssignmentService } from '@/services/assignment.service.ts'
 import { SectionService } from '@/services/section.service.ts'
 import { OrderService } from '@/services/order.service.ts'
 import { CouponService } from '@/services/coupon.service.ts'
-import { requireSameOrgUser, callerMayAccess, instructorOwnsSession, callerOrgForRead } from '@/utils/tenancy.ts'
+import {
+  requireSameOrgUser, callerMayAccess, instructorOwnsSession, callerOrgForRead,
+  servedClassFilter, classServesOrg, andFilter,
+} from '@/utils/tenancy.ts'
 import { reserveSeat, releaseSeat, seatStampFrom } from '@/services/seatPool.service.ts'
 import { documentRef } from '@/utils/documentRef.ts'
 import { UserService } from '@/services/user.service.ts'
@@ -797,6 +800,46 @@ async function callerMayManageSession(req: Request, liveClassId: unknown): Promi
 
   if (req.user!.role !== 'instructor') return true
   return owns
+}
+
+/* ── May this caller act on THIS SEAT? ─────────────────────────────────────
+   A narrower sibling of callerMayManageSession, and deliberately the ONLY
+   write carve-out this feature adds.
+
+   Managing the CLASS stays with the academy that owns it: editing, moving,
+   cancelling and deleting all still route through the untouched funnels and
+   still answer 404 across the wall. But a guest academy with forty of its own
+   students in a shared room has to be able to mark them present and release a
+   seat somebody took by mistake. Refusing that means their staff can see their
+   students on the class and do nothing about them, which is not a tenable
+   product answer.
+
+   NARROW IN THREE INDEPENDENT WAYS:
+     · the class must actually SERVE the caller's academy — owner or named
+       guest cohort;
+     · the SEAT must be stamped with the caller's academy, so a Bangalore admin
+       can only touch Bangalore's seats on that class;
+     · everything that is not one of the three seat routes still goes through
+       callerMayManageSession, untouched.
+
+   The seat stamp is read, never re-derived. A student's entitlement can change
+   after they book, and re-deriving would hand one academy authority over the
+   other's seat. */
+async function callerMayManageSeat(
+  req:     Request,
+  booking: { liveClassId?: unknown; seatOrganizationId?: unknown },
+): Promise<boolean> {
+  if (await callerMayManageSession(req, booking.liveClassId)) return true
+
+  const caller = await callerOrgForRead(req)
+  if (caller.gone || !caller.org) return false
+  if (!booking.seatOrganizationId) return false
+  if (String(booking.seatOrganizationId) !== String(caller.org)) return false
+
+  const { LiveClassModel } = await import('@/models/schema.ts')
+  const live = await LiveClassModel.findById(String(booking.liveClassId ?? ''))
+    .select('organizationId guestCohorts').lean()
+  return classServesOrg(live as never, caller.org)
 }
 
 /* ── May this caller act on this student's records? ───────────────
@@ -1991,11 +2034,18 @@ async function buildBookingFilter(
      literal N-07 shape. A caller with no record is refused outright; a caller
      genuinely without an academy stays unscoped, which is rule 3b and
      deliberate. */
+  let callerOrgId: string | null = null
   if (!isInstructor) {
     const caller = await callerOrgForRead(req)
     if (caller.gone) return null
+    callerOrgId = caller.org
     if (caller.org && Types.ObjectId.isValid(caller.org)) {
-      lcFilter['organizationId'] = new Types.ObjectId(caller.org)
+      /* WIDEN: classes this academy OWNS, plus shared classes that name it as a
+         guest cohort. Composed under $and, never by assigning $or — the
+         free-text search below assigns filter.$or and the status buckets in
+         liveClass.repository.ts assign query.$or, and a second assignment
+         silently deletes the first. That is the P-04 shape. */
+      andFilter(lcFilter, servedClassFilter(caller.org))
     }
   }
 
@@ -2045,9 +2095,18 @@ async function buildBookingFilter(
 
   /* ── Step 2: Resolve live-class IDs if needed ── */
   const filter: Record<string, any> = {}
+  /* organizationId comes back too, so the seat narrowing below can tell a class
+     the caller OWNS from one they are merely a guest on. An unstamped seat
+     belongs to the host, and only the host may see it. */
+  let ownedLcIds: unknown[] = []
   if (Object.keys(lcFilter).length > 0) {
-    const matchingLcIds = await LiveClassModel.find(lcFilter, '_id').lean()
-    filter['liveClassId'] = { $in: matchingLcIds.map((l: any) => l._id) }
+    const matchingLcs = await LiveClassModel.find(lcFilter, '_id organizationId').lean()
+    filter['liveClassId'] = { $in: matchingLcs.map((l: any) => l._id) }
+    if (callerOrgId) {
+      ownedLcIds = matchingLcs
+        .filter((l: any) => String(l.organizationId ?? '') === String(callerOrgId))
+        .map((l: any) => l._id)
+    }
   }
 
   /* Narrow to one session — but INTERSECT with the scoped set, never replace
@@ -2062,6 +2121,42 @@ async function buildBookingFilter(
     if (!inScope) return null   // out of scope → caller sees an empty result
     filter['liveClassId'] = requested
   }
+  /* NARROW: on a shared class, each academy sees ONLY ITS OWN SEATS — and that
+     includes the academy that owns the class.
+
+     Without this, the feature reintroduces N-07 verbatim. The booking query has
+     no organisation term of its own, it populates name, email and avatar, and
+     it feeds the list, the stats strip AND the CSV export. One shared class
+     would put every guest academy's student, by name and email, into the host's
+     roster and download in a single request.
+
+     Strictly narrower than today and a no-op on every existing row: no foreign
+     student can hold a seat yet, and an unstamped seat is the host's own.
+
+     THE ASSIGNED INSTRUCTOR IS THE ONE EXCEPTION, and they are excluded above
+     by isInstructor — they already see the whole room through
+     instructorOwnsSession, because assignment is narrower than the academy.
+     Somebody has to be able to see everyone in the class they are running. It
+     is the only cross-academy PII flow this feature accepts, it is one person
+     per class, and it is a judgement call rather than a derivation. */
+  if (!isInstructor && callerOrgId && Types.ObjectId.isValid(callerOrgId)) {
+    const oid = new Types.ObjectId(callerOrgId)
+    filter['$and'] = [
+      ...((filter['$and'] as unknown[]) ?? []),
+      { $or: [
+        /* Seats explicitly stamped with this academy's door. */
+        { seatOrganizationId: oid },
+        /* An UNSTAMPED seat is the host's: it was taken before the class was
+           ever shared, or on a class that has no allocation at all — which is
+           every booking that exists today. So it is visible only on classes
+           this caller OWNS. Matching it unconditionally would have shown a
+           guest academy's admin the host's entire legacy roster, which is the
+           leak this narrowing exists to prevent, reintroduced by the fix. */
+        { seatOrganizationId: { $exists: false }, liveClassId: { $in: ownedLcIds } },
+      ] },
+    ]
+  }
+
   if (q.userId && Types.ObjectId.isValid(q.userId)) filter['userId'] = new Types.ObjectId(q.userId)
   if (q.status) filter['status'] = q.status
 
@@ -2291,8 +2386,12 @@ router.patch('/bookings/:id/cancel', requireInstructor, requirePermission('booki
     const { ClassBookingModel, LiveClassModel, UserModel } = await import('@/models/schema.ts')
     const id = String(req.params['id'] ?? '')
 
-    const existing = await ClassBookingModel.findById(id).select('liveClassId userId status').lean()
-    if (!existing || !(await callerMayManageSession(req, existing.liveClassId))) {
+    const existing = await ClassBookingModel.findById(id)
+      .select('liveClassId userId status seatPoolKind seatOrganizationId').lean()
+    /* The seat guard, not the session guard: a guest academy must be able to
+       release its OWN student's seat on a shared class. Managing the class
+       itself stays with the owner. */
+    if (!existing || !(await callerMayManageSeat(req, existing))) {
       res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Booking not found' } }); return
     }
     if (existing.status !== 'booked') {
@@ -2393,14 +2492,23 @@ router.patch('/bookings/bulk-attendance', requireInstructor, requirePermission('
     const valid = [...new Set(ids)].filter(i => Types.ObjectId.isValid(i)).map(i => new Types.ObjectId(i))
     if (valid.length === 0) { sendSuccess(res, { updated: 0, skipped: ids.length }, 'Nothing to update'); return }
 
-    const docs = await ClassBookingModel.find({ _id: { $in: valid } }, '_id liveClassId status').lean()
+    const docs = await ClassBookingModel.find(
+      { _id: { $in: valid } },
+      '_id liveClassId status seatOrganizationId',
+    ).lean()
 
-    /* Check each SESSION once, not each booking: a bulk mark is nearly always
-       one class's roster and callerMayManageSession costs a query apiece. */
-    const bySession = new Map<string, boolean>()
+    /* Memoise per (SESSION, SEAT ACADEMY), not per session.
+
+       Keying on the session alone was correct while one class had one roster.
+       On a shared class it decides once for the first row it happens to see and
+       applies that answer to every other row of the same class — so one
+       academy's admin would sweep the OTHER academy's students into attendance
+       on the strength of a permission they never had for those seats. The key
+       has to carry everything the decision depends on. */
+    const bySeatScope = new Map<string, boolean>()
     for (const d of docs) {
-      const key = String((d as any).liveClassId ?? '')
-      if (!bySession.has(key)) bySession.set(key, await callerMayManageSession(req, (d as any).liveClassId))
+      const key = `${String((d as any).liveClassId ?? '')}:${String((d as any).seatOrganizationId ?? '')}`
+      if (!bySeatScope.has(key)) bySeatScope.set(key, await callerMayManageSeat(req, d as never))
     }
 
     /* Only seats that are still undecided. Sweeping a CANCELLED seat back to
@@ -2410,7 +2518,9 @@ router.patch('/bookings/bulk-attendance', requireInstructor, requirePermission('
        are skipped rather than refused, matching the 404-not-403 rule: the
        response must not confirm that an id exists in another academy. */
     const allowed = docs
-      .filter(d => bySession.get(String((d as any).liveClassId ?? '')) === true && (d as any).status === 'booked')
+      .filter(d => bySeatScope.get(
+        `${String((d as any).liveClassId ?? '')}:${String((d as any).seatOrganizationId ?? '')}`,
+      ) === true && (d as any).status === 'booked')
       .map(d => (d as any)._id)
 
     /* `status: 'booked'` repeated in the filter, so a seat cancelled between
@@ -2436,8 +2546,10 @@ router.patch('/bookings/:id/attendance', requireInstructor, requirePermission('b
        mark can lock a student out of a class they never took — and the
        response carries their name and email. Answers 404 across an academy
        boundary so the endpoint never confirms the id exists elsewhere. */
-    const existing = await ClassBookingModel.findById(id).select('liveClassId').lean()
-    if (!existing || !(await callerMayManageSession(req, existing.liveClassId))) {
+    const existing = await ClassBookingModel.findById(id)
+      .select('liveClassId seatOrganizationId').lean()
+    /* The seat guard: a guest academy marks its own students present. */
+    if (!existing || !(await callerMayManageSeat(req, existing))) {
       res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Booking not found' } }); return
     }
 

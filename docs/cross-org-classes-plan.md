@@ -15,7 +15,7 @@ under "Why classes are not in this plan", and the decision `docs/work-status.md`
 | 1 — extract the entitlement predicate | **done** | `18f8128` |
 | 2 — schema and authoring, inert | **done** | `6e11c41` |
 | 3 — seats | **done** | |
-| 4 — roster, homework and attendance split | not started | |
+| 4 — roster, homework and attendance split | **done** | |
 | 5 — mail clocks | not started | |
 | 6a — narrow the browse feed, alone | not started | |
 | 6b — open it | not started | |
@@ -50,9 +50,24 @@ database and found **4 drifted classes out of 94** — two overcounting, two
 undercounting. That is the backlog the cascade leak created, visible for the
 first time. It has NOT been applied anywhere.
 
-**Phase 4 is next.** It is the one that must land before phase 6b under any
-circumstances: until the roster is split, a guest academy's students, names and
-emails appear in the host academy's booking list, stats and CSV export.
+**Phase 4 landed, and it found one thing the plan did not anticipate.** The
+narrowing had to distinguish a class the caller OWNS from one they are merely a
+guest on. An UNSTAMPED seat means "the host's door" — which is every booking
+that exists today — so matching it unconditionally would have shown a guest
+academy the host's entire legacy roster. It is matched only on classes the
+caller owns.
+
+One asymmetry is now explicit and tested. The host keeps AUTHORITY over seats in
+the room it owns, because it can cancel the class out from under both cohorts
+and withholding authority over a single seat would be a fiction. What it does
+not get is the guest academy's student LIST. Authority over the room, no
+visibility of the other academy's people.
+
+**Phase 5 is next, and the plan calls it not cuttable.** Ship the remaining
+phases without it and a guest student reads one time in the app and a different
+one in every confirmation and reminder mail, unlabelled. Today that student gets
+no mail for the class at all, so cutting it creates a group of students who are
+actively told the wrong time.
 ---
 
 ## The answer
