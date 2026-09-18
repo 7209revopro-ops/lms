@@ -418,7 +418,10 @@ name a revealed admin wears.
 
 ## 11. Capacity
 
-An interactive LiveKit room is capped at **30 seats** (`LIVEKIT_MAX_SEATS`),
+An interactive LiveKit room is capped at **`LIVEKIT_MAX_PARTICIPANTS` seats**,
+default **50** (`liveClass.service.ts:21`). This section previously called the
+variable `LIVEKIT_MAX_SEATS` and the default 30; a variable of that name is
+read by nothing, so setting it silently leaves the cap where it was.
 validated when `provider === 'livekit'`; the admin form auto-fills 30 in place
 of the open-mode default of 500 and leaves it editable. Broadcast classes —
 instructor publishes, students subscribe — keep the larger default, and Mux

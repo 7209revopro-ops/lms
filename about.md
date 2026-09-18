@@ -5,7 +5,7 @@ academy. It runs two academies (Dubai and Bangalore) from one codebase, sells
 and delivers courses, runs live online classes, and manages the whole student
 lifecycle from enrolment to certificate.
 
-- **Repository:** github.com/Delta-init/lms
+- **Repository:** github.com/7209revopro-ops/lms
 - **Production (student):** https://lms.deltainstitutions.com
 - **Shape:** one monorepo, three apps — a backend API, a student app, and an admin dashboard.
 

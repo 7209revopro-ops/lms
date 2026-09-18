@@ -32,6 +32,11 @@ yarn-error.log*
 
 # env files (can opt-in for committing if needed)
 .env*
+# ...except the template, which is the whole point of having one. `.env*`
+# swallowed it, so the production variables for the meeting integration
+# existed only on one laptop and a deployer cloning the repo got a file
+# with none of them. It carries placeholders only - never a real value.
+!.env.example
 
 # vercel
 .vercel

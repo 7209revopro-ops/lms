@@ -1,6 +1,7 @@
 import { Router, type Request, type Response, type NextFunction } from 'express'
 import { resolveClassEntitlement, loadEnrolmentIndex, entitlementFrom, type ClassDoors } from '@/services/classEntitlement.service.ts'
 import { callerOrgForRead, andFilter, servedClassFilter } from '@/utils/tenancy.ts'
+import { meetingDisplayName } from '@/utils/meetingIdentity.ts'
 import express from 'express'
 import { z } from 'zod'
 import { LiveClassController } from '@/controllers/liveClass.controller.ts'
@@ -202,7 +203,10 @@ router.post('/:id/host-ticket', authenticateAny, injectCategoryScope, async (req
 
       const minted = await mintHostTicket(String(req.params['id'] ?? ''), {
         userId: req.user!.id,
-        name:   req.user!.email.split('@')[0] ?? 'Instructor',
+        /* The instructor's own identity, by the one rule — see
+           utils/meetingIdentity.ts. req.user carries no display name, and the
+           email is what the default mode wants anyway. */
+        name:   meetingDisplayName({ email: req.user!.email }, 'Instructor'),
         email:  req.user!.email,
         role:   req.user!.role,
         ...(hostCaller.org ? { organizationId: hostCaller.org } : {}),
@@ -268,7 +272,7 @@ router.post('/:id/join', authenticate, async (req: Request, res: Response, next:
 
       const joined = await resolveMeetJoin(String(req.params['id'] ?? ''), {
         userId: req.user!.id,
-        name:   me?.name ?? req.user!.email.split('@')[0] ?? 'Student',
+        name:   meetingDisplayName({ name: me?.name, email: req.user!.email }, 'Student'),
         email:  req.user!.email,
         role:   req.user!.role,
         ...(me?.organizationId ? { organizationId: String(me.organizationId) } : {}),
@@ -307,7 +311,7 @@ router.post('/:id/join-ticket', authenticate, async (req: Request, res: Response
 
       const minted = await mintStudentTicket(String(req.params['id'] ?? ''), {
         userId: req.user!.id,
-        name:   me?.name ?? req.user!.email.split('@')[0] ?? 'Student',
+        name:   meetingDisplayName({ name: me?.name, email: req.user!.email }, 'Student'),
         email:  req.user!.email,
         role:   req.user!.role,
         ...(me?.organizationId ? { organizationId: String(me.organizationId) } : {}),

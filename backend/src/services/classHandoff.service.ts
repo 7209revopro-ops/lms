@@ -18,6 +18,7 @@ import { createHash, randomBytes } from 'node:crypto'
 import { Types } from 'mongoose'
 import { ClassHandoffModel, type ClassHandoffKind } from '@/models/schema.ts'
 import { JoinError, mintHostTicket, mintStudentTicket, type JoinContext } from '@/services/liveClassJoin.service.ts'
+import { meetingDisplayName } from '@/utils/meetingIdentity.ts'
 import { logger } from '@/utils/logger.ts'
 
 /* Long enough that guessing is hopeless, short enough to sit in a URL. */
@@ -108,7 +109,12 @@ export async function exchangeHandoff(code: string): Promise<ExchangedHandoff> {
 
   const ctx: JoinContext = {
     userId: String(row.userId),
-    name:   user.name ?? 'Participant',
+    /* THE NAME ON THE TILE, and this is the ONLY path the Join buttons use.
+       It used to read `user.name ?? 'Participant'` — its own rule, decided
+       here, while the three ticket routes had already been moved onto
+       meetingDisplayName. The helper was green in its own suite and dark in
+       production, because nothing tested the path the UI actually takes. */
+    name:   meetingDisplayName({ name: user.name, email: user.email }, 'Participant'),
     email:  user.email ?? '',
     role:   user.role ?? 'student',
     ...(user.avatarUrl ? { avatarUrl: user.avatarUrl } : {}),
