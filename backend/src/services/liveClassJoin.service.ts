@@ -24,6 +24,7 @@ import { mintTicket, roomNameFor, type MintedTicket, type TicketRole } from '@/s
 import { tryEnsureRoom, cltConfigured } from '@/services/clt.service.ts'
 import { logger } from '@/utils/logger.ts'
 import { studentJoinWindow, STUDENT_JOIN_GRACE_MS } from '@/utils/liveStatus.ts'
+import { resolveClassEntitlement } from '@/services/classEntitlement.service.ts'
 
 export class JoinError extends Error {
   constructor(
@@ -164,8 +165,13 @@ async function assertAdminMayObserve(live: ILiveClass, ctx: JoinContext): Promis
   /* 1. Tenancy. A caller with no academy on record, or a class that predates
      the field, stays unscoped — the convention every other org guard in this
      codebase follows. Only a genuine mismatch is a refusal. */
-  if (ctx.organizationId && live.organizationId
-      && String(live.organizationId) !== String(ctx.organizationId)) {
+  /* An admin of any SERVING academy may observe: the host's, or any guest
+     academy the class was shared with. Until sharing is switched on this is
+     exactly the host comparison it replaces, falsy guards included. */
+  const { doorsFor } = await import('@/services/classEntitlement.service.ts')
+  const servesCaller = doorsFor(live).some(d =>
+    !d.organizationId || !ctx.organizationId || String(d.organizationId) === String(ctx.organizationId))
+  if (!servesCaller) {
     throw new JoinError('WRONG_ACADEMY', 'This class belongs to another academy.', 403)
   }
 
@@ -308,12 +314,24 @@ export async function assertStudentMayJoin(
     throw new JoinError('ENROLMENT_NOT_APPROVED',
       'Your enrolment is not approved yet.', 403)
   }
-  if (live.organizationId && ctx.organizationId
-      && String(live.organizationId) !== String(ctx.organizationId)) {
+  /* ACADEMY, ENROLMENT AND MODULE, ASKED OF ONE DOOR.
+
+     These were three hand-written checks here, and near-identical copies lived
+     in seven other files. They are one call now — see
+     services/classEntitlement.service.ts for why the module gate cannot be
+     asked of a different course than the enrolment was found in.
+
+     The ORDER of this function's refusals is a contract the client depends on:
+     everything above and including this is a PERMANENT no, and the time window
+     below is a "not yet" answered as 425 with Retry-After. That ordering is
+     unchanged. */
+  const entitlement = await resolveClassEntitlement(live, ctx.userId, ctx.organizationId ?? null, 'notDropped')
+
+  if (entitlement.code === 'WRONG_ACADEMY') {
     throw new JoinError('WRONG_ACADEMY', 'This class belongs to another academy.', 403)
   }
 
-  const { ClassBookingModel, EnrollmentModel } = await import('@/models/schema.ts')
+  const { ClassBookingModel } = await import('@/models/schema.ts')
 
   const booking = await ClassBookingModel.findOne({
     userId: new Types.ObjectId(ctx.userId),
@@ -326,29 +344,20 @@ export async function assertStudentMayJoin(
 
   /* The seat is not enough on its own: it was taken when the student was
      enrolled, and an admin can delete that enrolment afterwards without
-     touching the booking row. Requiring the enrolment HERE, at the click, is
-     what makes revoking course access actually revoke the class — the watch
-     page already refuses the same student with NOT_ENROLLED, and the two
-     doors must not disagree. A missing enrolment used to read as "nothing
-     blocked" and let the link through. */
-  const enrolment = await EnrollmentModel.findOne({
-    userId:   new Types.ObjectId(ctx.userId),
-    courseId: live.courseId,
-    status:   { $ne: 'dropped' },
-  }).select('blockedLessons').lean()
-  if (!enrolment) {
+     touching the booking row. Requiring the enrolment AT THE CLICK is what
+     makes revoking course access actually revoke the class — the watch page
+     refuses the same student with NOT_ENROLLED, and the two doors must not
+     disagree. A missing enrolment used to read as "nothing blocked" and let
+     the link through.
+
+     Both that check and the module gate are now answered by the resolver
+     above, against the door this student came through. */
+  if (entitlement.code === 'NOT_ENROLLED') {
     throw new JoinError('NOT_ENROLLED', 'You are no longer enrolled in this course.', 403)
   }
-
-  /* blockedLessons stores SECTION ids despite the name — a legacy misnomer
-     documented in CLAUDE.md. Module-level blocking must hold for a live class
-     exactly as it does for a lesson. */
-  if (live.sectionId) {
-    const blocked = (enrolment as { blockedLessons?: unknown[] }).blockedLessons ?? []
-    if (blocked.some(id => String(id) === String(live.sectionId))) {
-      throw new JoinError('MODULE_BLOCKED',
-        'This module is not available on your plan.', 403)
-    }
+  if (entitlement.code === 'MODULE_BLOCKED') {
+    throw new JoinError('MODULE_BLOCKED',
+      'This module is not available on your plan.', 403)
   }
 
   /* Time window last: everything above is a permanent no, this one is "not

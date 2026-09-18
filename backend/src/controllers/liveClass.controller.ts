@@ -1,6 +1,6 @@
 import type { Request, Response, NextFunction } from 'express'
 import { Types } from 'mongoose'
-import { instructorOwnsSession } from '@/utils/tenancy.ts'
+import { instructorOwnsSession, callerOrgForRead } from '@/utils/tenancy.ts'
 import { ensureOrgSlugs, orgSlugFor } from '@/utils/orgSlugs.ts'
 import { logger } from '@/utils/logger.ts'
 import { LiveClassService } from '@/services/liveClass.service.ts'
@@ -548,9 +548,16 @@ export class LiveClassController {
        instructor holding someone else's session id, still gets the 404 that
        refuses to confirm the class exists elsewhere. */
     if (!owns) {
-      const callerOrg = req.user?.organizationId
-      const liveOrg   = (live as { organizationId?: unknown }).organizationId
-      if (callerOrg && liveOrg && String(liveOrg) !== String(callerOrg)) {
+      /* Resolved, not read off the request. A session minted before the field
+         existed carried no academy, and the old blind read then skipped this
+         comparison altogether — an unscoped caller reaching every academy's
+         classes by id. See callerOrgForRead in utils/tenancy.ts. */
+      const caller = await callerOrgForRead(req)
+      if (caller.gone) {
+        res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Live class not found' } }); return false
+      }
+      const liveOrg = (live as { organizationId?: unknown }).organizationId
+      if (caller.org && liveOrg && String(liveOrg) !== String(caller.org)) {
         res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Live class not found' } }); return false
       }
     }

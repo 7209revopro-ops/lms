@@ -1,4 +1,6 @@
 import { Router, type Request, type Response, type NextFunction } from 'express'
+import { resolveClassEntitlement, loadEnrolmentIndex, entitlementFrom, type ClassDoors } from '@/services/classEntitlement.service.ts'
+import { callerOrgForRead } from '@/utils/tenancy.ts'
 import express from 'express'
 import { z } from 'zod'
 import { LiveClassController } from '@/controllers/liveClass.controller.ts'
@@ -71,19 +73,11 @@ router.get('/', authenticate, async (req: Request, res: Response, next: NextFunc
     const userId = req.user!.id
     const status = String(req.query['status'] ?? '')
 
-    // Find which courses this student has purchased. 'active' and 'completed'
-    // both keep access — only 'dropped' loses it.
-    const enrollments = await EnrollmentModel.find(
-      { userId: new Types.ObjectId(userId), status: { $ne: 'dropped' } },
-      { courseId: 1, blockedLessons: 1 },
-    ).lean()
-    const enrolledCourseIds = new Set(enrollments.map((e: any) => String(e.courseId)))
-    // blockedLessons stores SECTION ids (field name is a legacy misnomer): a
-    // session inside a blocked module is not entitled, even though the course
-    // enrolment is — same gate as /watch and POST /bookings.
-    const blockedByCourse = new Map<string, string[]>(
-      enrollments.map((e: any) => [String(e.courseId), (e.blockedLessons ?? []).map((b: any) => String(b))]),
-    )
+    /* ONE index load, then the same door rule /watch and POST /bookings apply
+       — see services/classEntitlement.service.ts. 'active' and 'completed'
+       both keep access; only 'dropped' loses it. A session inside a blocked
+       module is enrolled but not entitled. */
+    const index = await loadEnrolmentIndex(userId, 'notDropped')
 
     // Return sessions for the student's org (or all if no org on record).
     const lcOrgFilter: Record<string, unknown> = {}
@@ -114,16 +108,9 @@ router.get('/', authenticate, async (req: Request, res: Response, next: NextFunc
     // (resolveLiveStatus), 'ended' after. The STUDENT join window is a
     // different rule — start .. start+20m — carried separately below.
     let annotated = (classes as any[]).map(c => {
-      const courseId = c.courseId
-        ? String((c.courseId as any)?._id ?? (c.courseId as any)?.id ?? c.courseId)
-        : null
-      const sectionId = c.sectionId
-        ? String((c.sectionId as any)?._id ?? c.sectionId)
-        : null
-      const isEnrolled = courseId ? enrolledCourseIds.has(courseId) : false
-      const isEntitled = isEnrolled && !(
-        sectionId && courseId && (blockedByCourse.get(courseId) ?? []).includes(sectionId)
-      )
+      const e = entitlementFrom(c as ClassDoors, index, null)
+      const isEnrolled = e.ok || e.code === 'MODULE_BLOCKED'
+      const isEntitled = e.ok
       const dto: Record<string, unknown> = {
         ...c,
         id:         c.id ?? String(c._id),
@@ -195,12 +182,22 @@ router.post('/:id/host-ticket', authenticateAny, injectCategoryScope, async (req
          visible by forgetting the flag; the instructor path ignores it. */
       const visible = (req.body as { visible?: boolean } | undefined)?.visible === true
 
+      /* Resolved rather than read off the request. assertAdminMayObserve
+         compares ctx.organizationId against the class's, and a session minted
+         before the field existed carried none — which made an admin observer
+         UNSCOPED across academies instead of refused. The sibling student
+         routes below already resolve it from the record; this one did not. */
+      const hostCaller = await callerOrgForRead(req)
+      if (hostCaller.gone) {
+        res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Live class not found' } }); return
+      }
+
       const minted = await mintHostTicket(String(req.params['id'] ?? ''), {
         userId: req.user!.id,
         name:   req.user!.email.split('@')[0] ?? 'Instructor',
         email:  req.user!.email,
         role:   req.user!.role,
-        ...(req.user!.organizationId ? { organizationId: req.user!.organizationId } : {}),
+        ...(hostCaller.org ? { organizationId: hostCaller.org } : {}),
         /* Set by injectCategoryScope above. Without it the programme gate in
            the service has nothing to compare and lets every class through. */
         ...(req.user!.categoryScope ? { categoryScope: req.user!.categoryScope } : {}),
@@ -362,16 +359,21 @@ async function hasSessionAccess(userId: string, liveClassId: string): Promise<bo
   }).lean()
   if (booking) return true
 
-  const session = await LiveClassModel.findById(liveClassId).select('courseId').lean()
+  const session = await LiveClassModel.findById(liveClassId)
+    .select('courseId sectionId organizationId guestCohorts').lean()
   if (!session?.courseId) return false
 
-  /* 'active' and 'completed' both keep access — only 'dropped' loses it. */
-  const enrollment = await EnrollmentModel.findOne({
-    userId:   new Types.ObjectId(userId),
-    courseId: session.courseId,
-    status:   { $ne: 'dropped' },
-  }).lean()
-  return !!enrollment
+  /* ENROLMENT, ASKED OF ONE DOOR — see classEntitlement.service.ts. 'active'
+     and 'completed' both keep access; only 'dropped' loses it.
+
+     MODULE_BLOCKED IS DELIBERATELY TREATED AS ACCESS HERE, because it always
+     has been: this gate never had a module check, and Phase 1 of the
+     cross-academy work is a refactor that changes no answer. Whether a student
+     blocked on a module should still reach that session's homework is a real
+     question with a defensible answer either way, and it is not this change's
+     to decide. Written down rather than silently altered. */
+  const entitlement = await resolveClassEntitlement(session, userId, null, 'notDropped')
+  return entitlement.ok || entitlement.code === 'MODULE_BLOCKED'
 }
 
 router.get('/:id/homework', authenticate, async (req: Request, res: Response, next: NextFunction) => {

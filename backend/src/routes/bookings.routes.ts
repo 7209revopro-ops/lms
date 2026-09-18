@@ -12,6 +12,7 @@
  *     student sees the failure inside the app
  */
 import { Router, type Request, type Response, type NextFunction } from 'express'
+import { resolveClassEntitlement } from '@/services/classEntitlement.service.ts'
 import { z } from 'zod'
 import { resolveLiveStatus, isBookingOpen, bookingClosesAt } from '@/utils/liveStatus.ts'
 import { authenticate, requireEnrollmentApproval } from '@/middleware/auth.middleware.ts'
@@ -165,26 +166,17 @@ router.post('/', authenticate, requireEnrollmentApproval, validate(createBooking
       }); return
     }
 
-    /* Enrollment gate — student must be enrolled in the session's course */
-    let enrollment = null
-    if (session.courseId) {
-      enrollment = await EnrollmentModel.findOne({
-        userId:   new Types.ObjectId(userId),
-        courseId: session.courseId,
-        status:   'active',
-      }).lean()
-      if (!enrollment) {
-        res.status(403).json({ success: false, error: { code: 'NOT_ENROLLED', message: 'You must be enrolled in this course to book the session' } }); return
-      }
+    /* ENROLMENT AND MODULE, ASKED OF ONE DOOR — see
+       services/classEntitlement.service.ts. Booking is the strict path: it
+       demands a genuinely ACTIVE enrolment, where join and watch accept
+       anything not dropped. That disagreement is real, live and deliberately
+       preserved; it is now named in one file instead of re-derived in eight. */
+    const entitlement = await resolveClassEntitlement(session, userId, null, 'active')
+    if (entitlement.code === 'NOT_ENROLLED') {
+      res.status(403).json({ success: false, error: { code: 'NOT_ENROLLED', message: 'You must be enrolled in this course to book the session' } }); return
     }
-
-    /* Module access gate — block if the session's section is in the student's blocked list.
-       Note: blockedLessons actually stores section/module IDs (field name is a legacy misnomer). */
-    if (enrollment && session.sectionId) {
-      const blockedIds = (enrollment.blockedLessons ?? []).map((id: any) => String(id))
-      if (blockedIds.includes(String(session.sectionId))) {
-        res.status(403).json({ success: false, error: { code: 'MODULE_BLOCKED', message: 'You don\'t have access to this module. Contact your admin.' } }); return
-      }
+    if (entitlement.code === 'MODULE_BLOCKED') {
+      res.status(403).json({ success: false, error: { code: 'MODULE_BLOCKED', message: 'You don\'t have access to this module. Contact your admin.' } }); return
     }
 
     /* 2× attendance cap */

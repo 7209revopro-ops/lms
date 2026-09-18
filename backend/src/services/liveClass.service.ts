@@ -1,4 +1,5 @@
 import { Types } from 'mongoose'
+import { resolveClassEntitlement, loadEnrolmentIndex, entitlementFrom, type ClassDoors } from '@/services/classEntitlement.service.ts'
 import { LiveClassRepository } from '@/repositories/liveClass.repository.ts'
 import { CourseRepository } from '@/repositories/course.repository.ts'
 import { EnrollmentRepository } from '@/repositories/enrollment.repository.ts'
@@ -63,28 +64,22 @@ export class LiveClassService {
     if (!course) throw new LiveClassError('COURSE_NOT_FOUND', 'Course not found', 404)
     const sessions = await this.liveRepo.listForCourse(course.id)
 
-    let enrolled = false
-    let blockedSectionIds: string[] = []
-    if (userId) {
-      const enrollments = await this.enrollRepo.listForUser(userId)
-      const courseIdStr = String(course.id)
-      /* 'active' and 'completed' both keep access — only 'dropped' loses it. */
-      const enrollment  = enrollments.find(e => {
-        const cId = e.courseId && typeof e.courseId === 'object'
-          ? String((e.courseId as { _id?: unknown })._id ?? '')
-          : String(e.courseId)
-        return cId === courseIdStr && e.status !== 'dropped'
-      })
-      enrolled = !!enrollment
-      /* blockedLessons stores SECTION ids (field name is a legacy misnomer). */
-      blockedSectionIds = (enrollment?.blockedLessons ?? []).map(bid => String(bid))
+    /* ONE index load, then the same door rule the watch page and the booking
+       route apply — see services/classEntitlement.service.ts. 'active' and
+       'completed' both keep access; only 'dropped' loses it. */
+    if (!userId) {
+      return sessions.map(s => Object.assign(s, { isEnrolled: false, isEntitled: false }))
     }
+    const index = await loadEnrolmentIndex(userId, 'notDropped')
 
-    return sessions.map(s => Object.assign(s, {
-      isEnrolled: enrolled,
-      /* A blocked module is never entitled — mirrors the /watch gate below. */
-      isEntitled: enrolled && !(s.sectionId && blockedSectionIds.includes(String(s.sectionId))),
-    }))
+    return sessions.map(s => {
+      const e = entitlementFrom(s as unknown as ClassDoors, index, null)
+      return Object.assign(s, {
+        isEnrolled: e.ok || e.code === 'MODULE_BLOCKED',
+        /* A blocked module is never entitled — the same gate /watch applies. */
+        isEntitled: e.ok,
+      })
+    })
   }
 
   async listForCourseId(courseId: string): Promise<ILiveClass[]> {
@@ -100,18 +95,7 @@ export class LiveClassService {
     // 'active' and 'completed' both keep access — only 'dropped' loses it.
     // blockedLessons stores SECTION ids (legacy misnomer): a session inside a
     // blocked module is not entitled even though the course enrolment is.
-    const enrollments       = await this.enrollRepo.listForUser(userId)
-    const enrolledCourseIds = new Set<string>()
-    const blockedByCourse   = new Map<string, string[]>()
-    for (const e of enrollments) {
-      if (e.status === 'dropped') continue
-      const cId = e.courseId && typeof e.courseId === 'object'
-        ? String((e.courseId as { _id?: unknown })._id ?? '')
-        : String(e.courseId)
-      if (!cId) continue
-      enrolledCourseIds.add(cId)
-      blockedByCourse.set(cId, (e.blockedLessons ?? []).map(bid => String(bid)))
-    }
+    const index = await loadEnrolmentIndex(userId, 'notDropped')
 
     // If student has a category, restrict to that category's courses
     let courseIds: string[] | undefined
@@ -131,17 +115,11 @@ export class LiveClassService {
       .sort((a, b) => new Date(a.scheduledStart).getTime() - new Date(b.scheduledStart).getTime())
       .slice(0, limit)
       .map(s => {
-        const rawId = (s as any).courseId
-        const courseId = rawId && typeof rawId === 'object'
-          ? String((rawId as any)._id ?? (rawId as any).id ?? '')
-          : String(rawId ?? '')
-        const rawSection = (s as any).sectionId
-        /* sectionId is not populated here — never read `.id` off an ObjectId. */
-        const sectionId  = rawSection ? String((rawSection as any)._id ?? rawSection) : ''
-        const isEnrolled = enrolledCourseIds.has(courseId)
-        const isEntitled = isEnrolled &&
-          !(sectionId && (blockedByCourse.get(courseId) ?? []).includes(sectionId))
-        return Object.assign(s, { isEnrolled, isEntitled })
+        const e = entitlementFrom(s as unknown as ClassDoors, index, null)
+        return Object.assign(s, {
+          isEnrolled: e.ok || e.code === 'MODULE_BLOCKED',
+          isEntitled: e.ok,
+        })
       })
   }
 
@@ -533,24 +511,21 @@ export class LiveClassService {
       rawCourseId instanceof Types.ObjectId
         ? rawCourseId
         : (rawCourseId as { _id?: Types.ObjectId })?._id ?? String(rawCourseId)
-    const enrollment = await this.enrollRepo.findByUserCourse(userId, courseId).catch(() => null)
+    /* ENROLMENT AND MODULE, ASKED OF ONE DOOR — see
+       services/classEntitlement.service.ts.
 
-    /* A dropped enrolment is no enrolment. findByUserCourse has no status
-       filter, so without this a student whose course access was withdrawn
-       still got the landing page — with isBooked true and a Join button the
-       click would then refuse. The list and feed exclude dropped already;
-       the three doors must agree. */
-    if (!enrollment || (enrollment as { status?: string }).status === 'dropped') {
+       A dropped enrolment is no enrolment, and this used to be easy to get
+       wrong here: findByUserCourse has no status filter, so a student whose
+       course access was withdrawn still got the landing page, with isBooked
+       true and a Join button whose click would then refuse. The watch page,
+       the list and the feed must agree, and now they agree by construction
+       because they ask the same function the same way. */
+    const entitlement = await resolveClassEntitlement(live, userId, null, 'notDropped')
+    if (entitlement.code === 'NOT_ENROLLED') {
       throw new LiveClassError('NOT_ENROLLED', 'You must be enrolled in this course to watch this session', 403)
     }
-
-    /* Module access gate — mirrors the booking route. Note: blockedLessons
-       actually stores section/module IDs (field name is a legacy misnomer). */
-    if (live.sectionId) {
-      const blockedIds = (enrollment.blockedLessons ?? []).map(bid => String(bid))
-      if (blockedIds.includes(String(live.sectionId))) {
-        throw new LiveClassError('MODULE_BLOCKED', 'You don\'t have access to this module. Contact your admin.', 403)
-      }
+    if (entitlement.code === 'MODULE_BLOCKED') {
+      throw new LiveClassError('MODULE_BLOCKED', 'You don\'t have access to this module. Contact your admin.', 403)
     }
 
     if (live.status === 'cancelled') {

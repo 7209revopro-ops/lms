@@ -1,4 +1,5 @@
 import { Router } from 'express'
+import { resolveClassEntitlement } from '@/services/classEntitlement.service.ts'
 /* Type-only, and aliased: every handler below binds its own `Types` value
    via `await import('mongoose')`, which would shadow the namespace. */
 import type { Types as MongoTypes } from 'mongoose'
@@ -17,7 +18,7 @@ import { AssignmentService } from '@/services/assignment.service.ts'
 import { SectionService } from '@/services/section.service.ts'
 import { OrderService } from '@/services/order.service.ts'
 import { CouponService } from '@/services/coupon.service.ts'
-import { requireSameOrgUser, callerMayAccess, instructorOwnsSession } from '@/utils/tenancy.ts'
+import { requireSameOrgUser, callerMayAccess, instructorOwnsSession, callerOrgForRead } from '@/utils/tenancy.ts'
 import { documentRef } from '@/utils/documentRef.ts'
 import { UserService } from '@/services/user.service.ts'
 import { adminListDevices, adminApproveDevice, adminRevokeDevice } from '@/services/device.service.ts'
@@ -1425,26 +1426,17 @@ router.post('/bookings/book-for-student', requireAnyAdmin, validate(bookForStude
       res.status(404).json({ success: false, error: { code: 'STUDENT_NOT_FOUND', message: 'Student not found' } }); return
     }
 
-    /* Enrollment gate — student must be enrolled in the session's course */
-    let enrollment = null
-    if (session.courseId) {
-      const { EnrollmentModel } = await import('@/models/schema.ts')
-      enrollment = await EnrollmentModel.findOne({
-        userId:   new Types.ObjectId(studentId),
-        courseId: session.courseId,
-        status:   'active',
-      }).lean()
-      if (!enrollment) {
-        res.status(403).json({ success: false, error: { code: 'NOT_ENROLLED', message: 'Student is not enrolled in this course' } }); return
-      }
+    /* ENROLMENT AND MODULE, ASKED OF ONE DOOR — the same helper the student's
+       own booking route uses, so an admin booking on someone's behalf can never
+       admit a student their own request would have been refused. Note the
+       subject is the STUDENT, not the admin: it is the student's enrolment and
+       the student's blocked modules that decide. */
+    const entitlement = await resolveClassEntitlement(session, studentId, null, 'active')
+    if (entitlement.code === 'NOT_ENROLLED') {
+      res.status(403).json({ success: false, error: { code: 'NOT_ENROLLED', message: 'Student is not enrolled in this course' } }); return
     }
-
-    /* Module blocking — cannot book if student's section is blocked */
-    if (enrollment && session.sectionId) {
-      const blockedIds = ((enrollment as any).blockedLessons ?? []).map((id: any) => String(id))
-      if (blockedIds.includes(String(session.sectionId))) {
-        res.status(403).json({ success: false, error: { code: 'MODULE_BLOCKED', message: 'Student does not have access to this module' } }); return
-      }
+    if (entitlement.code === 'MODULE_BLOCKED') {
+      res.status(403).json({ success: false, error: { code: 'MODULE_BLOCKED', message: 'Student does not have access to this module' } }); return
     }
 
     /* Capacity fast-check — the authoritative check is the atomic seat
@@ -1987,9 +1979,21 @@ async function buildBookingFilter(
      utils/tenancy.ts.
 
      Kept for every other role, including when an admin filters by some other
-     instructor via q.instructorId: there the academy is still the only wall. */
-  if (!isInstructor && req.user!.organizationId && Types.ObjectId.isValid(req.user!.organizationId)) {
-    lcFilter['organizationId'] = new Types.ObjectId(req.user!.organizationId)
+     instructor via q.instructorId: there the academy is still the only wall.
+
+     RESOLVED, NOT READ BLIND. This used to read req.user!.organizationId
+     directly, and when that field was absent it added NO org clause at all —
+     handing the caller an unscoped roster of BOTH academies, with names and
+     emails, through the list, the stats strip and the CSV export. That is the
+     literal N-07 shape. A caller with no record is refused outright; a caller
+     genuinely without an academy stays unscoped, which is rule 3b and
+     deliberate. */
+  if (!isInstructor) {
+    const caller = await callerOrgForRead(req)
+    if (caller.gone) return null
+    if (caller.org && Types.ObjectId.isValid(caller.org)) {
+      lcFilter['organizationId'] = new Types.ObjectId(caller.org)
+    }
   }
 
   // Programme-scoped admins (sub_admin) only see their program's bookings

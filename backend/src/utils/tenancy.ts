@@ -130,6 +130,34 @@ export function sharedInstructorFilter(callerOrg: string | null | undefined): Re
 }
 
 /* ─────────────────────────────────────────────────────
+   callerOrgForRead(req)
+   ─────────────────────────────────────────────────────
+   For the guards that compare the caller's academy against a RECORD's, and
+   that were reading `req.user?.organizationId` straight off the request.
+
+   Reading the field blind has two failure modes, and this codebase has hit
+   both. A token minted before the field existed carries no academy, so a blind
+   read yields undefined and the comparison is skipped entirely — the caller
+   goes UNSCOPED rather than being refused, which is the N-07 shape
+   `resolveCallerOrg` was written to close. And collapsing "no academy on
+   record" into "no such account" is P-18: one must stay unscoped by design,
+   the other must be denied.
+
+   So this returns a discriminated result rather than a bare string. The caller
+   is forced to answer the gone case, and cannot accidentally treat it as the
+   permissive one.
+
+   `resolveCallerOrg` caches per request, so calling this in several guards on
+   one request costs one lookup. */
+export async function callerOrgForRead(
+  req: Request,
+): Promise<{ gone: true } | { gone: false; org: string | null }> {
+  const org = await resolveCallerOrg(req)
+  if (org === ACCOUNT_GONE) return { gone: true }
+  return { gone: false, org }
+}
+
+/* ─────────────────────────────────────────────────────
    instructorOwnsSession(req, live)
    ─────────────────────────────────────────────────────
    ASSIGNMENT IS THE AUTHORITY, AND IT IS NARROWER THAN THE ACADEMY.
