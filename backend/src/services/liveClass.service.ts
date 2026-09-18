@@ -14,6 +14,7 @@ import { env } from '@/config/env.ts'
 import { EnrollmentModel, LiveClassModel, UserModel, type ILiveClass, type LiveClassType, type LiveClassProvider } from '@/models/schema.ts'
 import { roomNameFor } from '@/services/integrationTicket.service.ts'
 import { tryEnsureRoom } from '@/services/clt.service.ts'
+import { adjustOverflow } from '@/services/seatPool.service.ts'
 
 /* CLT caps a LiveKit room at 50 participants and 8 concurrent rooms. Kept here
    as a named constant so the admin UI and the tests quote the same number. */
@@ -59,7 +60,7 @@ export class LiveClassService {
     return live
   }
 
-  async listForCourseSlug(slug: string, userId?: string): Promise<(ILiveClass & { isEnrolled: boolean; isEntitled: boolean })[]> {
+  async listForCourseSlug(slug: string, userId?: string, callerOrg: string | null = null): Promise<(ILiveClass & { isEnrolled: boolean; isEntitled: boolean })[]> {
     const course = await this.courseRepo.findBySlug(slug)
     if (!course) throw new LiveClassError('COURSE_NOT_FOUND', 'Course not found', 404)
     const sessions = await this.liveRepo.listForCourse(course.id)
@@ -73,7 +74,7 @@ export class LiveClassService {
     const index = await loadEnrolmentIndex(userId, 'notDropped')
 
     return sessions.map(s => {
-      const e = entitlementFrom(s as unknown as ClassDoors, index, null)
+      const e = entitlementFrom(s as unknown as ClassDoors, index, callerOrg)
       return Object.assign(s, {
         isEnrolled: e.ok || e.code === 'MODULE_BLOCKED',
         /* A blocked module is never entitled — the same gate /watch applies. */
@@ -123,7 +124,7 @@ export class LiveClassService {
       .sort((a, b) => new Date(a.scheduledStart).getTime() - new Date(b.scheduledStart).getTime())
       .slice(0, limit)
       .map(s => {
-        const e = entitlementFrom(s as unknown as ClassDoors, index, null)
+        const e = entitlementFrom(s as unknown as ClassDoors, index, callerOrg ?? null)
         return Object.assign(s, {
           isEnrolled: e.ok || e.code === 'MODULE_BLOCKED',
           isEntitled: e.ok,
@@ -605,7 +606,8 @@ export class LiveClassService {
   }
 
   /* ── Student watch access ─────────────────────────── */
-  async getWatchAccess(id: string, userId: string): Promise<{
+  /* callerOrg comes from the controller, which resolves it properly. */
+  async getWatchAccess(id: string, userId: string, callerOrg: string | null = null): Promise<{
     type:          'external' | 'internal'
     provider?:     LiveClassProvider
     /* Second signal for "this is an interactive room". Sent so the client can
@@ -648,7 +650,11 @@ export class LiveClassService {
        true and a Join button whose click would then refuse. The watch page,
        the list and the feed must agree, and now they agree by construction
        because they ask the same function the same way. */
-    const entitlement = await resolveClassEntitlement(live, userId, null, 'notDropped')
+    /*       THE ACADEMY IS PASSED HERE TOO, and it has to be. Booking and JOIN both
+       resolve the door with the caller's academy; a read path that resolves it
+       with null can pick a DIFFERENT door, and then the page says yes while the
+       door says no. Same rule everywhere, or the rule is not a rule. */
+    const entitlement = await resolveClassEntitlement(live, userId, callerOrg, 'notDropped')
     if (entitlement.code === 'NOT_ENROLLED') {
       throw new LiveClassError('NOT_ENROLLED', 'You must be enrolled in this course to watch this session', 403)
     }
@@ -918,7 +924,18 @@ export class LiveClassService {
             + 'Lower a floor first.',
             400)
         }
-        ;(patch as any).overflowSeatsLeft = nextOverflow
+        /* $inc, NOT $set, and deliberately not part of the patch.
+
+           Writing an absolute overflowSeatsLeft computed from a read taken
+           moments earlier clobbers any booking that decremented it in between:
+           the student keeps their seat, the pool forgets it was taken, and the
+           invariant silently breaks. A relative move is correct under
+           concurrency and needs no read at all.
+
+           It also has to go through the seat pool rather than the patch,
+           because the patch is written by findByIdAndUpdate and this is a
+           counter — the one thing check:seats exists to keep in one place. */
+        await adjustOverflow(id, delta)
       }
     }
 

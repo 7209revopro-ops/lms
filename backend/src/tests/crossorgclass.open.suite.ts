@@ -196,6 +196,13 @@ try {
     const sched = await call('GET', '/live-classes', { jar: blrStudent.jar })
     const schedTitles = (sched.body?.data ?? []).map((c: any) => String(c.title))
     check('and on their schedule list', schedTitles.includes('DM module 2 live'), schedTitles.join(' | '))
+
+    /* The third discovery surface. upcomingfeed.suite.ts asserts the mirror of
+       this with the switch off: the same class is invisible there. Together the
+       two pin that the switch governs discovery and entitlement alike. */
+    const up = await call('GET', '/live-classes/upcoming?limit=100', { jar: blrStudent.jar })
+    const upTitles = (up.body?.data ?? []).map((c: any) => String(c.title))
+    check('and in the browse feed', upTitles.includes('DM module 2 live'), upTitles.join(' | '))
   }
 
   /* ═══════════════════════════════════════════════════════ */

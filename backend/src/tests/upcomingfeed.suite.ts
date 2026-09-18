@@ -22,6 +22,10 @@ process.env.SMTP_HOST    = ''
 process.env.SMTP_USER    = ''
 process.env.RATE_LIMIT_AUTH_MAX = '900'
 process.env.RATE_LIMIT_API_MAX  = '9000'
+/* PINNED OFF. The narrowing this suite is about must hold in the state the
+   product actually ships in, and a suite that inherits the operator's
+   environment tests whatever they happened to export. */
+process.env.CROSS_ORG_CLASSES = ''
 export {}
 
 let pass = 0
@@ -145,11 +149,18 @@ try {
   }
 
   /* ═══════════════════════════════════════════════════════ */
-  section('A shared class reaches the academy it is shared with')
+  section('A shared class is DARK while the feature is switched off')
   {
     const { titles } = await feed(B)
-    check('a Dubai-owned class naming Bangalore as a guest IS visible to a Bangalore student',
-      titles.includes('Shared class'), titles.join(' | '))
+    /* OFF MEANS DARK ON BOTH HALVES. Gating only entitlement produced a class
+       that appeared on a guest academy's feed and then refused them at
+       booking — visible but unbookable, which is worse than invisible because
+       it generates a support ticket instead of silence.
+
+       The ON case is crossorgclass.open.suite.ts, which pins the switch the
+       other way and asserts this same class IS reachable. */
+    check('a class with an authored guest cohort stays hidden while the switch is off',
+      !titles.includes('Shared class'), titles.join(' | '))
   }
 
   /* ═══════════════════════════════════════════════════════ */

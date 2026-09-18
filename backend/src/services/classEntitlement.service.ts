@@ -45,13 +45,13 @@
 
 import { Types } from 'mongoose'
 
-/* Cross-academy classes stay dark until the phase that opens them. The resolver
-   is shipped, exercised and tested against single-door classes long before any
-   guest cohort can be authored, and long before one can be booked. Flipping
-   this is a deployment decision, not a code change, so the pilot can be turned
-   off from the server without a revert. */
-export const CROSS_ORG_CLASSES_ENABLED =
-  String(process.env['CROSS_ORG_CLASSES'] ?? '').toLowerCase() === 'true'
+/* Cross-academy classes stay dark until the switch is thrown. Lives in
+   utils/featureFlags.ts because the DISCOVERY filters in utils/tenancy.ts have
+   to consult the same value, and a utility importing a service to read an
+   environment variable is how an import cycle starts. Re-exported here so the
+   call sites that already read it from this module keep working. */
+export { CROSS_ORG_CLASSES_ENABLED } from '@/utils/featureFlags.ts'
+import { CROSS_ORG_CLASSES_ENABLED } from '@/utils/featureFlags.ts'
 
 export type EnrolmentStatusRule = 'active' | 'notDropped'
 

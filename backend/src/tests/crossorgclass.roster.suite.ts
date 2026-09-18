@@ -23,6 +23,13 @@ process.env.SMTP_HOST    = ''
 process.env.SMTP_USER    = ''
 process.env.RATE_LIMIT_AUTH_MAX = '900'
 process.env.RATE_LIMIT_API_MAX  = '9000'
+/* PINNED ON. A roster only needs SPLITTING when two academies can hold seats
+   in one room, and that state exists only with the feature switched on — with
+   it off, servedClassFilter does not widen and a guest academy cannot reach the
+   class at all, which is its own correct behaviour and is asserted in
+   upcomingfeed.suite.ts. The NARROWING this suite is really about (each academy
+   sees only its own seats, the owner included) applies in both states. */
+process.env.CROSS_ORG_CLASSES = 'true'
 export {}
 
 let pass = 0

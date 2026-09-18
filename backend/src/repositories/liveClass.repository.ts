@@ -1,6 +1,6 @@
 import { Types } from 'mongoose'
 import { andFilter, servedClassFilter } from '@/utils/tenancy.ts'
-import { CROSS_ORG_CLASSES_ENABLED } from '@/services/classEntitlement.service.ts'
+import { CROSS_ORG_CLASSES_ENABLED } from '@/utils/featureFlags.ts'
 import { BaseRepository } from './base.repository.ts'
 import { LiveClassModel, type ILiveClass } from '@/models/schema.ts'
 import { resolveLiveStatus, LIVE_LEAD_MS } from '@/utils/liveStatus.ts'

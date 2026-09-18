@@ -1,4 +1,5 @@
 import { Types } from 'mongoose'
+import { CROSS_ORG_CLASSES_ENABLED } from '@/utils/featureFlags.ts'
 import type { Request, Response, NextFunction } from 'express'
 
 /* ─────────────────────────────────────────────────────
@@ -176,10 +177,17 @@ export function servedClassFilter(
 ): Record<string, unknown> | null {
   if (!callerOrg || !Types.ObjectId.isValid(callerOrg)) return null
   const oid = new Types.ObjectId(callerOrg)
-  const arms: Record<string, unknown>[] = [
-    { organizationId: oid },
-    { 'guestCohorts.organizationId': oid },
-  ]
+  const arms: Record<string, unknown>[] = [{ organizationId: oid }]
+
+  /* THE GUEST ARM IS GATED, and gating only the entitlement half was a bug.
+     With the switch off, a class carrying an authored cohort would still have
+     appeared on that academy's schedule and browse feed, and then refused them
+     at booking — visible but unbookable, which is worse than invisible because
+     it produces a support ticket instead of silence. Off means dark on BOTH
+     halves. */
+  if (CROSS_ORG_CLASSES_ENABLED) {
+    arms.push({ 'guestCohorts.organizationId': oid })
+  }
   if (opts.includeUnowned) {
     arms.push({ organizationId: { $exists: false } }, { organizationId: null })
   }
@@ -193,6 +201,7 @@ export function classServesOrg(
 ): boolean {
   if (!live || !callerOrg) return false
   if (live.organizationId && String(live.organizationId) === String(callerOrg)) return true
+  if (!CROSS_ORG_CLASSES_ENABLED) return false
   return (live.guestCohorts ?? []).some(c => String(c.organizationId) === String(callerOrg))
 }
 

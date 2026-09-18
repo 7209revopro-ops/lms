@@ -1482,12 +1482,23 @@ router.post('/bookings/book-for-student', requireAnyAdmin, validate(bookForStude
        admit a student their own request would have been refused. Note the
        subject is the STUDENT, not the admin: it is the student's enrolment and
        the student's blocked modules that decide. */
-    const entitlement = await resolveClassEntitlement(session, studentId, null, 'active')
-    if (entitlement.code === 'NOT_ENROLLED') {
-      res.status(403).json({ success: false, error: { code: 'NOT_ENROLLED', message: 'Student is not enrolled in this course' } }); return
-    }
-    if (entitlement.code === 'MODULE_BLOCKED') {
-      res.status(403).json({ success: false, error: { code: 'MODULE_BLOCKED', message: 'Student does not have access to this module' } }); return
+    /* THE STUDENT'S academy, not the admin's — an admin of one academy can book
+       a seat for a student of another on a shared class, and it is the student
+       who has to be entitled. Same reasoning as the student's own route: with
+       more than one door, the academy is what selects it, and without it the
+       resolver would admit them through whichever door happened to yield an
+       enrolment first. */
+    const entitlement = await resolveClassEntitlement(
+      session, studentId,
+      (student as { organizationId?: unknown }).organizationId
+        ? String((student as { organizationId?: unknown }).organizationId) : null,
+      'active',
+    )
+    if (!entitlement.ok) {
+      const refusal = entitlement.code === 'MODULE_BLOCKED'
+        ? { code: 'MODULE_BLOCKED', message: 'Student does not have access to this module' }
+        : { code: 'NOT_ENROLLED', message: 'Student is not enrolled in this course' }
+      res.status(403).json({ success: false, error: refusal }); return
     }
 
     /* Capacity fast-check — the authoritative check is the atomic seat
@@ -2562,12 +2573,23 @@ router.patch('/bookings/:id/attendance', requireInstructor, requirePermission('b
       res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Booking not found' } }); return
     }
 
+    /* status: 'booked' IN THE FILTER, the guard the bulk sibling already has.
+       Without it, marking a CANCELLED seat 'attended' resurrects a booking the
+       student released — the seat was given back at cancel, and this hands it
+       out again without taking it from any pool, so the room ends up holding
+       more seats than it has. 'attended' also feeds the attendance history, so
+       it can credit a class the student never took. */
     const booking = await ClassBookingModel.findByIdAndUpdate(
-      id,
+      { _id: id, status: { $in: ['booked', 'attended', 'missed'] } } as never,
       { status },
       { new: true },
     ).populate('userId', 'id name email').lean({ virtuals: true })
-    if (!booking) { res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Booking not found' } }); return }
+    if (!booking) {
+      res.status(400).json({
+        success: false,
+        error: { code: 'CANNOT_MARK', message: 'Only a live booking can be marked. This seat was cancelled.' },
+      }); return
+    }
     sendSuccess(res, { ...(booking as any), id: (booking as any).id ?? String((booking as any)._id) }, 'Attendance updated')
   } catch (err) { next(err) }
 })
@@ -2608,6 +2630,31 @@ router.get('/reports/attendance', requireInstructor, requirePermission('reports'
     if (Object.keys(lcScope).length > 0) {
       const scopedClassIds = await LiveClassModel.find(lcScope, '_id').lean()
       filter['liveClassId'] = { $in: scopedClassIds.map((l: any) => l._id) }
+    }
+
+    /* NARROW THE ROWS, not only the classes — the same split buildBookingFilter
+       applies, and for the same reason. This report returns student names and
+       emails and offers a CSV, so on a shared class it would hand the host
+       academy every guest academy's student. Scoping the CLASS set is not
+       enough once one class has two rosters.
+
+       An unstamped seat is the host's, so it is only included for a caller who
+       owns the class — the same rule, and the same reason: matching it
+       unconditionally would show a guest academy the host's legacy roster. */
+    {
+      const reportCaller = await callerOrgForRead(req)
+      if (reportCaller.gone) { sendSuccess(res, []); return }
+      if (!reportingInstructor && reportCaller.org && Types.ObjectId.isValid(reportCaller.org)) {
+        const oid = new Types.ObjectId(reportCaller.org)
+        const owned = await LiveClassModel.find({ organizationId: oid }, '_id').lean()
+        filter['$and'] = [
+          ...((filter['$and'] as unknown[]) ?? []),
+          { $or: [
+            { seatOrganizationId: oid },
+            { seatOrganizationId: { $exists: false }, liveClassId: { $in: owned.map((l: any) => l._id) } },
+          ] },
+        ]
+      }
     }
     const bookings = await ClassBookingModel.find(filter)
       .populate('userId', 'id name email')
@@ -2835,7 +2882,7 @@ router.patch('/homework-submissions/:id/grade', requireRole('super_admin', 'admi
 /* GET /admin/live-classes/:id/feedback — feedback summary for a session */
 router.get('/live-classes/:id/feedback', requireInstructor, async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { ClassFeedbackModel } = await import('@/models/schema.ts')
+    const { ClassFeedbackModel, LiveClassModel, ClassBookingModel } = await import('@/models/schema.ts')
     const { Types } = await import('mongoose')
     const liveClassId = String(req.params['id'] ?? '')
     if (!Types.ObjectId.isValid(liveClassId)) {
@@ -2848,7 +2895,34 @@ router.get('/live-classes/:id/feedback', requireInstructor, async (req: Request,
     if (!(await callerMayManageSession(req, liveClassId))) {
       res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Live class not found' } }); return
     }
-    const docs = await ClassFeedbackModel.find({ liveClassId: new Types.ObjectId(liveClassId) })
+    /* NARROWED THE SAME WAY THE ROSTER IS. These rows carry the reviewing
+       students' names, emails and avatars, and on a shared class one class has
+       two cohorts — so scoping the CLASS is no longer enough. Each academy
+       reads the feedback of its own students only.
+
+       Feedback carries no seat stamp of its own, so the cohort is resolved
+       through the seat the student holds on this class. A student with no seat
+       row could not have attended, and their feedback is treated as the
+       host's — the same rule an unstamped seat gets. */
+    const fbCaller = await callerOrgForRead(req)
+    if (fbCaller.gone) {
+      res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Live class not found' } }); return
+    }
+    const fbFilter: Record<string, unknown> = { liveClassId: new Types.ObjectId(liveClassId) }
+    if (req.user!.role !== 'super_admin' && req.user!.role !== 'instructor'
+        && fbCaller.org && Types.ObjectId.isValid(fbCaller.org)) {
+      const oid = new Types.ObjectId(fbCaller.org)
+      const cls = await LiveClassModel.findById(liveClassId).select('organizationId').lean()
+      const ownsClass = String((cls as { organizationId?: unknown } | null)?.organizationId ?? '') === String(oid)
+      const mine = await ClassBookingModel.find(
+        ownsClass
+          ? { liveClassId: new Types.ObjectId(liveClassId), $or: [{ seatOrganizationId: oid }, { seatOrganizationId: { $exists: false } }] }
+          : { liveClassId: new Types.ObjectId(liveClassId), seatOrganizationId: oid },
+        'userId',
+      ).lean()
+      fbFilter['userId'] = { $in: mine.map((b: any) => b.userId) }
+    }
+    const docs = await ClassFeedbackModel.find(fbFilter)
       .populate('userId', 'id name email avatarUrl')
       .sort({ createdAt: -1 })
       .lean({ virtuals: true })

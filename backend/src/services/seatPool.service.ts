@@ -131,8 +131,33 @@ export async function releaseSeat(booking: {
   seatPoolKind?:       string
 }): Promise<void> {
   const { LiveClassModel } = await import('@/models/schema.ts')
-  const id = booking.liveClassId
-  if (!id || !Types.ObjectId.isValid(String(id))) return
+
+  /* THE ID MAY ARRIVE POPULATED, AND THIS GUARD USED TO SWALLOW IT.
+
+     The student cancel route loads its booking with
+     .populate('liveClassId', ...).lean(), so `booking.liveClassId` is a plain
+     object rather than an ObjectId. String({...}) is "[object Object]",
+     isValid said no, and this function returned having done NOTHING — while
+     the route answered 200 and flipped the row to cancelled. Every student
+     self-cancel burned a seat permanently, on every class, with the feature
+     off and nothing anywhere reporting a problem.
+
+     The statement this replaced was a raw updateOne whose filter Mongoose
+     CAST for us, and the caster extracts _id from a populated document. So the
+     helper was stricter than the code it replaced, and that difference was the
+     entire bug.
+
+     Two changes. Accept the shapes that actually arrive, and REFUSE LOUDLY on
+     one that does not: a seat helper that silently no-ops is indistinguishable
+     from a seat helper that worked, which is why this survived a green suite,
+     a green full chain and a lint that greps for raw $inc. */
+  const raw = booking.liveClassId as { _id?: unknown } | string | null | undefined
+  const id = raw && typeof raw === 'object' && '_id' in raw ? (raw as { _id?: unknown })._id : raw
+  if (!id || !Types.ObjectId.isValid(String(id))) {
+    const { logger } = await import('@/utils/logger.ts')
+    logger.error({ liveClassId: booking.liveClassId }, 'releaseSeat: unusable liveClassId — SEAT NOT RELEASED')
+    return
+  }
   const _id = new Types.ObjectId(String(id))
 
   const live = await LiveClassModel.findById(_id)
@@ -185,6 +210,25 @@ export async function releaseSeat(booking: {
   await LiveClassModel.updateOne(
     { _id, bookedCount: { $gt: 0 } },
     { $inc: { bookedCount: -1, hostSeatsLeft: 1 } },
+  )
+}
+
+/* Move the overflow pool by a RELATIVE amount, for a capacity edit.
+
+   The caller has just changed sessionCapacity, and the difference has to land
+   somewhere. It lands in the overflow rather than in anybody's floor, because a
+   floor is what an academy was promised and quietly enlarging one is as
+   surprising as quietly shrinking it.
+
+   Relative, so a booking that decrements the same counter between the caller's
+   read and this write is not lost. An absolute $set computed from a stale read
+   is how a seat gets handed out twice. */
+export async function adjustOverflow(liveClassId: string, delta: number): Promise<void> {
+  if (!delta) return
+  const { LiveClassModel } = await import('@/models/schema.ts')
+  await LiveClassModel.updateOne(
+    { _id: new Types.ObjectId(liveClassId), overflowSeatsLeft: { $exists: true } },
+    { $inc: { overflowSeatsLeft: delta } },
   )
 }
 

@@ -61,8 +61,19 @@ const drifted: Drift[] = []
 let scanned = 0
 
 const filter = ONLY ? { _id: new mongoose.Types.ObjectId(ONLY) } : {}
+/* .lean() IS LOAD-BEARING, NOT AN OPTIMISATION.
+
+   Without it the cursor yields hydrated documents whose guestCohorts are
+   Mongoose subdocuments. The repair below builds `{ ...c, seatsLeft }`, and
+   spreading a subdocument copies its INTERNALS — __parent, $__, _doc — not its
+   fields. The $set then wrote objects with no organizationId and no seatFloor,
+   Mongoose dropped them, and the script printed the repair, printed "Applied",
+   changed nothing, and reported the same drift on every subsequent run. A
+   repair tool that cannot converge is worse than no repair tool, because it
+   reports success. */
 const cursor = LiveClassModel.find(filter)
   .select('title sessionCapacity bookedCount hostSeatsLeft overflowSeatsLeft guestCohorts')
+  .lean()
   .cursor()
 
 for await (const live of cursor) {
@@ -126,9 +137,15 @@ for await (const live of cursor) {
   const overflowFloor = Math.max(0, (doc.overflowSeatsLeft ?? 0) + overflowHeld)
   const hostFloor     = Math.max(0, doc.sessionCapacity - guestFloors - overflowFloor)
 
+  /* Named explicitly rather than spread, so this cannot silently lose a field
+     again if the cohort shape grows. */
   const nextCohorts = cohorts.map(c => ({
-    ...c,
-    seatsLeft: Math.max(0, (c.seatFloor ?? 0) - (perOrgHeld.get(String(c.organizationId)) ?? 0)),
+    organizationId: (c as { organizationId: unknown }).organizationId,
+    courseId:       (c as unknown as { courseId: unknown }).courseId,
+    ...((c as unknown as { sectionId?: unknown }).sectionId
+      ? { sectionId: (c as unknown as { sectionId?: unknown }).sectionId } : {}),
+    seatFloor:      c.seatFloor ?? 0,
+    seatsLeft:      Math.max(0, (c.seatFloor ?? 0) - (perOrgHeld.get(String(c.organizationId)) ?? 0)),
   }))
   const nextHost     = Math.max(0, hostFloor - hostHeld)
   const nextOverflow = Math.max(0, overflowFloor - overflowHeld)

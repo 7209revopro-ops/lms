@@ -20,6 +20,12 @@ process.env.NODE_ENV     = 'test'
 process.env.PORT         = '0'
 process.env.SMTP_HOST    = ''
 process.env.SMTP_USER    = ''
+/* PINNED OFF. This suite's whole subject is the DARK state, so it must not
+   inherit whatever the operator happens to have exported — running the chain
+   with CROSS_ORG_CLASSES=true made three assertions here fail and stopped the
+   run before 37 later suites executed. Its sibling crossorgclass.open.suite.ts
+   pins the same variable ON for the same reason. */
+process.env.CROSS_ORG_CLASSES = ''
 export {}
 
 let pass = 0

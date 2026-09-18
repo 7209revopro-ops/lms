@@ -116,7 +116,7 @@ router.get('/', authenticate, async (req: Request, res: Response, next: NextFunc
     // (resolveLiveStatus), 'ended' after. The STUDENT join window is a
     // different rule — start .. start+20m — carried separately below.
     let annotated = (classes as any[]).map(c => {
-      const e = entitlementFrom(c as ClassDoors, index, null)
+      const e = entitlementFrom(c as ClassDoors, index, caller.org)
       const isEnrolled = e.ok || e.code === 'MODULE_BLOCKED'
       const isEntitled = e.ok
       const dto: Record<string, unknown> = {
@@ -355,7 +355,7 @@ router.post(
 
 /* A student may only see/submit homework for a session they booked, or
    whose course they are actively enrolled in. */
-async function hasSessionAccess(userId: string, liveClassId: string): Promise<boolean> {
+async function hasSessionAccess(userId: string, liveClassId: string, callerOrg: string | null = null): Promise<boolean> {
   const { ClassBookingModel, EnrollmentModel, LiveClassModel } = await import('@/models/schema.ts')
   const { Types } = await import('mongoose')
   if (!Types.ObjectId.isValid(liveClassId)) return false
@@ -380,7 +380,11 @@ async function hasSessionAccess(userId: string, liveClassId: string): Promise<bo
      blocked on a module should still reach that session's homework is a real
      question with a defensible answer either way, and it is not this change's
      to decide. Written down rather than silently altered. */
-  const entitlement = await resolveClassEntitlement(session, userId, null, 'notDropped')
+  /*       THE ACADEMY IS PASSED HERE TOO, and it has to be. Booking and JOIN both
+       resolve the door with the caller's academy; a read path that resolves it
+       with null can pick a DIFFERENT door, and then the page says yes while the
+       door says no. Same rule everywhere, or the rule is not a rule. */
+  const entitlement = await resolveClassEntitlement(session, userId, callerOrg, 'notDropped')
   return entitlement.ok || entitlement.code === 'MODULE_BLOCKED'
 }
 
@@ -388,7 +392,8 @@ router.get('/:id/homework', authenticate, async (req: Request, res: Response, ne
   try {
     const { SessionHomeworkModel } = await import('@/models/schema.ts')
     const liveClassId = String(req.params['id'] ?? '')
-    if (!(await hasSessionAccess(req.user!.id, liveClassId))) {
+    const hwCaller = await callerOrgForRead(req)
+    if (hwCaller.gone || !(await hasSessionAccess(req.user!.id, liveClassId, hwCaller.org))) {
       res.status(403).json({ success: false, error: { code: 'NOT_ENROLLED', message: 'You must be enrolled in this course to view this homework' } }); return
     }
     const list = await SessionHomeworkModel.find({ liveClassId }).lean({ virtuals: true })
@@ -407,7 +412,8 @@ router.post('/homework/:id/submit', authenticate, validate(submitHomeworkSchema)
     const homeworkId = String(req.params['id'] ?? '')
     const hw = await SessionHomeworkModel.findById(homeworkId)
     if (!hw) { res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Homework not found' } }); return }
-    if (!(await hasSessionAccess(req.user!.id, String(hw.liveClassId)))) {
+    const hwCaller2 = await callerOrgForRead(req)
+    if (hwCaller2.gone || !(await hasSessionAccess(req.user!.id, String(hw.liveClassId), hwCaller2.org))) {
       res.status(403).json({ success: false, error: { code: 'NOT_ENROLLED', message: 'You must be enrolled in this course to submit this homework' } }); return
     }
 

@@ -815,14 +815,14 @@ export async function sendBookingConfirmation(
         <strong>Date:</strong> ${dateStr}
       </td></tr>
       <tr><td style="font-size:14px;color:#374151;padding:6px 0">
-        <strong>Time:</strong> ${timeStr} (UAE Time)
+        <strong>Time:</strong> ${timeStr}
       </td></tr>
     </table>
     <p style="margin:0 0 20px;color:#374151">You will receive the session joining link <strong>5 minutes before the class begins</strong>.</p>
     <p style="margin:0 0 24px;color:#374151">Please be available and join the session on time.</p>
     <p style="margin:0;color:#374151">Thank you,<br><strong>Delta Academy</strong></p>
   `)
-  await sender.send({ to, subject, html, text: `Dear ${name},\n\nYour class has been successfully booked.\n\nDate: ${dateStr}\nTime: ${timeStr} (UAE Time)\n\nYou will receive the session joining link 5 minutes before the class begins.\n\nPlease be available and join the session on time.\n\nThank you,\nDelta Academy` })
+  await sender.send({ to, subject, html, text: `Dear ${name},\n\nYour class has been successfully booked.\n\nDate: ${dateStr}\nTime: ${timeStr}\n\nYou will receive the session joining link 5 minutes before the class begins.\n\nPlease be available and join the session on time.\n\nThank you,\nDelta Academy` })
 }
 
 export async function sendSessionLinkReminder(
@@ -917,7 +917,7 @@ export async function sendFiveMinReminder(
         <strong>Date:</strong> ${dateStr}
       </td></tr>
       <tr><td style="font-size:14px;color:#374151;padding:6px 0">
-        <strong>Time:</strong> ${timeStr} (UAE Time)
+        <strong>Time:</strong> ${timeStr}
       </td></tr>
     </table>
     <p style="margin:0 0 12px;color:#374151"><strong>Join the session here:</strong></p>
@@ -930,7 +930,7 @@ export async function sendFiveMinReminder(
     <p style="margin:0 0 4px;color:#374151">See you in class!</p>
     <p style="margin:0;color:#374151"><strong>Delta Academy</strong></p>
   `)
-  await sender.send({ to, subject, html, text: `Dear ${name},\n\nThis is a reminder that your class will begin in 5 minutes.\n\nDate: ${dateStr}\nTime: ${timeStr} (UAE Time)\n\nJoin the session here: ${joinUrl}\n\nPlease join a few minutes early to ensure a smooth start.\n\nSee you in class!\nDelta Academy` })
+  await sender.send({ to, subject, html, text: `Dear ${name},\n\nThis is a reminder that your class will begin in 5 minutes.\n\nDate: ${dateStr}\nTime: ${timeStr}\n\nJoin the session here: ${joinUrl}\n\nPlease join a few minutes early to ensure a smooth start.\n\nSee you in class!\nDelta Academy` })
 }
 
 /** At-time reminder — WITH join link, sent when class has just started */
@@ -982,14 +982,14 @@ export async function sendRescheduledNotification(
         <strong>Previous Schedule:</strong> <span style="text-decoration:line-through;color:#9CA3AF">${oldLabel}</span>
       </td></tr>
       <tr><td style="font-size:14px;color:#374151;padding:6px 0;border-top:1px solid #E5E7EB">
-        <strong>New Schedule:</strong> ${newLabel} (UAE Time)
+        <strong>New Schedule:</strong> ${newLabel}
       </td></tr>
     </table>
     <p style="margin:0 0 20px;color:#374151">If the session is conducted online, the joining link will be shared <strong>5 minutes before the class begins</strong>.</p>
     <p style="margin:0 0 20px;color:#374151">Thank you for your cooperation. We look forward to seeing you in the rescheduled session.</p>
     <p style="margin:0;color:#374151"><strong>Delta Academy</strong></p>
   `)
-  await sender.send({ to, subject, html, text: `Dear ${name},\n\nYour scheduled class has been rescheduled.\n\nPrevious Schedule: ${oldLabel}\nNew Schedule: ${newLabel} (UAE Time)\n\nIf the session is conducted online, the joining link will be shared 5 minutes before the class begins.\n\nThank you for your cooperation. We look forward to seeing you in the rescheduled session.\n\nDelta Academy` })
+  await sender.send({ to, subject, html, text: `Dear ${name},\n\nYour scheduled class has been rescheduled.\n\nPrevious Schedule: ${oldLabel}\nNew Schedule: ${newLabel}\n\nIf the session is conducted online, the joining link will be shared 5 minutes before the class begins.\n\nThank you for your cooperation. We look forward to seeing you in the rescheduled session.\n\nDelta Academy` })
 }
 
 /* ── Reschedule email sequence (3 emails sent at different times) ── */
@@ -1010,14 +1010,14 @@ export async function sendDelayNotification(
     <p style="margin:0 0 20px;color:#374151">Your scheduled class has been delayed.</p>
     <table cellpadding="0" cellspacing="0" style="margin:0 0 20px;background:#F4F5F8;border-radius:12px;padding:16px;width:100%;border:1px solid #E5E7EB">
       <tr><td style="font-size:14px;color:#374151;padding:6px 0">
-        <strong>Revised Start Time:</strong> ${timeStr} (UAE Time)
+        <strong>Revised Start Time:</strong> ${timeStr}
       </td></tr>
     </table>
     <p style="margin:0 0 20px;color:#374151">We apologize for the inconvenience and appreciate your patience. If applicable, you may continue to use the same joining link unless notified otherwise.</p>
     <p style="margin:0 0 24px;color:#374151">Thank you.</p>
     <p style="margin:0;color:#374151"><strong>Delta Academy</strong></p>
   `)
-  await sender.send({ to, subject, html, text: `Dear ${name},\n\nYour scheduled class has been delayed.\n\nRevised Start Time: ${timeStr} (UAE Time)\n\nWe apologize for the inconvenience and appreciate your patience. If applicable, you may continue to use the same joining link unless notified otherwise.\n\nThank you.\n\nDelta Academy` })
+  await sender.send({ to, subject, html, text: `Dear ${name},\n\nYour scheduled class has been delayed.\n\nRevised Start Time: ${timeStr}\n\nWe apologize for the inconvenience and appreciate your patience. If applicable, you may continue to use the same joining link unless notified otherwise.\n\nThank you.\n\nDelta Academy` })
 }
 
 interface RescheduledArgs {
@@ -1169,7 +1169,7 @@ export async function sendInstructorChangedNotification(
         <strong>New Instructor:</strong> ${escapeHtml(newInstructor)}
       </td></tr>
       <tr><td style="font-size:14px;color:#374151;padding:6px 0;border-top:1px solid #E5E7EB">
-        <strong>When:</strong> ${dateStr} at ${timeStr} (UAE Time)
+        <strong>When:</strong> ${dateStr} at ${timeStr}
       </td></tr>
     </table>
     <p style="margin:0 0 20px;color:#374151">Your booking is still confirmed — there is nothing you need to do.</p>
@@ -1177,7 +1177,7 @@ export async function sendInstructorChangedNotification(
   `)
   await sender.send({
     to, subject, html,
-    text: `Dear ${name},\n\nThe instructor for a session you have booked has changed. The date and time are unchanged.\n\nSession: ${sessionTitle}\nPrevious Instructor: ${oldInstructor}\nNew Instructor: ${newInstructor}\nWhen: ${dateStr} at ${timeStr} (UAE Time)\n\nYour booking is still confirmed — there is nothing you need to do.\n\nDelta Academy`,
+    text: `Dear ${name},\n\nThe instructor for a session you have booked has changed. The date and time are unchanged.\n\nSession: ${sessionTitle}\nPrevious Instructor: ${oldInstructor}\nNew Instructor: ${newInstructor}\nWhen: ${dateStr} at ${timeStr}\n\nYour booking is still confirmed — there is nothing you need to do.\n\nDelta Academy`,
   })
 }
 
@@ -1248,12 +1248,12 @@ export async function sendCancelledNotification(
   const html = wrap(subject, `
     <h2 style="margin:0 0 16px;font-size:20px;font-weight:700;color:#0D0F1A">❗ Class Cancellation Notice</h2>
     <p style="margin:0 0 16px;color:#374151">Dear <strong>${escapeHtml(name)}</strong>,</p>
-    <p style="margin:0 0 20px;color:#374151">We regret to inform you that your scheduled class on <strong>${dateStr} at ${timeStr} (UAE Time)</strong> has been cancelled.</p>
+    <p style="margin:0 0 20px;color:#374151">We regret to inform you that your scheduled class on <strong>${dateStr} at ${timeStr}</strong> has been cancelled.</p>
     <p style="margin:0 0 20px;color:#374151">We apologize for the inconvenience. A replacement session will be scheduled, and you will be notified once it is available.</p>
     <p style="margin:0 0 24px;color:#374151">Thank you for your understanding.</p>
     <p style="margin:0;color:#374151"><strong>Delta Academy</strong></p>
   `)
-  await sender.send({ to, subject, html, text: `Dear ${name},\n\nWe regret to inform you that your scheduled class on ${dateStr} at ${timeStr} (UAE Time) has been cancelled.\n\nWe apologize for the inconvenience. A replacement session will be scheduled, and you will be notified once it is available.\n\nThank you for your understanding.\n\nDelta Academy` })
+  await sender.send({ to, subject, html, text: `Dear ${name},\n\nWe regret to inform you that your scheduled class on ${dateStr} at ${timeStr} has been cancelled.\n\nWe apologize for the inconvenience. A replacement session will be scheduled, and you will be notified once it is available.\n\nThank you for your understanding.\n\nDelta Academy` })
 }
 
 export async function sendBookingCancelledByStudent(

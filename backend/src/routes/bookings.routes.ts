@@ -15,6 +15,7 @@ import { Router, type Request, type Response, type NextFunction } from 'express'
 import { resolveClassEntitlement } from '@/services/classEntitlement.service.ts'
 import { reserveSeat, releaseSeat, seatStampFrom } from '@/services/seatPool.service.ts'
 import { ensureOrgSlugs, orgSlugFor } from '@/utils/orgSlugs.ts'
+import { callerOrgForRead } from '@/utils/tenancy.ts'
 import { z } from 'zod'
 import { resolveLiveStatus, isBookingOpen, bookingClosesAt } from '@/utils/liveStatus.ts'
 import { authenticate, requireEnrollmentApproval } from '@/middleware/auth.middleware.ts'
@@ -176,12 +177,43 @@ router.post('/', authenticate, requireEnrollmentApproval, validate(createBooking
        demands a genuinely ACTIVE enrolment, where join and watch accept
        anything not dropped. That disagreement is real, live and deliberately
        preserved; it is now named in one file instead of re-derived in eight. */
-    const entitlement = await resolveClassEntitlement(session, userId, null, 'active')
-    if (entitlement.code === 'NOT_ENROLLED') {
+    /* THE STUDENT'S OWN ACADEMY, and passing null here was wrong twice over.
+
+       ONE. It let BOOKING and JOINING disagree, which they must never do.
+       assertStudentMayJoin passes ctx.organizationId and refuses WRONG_ACADEMY
+       on a mismatch; booking passed null and refused nothing. So a student
+       holding an enrolment in the OTHER academy's course could take a seat and
+       then be turned away at the door. That disagreement predates cross-academy
+       classes and is live today.
+
+       TWO. With more than one door it picks the WRONG door. The resolver takes
+       the first door that yields an enrolment, host first, so a student of one
+       academy who also holds the other academy's enrolment is admitted through
+       the HOST door — their own academy's module block never consulted, and
+       their seat drawn from the other academy's floor. Passing the academy
+       makes the door selection deterministic and correct.
+
+       A student with no academy on record still resolves to null and stays
+       unscoped, which is tenancy rule 3b and today's behaviour. */
+    const booker = await callerOrgForRead(req)
+    if (booker.gone) {
       res.status(403).json({ success: false, error: { code: 'NOT_ENROLLED', message: 'You must be enrolled in this course to book the session' } }); return
     }
-    if (entitlement.code === 'MODULE_BLOCKED') {
-      res.status(403).json({ success: false, error: { code: 'MODULE_BLOCKED', message: 'You don\'t have access to this module. Contact your admin.' } }); return
+    const entitlement = await resolveClassEntitlement(session, userId, booker.org, 'active')
+    /* EVERY refusal, not a list of the ones we remembered. Checking two of the
+       three codes left WRONG_ACADEMY falling straight through into a
+       SUCCESSFUL booking — the exact hole that passing the academy was added
+       to close. Switching on ok means a code introduced later cannot be
+       forgotten here.
+
+       A cross-academy refusal answers NOT_ENROLLED on purpose: saying "that
+       class belongs to another academy" confirms the class exists, which is
+       the same oracle the 404-not-403 rule elsewhere exists to close. */
+    if (!entitlement.ok) {
+      const refusal = entitlement.code === 'MODULE_BLOCKED'
+        ? { code: 'MODULE_BLOCKED', message: "You don't have access to this module. Contact your admin." }
+        : { code: 'NOT_ENROLLED', message: 'You must be enrolled in this course to book the session' }
+      res.status(403).json({ success: false, error: refusal }); return
     }
 
     /* 2× attendance cap */
@@ -379,7 +411,13 @@ router.delete('/:id', authenticate, async (req: Request, res: Response, next: Ne
     /* Back to the pool the seat was TAKEN from, read off the booking row.
        Re-deriving it here would hand a guest academy's seat to the host when
        the student's entitlement changed after they booked. */
-    await releaseSeat(booking as any)
+    /* The row is POPULATED here, so hand the helper the id rather than the
+       document. releaseSeat normalises this too; both, because one of the two
+       quietly losing a seat is exactly how this shipped. */
+    await releaseSeat({
+      ...(booking as any),
+      liveClassId: (booking.liveClassId as any)?._id ?? booking.liveClassId,
+    })
 
     sendSuccess(res, null, 'Booking cancelled')
 

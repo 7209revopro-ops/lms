@@ -2,6 +2,7 @@ import type { Request, Response, NextFunction } from 'express'
 import { Types } from 'mongoose'
 import { instructorOwnsSession, callerOrgForRead } from '@/utils/tenancy.ts'
 import { ensureOrgSlugs, orgSlugFor } from '@/utils/orgSlugs.ts'
+import { doorsFor } from '@/services/classEntitlement.service.ts'
 import { logger } from '@/utils/logger.ts'
 import { LiveClassService } from '@/services/liveClass.service.ts'
 import { SectionService } from '@/services/section.service.ts'
@@ -431,7 +432,10 @@ export class LiveClassController {
     try {
       const slug   = String(req.params['slug'] ?? '')
       const userId = req.user?.id
-      const docs   = await this.service.listForCourseSlug(slug, userId)
+      /* Resolved, so the card the student sees and the door they meet agree. */
+      const courseCaller = await callerOrgForRead(req)
+      if (courseCaller.gone) { sendSuccess(res, []); return }
+      const docs   = await this.service.listForCourseSlug(slug, userId, courseCaller.org)
       sendSuccess(res, docs.map(d => {
         /* Anonymous and non-entitled callers get no Mux-derived thumbnail and
            no recording — the playback id embedded in the thumbnail URL is
@@ -507,7 +511,11 @@ export class LiveClassController {
   watchAccess = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     try {
       const id     = String(req.params['id'] ?? '')
-      const result = await this.service.getWatchAccess(id, req.user!.id)
+      const watchCaller = await callerOrgForRead(req)
+      if (watchCaller.gone) {
+        res.status(403).json({ success: false, error: { code: 'NOT_ENROLLED', message: 'You must be enrolled in this course to watch this session' } }); return
+      }
+      const result = await this.service.getWatchAccess(id, req.user!.id, watchCaller.org)
       sendSuccess(res, result)
     } catch (err) { next(err) }
   }
@@ -707,7 +715,33 @@ export class LiveClassController {
         ? docs.filter(d => String((d as { instructorId?: unknown }).instructorId ?? '') === String(req.user!.id))
         : docs
 
-      sendSuccess(res, visible.map(d => toDTO(d)))
+      /* THIS ROUTE HAS NEVER HAD AN ACADEMY TERM, and it hands back the DTO —
+         which carries meetingUrl. Programme scope narrowed it for a sub_admin
+         and nothing narrowed it for an admin, so either academy's admin could
+         read the other's sessions for a course, join links included, by asking
+         for that course by id.
+
+         Guest cohorts make it worse rather than causing it: listForCourseId now
+         also returns classes SHARED with the course, so there is a second way
+         in. Both are closed by the same clause.
+
+         A class this academy is SERVED by is fine — owner or named guest. The
+         falsy guards match every other org comparison in this codebase: a class
+         with no academy, or a caller with none, stays unscoped. */
+      const caller = await callerOrgForRead(req)
+      if (caller.gone) { sendSuccess(res, []); return }
+      const scoped = caller.org
+        ? visible.filter(d => {
+            const own = (d as { organizationId?: unknown }).organizationId
+            if (!own) return true
+            if (String(own) === String(caller.org)) return true
+            return doorsFor(d as never).some(door =>
+              door.organizationId && String(door.organizationId) === String(caller.org))
+          })
+        : visible
+
+
+      sendSuccess(res, scoped.map(d => toDTO(d)))
     } catch (err) { next(err) }
   }
 

@@ -19,6 +19,7 @@
 import cron from 'node-cron'
 import { logger } from '@/utils/logger.ts'
 import { ensureOrgSlugs, orgSlugFor } from '@/utils/orgSlugs.ts'
+import { academyClock, academyTime } from '@/utils/academyClock.ts'
 import { NotificationService } from '@/services/notification.service.ts'
 import {
   sendSessionLinkReminder,
@@ -119,12 +120,18 @@ function getJoinUrl(lc: NonNullable<BookingWithRefs['liveClassId']>): string {
   return id ? `${base}/live-classes/${String(id)}/watch` : `${base}/class-bookings`
 }
 
-function fmtFull(d: Date): string {
-  return d.toLocaleString('en-US', { dateStyle: 'full', timeStyle: 'short' })
+/* THESE TWO WERE MISSED BY THE MAIL WORK, and they are the day-before and
+   day-of reminders — the ones a student actually plans around. Both formatted
+   in whatever zone the server runs in, with no label at all, so a guest
+   academy's student could be told the wrong time and, near midnight, the wrong
+   DAY. Everything else in the mail path already renders in the reader's
+   academy and says which clock it means; these now do too. */
+function fmtFull(d: Date, academySlug?: string | null): string {
+  return academyClock(d, academySlug).full
 }
 
-function fmtTime(d: Date): string {
-  return d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true })
+function fmtTime(d: Date, academySlug?: string | null): string {
+  return academyTime(d, academySlug)
 }
 
 /**
@@ -216,7 +223,11 @@ export async function runDayBeforeReminders(): Promise<void> {
       const joinUrl  = getJoinUrl(b.liveClassId)
 
       await dispatch(userId, b.liveClassId.title, start, 'day-before', () =>
-        sendSessionLinkReminder(b.userId.email, b.userId.name, b.liveClassId.title, fmtFull(start), joinUrl),
+        sendSessionLinkReminder(
+          b.userId.email, b.userId.name, b.liveClassId.title,
+          fmtFull(start, orgSlugFor((b.userId as { organizationId?: unknown }).organizationId)),
+          joinUrl,
+        ),
       )
 
       await ClassBookingModel.findByIdAndUpdate(b._id, { reminderDayBeforeSent: true })
@@ -255,7 +266,11 @@ export async function runDayOfReminders(): Promise<void> {
       const joinUrl = getJoinUrl(b.liveClassId)
 
       await dispatch(userId, b.liveClassId.title, classAt, 'day-of', () =>
-        sendDayOfReminder(b.userId.email, b.userId.name, b.liveClassId.title, fmtTime(classAt), joinUrl),
+        sendDayOfReminder(
+          b.userId.email, b.userId.name, b.liveClassId.title,
+          fmtTime(classAt, orgSlugFor((b.userId as { organizationId?: unknown }).organizationId)),
+          joinUrl,
+        ),
       )
 
       await ClassBookingModel.findByIdAndUpdate(b._id, { reminderDayOfSent: true })
