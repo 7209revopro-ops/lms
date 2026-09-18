@@ -17,7 +17,7 @@ under "Why classes are not in this plan", and the decision `docs/work-status.md`
 | 3 — seats | **done** | |
 | 4 — roster, homework and attendance split | **done** | |
 | 5 — mail clocks | **done** | |
-| 6a — narrow the browse feed, alone | not started | |
+| 6a — narrow the browse feed, alone | **done** | |
 | 6b — open it | not started | |
 
 Guest cohorts are read only when `CROSS_ORG_CLASSES=true`, and it is off. A
@@ -84,9 +84,27 @@ date rendered as the literal text "Invalid Date at Invalid Date". Every
 formatter now answers with a dash, which is obviously missing rather than
 confidently wrong, and the suite pins it for five kinds of bad input.
 
-**Phase 6a is next**, and it ships alone on purpose: it takes something away
-from students with no stake in this feature, and this repo has already lived
-through a support wave from live classes appearing to vanish.
+**Phase 6a shipped alone, as the plan demands.** The browse feed is now scoped
+to classes that serve the caller. Measured against the local database: a
+Bangalore student stops seeing 88 Dubai-owned classes there, and keeps their own
+6 plus any class shared with them.
+
+Two exceptions are kept, and the suite caught one of them. A class created
+before organizationId existed belongs to nobody, and tenancy rule 2 keeps it
+visible to everyone — a filter that dropped it would be stricter than the join
+guard it mirrors, and the row would simply be gone with nothing to explain it.
+A caller with no academy on record stays unscoped, which is rule 3b. So
+servedClassFilter now takes an includeUnowned option: the admin roster already
+excluded unowned classes and must keep doing so, while the feed never did and
+must not start.
+
+**Watch a week of support tickets before phase 6b.** This is the only
+user-visible change before the feature, it takes something away from students
+with no stake in it, and it can be reverted on its own.
+
+**Phase 6b is the last one, and its revert is NOT free.** Once guests have
+booked, backing the feature out means cancelling those seats and mailing those
+students. That needs saying out loud before it ships, not after.
 ---
 
 ## The answer

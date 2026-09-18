@@ -90,7 +90,15 @@ export class LiveClassService {
   }
 
   /* ── Upcoming feed — all sessions, annotated with isEnrolled ─────────────── */
-  async listUpcomingForUser(userId: string, limit = 50, categoryFilter?: string): Promise<(ILiveClass & { isEnrolled: boolean; isEntitled: boolean })[]> {
+  async listUpcomingForUser(
+    userId: string,
+    limit = 50,
+    categoryFilter?: string,
+    /* The caller's academy, RESOLVED by the controller — see callerOrgForRead.
+       null means unscoped, which is what every caller passed before this and
+       what a student with no academy on record still gets. */
+    callerOrg?: string | null,
+  ): Promise<(ILiveClass & { isEnrolled: boolean; isEntitled: boolean })[]> {
     // Find which courses the user has purchased so we can annotate isEnrolled.
     // 'active' and 'completed' both keep access — only 'dropped' loses it.
     // blockedLessons stores SECTION ids (legacy misnomer): a session inside a
@@ -108,7 +116,7 @@ export class LiveClassService {
     }
 
     // Return upcoming sessions (optionally filtered by category's courseIds)
-    const sessions = await this.liveRepo.listAllUpcoming(limit, courseIds)
+    const sessions = await this.liveRepo.listAllUpcoming(limit, courseIds, callerOrg)
 
     return sessions
       .slice()

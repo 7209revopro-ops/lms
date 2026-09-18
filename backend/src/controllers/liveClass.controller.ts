@@ -445,7 +445,14 @@ export class LiveClassController {
       const { UserModel } = await import('@/models/schema.ts')
       const user     = await UserModel.findById(req.user!.id).select('category').lean()
       const category = (user as any)?.category as string | undefined
-      const docs     = await this.service.listUpcomingForUser(req.user!.id, limit, category)
+
+      /* Resolved, not read off the request: a session minted before the field
+         existed carries no academy, and reading it blind would leave that
+         caller unscoped — which is the state this narrowing exists to end. */
+      const caller   = await callerOrgForRead(req)
+      if (caller.gone) { sendSuccess(res, []); return }
+
+      const docs     = await this.service.listUpcomingForUser(req.user!.id, limit, category, caller.org)
 
       /* The caller's seats, once. The Meet link is fetched on the click via
          POST /live-classes/:id/join; the feed only says whether there is a

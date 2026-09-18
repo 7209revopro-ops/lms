@@ -151,10 +151,39 @@ export function sharedInstructorFilter(callerOrg: string | null | undefined): Re
    assigns `filter.$or` for roster search. A second $or assignment silently
    deletes the first — which is the P-04 shape, twice over, and the symptom is
    a filter that quietly stops filtering. */
-export function servedClassFilter(callerOrg: string | null | undefined): Record<string, unknown> | null {
+export function servedClassFilter(
+  callerOrg: string | null | undefined,
+  /* INCLUDE CLASSES THAT BELONG TO NOBODY.
+
+     A class created before organizationId existed carries none, and tenancy
+     rule 2 says such a record stays unscoped — the join guard refuses only on a
+     GENUINE mismatch, `live.organizationId && ctx.organizationId && they
+     differ`. A filter that drops unowned rows is therefore stricter than the
+     guard it mirrors, and the difference is invisible: the class simply is not
+     there.
+
+     It is an OPTION rather than the default because the two callers want
+     opposite things, and both are right.
+
+       · The ADMIN ROSTER already excluded unowned classes — it assigned
+         organizationId outright — so including them there would be a widening
+         nobody asked for, in a phase about narrowing.
+       · The STUDENT BROWSE FEED had no academy term at all, so excluding them
+         there would hide rows that were previously visible and that nothing
+         about this feature intends to hide. That is how "the classes
+         disappeared" support waves start. */
+  opts: { includeUnowned?: boolean } = {},
+): Record<string, unknown> | null {
   if (!callerOrg || !Types.ObjectId.isValid(callerOrg)) return null
   const oid = new Types.ObjectId(callerOrg)
-  return { $or: [{ organizationId: oid }, { 'guestCohorts.organizationId': oid }] }
+  const arms: Record<string, unknown>[] = [
+    { organizationId: oid },
+    { 'guestCohorts.organizationId': oid },
+  ]
+  if (opts.includeUnowned) {
+    arms.push({ organizationId: { $exists: false } }, { organizationId: null })
+  }
+  return { $or: arms }
 }
 
 /** The same question about one already-loaded class. */

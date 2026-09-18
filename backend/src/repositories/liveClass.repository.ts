@@ -1,4 +1,5 @@
 import { Types } from 'mongoose'
+import { andFilter, servedClassFilter } from '@/utils/tenancy.ts'
 import { BaseRepository } from './base.repository.ts'
 import { LiveClassModel, type ILiveClass } from '@/models/schema.ts'
 import { resolveLiveStatus, LIVE_LEAD_MS } from '@/utils/liveStatus.ts'
@@ -33,7 +34,7 @@ export class LiveClassRepository extends BaseRepository<ILiveClass> {
   }
 
   /* All upcoming/live sessions across every course — no enrollment filter */
-  async listAllUpcoming(limit = 50, courseIds?: string[]): Promise<ILiveClass[]> {
+  async listAllUpcoming(limit = 50, courseIds?: string[], callerOrg?: string | null): Promise<ILiveClass[]> {
     const query: Record<string, unknown> = {
       status: { $in: ['scheduled', 'live'] },
       scheduledStart: { $gte: new Date(Date.now() - 60 * 60_000) },
@@ -41,6 +42,22 @@ export class LiveClassRepository extends BaseRepository<ILiveClass> {
     if (courseIds && courseIds.length > 0) {
       query['courseId'] = { $in: courseIds.map(id => new Types.ObjectId(id)) }
     }
+
+    /* THE BROWSE FEED HAD NO ACADEMY TERM AT ALL. Every other student-facing
+       list is scoped; this one was not, so a student has always been able to
+       see the OTHER academy's entire upcoming timetable here — titles,
+       instructors and times for classes they can neither book nor join.
+
+       Narrowed to classes that SERVE the caller: their own academy's, plus any
+       shared class that names their academy as a guest cohort. A caller with no
+       academy on record stays unscoped, which is tenancy rule 3b.
+
+       Composed under $and via andFilter, never by assigning $or. That is not
+       stylistic here: the status bucket above and the search arms elsewhere in
+       this repository assign query.$or, and a second assignment silently
+       deletes the first — the P-04 shape, and the symptom is a filter that
+       quietly stops filtering. */
+    andFilter(query, servedClassFilter(callerOrg, { includeUnowned: true }))
     return LiveClassModel
       .find(query)
       .sort({ scheduledStart: 1 })
