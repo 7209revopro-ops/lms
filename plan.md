@@ -387,6 +387,17 @@ Four things that are **not** configuration and will each stop a cutover dead.
    and the ticket verifier allows 60 seconds. Drift produces intermittent failures
    that resist diagnosis. Verify NTP on both.
 
+> **The full, verified credential reference is [`docs/PRODUCTION_ENV.md`](docs/PRODUCTION_ENV.md).**
+> It covers every variable in both applications and both LMS frontends, each cited to the line
+> the CODE reads, with the production origins verified live. §8.5 and §8.6 below are the
+> integration subset. Two facts from that verification belong here:
+>
+> - The meeting SPA (`https://connect.deltainstitutions.com`) and the meeting API
+>   (`https://connect-api.deltainstitutions.com`) are on **two separate origins**, so
+>   `CLT_PUBLIC_URL` and `CLT_BASE_URL` are different values. §8.10 item 2 is now closed.
+> - **Neither side is configured today.** The LMS JWKS serves `{"keys":[]}` with HTTP 200, and
+>   the meeting API answers 503 `LMS integration is not configured on this server`.
+
 ### 8.5 Credentials — LMS `backend/.env`
 
 Thirteen variables. **None are validated at boot**, so a typo produces a server that
