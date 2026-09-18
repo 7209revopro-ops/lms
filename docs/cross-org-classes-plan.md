@@ -14,7 +14,7 @@ under "Why classes are not in this plan", and the decision `docs/work-status.md`
 | 0 — resolve the caller's academy | **done** | `18f8128` |
 | 1 — extract the entitlement predicate | **done** | `18f8128` |
 | 2 — schema and authoring, inert | **done** | `6e11c41` |
-| 3 — seats | not started | |
+| 3 — seats | **done** | |
 | 4 — roster, homework and attendance split | not started | |
 | 5 — mail clocks | not started | |
 | 6a — narrow the browse feed, alone | not started | |
@@ -39,12 +39,20 @@ human:** the admin route and its Zod schema do not accept `guestCohorts`, so a
 cohort can only be created through the service layer. The admin form listed
 under phase 2 in this plan has not been built either. Neither blocks phase 3.
 
-**Phase 3 is the next step and it is the one to be careful with.** Twelve
-reserve/release sites must move to the seat helper in one change; miss one and a
-seat leaks out of an academy's floor with nothing to reconcile it. The phase also
-carries three riders that are easy to drop: the `userCascade` booking-deletion
-fix, `reconcile-class-seats.ts`, and the capacity/floor edit guards.
+**Phase 3 landed with its three riders**, which were the parts most likely to be
+dropped. Seat counters are now moved only by `services/seatPool.service.ts`, and
+`bun run check:seats` fails the build on any other `$inc` against them. Deleting
+a user now deletes their bookings and returns the seats; before this it left the
+rows behind and the seat was consumed forever.
 
+`backend/src/scripts/reconcile-class-seats.ts` was run dry against the local
+database and found **4 drifted classes out of 94** — two overcounting, two
+undercounting. That is the backlog the cascade leak created, visible for the
+first time. It has NOT been applied anywhere.
+
+**Phase 4 is next.** It is the one that must land before phase 6b under any
+circumstances: until the roster is split, a guest academy's students, names and
+emails appear in the host academy's booking list, stats and CSV export.
 ---
 
 ## The answer

@@ -19,6 +19,7 @@ import { SectionService } from '@/services/section.service.ts'
 import { OrderService } from '@/services/order.service.ts'
 import { CouponService } from '@/services/coupon.service.ts'
 import { requireSameOrgUser, callerMayAccess, instructorOwnsSession, callerOrgForRead } from '@/utils/tenancy.ts'
+import { reserveSeat, releaseSeat, seatStampFrom } from '@/services/seatPool.service.ts'
 import { documentRef } from '@/utils/documentRef.ts'
 import { UserService } from '@/services/user.service.ts'
 import { adminListDevices, adminApproveDevice, adminRevokeDevice } from '@/services/device.service.ts'
@@ -1327,7 +1328,10 @@ const liveCreateSchema = z.object({
   /* meetingUrl is now auto-generated for external sessions — omit from create requests */
   instructorId:    z.string().optional(),
   sectionId:       z.string().optional(),
-  sessionCapacity: z.coerce.number().int().min(1).max(10000).optional(),
+  /* 500 is the schema's own ceiling (schema.ts sessionCapacity max). Accepting
+     10000 here only pushed the refusal down into Mongoose, where it surfaced as
+     a validation error rather than a field-level message. */
+  sessionCapacity: z.coerce.number().int().min(1).max(500).optional(),
   language:        z.enum(LIVE_LANGUAGES).default('English'),
   /* Offline / in-person support */
   isOnline:        z.boolean().optional(),
@@ -1342,7 +1346,10 @@ const liveUpdateSchema = z.object({
   meetingUrl:      z.string().url().max(2048).optional(),
   recordingUrl:    z.string().url().max(2048).optional().or(z.literal('')),
   status:          z.enum(['scheduled', 'live', 'ended', 'cancelled']).optional(),
-  sessionCapacity: z.coerce.number().int().min(1).max(10000).optional(),
+  /* 500 is the schema's own ceiling (schema.ts sessionCapacity max). Accepting
+     10000 here only pushed the refusal down into Mongoose, where it surfaced as
+     a validation error rather than a field-level message. */
+  sessionCapacity: z.coerce.number().int().min(1).max(500).optional(),
   mentorNotes:     z.string().max(5000).optional(),
   courseId:        z.string().optional(),
   sectionId:       z.string().optional(),
@@ -1455,11 +1462,8 @@ router.post('/bookings/book-for-student', requireAnyAdmin, validate(bookForStude
       if (existing.status === 'cancelled') {
         /* Reserve the seat atomically — the cap is re-evaluated inside the
            filter, so concurrent bookings can never oversell the session. */
-        const reserved = await LiveClassModel.updateOne(
-          { _id: liveClassId, $expr: { $lt: ['$bookedCount', '$sessionCapacity'] } },
-          { $inc: { bookedCount: 1 } },
-        )
-        if (reserved.modifiedCount === 0) {
+        const reserved = await reserveSeat(liveClassId, entitlement.door?.organizationId ?? null)
+        if (reserved === null) {
           res.status(400).json({ success: false, error: { code: 'SESSION_FULL', message: 'This session is fully booked' } }); return
         }
         /* The status:'cancelled' term makes the transition conditional, so
@@ -1468,17 +1472,18 @@ router.post('/bookings/book-for-student', requireAnyAdmin, validate(bookForStude
         try {
           rebooked = await ClassBookingModel.updateOne({ _id: existing._id, status: 'cancelled' }, {
             status: 'booked', bookedAt: new Date(), cancelledAt: undefined,
+            ...seatStampFrom(reserved, entitlement.door),
             reminderDayBeforeSent: false, reminderDayOfSent: false,
             reminderPreSessionSent: false, reminder5MinSent: false, reminderAtTimeSent: false,
           })
         } catch (err) {
-          /* Re-book failed — give the reserved seat back */
-          await LiveClassModel.updateOne({ _id: liveClassId, bookedCount: { $gt: 0 } }, { $inc: { bookedCount: -1 } })
+          /* Re-book failed — give the reserved seat back, to the pool it came from */
+          await releaseSeat({ liveClassId, ...seatStampFrom(reserved, entitlement.door) })
           throw err
         }
         if (rebooked.modifiedCount === 0) {
           /* Another request re-booked it first — give the seat back */
-          await LiveClassModel.updateOne({ _id: liveClassId, bookedCount: { $gt: 0 } }, { $inc: { bookedCount: -1 } })
+          await releaseSeat({ liveClassId, ...seatStampFrom(reserved, entitlement.door) })
           res.status(409).json({ success: false, error: { code: 'ALREADY_BOOKED', message: 'Student already has a booking for this session' } }); return
         }
         bookingDoc = await ClassBookingModel.findById(existing._id).lean({ virtuals: true })
@@ -1488,11 +1493,8 @@ router.post('/bookings/book-for-student', requireAnyAdmin, validate(bookForStude
     } else {
       /* Reserve the seat atomically — the cap is re-evaluated inside the
          filter, so concurrent bookings can never oversell the session. */
-      const reserved = await LiveClassModel.updateOne(
-        { _id: liveClassId, $expr: { $lt: ['$bookedCount', '$sessionCapacity'] } },
-        { $inc: { bookedCount: 1 } },
-      )
-      if (reserved.modifiedCount === 0) {
+      const reserved = await reserveSeat(liveClassId, entitlement.door?.organizationId ?? null)
+      if (reserved === null) {
         res.status(400).json({ success: false, error: { code: 'SESSION_FULL', message: 'This session is fully booked' } }); return
       }
 
@@ -1503,10 +1505,11 @@ router.post('/bookings/book-for-student', requireAnyAdmin, validate(bookForStude
           liveClassId: new Types.ObjectId(liveClassId),
           status:      'booked',
           bookedAt:    new Date(),
+          ...seatStampFrom(reserved, entitlement.door),
         })
       } catch (err) {
         /* Booking row not created — give the reserved seat back */
-        await LiveClassModel.updateOne({ _id: liveClassId, bookedCount: { $gt: 0 } }, { $inc: { bookedCount: -1 } })
+        await releaseSeat({ liveClassId, ...seatStampFrom(reserved, entitlement.door) })
         throw err
       }
 
@@ -2304,10 +2307,9 @@ router.patch('/bookings/:id/cancel', requireInstructor, requirePermission('booki
       res.status(400).json({ success: false, error: { code: 'CANNOT_CANCEL', message: 'Only active bookings can be cancelled' } }); return
     }
 
-    await LiveClassModel.updateOne(
-      { _id: existing.liveClassId, bookedCount: { $gt: 0 } },
-      { $inc: { bookedCount: -1 } },
-    )
+    /* Back to the pool the seat was TAKEN from, read off the booking row —
+       never re-derived, because the student's door may have changed since. */
+    await releaseSeat(existing as any)
 
     sendSuccess(res, null, 'Booking cancelled')
 

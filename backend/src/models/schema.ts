@@ -2272,6 +2272,34 @@ export interface IClassBooking extends Document {
      difference between "cancelled in advance" and "no-showed". */
   attendedAt?:      Date
   attendanceSource?: 'livekit'
+
+  /* WHICH DOOR THIS SEAT CAME THROUGH.
+
+     A class can serve more than one academy, each through its own course and
+     module, and each with its own floor of seats. These three record which one
+     this student was admitted through.
+
+     THE RELEASE PATH IS WHY seatOrganizationId EXISTS. A student's entitlement
+     can change between booking and cancelling — moved between academies, a
+     module revoked, the class un-shared — so re-deriving the door at cancel
+     time can hand the seat back to the wrong academy's floor. The stamp is the
+     record; it is read, never recomputed.
+
+     THREE FIELDS, NOT ONE. classAssignment.service.ts copies courseId AND
+     sectionId from the session when a student submits homework, and
+     ClassAssignment.courseId is required — so a guest student's homework would
+     otherwise be filed against the HOST's course with the HOST's module. The
+     same three are what let a booking card be labelled in the caller's own
+     catalogue language, and what make per-cohort reporting answerable without
+     a join.
+
+     Not required. Absent reads as "the class's host door", which is correct for
+     every booking that exists today and is why no backfill is needed. */
+  seatPoolKind?:       'flat' | 'host' | 'guest' | 'overflow'
+  seatOrganizationId?: Types.ObjectId
+  seatCourseId?:       Types.ObjectId
+  seatSectionId?:      Types.ObjectId
+
   // Reminder flags
   reminderDayBeforeSent:  boolean
   reminderDayOfSent:      boolean
@@ -2291,6 +2319,10 @@ const ClassBookingSchema = new Schema<IClassBooking>(
     attendedAt:       { type: Date },
     attendanceSource: { type: String, enum: ['livekit'] },
     cancelledAt: { type: Date },
+    seatPoolKind:       { type: String, enum: ['flat', 'host', 'guest', 'overflow'] },
+    seatOrganizationId: { type: Schema.Types.ObjectId, ref: 'Organization', index: true },
+    seatCourseId:       { type: Schema.Types.ObjectId, ref: 'Course' },
+    seatSectionId:      { type: Schema.Types.ObjectId, ref: 'Section' },
     reminderDayBeforeSent:  { type: Boolean, default: false },
     reminderDayOfSent:      { type: Boolean, default: false },
     reminderPreSessionSent: { type: Boolean, default: false },

@@ -29,12 +29,30 @@ export async function cascadeUserDeletion(userId: string | Types.ObjectId): Prom
      top-level import here closes a cycle at module load. */
   const {
     ReviewModel, EnrollmentModel, LessonProgressModel, AuthTokenModel,
-    CourseModel, DeviceModel,
+    CourseModel, DeviceModel, ClassBookingModel,
   } = await import('@/models/schema.ts')
+  const { releaseSeat } = await import('@/services/seatPool.service.ts')
 
   /* Read the courses before the rows go — afterwards there is nothing left to
      tell us which counters to decrement. */
   const removedEnrolments = await EnrollmentModel.find({ userId }, { courseId: 1 }).lean()
+
+  /* CLASS BOOKINGS WERE NOT CASCADED AT ALL, and the seat was never returned.
+     A deleted student permanently consumed one seat of every class they had
+     booked: the row stayed, bookedCount stayed, and the class quietly had one
+     fewer seat forever with nothing to reconcile it against.
+
+     That was already wrong. Once a class divides its seats into per-academy
+     floors it gets worse, because the seat is not lost from the room in
+     general — it is lost from one ACADEMY's floor, so an academy silently
+     stops getting the seats it was promised.
+
+     Only live seats are released. A cancelled booking already gave its seat
+     back, and releasing it again would credit the pool twice. */
+  const heldSeats = await ClassBookingModel.find(
+    { userId, status: { $in: ['booked', 'attended'] } },
+    { liveClassId: 1, seatPoolKind: 1, seatOrganizationId: 1 },
+  ).lean()
 
   await Promise.all([
     AuthTokenModel.deleteMany({ userId }).exec(),
@@ -44,7 +62,16 @@ export async function cascadeUserDeletion(userId: string | Types.ObjectId): Prom
     /* A device whitelist entry for an account that no longer exists is a row
        in the admin approvals list that can never be actioned. */
     DeviceModel.deleteMany({ userId }).exec(),
+    ClassBookingModel.deleteMany({ userId }).exec(),
   ])
+
+  /* Sequential, not Promise.all: two seats on the SAME class would otherwise
+     race each other's read-modify-write of the pool counters. A deleted user
+     holds a handful of seats at most, so the cost is irrelevant and the
+     correctness is not. */
+  for (const seat of heldSeats) {
+    await releaseSeat(seat as never)
+  }
 
   if (removedEnrolments.length) {
     await CourseModel.bulkWrite(
@@ -56,7 +83,11 @@ export async function cascadeUserDeletion(userId: string | Types.ObjectId): Prom
   }
 
   logger.info(
-    { userId: String(userId), enrolmentsReleased: removedEnrolments.length },
+    {
+      userId:             String(userId),
+      enrolmentsReleased: removedEnrolments.length,
+      seatsReleased:      heldSeats.length,
+    },
     'user records cascaded',
   )
 }

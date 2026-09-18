@@ -13,6 +13,7 @@
  */
 import { Router, type Request, type Response, type NextFunction } from 'express'
 import { resolveClassEntitlement } from '@/services/classEntitlement.service.ts'
+import { reserveSeat, releaseSeat, seatStampFrom } from '@/services/seatPool.service.ts'
 import { z } from 'zod'
 import { resolveLiveStatus, isBookingOpen, bookingClosesAt } from '@/utils/liveStatus.ts'
 import { authenticate, requireEnrollmentApproval } from '@/middleware/auth.middleware.ts'
@@ -212,11 +213,8 @@ router.post('/', authenticate, requireEnrollmentApproval, validate(createBooking
       if (existing.status === 'cancelled') {
         /* Reserve the seat atomically — the cap is re-evaluated inside the
            filter, so concurrent bookings can never oversell the session. */
-        const reserved = await LiveClassModel.updateOne(
-          { _id: liveClassId, $expr: { $lt: ['$bookedCount', '$sessionCapacity'] } },
-          { $inc: { bookedCount: 1 } },
-        )
-        if (reserved.modifiedCount === 0) {
+        const reserved = await reserveSeat(liveClassId, entitlement.door?.organizationId ?? null)
+        if (reserved === null) {
           res.status(400).json({ success: false, error: { code: 'SESSION_FULL', message: 'This session is fully booked' } }); return
         }
         /* Re-book after cancel — reset the reminder flags so the re-booked
@@ -228,6 +226,9 @@ router.post('/', authenticate, requireEnrollmentApproval, validate(createBooking
             status: 'booked',
             bookedAt: new Date(),
             cancelledAt: undefined,
+            /* Re-stamped, not kept: the student may be coming through a
+               different door than the one they cancelled from. */
+            ...seatStampFrom(reserved, entitlement.door),
             reminderDayBeforeSent:  false,
             reminderDayOfSent:      false,
             reminderPreSessionSent: false,
@@ -235,13 +236,14 @@ router.post('/', authenticate, requireEnrollmentApproval, validate(createBooking
             reminderAtTimeSent:     false,
           })
         } catch (err) {
-          /* Re-book failed — give the reserved seat back */
-          await LiveClassModel.updateOne({ _id: liveClassId, bookedCount: { $gt: 0 } }, { $inc: { bookedCount: -1 } })
+          /* Re-book failed — give the reserved seat back, to the pool it came
+             from rather than to a re-derived one. */
+          await releaseSeat({ liveClassId, ...seatStampFrom(reserved, entitlement.door) })
           throw err
         }
         if (rebooked.modifiedCount === 0) {
           /* Another request re-booked it first — give the seat back */
-          await LiveClassModel.updateOne({ _id: liveClassId, bookedCount: { $gt: 0 } }, { $inc: { bookedCount: -1 } })
+          await releaseSeat({ liveClassId, ...seatStampFrom(reserved, entitlement.door) })
           res.status(409).json({ success: false, error: { code: 'ALREADY_BOOKED', message: 'You already have a booking for this session' } }); return
         }
         bookingDoc = await ClassBookingModel.findById(existing._id).lean({ virtuals: true })
@@ -252,11 +254,8 @@ router.post('/', authenticate, requireEnrollmentApproval, validate(createBooking
     } else {
       /* Reserve the seat atomically — the cap is re-evaluated inside the
          filter, so concurrent bookings can never oversell the session. */
-      const reserved = await LiveClassModel.updateOne(
-        { _id: liveClassId, $expr: { $lt: ['$bookedCount', '$sessionCapacity'] } },
-        { $inc: { bookedCount: 1 } },
-      )
-      if (reserved.modifiedCount === 0) {
+      const reserved = await reserveSeat(liveClassId, entitlement.door?.organizationId ?? null)
+      if (reserved === null) {
         res.status(400).json({ success: false, error: { code: 'SESSION_FULL', message: 'This session is fully booked' } }); return
       }
 
@@ -267,10 +266,11 @@ router.post('/', authenticate, requireEnrollmentApproval, validate(createBooking
           liveClassId: new Types.ObjectId(liveClassId),
           status:      'booked',
           bookedAt:    new Date(),
+          ...seatStampFrom(reserved, entitlement.door),
         })
       } catch (err) {
         /* Booking row not created — give the reserved seat back */
-        await LiveClassModel.updateOne({ _id: liveClassId, bookedCount: { $gt: 0 } }, { $inc: { bookedCount: -1 } })
+        await releaseSeat({ liveClassId, ...seatStampFrom(reserved, entitlement.door) })
         throw err
       }
 
@@ -366,10 +366,10 @@ router.delete('/:id', authenticate, async (req: Request, res: Response, next: Ne
       res.status(400).json({ success: false, error: { code: 'CANNOT_CANCEL', message: 'Only active bookings can be cancelled' } }); return
     }
 
-    await LiveClassModel.updateOne(
-      { _id: booking.liveClassId, bookedCount: { $gt: 0 } },
-      { $inc: { bookedCount: -1 } },
-    )
+    /* Back to the pool the seat was TAKEN from, read off the booking row.
+       Re-deriving it here would hand a guest academy's seat to the host when
+       the student's entitlement changed after they booked. */
+    await releaseSeat(booking as any)
 
     sendSuccess(res, null, 'Booking cancelled')
 

@@ -832,7 +832,11 @@ export class LiveClassService {
 
     // Snapshot current doc so we can detect status transitions for recording poll
     // and a change of start time (which invalidates every reminder already sent)
-    const current = await LiveClassModel.findById(id).select('type status googleMeetCode recordingUrl scheduledStart organizationId').lean()
+    const current = await LiveClassModel.findById(id)
+      .select('type status googleMeetCode recordingUrl scheduledStart organizationId '
+            + 'courseId isOnline provider sessionCapacity bookedCount '
+            + 'hostSeatsLeft overflowSeatsLeft guestCohorts')
+      .lean()
 
     const patch: Partial<ILiveClass> = { ...(input as any) }
     if (input.instructorId != null) {
@@ -860,6 +864,56 @@ export class LiveClassService {
       if (courseAfter) await this.#assertSectionBelongsToCourse(input.sectionId, courseAfter)
       patch.sectionId = new Types.ObjectId(input.sectionId) as any
     }
+    /* ── SEAT GUARDS ON THE EDIT PATH ──────────────────────────────────────
+       The counters are a promise to two academies, and an edit is the one
+       place that promise can be broken silently.
+
+       A capacity LOWERED below what is already taken would leave the room
+       oversold with nothing to refuse. A capacity RAISED on an allocated class
+       has to go somewhere, and it goes to the overflow — never to a floor,
+       because a floor is what an academy was promised and quietly enlarging
+       one is as surprising as quietly shrinking it.
+
+       And the LiveKit ceiling was only ever checked at CREATE, so raising the
+       seat count afterwards produced a class LiveKit refuses at the door. */
+    if (input.sessionCapacity != null) {
+      const cur = current as {
+        bookedCount?: number; sessionCapacity?: number; provider?: string
+        type?: string; isOnline?: boolean
+        hostSeatsLeft?: number; overflowSeatsLeft?: number
+        guestCohorts?: Array<{ seatFloor?: number }>
+      } | null
+
+      const taken = cur?.bookedCount ?? 0
+      if (input.sessionCapacity < taken) {
+        throw new LiveClassError('CAPACITY_BELOW_BOOKED',
+          `${taken} seat(s) are already taken, so the capacity cannot be set to ${input.sessionCapacity}`,
+          400)
+      }
+
+      const isInAppLive = (cur?.type ?? 'external') === 'internal' && cur?.isOnline !== false
+      if (isInAppLive && (cur?.provider ?? 'mux') === 'livekit'
+          && input.sessionCapacity > LIVEKIT_MAX_PARTICIPANTS) {
+        throw new LiveClassError('LIVEKIT_CAPACITY_EXCEEDED',
+          `Interactive rooms hold up to ${LIVEKIT_MAX_PARTICIPANTS} participants. `
+          + `Reduce the seat count, or use a Mux stream for a larger session.`,
+          400)
+      }
+
+      /* Allocated class: the difference lands in the overflow. */
+      if (typeof cur?.hostSeatsLeft === 'number') {
+        const delta = input.sessionCapacity - (cur.sessionCapacity ?? 0)
+        const nextOverflow = (cur.overflowSeatsLeft ?? 0) + delta
+        if (nextOverflow < 0) {
+          throw new LiveClassError('CAPACITY_BELOW_FLOORS',
+            'That capacity is smaller than the seats already promised to each academy. '
+            + 'Lower a floor first.',
+            400)
+        }
+        ;(patch as any).overflowSeatsLeft = nextOverflow
+      }
+    }
+
     const updated = await this.liveRepo.updateByIdPopulated(id, patch)
     if (!updated) throw new LiveClassError('LIVE_CLASS_NOT_FOUND', 'Live class not found', 404)
 
