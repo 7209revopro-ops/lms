@@ -109,6 +109,7 @@ export interface LessonDTO {
   order:        number
   isFree:       boolean
   contentUrl?:  string   // non-video content (article/external) — safe to expose
+  contentBody?: string   // rich-text body for article lessons — gated like contentUrl
   hasVideo?:    boolean  // true when a video exists; the real URL is fetched, signed, from GET /lessons/:id/play-url
 }
 
@@ -142,6 +143,12 @@ export function toLessonDTO(l: ILesson, includeContentUrl = false): LessonDTO {
       dto.hasVideo = !!url
     } else {
       dto.contentUrl = url   // articles / external links are not the R2 video leak
+      /* The article's rich-text body is content too, so it rides the same
+         enrollment gate as contentUrl — withheld from non-enrolled, non-free
+         viewers, shipped to everyone entitled to read the lesson. Omitted
+         entirely before this fix, so article bodies never reached the client. */
+      const body = j['contentBody'] as string | undefined
+      if (body) dto.contentBody = body
     }
   }
   return dto

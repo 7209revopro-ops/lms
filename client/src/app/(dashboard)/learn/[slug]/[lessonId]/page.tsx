@@ -295,6 +295,8 @@ export default function LessonPlayerPage({ params }: { params: Promise<{ slug: s
         <main className="lg:order-2 min-w-0">
           {lesson.type === 'quiz'
             ? <QuizPlayer lessonId={lesson.id} onPassed={() => { if (nextLesson) router.push(`/learn/${slug}/${nextLesson.id}`) }} />
+            : lesson.type === 'article'
+            ? <ArticleReader lesson={lesson} />
             : <PlayerArea lesson={lesson} playerRef={playerRef} lessonId={lessonId} />}
 
           <div className="mt-4 flex items-center justify-between rounded-2xl bg-[var(--color-bg-surface)] p-4" style={{ border: '1px solid var(--color-border)' }}>
@@ -361,6 +363,84 @@ export default function LessonPlayerPage({ params }: { params: Promise<{ slug: s
           <SidebarContent />
         </aside>
       </div>
+    </div>
+  )
+}
+
+/* ─── Article / PDF reader ────────────────────────────
+   An 'article' lesson carries its content in contentUrl (a PDF or resource
+   link, and/or an uploaded file) and optionally contentBody (rich text). The
+   backend ships both to enrolled/free viewers; this renders them. Before this
+   existed the page treated every non-quiz lesson as a video and article
+   lessons showed "No video available", so admin-published PDFs and articles
+   were unreadable on the student side. */
+function ArticleReader({ lesson }: { lesson: LessonOutline }) {
+  const url  = lesson.contentUrl?.trim()
+  const body = lesson.contentBody?.trim()
+  const isImage = !!url && /\.(png|jpe?g|gif|webp|avif|svg)(\?|$)/i.test(url)
+  const isPdf   = !!url && /\.pdf(\?|$)/i.test(url)
+  /* Anything that is neither an image nor an obvious PDF still gets an inline
+     frame attempt, because most resource links (PDFs without an extension,
+     Google Docs, slides) render in an iframe — and the open-in-new-tab link
+     below is always there as the guaranteed fallback. */
+  const canEmbed = !!url && !isImage
+
+  if (!url && !body) {
+    return (
+      <div data-protected-content className="flex min-h-[320px] flex-col items-center justify-center gap-3 rounded-2xl"
+        style={{ background: 'var(--color-bg-surface)', border: '1px solid var(--color-border)' }}>
+        <div className="flex h-16 w-16 items-center justify-center rounded-3xl"
+          style={{ background: 'var(--color-bg-muted)', border: '1px solid var(--color-border)' }}>
+          <FileText size={28} style={{ color: 'var(--color-text-muted)' }} />
+        </div>
+        <p className="text-sm font-medium" style={{ color: 'var(--color-text-muted)' }}>
+          This article has no content yet.
+        </p>
+      </div>
+    )
+  }
+
+  return (
+    <div data-protected-content className="space-y-4">
+      {/* Rich-text body — rendered as whitespace-preserving text (never as raw
+          HTML) so a content author cannot inject script into the student app. */}
+      {body && (
+        <div className="rounded-2xl p-6" style={{ background: 'var(--color-bg-surface)', border: '1px solid var(--color-border)' }}>
+          <p className="whitespace-pre-wrap break-words text-[15px] leading-relaxed" style={{ color: 'var(--color-text-primary)' }}>
+            {body}
+          </p>
+        </div>
+      )}
+
+      {/* The resource itself */}
+      {url && isImage && (
+        <div className="overflow-hidden rounded-2xl" style={{ border: '1px solid var(--color-border)' }}>
+          <img src={url} alt={lesson.title} className="h-auto w-full" />
+        </div>
+      )}
+
+      {url && canEmbed && (
+        <div className="overflow-hidden rounded-2xl bg-[var(--color-bg-inset)]" style={{ border: '1px solid var(--color-border)', height: '78vh' }}>
+          <iframe
+            src={url}
+            title={lesson.title}
+            className="h-full w-full"
+            style={{ border: 'none' }}
+          />
+        </div>
+      )}
+
+      {url && (
+        <a
+          href={url}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="inline-flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm font-semibold text-white"
+          style={{ background: '#0057b8' }}>
+          <FileText size={15} />
+          {isPdf ? 'Open PDF in a new tab' : isImage ? 'Open image in a new tab' : 'Open resource in a new tab'}
+        </a>
+      )}
     </div>
   )
 }
