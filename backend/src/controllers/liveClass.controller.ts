@@ -132,6 +132,16 @@ function toDTO(doc: any, entitled = true) {
     hostSeatsLeft:     j.hostSeatsLeft,
     overflowSeatsLeft: j.overflowSeatsLeft,
 
+    /* Every academy this class serves, owner first. The admin panel draws its
+       "serves Dubai + Bangalore" chip from this, and it is the single cheapest
+       thing that stops two academies' staff mis-communicating about one
+       session. Always at least one entry, so a consumer never has to special-
+       case the unshared case. */
+    servesAcademies: [
+      orgSlugFor(j.organizationId),
+      ...(Array.isArray(j.guestCohorts) ? j.guestCohorts.map((c: any) => orgSlugFor(c.organizationId)) : []),
+    ].filter(Boolean),
+
     createdAt:      j.createdAt,
     updatedAt:      j.updatedAt,
   }

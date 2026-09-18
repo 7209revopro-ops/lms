@@ -1,5 +1,5 @@
 import { Types } from 'mongoose'
-import { resolveClassEntitlement, loadEnrolmentIndex, entitlementFrom, type ClassDoors } from '@/services/classEntitlement.service.ts'
+import { resolveClassEntitlement, loadEnrolmentIndex, entitlementFrom, doorsFor, type ClassDoors } from '@/services/classEntitlement.service.ts'
 import { LiveClassRepository } from '@/repositories/liveClass.repository.ts'
 import { CourseRepository } from '@/repositories/course.repository.ts'
 import { EnrollmentRepository } from '@/repositories/enrollment.repository.ts'
@@ -1086,11 +1086,39 @@ export class LiveClassService {
   }
 
   async #notifyEnrolledStudents(live: ILiveClass, courseTitle: string, courseSlug: string): Promise<void> {
-    const enrolledStudents = await EnrollmentModel
-      .find({ courseId: live.courseId, status: { $ne: 'dropped' } })
-      .limit(200)
-      .populate('userId', '_id email name isActive')
-      .exec()
+    /* FAN OUT PER DOOR. A shared class has a cohort in each academy it serves,
+       and each of them is enrolled in a DIFFERENT course. Querying only
+       live.courseId tells the host's students and leaves the guest academy's
+       cohort to discover the class by accident.
+
+       Relevance is judged per door too, further down: a guest student's
+       progress is measured through THEIR course's modules, because that is the
+       only course whose section ids their progress rows refer to.
+
+       The per-door cap is deliberate. It was one flat limit of 200; two
+       cohorts sharing one limit would silently starve whichever academy the
+       query happened to reach second. Each door now gets its own 200, and a
+       door that hits it says so rather than truncating in silence. */
+    const doors = doorsFor(live as never)
+
+    const perDoor: Array<{ door: typeof doors[number]; rows: any[] }> = []
+    for (const door of doors) {
+      if (!door.courseId) continue
+      const rows = await EnrollmentModel
+        .find({ courseId: door.courseId, status: { $ne: 'dropped' } })
+        .limit(200)
+        .populate('userId', '_id email name isActive')
+        .exec()
+      if (rows.length === 200) {
+        logger.warn(
+          { liveClassId: String((live as any).id ?? (live as any)._id), academy: door.organizationId },
+          'live-class notification: cohort hit the 200 cap — some students were not reached',
+        )
+      }
+      perDoor.push({ door, rows })
+    }
+
+    const enrolledStudents = perDoor.flatMap(p => p.rows)
 
     const courseUrl = `${env.CLIENT_URL}/courses/${courseSlug}`
 
@@ -1116,11 +1144,21 @@ export class LiveClassService {
       .map((id: any) => String(id))
 
     let reached = new Set<string>()
-    if (live.sectionId) {
-      reached = await this.#studentsAtModule(live.courseId, live.sectionId, candidateIds)
+    const anyGated = doors.some(d => d.sectionId)
+    if (anyGated) {
+      /* Per door, and this is the same namespace argument the entitlement
+         resolver rests on: a student's progress rows carry section ids of the
+         course THEY are enrolled in, so measuring a guest student against the
+         host's module list can only ever answer "not reached". */
+      for (const { door, rows } of perDoor) {
+        if (!door.sectionId || !door.courseId) continue
+        const ids = rows.map(e => (e.userId as any)?._id).filter(Boolean).map((id: any) => String(id))
+        const hit = await this.#studentsAtModule(door.courseId, door.sectionId, ids)
+        for (const id of hit) reached.add(id)
+      }
       logger.info(
         { liveClassId: String((live as any).id ?? (live as any)._id),
-          enrolled: candidateIds.length, emailed: reached.size },
+          doors: doors.length, enrolled: candidateIds.length, emailed: reached.size },
         'new live class: progress-gated notification',
       )
     } else {

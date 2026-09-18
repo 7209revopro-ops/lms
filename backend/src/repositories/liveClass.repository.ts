@@ -1,5 +1,6 @@
 import { Types } from 'mongoose'
 import { andFilter, servedClassFilter } from '@/utils/tenancy.ts'
+import { CROSS_ORG_CLASSES_ENABLED } from '@/services/classEntitlement.service.ts'
 import { BaseRepository } from './base.repository.ts'
 import { LiveClassModel, type ILiveClass } from '@/models/schema.ts'
 import { resolveLiveStatus, LIVE_LEAD_MS } from '@/utils/liveStatus.ts'
@@ -10,8 +11,21 @@ export class LiveClassRepository extends BaseRepository<ILiveClass> {
   }
 
   async listForCourse(courseId: string | Types.ObjectId): Promise<ILiveClass[]> {
+    /* THE COURSE PAGE IS THE PRIMARY SURFACE FOR A GUEST COHORT.
+
+       A Bangalore student looks for their class on their own Bangalore course
+       page. Matching `courseId` alone finds only classes the course HOSTS, so
+       a class shared with this course through a guest cohort would be missing
+       from the one place its students go looking — and the booking card would
+       be labelled with the other academy's course.
+
+       Both arms name a course, so this widens along the same axis rather than
+       reaching across academies: a class is here because it serves THIS
+       course, not because of who owns it. */
     return LiveClassModel
-      .find({ courseId })
+      .find(CROSS_ORG_CLASSES_ENABLED
+        ? { $or: [{ courseId }, { 'guestCohorts.courseId': courseId }] }
+        : { courseId })
       .sort({ scheduledStart: 1 })
       .populate('instructorId', 'name avatarUrl')
       .exec()

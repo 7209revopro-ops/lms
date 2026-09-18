@@ -1,6 +1,6 @@
 import { Router, type Request, type Response, type NextFunction } from 'express'
 import { resolveClassEntitlement, loadEnrolmentIndex, entitlementFrom, type ClassDoors } from '@/services/classEntitlement.service.ts'
-import { callerOrgForRead } from '@/utils/tenancy.ts'
+import { callerOrgForRead, andFilter, servedClassFilter } from '@/utils/tenancy.ts'
 import express from 'express'
 import { z } from 'zod'
 import { LiveClassController } from '@/controllers/liveClass.controller.ts'
@@ -79,11 +79,19 @@ router.get('/', authenticate, async (req: Request, res: Response, next: NextFunc
        module is enrolled but not entitled. */
     const index = await loadEnrolmentIndex(userId, 'notDropped')
 
-    // Return sessions for the student's org (or all if no org on record).
+    /* Sessions this student's academy is SERVED by: their own academy's, plus
+       any class shared with their academy as a guest cohort. A caller with no
+       academy on record stays unscoped, which is tenancy rule 3b.
+
+       Resolved rather than read off the request — a session minted before the
+       field existed would otherwise leave the caller unscoped.
+
+       Composed under $and via andFilter. The status and search arms elsewhere
+       in this handler assign $or, and a second assignment deletes the first. */
+    const caller = await callerOrgForRead(req)
+    if (caller.gone) { sendSuccess(res, []); return }
     const lcOrgFilter: Record<string, unknown> = {}
-    if (req.user?.organizationId && Types.ObjectId.isValid(req.user.organizationId)) {
-      lcOrgFilter['organizationId'] = new Types.ObjectId(req.user.organizationId)
-    }
+    andFilter(lcOrgFilter, servedClassFilter(caller.org, { includeUnowned: true }))
     const classes = await LiveClassModel.find(lcOrgFilter)
       .populate('instructorId', 'id name avatarUrl')
       .populate('courseId', 'id title slug thumbnailUrl program')

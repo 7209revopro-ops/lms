@@ -18,7 +18,7 @@ under "Why classes are not in this plan", and the decision `docs/work-status.md`
 | 4 — roster, homework and attendance split | **done** | |
 | 5 — mail clocks | **done** | |
 | 6a — narrow the browse feed, alone | **done** | |
-| 6b — open it | not started | |
+| 6b — open it | **done, behind CROSS_ORG_CLASSES** | |
 
 Guest cohorts are read only when `CROSS_ORG_CLASSES=true`, and it is off. A
 cohort can be authored today and no guest student can book, see or enter the
@@ -84,27 +84,44 @@ date rendered as the literal text "Invalid Date at Invalid Date". Every
 formatter now answers with a dash, which is obviously missing rather than
 confidently wrong, and the suite pins it for five kinds of bad input.
 
-**Phase 6a shipped alone, as the plan demands.** The browse feed is now scoped
-to classes that serve the caller. Measured against the local database: a
-Bangalore student stops seeing 88 Dubai-owned classes there, and keeps their own
-6 plus any class shared with them.
+**All eight phases have landed. The feature is complete and OFF.**
 
-Two exceptions are kept, and the suite caught one of them. A class created
-before organizationId existed belongs to nobody, and tenancy rule 2 keeps it
-visible to everyone — a filter that dropped it would be stricter than the join
-guard it mirrors, and the row would simply be gone with nothing to explain it.
-A caller with no academy on record stays unscoped, which is rule 3b. So
-servedClassFilter now takes an includeUnowned option: the admin roster already
-excluded unowned classes and must keep doing so, while the feed never did and
-must not start.
+It is gated on `CROSS_ORG_CLASSES`, which is not set anywhere. Nothing changes
+on deploy; a guest cohort can be authored and no guest student can see, book or
+enter the class. Turning it on is a server decision, and turning it off again is
+a server decision rather than a revert — which is a deliberate improvement on
+this plan as written, because 6b's revert is otherwise not free.
 
-**Watch a week of support tickets before phase 6b.** This is the only
-user-visible change before the feature, it takes something away from students
-with no stake in it, and it can be reverted on its own.
+`crossorgclass.open.suite.ts` is the only suite that switches it on, and it
+drives the owner's literal question over real HTTP: a Dubai student and a
+Bangalore student book the SAME class through their OWN courses and OWN module
+2, drawing from their own academies' seats.
 
-**Phase 6b is the last one, and its revert is NOT free.** Once guests have
-booked, backing the feature out means cancelling those seats and mailing those
-students. That needs saying out loud before it ships, not after.
+The gate that matters most is asserted directly: a Bangalore student blocked on
+BANGALORE module 2 gets MODULE_BLOCKED, and the test also proves the id that
+blocked them is Bangalore's and not the class's own. That is the failure every
+cheaper design ships, and the reason a door carries its course.
+
+### Still not built
+
+- **The admin form.** The route and Zod schema do not accept `guestCohorts`, so
+  a cohort can only be authored through the service layer. The DTO already
+  carries `servesAcademies` for the chip.
+- **The client booking card labels.** `yourCohort` is not surfaced; the card
+  shows the populated host course title.
+- **The "also 09:00 Bangalore" secondary clock line** in the admin panel.
+
+None of these block the backend being correct, and all three are cosmetic
+relative to the gates. They are what stands between this and a pilot.
+
+### Before switching it on
+
+1. Run `reconcile-class-seats.ts` against production. The local run found 4
+   drifted classes out of 94.
+2. Decide the eight items under "Decisions you must make".
+3. Watch the phase 6a feed narrowing for a week first.
+4. Know that once guests have booked, turning the flag off leaves them holding
+   seats they will be refused at the door. Cancel and mail them, or leave it on.
 ---
 
 ## The answer
