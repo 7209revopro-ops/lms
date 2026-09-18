@@ -207,6 +207,85 @@ export class LiveClassService {
     }
   }
 
+  /* ── A module must belong to the course it gates ───────────────────────
+     create() and update() validated only that sectionId PARSED. So a class
+     could already be gated to a module of some OTHER course — and then the
+     module gate tests an id that appears in nobody's blockedLessons for that
+     course, which means it never fires. A silent open door, predating this
+     work, and #studentsAtModule carries a defensive targetIdx === -1 branch
+     precisely because of it.
+
+     A design keyed on (course, module) pairs cannot inherit that hole, so it
+     is closed here for the host pair as well as for every guest cohort. */
+  async #assertSectionBelongsToCourse(sectionId: string, courseId: string): Promise<void> {
+    const { SectionModel } = await import('@/models/schema.ts')
+    const section = await SectionModel.findById(sectionId).select('courseId').lean()
+    if (!section || String((section as { courseId?: unknown }).courseId ?? '') !== String(courseId)) {
+      throw new LiveClassError('SECTION_NOT_IN_COURSE',
+        'That module does not belong to the selected course', 400)
+    }
+  }
+
+  /* ── Guest cohorts: each academy's own door into this room ──────────────
+     Modelled on #assertInstructorUsable, including its ordering: the TENANCY
+     question is answered before anything more specific, so the error code can
+     never be used to enumerate which ids exist in the other academy.
+
+     What is proven here, per cohort:
+       · the academy exists;
+       · the course belongs to THAT academy — otherwise the class would admit
+         a cohort through a door into a third party's catalogue;
+       · the module belongs to THAT course — the namespace guarantee the whole
+         module gate rests on.
+
+     What CANNOT be proven here, and is the feature's known sharp edge: that the
+     guest module teaches the same syllabus as the host's. Somebody picks it by
+     hand. Course.program is a one-to-many programme scope, so it is a hint for
+     the picker and can never be the check. */
+  async #assertCohortsUsable(
+    cohorts:    Array<{ organizationId?: unknown; courseId?: unknown; sectionId?: unknown }>,
+    classOrgId: Types.ObjectId | null,
+  ): Promise<void> {
+    if (!cohorts.length) return
+    const { OrganizationModel, CourseModel } = await import('@/models/schema.ts')
+
+    const seen = new Set<string>()
+    for (const c of cohorts) {
+      const org     = String(c.organizationId ?? '')
+      const course  = String(c.courseId ?? '')
+      const section = c.sectionId ? String(c.sectionId) : ''
+
+      if (!Types.ObjectId.isValid(org) || !Types.ObjectId.isValid(course)) {
+        throw new LiveClassError('INVALID_COHORT', 'A guest cohort must name an academy and a course', 400)
+      }
+      if (classOrgId && org === String(classOrgId)) {
+        throw new LiveClassError('INVALID_COHORT', 'A class cannot be a guest of its own academy', 400)
+      }
+      if (seen.has(org)) {
+        throw new LiveClassError('INVALID_COHORT', 'An academy may appear only once', 400)
+      }
+      seen.add(org)
+
+      if (!(await OrganizationModel.exists({ _id: org }))) {
+        throw new LiveClassError('COHORT_NOT_FOUND', 'Academy not found', 404)
+      }
+
+      const courseDoc = await CourseModel.findById(course).select('organizationId').lean()
+      /* 404, and the SAME code a missing academy gets: a Dubai admin must not
+         learn which Bangalore course ids exist by reading the difference. */
+      if (!courseDoc || String((courseDoc as { organizationId?: unknown }).organizationId ?? '') !== org) {
+        throw new LiveClassError('COHORT_NOT_FOUND', 'Course not found', 404)
+      }
+
+      if (section) {
+        if (!Types.ObjectId.isValid(section)) {
+          throw new LiveClassError('INVALID_COHORT', 'Invalid module id', 400)
+        }
+        await this.#assertSectionBelongsToCourse(section, course)
+      }
+    }
+  }
+
   /* ── Admin/instructor create ──────────────────────── */
   async create(input: {
     courseId:         string
@@ -227,6 +306,10 @@ export class LiveClassService {
     room?:            string
     organizationId?:  string
     seriesId?:        string
+    /* Guest academies this class also serves. Authoring only in this phase —
+       nothing reads them for entitlement until CROSS_ORG_CLASSES is on. */
+    guestCohorts?:    Array<{ organizationId: string; courseId: string; sectionId?: string; seatFloor: number }>
+    overflowSeats?:   number
   }): Promise<ILiveClass> {
     if (!Types.ObjectId.isValid(input.courseId)) {
       throw new LiveClassError('INVALID_COURSE_ID', 'Invalid course id', 400)
@@ -317,11 +400,48 @@ export class LiveClassService {
        on organizationId with strict equality, so an unstamped class is
        invisible to all of them until the boot backfill claims it. */
     if (classOrgId) (doc as any).organizationId = classOrgId
+    /* GUEST COHORTS. Validated before the allocation is computed, so a bad
+       cohort never reaches the arithmetic. */
+    const cohorts = input.guestCohorts ?? []
+    if (cohorts.length > 0) {
+      await this.#assertCohortsUsable(cohorts, classOrgId)
+
+      /* If the host is gated to a module, every guest must be. Duplicated from
+         the schema hook on purpose: the hook does not run on the edit path, and
+         a rule enforced in only one of the two places is a rule that holds
+         until the first edit. */
+      if (input.sectionId && cohorts.some(c => !c.sectionId)) {
+        throw new LiveClassError('INVALID_COHORT',
+          'This class is gated to a module, so every guest cohort must name one too', 400)
+      }
+
+      const capacity = (doc.sessionCapacity ?? 30) as number
+      const overflow = Math.max(0, Math.trunc(input.overflowSeats ?? 0))
+      const floors   = cohorts.reduce((n, c) => n + Math.max(0, Math.trunc(c.seatFloor ?? 0)), 0)
+      const host     = capacity - floors - overflow
+      if (host < 0) {
+        throw new LiveClassError('SEATS_OVERALLOCATED',
+          `The guest floors and overflow come to ${floors + overflow}, which is more than the ${capacity} seats this class has`,
+          400)
+      }
+
+      ;(doc as any).guestCohorts = cohorts.map(c => ({
+        organizationId: new Types.ObjectId(c.organizationId),
+        courseId:       new Types.ObjectId(c.courseId),
+        ...(c.sectionId ? { sectionId: new Types.ObjectId(c.sectionId) } : {}),
+        seatFloor:      Math.max(0, Math.trunc(c.seatFloor ?? 0)),
+        seatsLeft:      Math.max(0, Math.trunc(c.seatFloor ?? 0)),
+      }))
+      ;(doc as any).hostSeatsLeft     = host
+      ;(doc as any).overflowSeatsLeft = overflow
+    }
+
     if (input.seriesId && Types.ObjectId.isValid(input.seriesId)) {
       doc.seriesId = new Types.ObjectId(input.seriesId)
     }
 
     if (input.sectionId && Types.ObjectId.isValid(input.sectionId)) {
+      await this.#assertSectionBelongsToCourse(input.sectionId, input.courseId)
       doc.sectionId = new Types.ObjectId(input.sectionId)
     }
 
@@ -733,6 +853,11 @@ export class LiveClassService {
     }
     if (input.sectionId != null) {
       if (!Types.ObjectId.isValid(input.sectionId)) throw new LiveClassError('INVALID_ID', 'Invalid sectionId', 400)
+      /* Against the course the class will HAVE after this patch, not the one it
+         had before — moving a class to another course and re-pointing its
+         module is one request. */
+      const courseAfter = input.courseId ?? String((current as { courseId?: unknown } | null)?.courseId ?? '')
+      if (courseAfter) await this.#assertSectionBelongsToCourse(input.sectionId, courseAfter)
       patch.sectionId = new Types.ObjectId(input.sectionId) as any
     }
     const updated = await this.liveRepo.updateByIdPopulated(id, patch)

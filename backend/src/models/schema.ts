@@ -860,6 +860,18 @@ export type LiveClassType   = 'external' | 'internal'
 
 export type LiveClassProvider = 'mux' | 'livekit'
 
+export interface IGuestCohort {
+  organizationId: Types.ObjectId
+  courseId:       Types.ObjectId
+  sectionId?:     Types.ObjectId
+  /** Seats this academy was promised and nobody else may take. */
+  seatFloor:      number
+  /** COUNTDOWN of that floor. Counting down is what keeps the reservation
+      atomic: a countdown compares against a literal, so the per-cohort
+      condition fits inside $elemMatch, where $expr is illegal. */
+  seatsLeft:      number
+}
+
 export interface ILiveClass extends Document {
   id:             string
   courseId:       Types.ObjectId
@@ -931,6 +943,33 @@ export interface ILiveClass extends Document {
   /* Multi-org */
   organizationId?: Types.ObjectId
 
+  /* GUEST ACADEMIES THIS CLASS ALSO SERVES.
+
+     `organizationId` above still names the OWNER, and only the owner may edit,
+     move or cancel the class. Each entry here is another academy's DOOR into
+     the same room: that academy's OWN course and that course's OWN module.
+
+     Naming the guest's own course is the entire point. Their students hold an
+     enrolment in THEIR course, and their admins write THEIR section ids into
+     blockedLessons — so testing a guest student against the host's section id
+     could never match, and module blocking would fail open for the whole
+     visiting cohort. See services/classEntitlement.service.ts.
+
+     The host is NEVER mirrored into this array. The host's door is read from
+     the singular fields above. A mirror would have to be kept in sync by a
+     document validator, and update() writes through findByIdAndUpdate, where
+     document validators DO NOT RUN — so the copy would drift on the first edit
+     and the symptom of drift is the booking answer disagreeing with the join
+     answer. Here that state is not merely invalid, it is unrepresentable. */
+  guestCohorts:      IGuestCohort[]
+
+  /* Seat allocation. undefined on both means NO ALLOCATION IN FORCE, which is
+     every class that existed before this feature — the seat helper then runs
+     the original single-statement reservation unchanged. That is the whole
+     back-compat story and it needs no migration. */
+  hostSeatsLeft?:     number
+  overflowSeatsLeft?: number
+
   /* Weekly-repeat grouping — a pure tag shared by every class generated
      from the same "repeat weekly" action. Not a foreign-key relation;
      there is no separate series/template document. */
@@ -939,6 +978,14 @@ export interface ILiveClass extends Document {
   createdAt:      Date
   updatedAt:      Date
 }
+
+const GuestCohortSchema = new Schema<IGuestCohort>({
+  organizationId: { type: Schema.Types.ObjectId, ref: 'Organization', required: true },
+  courseId:       { type: Schema.Types.ObjectId, ref: 'Course',       required: true },
+  sectionId:      { type: Schema.Types.ObjectId, ref: 'Section' },
+  seatFloor:      { type: Number, required: true, min: 0, max: 500 },
+  seatsLeft:      { type: Number, required: true, min: 0 },
+}, { _id: false })
 
 const LiveClassSchema = new Schema<ILiveClass>(
   {
@@ -984,10 +1031,66 @@ const LiveClassSchema = new Schema<ILiveClass>(
     rescheduledReason:           { type: String, maxlength: 2000 },
     reminderInstructor15MinSent: { type: Boolean, default: false },
     organizationId:              { type: Schema.Types.ObjectId, ref: 'Organization' },
+    guestCohorts:                { type: [GuestCohortSchema], default: [] },
+    hostSeatsLeft:               { type: Number, min: 0 },
+    overflowSeatsLeft:           { type: Number, min: 0 },
     seriesId:                    { type: Schema.Types.ObjectId },
   },
   baseSchemaOptions,
 )
+
+/* ─────────────────────────────────────────────────────
+   The shape rules that must not depend on a call site remembering them.
+
+   Same precedent as the sharedAcrossOrgs validator on UserSchema: a rule that
+   makes an invalid document UNPERSISTABLE beats a rule every write path has to
+   remember. Note the limit, though — this hook runs on save() and create(), NOT
+   on findByIdAndUpdate, which is how update() writes. So it is a floor, not the
+   enforcement point; liveClass.service.ts re-asserts the same rules on the edit
+   path, and seatPool.service.ts owns the counter invariant.
+───────────────────────────────────────────────────── */
+LiveClassSchema.pre('validate', function (next) {
+  const cohorts = (this.guestCohorts ?? []) as IGuestCohort[]
+  if (cohorts.length === 0) return next()
+
+  const own = this.organizationId ? String(this.organizationId) : null
+  const seen = new Set<string>()
+
+  for (const c of cohorts) {
+    const org = c.organizationId ? String(c.organizationId) : ''
+    if (!org) return next(new Error('A guest cohort must name an academy'))
+    /* The owner is not a guest of itself. Allowing it would give the host two
+       doors and two seat pools into one room. */
+    if (own && org === own) {
+      return next(new Error('A class cannot be a guest of its own academy'))
+    }
+    if (seen.has(org)) {
+      return next(new Error('An academy may appear only once in guestCohorts'))
+    }
+    seen.add(org)
+
+    /* IF THE HOST IS GATED TO A MODULE, EVERY GUEST MUST BE TOO. Otherwise the
+       admin silently opens the class to the guest academy's ENTIRE course while
+       their own cohort is confined to one module — the asymmetry nobody would
+       choose on purpose and nobody would notice. */
+    if (this.sectionId && !c.sectionId) {
+      return next(new Error('This class is gated to a module, so every guest cohort must name one too'))
+    }
+  }
+
+  if (typeof this.hostSeatsLeft !== 'number' || typeof this.overflowSeatsLeft !== 'number') {
+    return next(new Error('A class with guest cohorts must carry a seat allocation'))
+  }
+
+  const total = this.hostSeatsLeft + this.overflowSeatsLeft + (this.bookedCount ?? 0)
+    + cohorts.reduce((n, c) => n + (c.seatsLeft ?? 0), 0)
+  if (total !== this.sessionCapacity) {
+    return next(new Error(
+      `Seat allocation does not add up: ${total} allocated against a capacity of ${this.sessionCapacity}`,
+    ))
+  }
+  next()
+})
 
 LiveClassSchema.index({ courseId: 1, scheduledStart: 1 })
 LiveClassSchema.index({ scheduledStart: 1 })
@@ -996,6 +1099,10 @@ LiveClassSchema.index({ muxLiveStreamId: 1 }, { sparse: true })
 LiveClassSchema.index({ cltRoomName: 1 }, { sparse: true })
 LiveClassSchema.index({ organizationId: 1 })
 LiveClassSchema.index({ seriesId: 1 }, { sparse: true })
+/* A guest academy's students and admins find the class by their OWN academy and
+   their OWN course — never by the host's. */
+LiveClassSchema.index({ 'guestCohorts.organizationId': 1, scheduledStart: 1 })
+LiveClassSchema.index({ 'guestCohorts.courseId': 1, scheduledStart: 1 })
 
 export const LiveClassModel = mongoose.model<ILiveClass>('LiveClass', LiveClassSchema)
 

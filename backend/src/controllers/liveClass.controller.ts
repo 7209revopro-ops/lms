@@ -115,6 +115,23 @@ function toDTO(doc: any, entitled = true) {
     organizationId:   j.organizationId ? String(j.organizationId) : undefined,
     organizationSlug: orgSlugFor(j.organizationId),
 
+    /* The academies this class ALSO serves, each through its own course and
+       module. Sent so the admin panel can show a "serves both" chip and so a
+       guest academy's staff can see which of their courses this belongs to.
+       Empty on every class that is not shared, which is all of them today. */
+    guestCohorts: Array.isArray(j.guestCohorts)
+      ? j.guestCohorts.map((c: any) => ({
+          organizationId:   String(c.organizationId),
+          organizationSlug: orgSlugFor(c.organizationId),
+          courseId:         String(c.courseId),
+          sectionId:        c.sectionId ? String(c.sectionId) : undefined,
+          seatFloor:        c.seatFloor,
+          seatsLeft:        c.seatsLeft,
+        }))
+      : [],
+    hostSeatsLeft:     j.hostSeatsLeft,
+    overflowSeatsLeft: j.overflowSeatsLeft,
+
     createdAt:      j.createdAt,
     updatedAt:      j.updatedAt,
   }
