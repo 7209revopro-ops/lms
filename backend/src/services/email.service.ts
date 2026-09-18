@@ -2,6 +2,7 @@ import { writeFile, mkdir } from 'fs/promises'
 import { join } from 'path'
 import nodemailer, { type Transporter } from 'nodemailer'
 import { logger } from '@/utils/logger.ts'
+import { academyClock, academyTime } from '@/utils/academyClock.ts'
 
 /* ─────────────────────────────────────────────────────
    EmailService
@@ -673,9 +674,12 @@ export async function sendInstructorClassScheduled(
   liveTitle: string,
   startsAt: Date,
   meetLink: string,
+  /* The academy whose wall clock this reader thinks in. Absent falls back to
+     Dubai, which is what every one of these printed before — unlabelled. */
+  academySlug?: string | null,
 ): Promise<void> {
   const subject = `You've been scheduled: ${liveTitle}`
-  const when = startsAt.toLocaleString('en-US', { dateStyle: 'full', timeStyle: 'short', timeZone: 'Asia/Dubai' })
+  const when = academyClock(startsAt, academySlug).full
   const html = wrap(subject, `
     <h2 style="margin:0 0 16px;font-size:20px;font-weight:700;color:#0D0F1A">You've been assigned a live class</h2>
     <p>Hi ${escapeHtml(name)},</p>
@@ -706,9 +710,10 @@ export async function sendInstructor15MinReminder(
   liveTitle: string,
   startsAt: Date,
   meetLink: string,
+  academySlug?: string | null,
 ): Promise<void> {
   const subject = `⏰ Starting in 15 min: ${liveTitle}`
-  const when = startsAt.toLocaleString('en-US', { timeStyle: 'short', timeZone: 'Asia/Dubai' })
+  const when = academyTime(startsAt, academySlug)
   const html = wrap(subject, `
     <h2 style="margin:0 0 16px;font-size:20px;font-weight:700;color:#0D0F1A">Your class starts in 15 minutes</h2>
     <p>Hi ${escapeHtml(name)},</p>
@@ -796,10 +801,10 @@ export async function sendBookingConfirmation(
   name: string,
   sessionTitle: string,
   sessionStart: Date | string,
+  academySlug?: string | null,
 ): Promise<void> {
   const d = new Date(sessionStart)
-  const dateStr = d.toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', timeZone: 'Asia/Dubai' })
-  const timeStr = d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true, timeZone: 'Asia/Dubai' })
+  const { date: dateStr, time: timeStr } = academyClock(d, academySlug)
   const subject = `✅ Class Booking Confirmed`
   const html = wrap(subject, `
     <h2 style="margin:0 0 16px;font-size:20px;font-weight:700;color:#0D0F1A">✅ Class Booking Confirmed</h2>
@@ -898,10 +903,10 @@ export async function sendFiveMinReminder(
   sessionTitle: string,
   joinUrl: string,
   sessionStart: Date | string,
+  academySlug?: string | null,
 ): Promise<void> {
   const d = new Date(sessionStart)
-  const dateStr = d.toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', timeZone: 'Asia/Dubai' })
-  const timeStr = d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true, timeZone: 'Asia/Dubai' })
+  const { date: dateStr, time: timeStr } = academyClock(d, academySlug)
   const subject = `🔔 Your Class Starts in 5 Minutes`
   const html = wrap(subject, `
     <h2 style="margin:0 0 16px;font-size:20px;font-weight:700;color:#0D0F1A">🔔 Your Class Starts in 5 Minutes</h2>
@@ -958,11 +963,11 @@ export async function sendRescheduledNotification(
   sessionTitle: string,
   oldStart: Date | string,
   newStart: Date | string,
+  academySlug?: string | null,
 ): Promise<void> {
   const fmt = (dt: Date | string) => {
     const d = new Date(dt)
-    const date = d.toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', timeZone: 'Asia/Dubai' })
-    const time = d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true, timeZone: 'Asia/Dubai' })
+    const { date, time } = academyClock(d, academySlug)
     return `${date} at ${time}`
   }
   const oldLabel = fmt(oldStart)
@@ -994,9 +999,10 @@ export async function sendDelayNotification(
   name: string,
   sessionTitle: string,
   newStart: Date | string,
+  academySlug?: string | null,
 ): Promise<void> {
   const d = new Date(newStart)
-  const timeStr = d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true, timeZone: 'Asia/Dubai' })
+  const timeStr = academyTime(d, academySlug)
   const subject = `⏳ Class Delay Notice`
   const html = wrap(subject, `
     <h2 style="margin:0 0 16px;font-size:20px;font-weight:700;color:#0D0F1A">⏳ Class Delay Notice</h2>
@@ -1143,10 +1149,10 @@ export async function sendInstructorChangedNotification(
   oldInstructor: string,
   newInstructor: string,
   sessionStart: Date | string,
+  academySlug?: string | null,
 ): Promise<void> {
   const d = new Date(sessionStart)
-  const dateStr = d.toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', timeZone: 'Asia/Dubai' })
-  const timeStr = d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true, timeZone: 'Asia/Dubai' })
+  const { date: dateStr, time: timeStr } = academyClock(d, academySlug)
   const subject = `📣 Instructor Update — ${sessionTitle}`
   const html = wrap(subject, `
     <h2 style="margin:0 0 16px;font-size:20px;font-weight:700;color:#0D0F1A">Instructor Update</h2>
@@ -1234,10 +1240,10 @@ export async function sendCancelledNotification(
   name: string,
   sessionTitle: string,
   sessionStart: Date | string,
+  academySlug?: string | null,
 ): Promise<void> {
   const d = new Date(sessionStart)
-  const dateStr = d.toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', timeZone: 'Asia/Dubai' })
-  const timeStr = d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true, timeZone: 'Asia/Dubai' })
+  const { date: dateStr, time: timeStr } = academyClock(d, academySlug)
   const subject = `❗ Class Cancellation Notice`
   const html = wrap(subject, `
     <h2 style="margin:0 0 16px;font-size:20px;font-weight:700;color:#0D0F1A">❗ Class Cancellation Notice</h2>

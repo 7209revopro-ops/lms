@@ -16,7 +16,7 @@ under "Why classes are not in this plan", and the decision `docs/work-status.md`
 | 2 — schema and authoring, inert | **done** | `6e11c41` |
 | 3 — seats | **done** | |
 | 4 — roster, homework and attendance split | **done** | |
-| 5 — mail clocks | not started | |
+| 5 — mail clocks | **done** | |
 | 6a — narrow the browse feed, alone | not started | |
 | 6b — open it | not started | |
 
@@ -63,11 +63,30 @@ and withholding authority over a single seat would be a fiction. What it does
 not get is the guest academy's student LIST. Authority over the room, no
 visibility of the other academy's people.
 
-**Phase 5 is next, and the plan calls it not cuttable.** Ship the remaining
-phases without it and a guest student reads one time in the app and a different
-one in every confirmation and reminder mail, unlabelled. Today that student gets
-no mail for the class at all, so cutting it creates a group of students who are
-actively told the wrong time.
+**Phase 5 landed both steps.** There are now zero hard-coded zone strings in
+email.service.ts, and every class mail prints its zone — GST or IST — whether or
+not anything else is threaded through. That was step 1 and it protects every
+recipient on its own: a labelled wrong time is a question, an unlabelled one is
+a missed class.
+
+Step 2 threads the reader. Two rules, and the split is deliberate:
+
+- **Students** read their OWN academy's clock. They booked through their own
+  academy's course and think in its terms.
+- **Staff** read the CLASS's academy clock, because that is what the admin panel
+  already shows them for the same class. An instructor comparing the panel
+  against their inbox must not find two different times.
+
+Both are labelled, so neither misleads even where the choice is arguable.
+
+One defect fixed in passing that had already reached real students: an invalid
+date rendered as the literal text "Invalid Date at Invalid Date". Every
+formatter now answers with a dash, which is obviously missing rather than
+confidently wrong, and the suite pins it for five kinds of bad input.
+
+**Phase 6a is next**, and it ships alone on purpose: it takes something away
+from students with no stake in this feature, and this repo has already lived
+through a support wave from live classes appearing to vanish.
 ---
 
 ## The answer

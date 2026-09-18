@@ -18,6 +18,7 @@
  */
 import cron from 'node-cron'
 import { logger } from '@/utils/logger.ts'
+import { ensureOrgSlugs, orgSlugFor } from '@/utils/orgSlugs.ts'
 import { NotificationService } from '@/services/notification.service.ts'
 import {
   sendSessionLinkReminder,
@@ -200,7 +201,10 @@ export async function runDayBeforeReminders(): Promise<void> {
       status: 'booked',
       reminderDayBeforeSent: false,
     })
-      .populate<{ userId: BookingWithRefs['userId'] }>('userId', 'name email')
+      /* organizationId comes back so the mail can be rendered in the READER's
+         academy clock. On a shared class the student's academy and the class's
+         differ, and an unlabelled ninety-minute gap is a missed class. */
+      .populate<{ userId: BookingWithRefs['userId'] }>('userId', 'name email organizationId')
       .populate<{ liveClassId: BookingWithRefs['liveClassId'] }>('liveClassId', 'id title scheduledStart meetingUrl muxPlaybackId status')
       .lean({ virtuals: true }) as unknown as BookingWithRefs[]
 
@@ -236,7 +240,10 @@ export async function runDayOfReminders(): Promise<void> {
       status: 'booked',
       reminderDayOfSent: false,
     })
-      .populate<{ userId: BookingWithRefs['userId'] }>('userId', 'name email')
+      /* organizationId comes back so the mail can be rendered in the READER's
+         academy clock. On a shared class the student's academy and the class's
+         differ, and an unlabelled ninety-minute gap is a missed class. */
+      .populate<{ userId: BookingWithRefs['userId'] }>('userId', 'name email organizationId')
       .populate<{ liveClassId: BookingWithRefs['liveClassId'] }>('liveClassId', 'id title scheduledStart meetingUrl muxPlaybackId status')
       .lean({ virtuals: true }) as unknown as BookingWithRefs[]
 
@@ -272,7 +279,10 @@ export async function runPreSessionReminders(): Promise<void> {
       status: 'booked',
       reminderPreSessionSent: false,
     })
-      .populate<{ userId: BookingWithRefs['userId'] }>('userId', 'name email')
+      /* organizationId comes back so the mail can be rendered in the READER's
+         academy clock. On a shared class the student's academy and the class's
+         differ, and an unlabelled ninety-minute gap is a missed class. */
+      .populate<{ userId: BookingWithRefs['userId'] }>('userId', 'name email organizationId')
       .populate<{ liveClassId: BookingWithRefs['liveClassId'] }>('liveClassId', 'id title scheduledStart meetingUrl muxPlaybackId status')
       .lean({ virtuals: true }) as unknown as BookingWithRefs[]
 
@@ -307,7 +317,10 @@ export async function runFiveMinReminders(): Promise<void> {
       status: 'booked',
       reminder5MinSent: false,
     })
-      .populate<{ userId: BookingWithRefs['userId'] }>('userId', 'name email')
+      /* organizationId comes back so the mail can be rendered in the READER's
+         academy clock. On a shared class the student's academy and the class's
+         differ, and an unlabelled ninety-minute gap is a missed class. */
+      .populate<{ userId: BookingWithRefs['userId'] }>('userId', 'name email organizationId')
       .populate<{ liveClassId: BookingWithRefs['liveClassId'] }>('liveClassId', 'id title scheduledStart meetingUrl muxPlaybackId status')
       .lean({ virtuals: true }) as unknown as BookingWithRefs[]
 
@@ -319,7 +332,10 @@ export async function runFiveMinReminders(): Promise<void> {
       const joinUrl = getJoinUrl(b.liveClassId)
 
       await dispatch(userId, b.liveClassId.title, classAt, 'five-min', () =>
-        sendFiveMinReminder(b.userId.email, b.userId.name, b.liveClassId.title, joinUrl, classAt),
+        sendFiveMinReminder(
+          b.userId.email, b.userId.name, b.liveClassId.title, joinUrl, classAt,
+          orgSlugFor((b.userId as { organizationId?: unknown }).organizationId),
+        ),
       )
 
       await ClassBookingModel.findByIdAndUpdate(b._id, { reminder5MinSent: true })
@@ -343,7 +359,10 @@ export async function runAtTimeReminders(): Promise<void> {
       status: 'booked',
       reminderAtTimeSent: false,
     })
-      .populate<{ userId: BookingWithRefs['userId'] }>('userId', 'name email')
+      /* organizationId comes back so the mail can be rendered in the READER's
+         academy clock. On a shared class the student's academy and the class's
+         differ, and an unlabelled ninety-minute gap is a missed class. */
+      .populate<{ userId: BookingWithRefs['userId'] }>('userId', 'name email organizationId')
       .populate<{ liveClassId: BookingWithRefs['liveClassId'] }>('liveClassId', 'id title scheduledStart meetingUrl muxPlaybackId status')
       .lean({ virtuals: true }) as unknown as BookingWithRefs[]
 
@@ -425,6 +444,7 @@ export async function runInstructor15MinReminders(): Promise<void> {
           cls.title,
           new Date(cls.scheduledStart),
           cls.meetingUrl,
+          orgSlugFor((cls as { organizationId?: unknown }).organizationId),
         )
         await LiveClassModel.findByIdAndUpdate(cls._id, { reminderInstructor15MinSent: true })
         logger.info({ classId: cls._id, instructor: instructor.email }, '[Reminders] Instructor 15-min reminder sent')
@@ -514,6 +534,11 @@ export function exclusive(name: string, task: () => Promise<void>): () => Promis
 }
 
 export function startReminderJobs(): void {
+  /* Warm the academy slug map once at start-up. orgSlugFor() is synchronous
+     because it is called inside mail assembly; a cold cache falls back to the
+     default zone, which is the old unlabelled behaviour but now labelled. */
+  void ensureOrgSlugs().catch(() => {/* non-fatal — falls back to the default */})
+
   // Every hour at :00 — day-before reminders (23–25 h window)
   cron.schedule('0 * * * *', exclusive('day-before', runDayBeforeReminders))
 

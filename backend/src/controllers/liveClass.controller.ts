@@ -833,6 +833,9 @@ export class LiveClassController {
               live.title,
               live.scheduledStart,
               meetingUrl,
+              /* The CLASS's academy — the same clock the admin panel shows this
+                 instructor for this class. */
+              orgSlugFor((live as { organizationId?: unknown }).organizationId),
             )
           }
         } catch (err) {

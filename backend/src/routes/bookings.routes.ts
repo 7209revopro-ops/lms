@@ -14,6 +14,7 @@
 import { Router, type Request, type Response, type NextFunction } from 'express'
 import { resolveClassEntitlement } from '@/services/classEntitlement.service.ts'
 import { reserveSeat, releaseSeat, seatStampFrom } from '@/services/seatPool.service.ts'
+import { ensureOrgSlugs, orgSlugFor } from '@/utils/orgSlugs.ts'
 import { z } from 'zod'
 import { resolveLiveStatus, isBookingOpen, bookingClosesAt } from '@/utils/liveStatus.ts'
 import { authenticate, requireEnrollmentApproval } from '@/middleware/auth.middleware.ts'
@@ -60,6 +61,9 @@ async function afterBookingCreated(
   sessionTitle: string,
   sessionStart: string | Date,
   joinUrl: string,
+  /* THE RECIPIENT'S academy, not the class's. On a shared class the two
+     differ, and the reader thinks in their own academy's clock. */
+  academySlug?: string | null,
 ): Promise<void> {
   const dateLabel = fmtDate(sessionStart)
 
@@ -74,7 +78,7 @@ async function afterBookingCreated(
   /* 2. Confirmation email — if it fails, add a system notification */
   try {
     const { sendBookingConfirmation } = await import('@/services/email.service.ts')
-    await sendBookingConfirmation(userEmail, userName, sessionTitle, sessionStart)
+    await sendBookingConfirmation(userEmail, userName, sessionTitle, sessionStart, academySlug)
   } catch {
     await notifSvc.create(userId, {
       kind:  'system',
@@ -288,14 +292,20 @@ router.post('/', authenticate, requireEnrollmentApproval, validate(createBooking
       const joinUrl = (lc as any).meetingUrl
         ?? `${process.env['CLIENT_URL'] ?? 'http://localhost:3000'}/live-classes/${liveClassId}/watch`
 
-      afterBookingCreated(
-        userId,
-        user.email,
-        user.name,
-        lc.title,
-        lc.scheduledStart,
-        joinUrl,
-      ).catch(() => {/* non-fatal */})
+      /* THE STUDENT'S OWN ACADEMY, not the class's. On a shared class those
+         differ by ninety minutes, and the reader thinks in their own. */
+      void (async () => {
+        await ensureOrgSlugs()
+        await afterBookingCreated(
+          userId,
+          user.email,
+          user.name,
+          lc.title,
+          lc.scheduledStart,
+          joinUrl,
+          orgSlugFor((user as { organizationId?: unknown }).organizationId),
+        )
+      })().catch(() => {/* non-fatal */})
     }).catch(() => {/* non-fatal */})
 
   } catch (err: any) {

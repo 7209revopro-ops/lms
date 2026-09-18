@@ -23,6 +23,7 @@ import {
   servedClassFilter, classServesOrg, andFilter,
 } from '@/utils/tenancy.ts'
 import { reserveSeat, releaseSeat, seatStampFrom } from '@/services/seatPool.service.ts'
+import { ensureOrgSlugs, orgSlugFor } from '@/utils/orgSlugs.ts'
 import { documentRef } from '@/utils/documentRef.ts'
 import { UserService } from '@/services/user.service.ts'
 import { adminListDevices, adminApproveDevice, adminRevokeDevice } from '@/services/device.service.ts'
@@ -1574,7 +1575,13 @@ router.post('/bookings/book-for-student', requireAnyAdmin, validate(bookForStude
     }).catch(() => {/* non-fatal */})
 
     import('@/services/email.service.ts').then(({ sendBookingConfirmation }) => {
-      sendBookingConfirmation((student as any).email, (student as any).name, session.title, session.scheduledStart)
+      void ensureOrgSlugs()
+      sendBookingConfirmation(
+        (student as any).email, (student as any).name, session.title, session.scheduledStart,
+        /* The STUDENT's academy, not the admin's: an admin of one academy can
+           book a seat for a student of another on a shared class. */
+        orgSlugFor((student as any).organizationId),
+      )
         .catch(() => {/* non-fatal */})
     }).catch(() => {/* non-fatal */})
 
@@ -2447,11 +2454,13 @@ router.patch('/bookings/:id/cancel', requireInstructor, requirePermission('booki
            17, 2026 at 10:00 PM" is not a parseable date, so the mail went out
            reading "your scheduled class on Invalid Date at Invalid Date has
            been cancelled". The type accepted it; only the output showed it. */
+        await ensureOrgSlugs()
         await sendCancelledNotification(
           (student as any).email,
           (student as any).name ?? '',
           title,
           start ?? new Date(),
+          orgSlugFor((student as any).organizationId),
         )
       } catch {
         /* Non-fatal: the seat is already released and the caller already has
