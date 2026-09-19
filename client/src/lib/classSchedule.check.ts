@@ -9,7 +9,7 @@
    deliberately set to different values, and the tree is asserted to have
    used neither.
    ───────────────────────────────────────────────────────────────────────── */
-import { buildCatalog, GENERAL_MODULE_ID } from '@/lib/classSchedule'
+import { buildCatalog, GENERAL_MODULE_ID, groupKeyOf, slotPattern } from '@/lib/classSchedule'
 import type { LiveClass } from '@/lib/api/liveClasses'
 import type { MyBooking } from '@/lib/api/bookings'
 
@@ -135,6 +135,50 @@ console.log('\nE. Sessions with no module')
   check('E1 a General bucket exists', mods.some(m => m.id === GENERAL_MODULE_ID))
   check('E2 and it sorts LAST', mods[mods.length - 1]!.id === GENERAL_MODULE_ID,
     JSON.stringify(mods.map(m => m.title)))
+}
+
+console.log('\nF. A class taught in two languages is TWO series, not one')
+{
+  /* Caught on screen, not by a test: a module card read "2 Languages,
+     8 Sessions" and the sheet beneath it listed ONE English slot holding all
+     eight. The group key ignored language, so the Malayalam sessions were
+     swallowed into the English group, the modal's single language badge
+     mislabelled half of them, and the weekly pattern could never form
+     because two interleaved schedules never agree on a weekday. */
+  const series = (lang: string, dayOffset: number, hour: number) =>
+    [0, 1, 2, 3].map(w => {
+      const d = new Date('2026-10-05T00:00:00Z')            // a Monday
+      d.setUTCDate(d.getUTCDate() + w * 7 + dayOffset)
+      d.setUTCHours(hour, 0, 0, 0)
+      return row({ ...HOST, id: `${lang}${w}`, title: 'Core Concepts', language: lang,
+                   scheduledStart: d.toISOString(), isEnrolled: true, isEntitled: true })
+    })
+
+  const rows = [...series('English', 1, 15), ...series('Malayalam', 3, 6)]
+  const cat  = buildCatalog(rows, noBookings)
+  const mod  = cat[0]!.modules[0]!
+
+  check('F1 the two languages are two groups', mod.groups.length === 2,
+    JSON.stringify(mod.groups.map(g => g.slots.length)))
+  check('F2 neither group mixes languages',
+    mod.groups.every(g => new Set(g.slots.map(s => (s as { language?: string }).language)).size === 1),
+    JSON.stringify(mod.groups.map(g => g.slots.map(s => (s as { language?: string }).language))))
+  check('F3 every session is still accounted for',
+    mod.groups.reduce((n, g) => n + g.slots.length, 0) === 8 && mod.sessionCount === 8,
+    String(mod.sessionCount))
+  check('F4 the module still counts two languages', mod.languages.length === 2,
+    JSON.stringify(mod.languages))
+  check('F5 the count and the slots agree - what the screen got wrong',
+    mod.languages.length === mod.groups.length)
+
+  /* The weekly pattern is only findable once the schedules are separated. */
+  check('F6 each group now claims its weekday',
+    mod.groups.every(g => slotPattern(g.slots) !== null),
+    JSON.stringify(mod.groups.map(g => slotPattern(g.slots))))
+  check('F7 and a merged group would NOT have', slotPattern(rows) === null)
+
+  check('F8 language is part of the key', groupKeyOf(rows[0]!) !== groupKeyOf(rows[4]!),
+    `${groupKeyOf(rows[0]!)} vs ${groupKeyOf(rows[4]!)}`)
 }
 
 console.log(`\nclassSchedule.check — ${pass} passed, ${fail} failed\n`)

@@ -213,13 +213,30 @@ export interface ClassGroup {
 }
 
 /* A repeat series, as far as the student is concerned: the same class, by the
-   same instructor, in the same course and the same module.
+   same instructor, in the same course, the same module AND THE SAME LANGUAGE.
 
    BOTH DOORS ARE IN THE KEY VIA THE `eff` READERS, so a group can never span
    two courses or two modules — which is what lets the hierarchy bucket groups
-   by course and module without regrouping the raw sessions. */
+   by course and module without regrouping the raw sessions.
+
+   LANGUAGE IS IN THE KEY because a class taught in two languages is two
+   series, not one, and merging them broke three things at once: the module
+   sheet groups slots BY language and put the whole merged group under
+   whichever language its first session happened to be in, so the other
+   language's sessions vanished from a module whose own card still counted
+   them ("2 Languages", one slot listed); SlotModal shows a single language
+   badge taken from slots[0], which mislabelled every session in the other
+   language; and slotPattern could never find a weekly pattern, because two
+   interleaved schedules never agree on a weekday, so a genuine "Tuesdays ·
+   7:00 PM" slot fell back to listing dates. */
 export const groupKeyOf = (lc: LiveClass): string =>
-  [lc.title.trim(), lc.instructor?.id ?? '', effCourseId(lc) ?? '', effSectionId(lc)].join('|')
+  [
+    lc.title.trim(),
+    lc.instructor?.id ?? '',
+    effCourseId(lc) ?? '',
+    effSectionId(lc),
+    (lc as { language?: string }).language ?? '',
+  ].join('|')
 
 /** Bucket sessions into slot-groups. Slots ascending by start; `bookedSlot` is
     the one the student holds, if any. Callers sort the groups themselves. */
