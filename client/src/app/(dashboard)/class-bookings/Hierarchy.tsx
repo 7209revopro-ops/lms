@@ -254,289 +254,176 @@ function ModuleGeometry({ skin }: { skin: Skin }) {
 }
 
 
-/* ── Level 1 — the courses ───────────────────────────────────────────────
+/* ── Level 1 — the courses ──────────────────────────────────────
 
-   THE COVER IS A LAYER, NOT A CASE.
+   THE SAME CARD THE CATALOG USES, WITH THE SCHEDULE'S BUTTON.
 
-   Some courses have artwork and some never will — and `buildCatalog` makes
-   that structural, not accidental: `thumbnailUrl` is deliberately dropped for
-   every SHARED course, so a guest's card can NEVER have a photo. The old card
-   made that the student's problem: a photographed course sat beside a grey box
-   with a cap floating in it, which reads as a broken image rather than a cover.
+   A student meets these courses twice — once in the Catalog and once here —
+   and two different cards for one course is two things to learn. So this
+   follows MaterialCard in courses/page.tsx: a 16:9 cover that zooms on hover
+   under a scrim with a play affordance, a type badge, the title, the
+   instructor, a meta line, a hairline, and the level. What changes is the
+   action: the Catalog's small right-aligned button becomes the full-width one
+   this hierarchy uses at every level, because here the card has exactly one
+   thing to do.
 
-   So the ground is ALWAYS the generated delta banner the module cards use —
-   same FNV-1a hash, same six hues, same four motifs, same hairline — and the
-   cover, when there is one, is a layer on top of it. A course with a photo and
-   a course without are the same card with one layer switched off: same wash,
-   same geometry, same scrim, same hairline, same numeral, same hover. Nothing
-   in the row reads as a fallback, and a cover that 404s falls back to the
-   designed banner instead of leaving a hole.
+   THE COVER STILL FALLS BACK TO A DRAWN BANNER, not to the Catalog's grey box
+   with an icon floating in it. `buildCatalog` drops `thumbnailUrl` for every
+   SHARED course by construction, so on this screen the empty case is not a
+   rare gap — it is the permanent appearance of every cross-academy course. A
+   generated banner is the same family as the module cards one level down, and
+   nothing in the row reads as a broken image.
+   ────────────────────────────────────────────────────────────────── */
 
-   The ring position is hashed from the course id, not taken from `index`,
-   because `index` is the position in the FILTERED grid: seeding off it would
-   repaint every banner in the grid as the student types in the search box. A
-   module's number is its place in the course and a course's colour is a
-   property of the course — neither is a property of your search results.
-   ──────────────────────────────────────────────────────────────────────── */
-
-/** `level` arrives as free text — the admin typed it by hand for years before
-    it became a select, so it shows up as 'Beginner', 'BEGINNER', 'beginner'
-    and as things that are none of the three. The three we can draw a meter for
-    are matched case-insensitively and rendered from the canonical map (NOT
-    through `titleCase`, which preserves deliberate capitals and would leave
-    'BEGINNER' shouting); anything else is still shown as a word rather than
-    thrown away. */
-const LEVEL_RUNGS: Record<string, number> = { beginner: 1, intermediate: 2, advanced: 3 }
+/** `level` is free text — the admin typed it by hand for years before it
+    became a select — so it arrives as 'Beginner', 'BEGINNER' and 'beginner'.
+    The three we know are rendered from this map rather than through
+    `titleCase`, which preserves deliberate capitals and would leave 'BEGINNER'
+    shouting; anything else still shows as typed. */
 const LEVEL_LABEL: Record<string, string> = {
   beginner: 'Beginner', intermediate: 'Intermediate', advanced: 'Advanced',
 }
 
-/** How an uploaded cover composites onto its generated banner.
-
-    'normal'     — the photo keeps its own colours; the banner supplies the
-                   hue only through the eyebrow, the hairline and a 10% veil.
-    'luminosity' — duotone: the photo supplies the light and the banner the
-                   colour, so every cover renders in its card's hue.
-
-    'normal' is the default because a cover is content an academy chose to
-    upload, and silently recolouring it is destructive. The lightness clamp
-    below — not the blend — is what keeps a blown-out photo from landing two
-    stops brighter than the generated banners beside it. Flip this one constant
-    to see the whole grid duotone. */
-const COVER_BLEND: 'normal' | 'luminosity' = 'normal'
-
-/** Structurally a `CourseNode`, widened only where the card is tolerant:
-    `modules` is counted, never read into, and `level` is free text. */
-interface CourseCardNode {
-  id:            string
-  title:         string
-  program?:      string
-  thumbnailUrl?: string
-  description?:  string
-  level?:        string
-  shared:        boolean
-  modules:       unknown[]
-  sessionCount:  number
-}
-
-/** Three bars, n of them lit. A level reads faster as a shape than as a word,
-    and a shape survives being 10px tall on a banner where a word would not —
-    the word is still beside it for everyone who is not skimming. */
-function LevelMeter({ rungs }: { rungs: number }) {
-  return (
-    <span aria-hidden className="flex items-end gap-[2px]">
-      {[0, 1, 2].map(i => (
-        <span key={i} className="w-[3px] rounded-[1px]"
-          style={{ height: 4 + i * 3, background: '#fff', opacity: i < rungs ? 0.95 : 0.32 }} />
-      ))}
-    </span>
-  )
-}
-
 function CourseCard({ node, index, onOpen }: {
-  node: CourseCardNode; index: number; onOpen: () => void
+  node: CourseNode; index: number; onOpen: () => void
 }) {
   const moduleCount = node.modules.length
   const empty       = node.sessionCount === 0
 
-  const raw    = node.level?.trim() ?? ''
-  const key    = raw.toLowerCase()
-  const rungs  = LEVEL_RUNGS[key] ?? 0
-  const level  = raw ? (LEVEL_LABEL[key] ?? titleCase(raw)) : null
+  const raw   = node.level?.trim() ?? ''
+  const level = raw ? (LEVEL_LABEL[raw.toLowerCase()] ?? titleCase(raw)) : null
 
-  /* A cover that fails to load is remembered BY URL rather than as a boolean,
-     so the layer comes back by itself if the course is later given a working
-     one — no effect, no stale `true` pinned to a new src. */
+  /* Remembered BY URL rather than as a boolean, so the cover comes back by
+     itself if the course is later given a working one. */
   const [failedSrc, setFailedSrc] = useState<string | null>(null)
   const cover = node.thumbnailUrl && node.thumbnailUrl !== failedSrc ? node.thumbnailUrl : null
 
-  /* The course's own hash picks its stop in the ring; the programme seeds
-     where that ring starts, so one programme's courses read as one slice of
-     the six hues and another programme's as a different slice. Pure FNV-1a,
-     so the server and the browser paint the same card. */
+  /* Hashed off the course id, not the render index: `index` is the position
+     in the FILTERED grid, so seeding from it would repaint every banner in
+     the row as the student types in the search box. */
   const skin = useMemo(
     () => moduleSkin(node.id, node.title, moduleHash(node.id || node.title) % 6, node.program ?? 'delta'),
     [node.id, node.title, node.program],
   )
 
+  const tutors = node.instructors
+  const tutor  = tutors.length === 1 ? tutors[0]!.name
+               : tutors.length > 1   ? `${tutors.length} instructors`
+               : null
+
   const label = [
-    titleCase(node.title),
-    ' — ', plural(moduleCount, 'module'), ', ',
+    titleCase(node.title), ' — ', plural(moduleCount, 'module'), ', ',
     empty ? 'nothing scheduled' : plural(node.sessionCount, 'upcoming session'),
     level ? `, ${level}` : '',
     node.shared ? ', shared with your academy' : '',
   ].join('')
 
-  /* Capped: a 40-course catalogue would otherwise take 1.6s to finish
-     arriving, and the last card would animate in long after the student had
-     started reading the first. Twelve cards is more than one screen. */
-  const delay = Math.min(index, 11) * 0.04
-
   return (
-    /* ONE focusable element, as ModuleCard is. The CTA below is a span that
-       looks like a button — a real button nested in this one would be invalid
-       HTML and would cost a second tab stop per card: five cards to a row,
-       ten tab stops to cross a grid.
+    /* ONE focusable element. The CTA below is a span that looks like a button
+       — a real one nested here would be invalid HTML and would cost a second
+       tab stop on every card.
 
-       `outline-none` holds a transparent 2px outline at rest so the focus ring
-       costs no layout when it appears, and the colour is `primary-on-surface`
-       (#6ba6ff in dark) rather than `--color-primary`, which is the same
-       #0057b8 in both themes and would be nearly invisible against #12151F.
-       An outline rather than the button component's ring, because
-       `ring-offset` paints a band in a fixed colour and would draw a white
-       halo around every focused card in dark mode.
-
-       The stagger lives inside the `animate` target's own transition, NOT in a
-       top-level `transition` prop: a top-level one would replace cardHover's
-       350/28 spring and apply the entry delay to hover and tap, so the tenth
-       card in the grid would sit still for 400ms after the cursor arrived. */
+       The stagger lives INSIDE the animate target. As a sibling `transition`
+       prop it would be framer's default for whileHover and whileTap too, and
+       being written after the spread it would replace cardHover's own spring,
+       so the last card in the grid would sit still for a third of a second
+       after the cursor reached it. */
     <motion.button type="button" onClick={onOpen}
       {...cardHover}
       initial={{ opacity: 0, y: 16 }}
-      animate={{ opacity: 1, y: 0, transition: { ...spring, delay } }}
+      animate={{ opacity: 1, y: 0, transition: { ...spring, delay: Math.min(index, 11) * 0.04 } }}
       style={CARD}
       aria-label={label}
       className="dm group flex h-full w-full min-w-0 flex-col overflow-hidden rounded-2xl bg-[var(--color-bg-surface)] text-left outline-none focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[color:var(--color-primary-on-surface,var(--color-primary))]">
 
-      {/* ── the banner ── */}
+      {/* ── cover ── */}
       <div className="relative aspect-video w-full flex-shrink-0 overflow-hidden"
         style={{ background: skin.wash }}>
-
-        {/* One layer carries the ground AND the cover, so both cases move
-            identically on hover.
-
-            `isolate` is load-bearing rather than decorative: `group-hover:
-            scale` opens a stacking context the moment the cursor arrives, so
-            without an isolation of its own a blended cover would resolve
-            against the page at rest and against this box on hover, and the
-            photograph would visibly jump the first time you pointed at it. */}
-        <div className="absolute inset-0 isolate transition-transform duration-[600ms] ease-out group-hover:scale-[1.06]"
-          style={{ background: skin.wash }}>
-          <ModuleGeometry skin={skin} />
-
-          {cover && (
-            <>
-              {/* The clamp, not the blend, is what makes a photographed card
-                  and a generated one siblings: measured against a deliberately
-                  blown-out test image, an unclamped cover lands two lightness
-                  stops above every banner beside it and the row stops reading
-                  as a set. */}
-              <img src={cover} alt="" loading="lazy" decoding="async" draggable={false}
-                onError={() => setFailedSrc(cover)}
-                className="absolute inset-0 h-full w-full object-cover"
-                style={{
-                  mixBlendMode: COVER_BLEND,
-                  opacity: COVER_BLEND === 'luminosity' ? 0.88 : 1,
-                  filter: COVER_BLEND === 'luminosity'
-                    ? 'brightness(0.62) contrast(1.08)'
-                    : 'brightness(0.82) saturate(0.92)',
-                }} />
-              {/* A 10% breath of the card's own hue, so a cover still belongs
-                  to the family it sits in. Degrades to a faint haze rather
-                  than to nothing if `overlay` is unsupported. */}
-              <span aria-hidden className="absolute inset-0"
-                style={{ background: skin.tint, opacity: 0.1, mixBlendMode: 'overlay' }} />
-            </>
+        <div className="absolute inset-0 transition-transform duration-500 group-hover:scale-105">
+          {cover ? (
+            <img src={cover} alt="" loading="lazy" decoding="async" draggable={false}
+              onError={() => setFailedSrc(cover)}
+              className="h-full w-full object-cover" />
+          ) : (
+            <ModuleGeometry skin={skin} />
           )}
         </div>
 
-        {/* Constant scrim: the type at the foot sits on the same darkness
-            whether the layer above it is a photograph or a gradient. Fixed
-            near-black alpha over an always-dark banner, so it is
-            theme-independent by construction. */}
-        <span aria-hidden className="absolute inset-0"
-          style={{ background: 'linear-gradient(180deg, rgba(4,8,16,0.20) 0%, rgba(4,8,16,0.12) 38%, rgba(4,8,16,0.56) 74%, rgba(4,8,16,0.86) 100%)' }} />
+        {/* The Catalog's hover scrim and play affordance, so the two screens
+            answer a pointer the same way. */}
+        <div className="absolute inset-0 flex items-center justify-center opacity-0 transition-opacity duration-300 group-hover:opacity-100"
+          style={{ background: 'rgba(13,15,26,0.30)' }}>
+          <span className="flex h-10 w-10 items-center justify-center rounded-full"
+            style={{ background: 'rgba(0,87,184,0.90)', boxShadow: '0 6px 18px rgba(0,87,184,0.40)' }}>
+            <ChevronRight size={15} strokeWidth={3} color="white" />
+          </span>
+        </div>
 
-        {/* The hairline every banner in this file carries. Drawn here as well
-            as inside the SVG, because the SVG's own hairline is under the
-            cover — and this line is what stops the banner's 18% foot reading
-            as a hole punched in the #12151F card surface in dark mode. */}
-        <span aria-hidden className="absolute inset-x-0 bottom-0 h-px"
-          style={{ background: skin.tint, opacity: 0.34 }} />
+        {/* Top-left: how much of this course is actually on. The Catalog puts
+            the runtime here; the schedule's equivalent is what you can book. */}
+        <span className="absolute left-2.5 top-2.5 rounded-lg px-2 py-0.5 text-[10px] font-bold"
+          style={{ background: 'rgba(13,15,26,0.68)', color: 'white', backdropFilter: 'blur(6px)' }}>
+          {empty ? 'No sessions' : plural(node.sessionCount, 'session')}
+        </span>
 
         {node.shared && (
-          /* Still the admin dashboard's violet, but as tint on glass rather
-             than white on #A78BFA — that pairing measures under 3:1 and was
-             the weakest type on the card. Same mark, legible. */
-          <span className="absolute left-2.5 top-2.5 inline-flex max-w-[calc(100%-1.25rem)] items-center gap-1 rounded-full px-2 py-0.5 text-[9px] font-bold"
+          /* The admin dashboard's cross-academy violet, as tint on glass —
+             white on #A78BFA measures about 2:1 and was the weakest type on
+             the card. */
+          <span className="absolute right-2.5 top-2.5 inline-flex max-w-[60%] items-center gap-1 rounded-full px-2 py-0.5 text-[9px] font-bold"
             style={{
-              background: 'rgba(8,12,22,0.55)',
-              border: `1px solid rgba(${SHARED_RGB},0.45)`,
+              background: 'rgba(8,12,22,0.55)', border: `1px solid rgba(${SHARED_RGB},0.45)`,
               color: '#CFC0FF', backdropFilter: 'blur(6px)',
             }}>
             <Share2 size={8} strokeWidth={2.5} className="flex-shrink-0" />
-            <span className="truncate">Shared with your academy</span>
+            <span className="truncate">Shared</span>
           </span>
         )}
+      </div>
 
-        {/* The hero figure, echoing the module card's numeral one level down:
-            same face, same size, same corner. There it counts the module's
-            place; here it counts how much course there is to book — so the
-            banner and the footer never carry the same number twice. */}
-        <div className="absolute inset-x-0 bottom-0 flex items-end justify-between gap-2 p-3.5">
-          <div className="min-w-0">
-            <span className="dm block truncate text-[9px] font-bold uppercase tracking-[0.18em]"
-              style={{ color: skin.tint }}>
-              {node.program ? titleCase(node.program) : 'Course'}
-            </span>
-            <span className="flex items-baseline gap-1.5">
-              {/* Not pure #FFF — the dark palette stops at #E8EAF0 to avoid
-                  haloing, and a 30px numeral is exactly that case. */}
-              <span className="syne text-[30px] font-extrabold leading-none tracking-tight"
-                style={{ color: 'rgba(255,255,255,0.95)' }}>{pad2(moduleCount)}</span>
-              <span className="text-[9px] font-bold uppercase tracking-[0.16em]"
-                style={{ color: 'rgba(255,255,255,0.72)' }}>
-                {moduleCount === 1 ? 'Module' : 'Modules'}
-              </span>
-            </span>
-          </div>
+      {/* ── content, in the Catalog's order ── */}
+      <div className="flex flex-1 flex-col gap-2 p-3.5">
+        <span className="inline-flex w-fit items-center gap-1 rounded-lg px-2 py-0.5 text-[10px] font-semibold"
+          style={{ background: 'rgba(0,87,184,0.08)', color: 'var(--color-primary-on-surface, var(--color-primary))' }}>
+          <span className="h-1.5 w-1.5 rounded-full" style={{ background: 'var(--color-primary)' }} />
+          Course
+        </span>
 
-          {level && (
-            <span className="inline-flex max-w-[45%] flex-shrink-0 items-center gap-1.5 rounded-full px-2 py-1 text-[9px] font-bold uppercase tracking-wide"
-              style={{
-                background: 'rgba(8,12,22,0.42)', border: '1px solid rgba(255,255,255,0.22)',
-                color: 'rgba(255,255,255,0.94)', backdropFilter: 'blur(6px)',
-              }}>
-              {rungs > 0 && <LevelMeter rungs={rungs} />}
-              <span className="truncate">{level}</span>
+        <h3 className="line-clamp-2 break-words text-sm font-bold leading-snug"
+          style={{ color: 'var(--color-text-primary)' }}>{titleCase(node.title)}</h3>
+
+        {tutor && (
+          <p className="truncate text-xs" style={{ color: 'var(--color-text-muted)' }}>{tutor}</p>
+        )}
+
+        <div className="flex flex-wrap items-center gap-2 text-[11px] font-medium"
+          style={{ color: 'var(--color-text-muted)' }}>
+          <span className="flex items-center gap-1">
+            <Layers size={10} strokeWidth={2} />{plural(moduleCount, 'module')}
+          </span>
+          {node.program && (
+            <span className="rounded-md px-1.5 py-0.5 text-[10px] font-medium"
+              style={{ background: 'var(--color-bg-subtle)', color: 'var(--color-text-muted)' }}>
+              {titleCase(node.program)}
             </span>
           )}
         </div>
-      </div>
 
-      {/* ── the body ── */}
-      <div className="flex flex-1 flex-col gap-2 p-3.5">
-        <h3 className="syne line-clamp-2 break-words text-[13px] font-extrabold uppercase leading-[1.35] tracking-[0.02em]"
-          style={{ color: 'var(--color-text-primary)' }}>
-          {titleCase(node.title)}
-        </h3>
-
-        {/* Always three lines' worth of room, described or not: an absent
-            description must not leave a shorter, emptier card in the row
-            beside a described one. The generic line is muted so it reads as
-            chrome rather than as somebody's copy. */}
-        <p className="line-clamp-3 break-words text-[11.5px] leading-relaxed"
-          style={{ color: node.description?.trim() ? 'var(--color-text-secondary)' : 'var(--color-text-muted)' }}>
-          {node.description?.trim()
-            || 'Live sessions for this course, grouped by module — open one to see the slots you can book.'}
-        </p>
-
-        {/* The hairline every sibling card separates its footer with. The
-            module count is the banner's numeral, so this carries the figure
-            the banner does not. */}
-        <div className="mt-auto flex items-center gap-3 pt-3 text-[11px] font-medium"
-          style={{ borderTop: '1px solid var(--color-border)', color: 'var(--color-text-muted)' }}>
-          <span className="flex min-w-0 items-center gap-1">
-            <Calendar size={10} strokeWidth={2} className="flex-shrink-0" />
-            <span className="truncate">
-              {empty ? 'No sessions yet' : `${plural(node.sessionCount, 'Session')} ahead`}
-            </span>
+        {/* The hairline the Catalog separates its footer with. Level sits where
+            the Catalog puts it; the button below is the schedule's, full width,
+            because this card has exactly one thing to do. */}
+        <div className="mt-auto flex items-center justify-between gap-2 pt-3"
+          style={{ borderTop: '1px solid var(--color-border)' }}>
+          <span className="truncate text-[10px] capitalize" style={{ color: 'var(--color-text-muted)' }}>
+            {level ?? 'All levels'}
           </span>
+          {!empty && (
+            <span className="flex-shrink-0 text-[10px] font-semibold" style={{ color: 'var(--color-text-muted)' }}>
+              {plural(node.sessionCount, 'session')} ahead
+            </span>
+          )}
         </div>
 
-        {/* Delta blue and white, the same primary CTA ModuleCard carries one
-            level down — stable in both themes, unlike an ink button whose
-            inverse text flips with the palette. */}
         <span aria-hidden
           className="mt-2.5 flex w-full items-center justify-center gap-1.5 rounded-xl py-2.5 text-[12px] font-bold transition-opacity group-hover:opacity-90"
           style={empty
@@ -551,21 +438,6 @@ function CourseCard({ node, index, onOpen }: {
         </span>
       </div>
     </motion.button>
-  )
-}
-
-/** Five up on a wide desktop, as the reference is, and one up at 375px.
-    `items-stretch` is the grid default and every card is `h-full`, so a row is
-    as tall as its tallest card and every CTA in that row shares a baseline. */
-function CourseGrid({ courses, onOpen }: {
-  courses: CourseCardNode[]; onOpen: (course: CourseCardNode) => void
-}) {
-  return (
-    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5">
-      {courses.map((c, i) => (
-        <CourseCard key={c.id || 'unassigned'} node={c} index={i} onOpen={() => onOpen(c)} />
-      ))}
-    </div>
   )
 }
 

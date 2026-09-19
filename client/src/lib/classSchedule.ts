@@ -347,6 +347,11 @@ export interface CourseNode {
   /** Reached through a GUEST door — this course belongs to the other academy
       and is shared with yours. */
   shared:        boolean
+  /** Whoever is teaching the sessions still ahead — deduped, in the order
+      they first appear. A course's "instructor" is a property of the CLASSES
+      that are actually scheduled, not of the course document, so a course
+      taught by two people says two rather than picking one. */
+  instructors:   { id: string; name: string; avatarUrl?: string }[]
   modules:       ModuleNode[]
   sessionCount:  number
 }
@@ -391,12 +396,15 @@ export function buildCatalog(
            doors in one card. */
         thumbnailUrl: isSharedWithYou(first) ? undefined : first.course?.thumbnailUrl,
         shared:  false,
+        instructors: [],
         modules: [],
         sessionCount: 0,
       }
       courses.set(cid, course)
     }
     if (isSharedWithYou(first)) course.shared = true
+    const tutor = g.instructor
+    if (tutor && !course.instructors.some(i => i.id === tutor.id)) course.instructors.push(tutor)
 
     const mid = effSectionId(first) || GENERAL
     let mod = course.modules.find(m => m.id === mid)

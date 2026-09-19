@@ -1367,6 +1367,23 @@ export default function ClassBookingsPage() {
     const q = search.trim().toLowerCase()
     return allClasses.filter(lc=>{
       const a = lc as any
+      /* THE SCHEDULE IS WHAT IS ON, NOT WHAT WAS.
+
+         The default tab applied no time filter at all, so a database with a
+         hundred finished classes behind it opened on a hundred things nobody
+         can book. You cannot reserve a seat in a class that has ended, and a
+         student looking for what they ATTENDED is asking a different question
+         on a different screen — My Bookings, which is a full history.
+
+         So 'All' now means all of what is still ahead. 'Completed' is
+         untouched and is still the way to look back from here; nothing is
+         unreachable, it is simply no longer the first thing you see. */
+      if(filterStatus==='all'){
+        const finished = a.isOnline===false
+          ? (lc.status==='ended' || lc.status==='cancelled' || offlineDayOffset(lc.scheduledStart) < 0)
+          : (lc.status==='ended' || lc.status==='cancelled' || isPastEnd(lc))
+        if(finished) return false
+      }
       // Status filter
       if(filterStatus==='live'){
         if(filterDelivery==='offline'){

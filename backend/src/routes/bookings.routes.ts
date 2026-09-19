@@ -381,7 +381,28 @@ router.get('/me', authenticate, validate(bookingQuerySchema, 'query'), async (re
            holder. A booking row carried it for every status — cancelled
            included — and at any time; that was a way to read the link
            without ever being let in. */
-        .populate('liveClassId', 'id title scheduledStart durationMins status muxPlaybackId type isOnline')
+        /* WIDE ENOUGH TO BE A HISTORY. The projection above carried the
+           class's title, clock and type and nothing else — enough for
+           "you have a class on Tuesday", not enough to say WHICH course
+           it belonged to, who taught it, what language it ran in, or
+           which room an in-person one was in. A booking the student made
+           a year ago has to answer all of those on its own, because the
+           class it points at may be long over.
+
+           Still no meetingUrl, and deliberately: the link is released
+           only by POST /live-classes/:id/join, inside the join window,
+           to the seat holder. A booking row carried it for every status
+           — cancelled included — and at any time, which was a way to
+           read the link without ever being let in. */
+        .populate({
+          path:   'liveClassId',
+          select: 'id title scheduledStart durationMins status muxPlaybackId type isOnline language location room courseId sectionId instructorId',
+          populate: [
+            { path: 'courseId',     select: 'id title slug thumbnailUrl' },
+            { path: 'sectionId',    select: 'id title order' },
+            { path: 'instructorId', select: 'id name avatarUrl' },
+          ],
+        })
         .sort({ bookedAt: -1 })
         .skip(skip).limit(per_page)
         .lean({ virtuals: true }),

@@ -18,6 +18,17 @@ export interface MyBooking {
     muxPlaybackId?: string
     type:           string
     isOnline?:      boolean
+    language?:      string
+    /* In-person only. */
+    location?:      string
+    room?:          string
+    /* WHAT THIS BOOKING WAS FOR. All three are optional because a class
+       may have been filed under no module, and because a booking
+       outlives the rows it points at — a course deleted after the fact
+       leaves the reference unpopulated rather than the booking broken. */
+    courseId?:      { id: string; title: string; slug: string; thumbnailUrl?: string }
+    sectionId?:     { id: string; title: string; order?: number }
+    instructorId?:  { id: string; name: string; avatarUrl?: string }
     /* No meetingUrl and no join window on a booking row: the Join button on
        My Classes reads the window from the matching /live-classes row and
        fetches the link through POST /live-classes/:id/join. */
@@ -32,10 +43,20 @@ export const bookingKeys = {
 /** Normalize a raw booking doc — maps `_id → id` on the doc and its nested objects */
 function normalizeBooking(b: any): MyBooking {
   const lc = b.liveClassId
+  /* `_id → id` on the nested refs too. Spread rather than rebuilt field
+     by field, so widening the populate again does not silently drop the
+     new fields on the floor here — which is exactly what happened to the
+     module's order and the course's description elsewhere. */
+  const ref = (o: any) => (o && typeof o === 'object' ? { ...o, id: o.id ?? String(o._id ?? '') } : undefined)
   return {
     ...b,
     id:          b.id ?? b._id,
-    liveClassId: lc ? { ...lc, id: lc.id ?? lc._id } : lc,
+    liveClassId: lc
+      ? { ...lc, id: lc.id ?? lc._id,
+          courseId:     ref(lc.courseId),
+          sectionId:    ref(lc.sectionId),
+          instructorId: ref(lc.instructorId) }
+      : lc,
   }
 }
 
