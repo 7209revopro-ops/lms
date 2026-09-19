@@ -19,6 +19,12 @@ export interface MyBooking {
     type:           string
     isOnline?:      boolean
     language?:      string
+    /* THE JOIN WINDOW, derived server-side from scheduledStart by the same
+       rule the schedule's rows use. Still no meetingUrl: the button drawn
+       from these fetches the link on the click, through
+       POST /live-classes/:id/join, which re-checks the seat and the window. */
+    joinOpensAt?:   string
+    joinClosesAt?:  string
     /* In-person only. */
     location?:      string
     room?:          string

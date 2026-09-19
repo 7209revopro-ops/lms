@@ -29,11 +29,16 @@
    the SERVER's (`useServerNow`), so a device clock that is a day out cannot
    move a class either.
 
-   THERE IS DELIBERATELY NO JOIN BUTTON.
-   Joining reads a window this row does not carry: `GET /bookings/me` omits
-   `meetingUrl` on purpose, because serving it here would be a way to read the
-   link without ever being let in. Join lives on the Class Schedule, beside
-   the live-class row that owns the window.
+   JOINING HAPPENS HERE, WITHOUT THE LINK LIVING HERE.
+   `GET /bookings/me` still omits `meetingUrl` on purpose, because serving it
+   on every row would be a way to read the link without ever being let in.
+   What it does serve is the WINDOW - `joinOpensAt`/`joinClosesAt`, derived
+   server-side by the same `studentJoinWindow` the Class Schedule's rows are
+   built from, so the two screens open the door on the same second instead of
+   each keeping a copy of the rule. The button drawn from those two instants
+   fetches the link on the click, through `POST /live-classes/:id/join`, which
+   re-checks the seat and the window before answering. An affordance, not a
+   key.
    ───────────────────────────────────────────────────────────────────────── */
 
 import { useEffect, useMemo, useState } from 'react'
@@ -45,6 +50,7 @@ import {
   RotateCw, Search, Target, Ticket, Video, X, XCircle,
 } from 'lucide-react'
 import { useMyBookings, useCancelBooking, type MyBooking } from '@/lib/api/bookings'
+import JoinMeetButton from '@/components/live-classes/JoinMeetButton'
 import { useServerNow } from '@/hooks/useServerNow'
 import { APP_TIMEZONE } from '@/lib/timezone'
 import { titleCase } from '@/lib/titleCase'
@@ -294,6 +300,34 @@ function canCancel(r: Row, v: Verdict, now: number): boolean {
   return r.booking.status === 'booked' && v.kind === 'booked' && now < r.start
 }
 
+/* JOINING FROM THE HISTORY.
+
+   This page used to argue, in its own header, that there was deliberately no
+   join button here - because the booking row did not carry the window and
+   joining was the schedule's job. The row carries it now: studentJoinWindow,
+   derived server-side by the same rule the schedule's own rows are built
+   from, so both screens open the door on the same second rather than each
+   keeping a copy of the rule. The argument is gone, and a student looking at
+   the seat they hold should be able to walk through the door from there.
+
+   WHAT HAS NOT CHANGED IS WHERE THE LINK LIVES. The row still has no
+   meetingUrl. JoinMeetButton fetches it on the click, through
+   POST /live-classes/:id/join, which re-checks the seat and the window
+   server-side. So this button is an affordance, never a key.
+
+   Offered only on a seat the student still HOLDS, and only for an online
+   class - there is nothing to join for an in-person one, and the button
+   renders nothing for it anyway. It draws its own before/open/closed states
+   off `now`, so it can say "opens in 12 min" as readily as "join now"; what
+   it must never do is appear on a cancelled seat or a finished class. */
+function canJoin(r: Row, v: Verdict): boolean {
+  const lc = r.booking.liveClassId
+  return r.booking.status === 'booked'
+    && (v.kind === 'booked' || v.kind === 'live')
+    && lc.isOnline !== false
+    && !!lc.joinOpensAt
+}
+
 /* ── Small parts ────────────────────────────────────────────────────────── */
 
 function Badge({ v }: { v: Verdict }) {
@@ -541,9 +575,22 @@ function BookingRow({ row, now }: { row: Row; now: number }) {
         )}
       </div>
 
-      {/* Status, and the one thing you may still do about it. */}
+      {/* Status, and what you may still do about it: walk in, or give the
+          seat back. Join sits above Cancel because on a class about to
+          start it is the one a student is reaching for. */}
       <div className="flex flex-shrink-0 flex-col items-end gap-1.5">
         <Badge v={v} />
+        {canJoin(row, v) && (
+          <JoinMeetButton
+            sessionId={b.liveClassId.id} now={now} size="sm"
+            isBooked
+            joinOpensAt={b.liveClassId.joinOpensAt}
+            joinClosesAt={b.liveClassId.joinClosesAt}
+            type={b.liveClassId.type}
+            isOnline={b.liveClassId.isOnline}
+            status={b.liveClassId.status}
+          />
+        )}
         {canCancel(row, v, now) && <CancelSeat booking={b} />}
       </div>
     </li>
@@ -883,9 +930,10 @@ export default function MyBookingsPage() {
           Booking History
         </h1>
         <p className="dm mt-1 text-[12.5px] leading-relaxed" style={{ color: 'var(--color-text-muted)' }}>
-          Every seat you have reserved — upcoming and past.
+          Every seat you have reserved — upcoming and past. Join or cancel an
+          upcoming class from the row itself.
           {mounted && <> Shown in your local time ({APP_TIMEZONE.replace(/_/g, ' ')}).</>}
-          {' '}Joining a class happens on the{' '}
+          {' '}Browse what else is on in the{' '}
           <Link href="/class-bookings"
             className="bk-focus font-semibold underline underline-offset-2"
             style={{ color: BLUE_INK }}>

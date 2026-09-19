@@ -17,7 +17,7 @@ import { reserveSeat, releaseSeat, seatStampFrom } from '@/services/seatPool.ser
 import { ensureOrgSlugs, orgSlugFor } from '@/utils/orgSlugs.ts'
 import { callerOrgForRead } from '@/utils/tenancy.ts'
 import { z } from 'zod'
-import { resolveLiveStatus, isBookingOpen, bookingClosesAt } from '@/utils/liveStatus.ts'
+import { resolveLiveStatus, isBookingOpen, bookingClosesAt, studentJoinWindow } from '@/utils/liveStatus.ts'
 import { authenticate, requireEnrollmentApproval } from '@/middleware/auth.middleware.ts'
 import { validate } from '@/middleware/validate.middleware.ts'
 import { NotificationService } from '@/services/notification.service.ts'
@@ -416,10 +416,35 @@ router.get('/me', authenticate, validate(bookingQuerySchema, 'query'), async (re
         .lean({ virtuals: true }),
       ClassBookingModel.countDocuments(filter),
     ])
+    /* THE JOIN WINDOW, so a seat can be joined from the history it is listed
+       in. Derived, never stored — the same studentJoinWindow the schedule's
+       own rows are built from, so the two screens open the door at the same
+       second rather than each keeping a copy of the rule.
+
+       This is still NOT the meeting URL. The button drawn from these two
+       instants fetches the link on the click, through
+       POST /live-classes/:id/join, which re-checks the seat and the window
+       server-side. Serialising the URL here would hand it to every row —
+       cancelled ones included — at any hour, which is a way into the room
+       without ever being let in. */
+    const rows = (docs as any[]).map(b => {
+      const lc = b.liveClassId
+      if (!lc?.scheduledStart) return b
+      const w = studentJoinWindow(lc.scheduledStart)
+      return {
+        ...b,
+        liveClassId: {
+          ...lc,
+          joinOpensAt:  w.opensAt.toISOString(),
+          joinClosesAt: w.closesAt.toISOString(),
+        },
+      }
+    })
+
     /* No avatar in this projection today, but the rule is the rule: anything
        that serialises a stored document goes through sendSuccess, so a field
        added to the populate later cannot quietly start shipping dead URLs. */
-    sendSuccess(res, docs, undefined, 200, buildPaginationMeta(total, page, per_page))
+    sendSuccess(res, rows, undefined, 200, buildPaginationMeta(total, page, per_page))
   } catch (err) { next(err) }
 })
 
