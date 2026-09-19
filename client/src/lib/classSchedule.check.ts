@@ -190,5 +190,54 @@ console.log('\nF. A class taught in two languages is TWO series, not one')
     `${groupKeyOf(rows[0]!)} vs ${groupKeyOf(rows[4]!)}`)
 }
 
+console.log('\nG. Four weekly slots of one class are FOUR slots')
+{
+  /* Caught on screen: a module offering Monday 7am, Tuesday 8pm, Wednesday
+     9pm and Saturday 3:30pm — four genuinely different weekly cohorts of the
+     same class — rendered as "English · 1 SLOT" holding sixteen sessions.
+     The key had the title, instructor, course, module and language, all of
+     which those four share, and nothing about WHEN. And because sixteen
+     sessions spread over four weekdays never agree, slotPattern correctly
+     refused to name a weekday and the card fell back to a bare date, so the
+     student was shown one slot where there were four and could not tell
+     which cohort they were joining. */
+  const weekly = (label: string, dayOffset: number, hour: number, minute = 0) =>
+    [0, 1, 2, 3].map(w => {
+      const d = new Date('2026-10-05T00:00:00Z')            // a Monday
+      d.setUTCDate(d.getUTCDate() + w * 7 + dayOffset)
+      d.setUTCHours(hour, minute, 0, 0)
+      return row({ ...HOST, id: `${label}${w}`, title: 'Core Concepts', language: 'English',
+                   scheduledStart: d.toISOString(), isEnrolled: true, isEntitled: true })
+    })
+
+  const rows = [
+    ...weekly('mon', 0, 7),
+    ...weekly('tue', 1, 20),
+    ...weekly('wed', 2, 21),
+    ...weekly('sat', 5, 15, 30),
+  ]
+  const mod = buildCatalog(rows, noBookings)[0]!.modules[0]!
+
+  check('G1 four slots, not one', mod.groups.length === 4,
+    JSON.stringify(mod.groups.map(g => g.slots.length)))
+  check('G2 each holds its own four dates',
+    mod.groups.every(g => g.slots.length === 4),
+    JSON.stringify(mod.groups.map(g => g.slots.length)))
+  check('G3 all sixteen sessions are still counted', mod.sessionCount === 16, String(mod.sessionCount))
+  check('G4 every slot can now name its weekday',
+    mod.groups.every(g => slotPattern(g.slots) !== null),
+    JSON.stringify(mod.groups.map(g => slotPattern(g.slots))))
+  check('G5 and they are four DIFFERENT weekdays',
+    new Set(mod.groups.map(g => slotPattern(g.slots)?.weekday)).size === 4,
+    JSON.stringify(mod.groups.map(g => slotPattern(g.slots)?.weekday)))
+  check('G6 one language throughout, so the module still says one',
+    mod.languages.length === 1, JSON.stringify(mod.languages))
+  check('G7 the recurrence is part of the key',
+    groupKeyOf(rows[0]!) !== groupKeyOf(rows[4]!),
+    `${groupKeyOf(rows[0]!)} vs ${groupKeyOf(rows[4]!)}`)
+  check('G8 but two dates of the SAME weekly slot share it',
+    groupKeyOf(rows[0]!) === groupKeyOf(rows[1]!))
+}
+
 console.log(`\nclassSchedule.check — ${pass} passed, ${fail} failed\n`)
 process.exit(fail === 0 ? 0 : 1)

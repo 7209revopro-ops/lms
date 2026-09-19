@@ -237,6 +237,15 @@ export interface ClassGroup {
    language; and slotPattern could never find a weekly pattern, because two
    interleaved schedules never agree on a weekday, so a genuine "Tuesdays ·
    7:00 PM" slot fell back to listing dates. */
+/** The weekday and clock time a session recurs on, in the student's own
+    zone. This is what makes one weekly slot one slot. */
+const WEEKDAY_NUM = new Intl.DateTimeFormat('en-US', { timeZone: APP_TIMEZONE, weekday: 'short' })
+const CLOCK_HM    = new Intl.DateTimeFormat('en-GB', { timeZone: APP_TIMEZONE, hour: '2-digit', minute: '2-digit', hour12: false })
+const slotSignature = (lc: LiveClass): string => {
+  const d = new Date(lc.scheduledStart)
+  return `${WEEKDAY_NUM.format(d)}@${CLOCK_HM.format(d)}`
+}
+
 export const groupKeyOf = (lc: LiveClass): string =>
   [
     lc.title.trim(),
@@ -244,6 +253,23 @@ export const groupKeyOf = (lc: LiveClass): string =>
     effCourseId(lc) ?? '',
     effSectionId(lc),
     (lc as { language?: string }).language ?? '',
+    /* THE RECURRENCE ITSELF IS PART OF THE IDENTITY.
+
+       Without it, every weekly series of the same class in the same module
+       and language collapsed into one group. A module offering Monday 7am,
+       Tuesday 8pm, Wednesday 9pm and Saturday 3:30pm — four genuinely
+       different weekly cohorts — came out as "1 SLOT" holding sixteen
+       sessions, and because those sixteen disagree on weekday, slotPattern
+       correctly refused to name one and the card fell back to printing a
+       single date. The student was shown one slot where there were four, and
+       could not tell which cohort they were joining.
+
+       Keyed on weekday + clock time in the STUDENT'S zone, which is the zone
+       the card labels them in, so the grouping and the label can never
+       disagree. A rescheduled member now splits into its own group rather
+       than suppressing its series' weekday label — which is also truer: it
+       really is at a different time now. */
+    slotSignature(lc),
   ].join('|')
 
 /** Bucket sessions into slot-groups. Slots ascending by start; `bookedSlot` is

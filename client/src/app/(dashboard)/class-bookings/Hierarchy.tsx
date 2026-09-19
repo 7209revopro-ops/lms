@@ -25,14 +25,14 @@ import { useMemo, useState } from 'react'
 import { motion, useReducedMotion } from 'framer-motion'
 import {
   BookOpen, ChevronRight, Globe, Layers, Lock, Users, Clock,
-  Share2, Calendar, ArrowLeft, Radio, MapPin, Check,
+  Share2, Calendar, ArrowLeft, Radio, MapPin, Check, Video,
 } from 'lucide-react'
 import type { LiveClass } from '@/lib/api/liveClasses'
 import type { MyBooking } from '@/lib/api/bookings'
 import { titleCase } from '@/lib/titleCase'
 import { AvatarImg } from '@/components/ui/AvatarImg'
 import {
-  getSlotStatus, SC, seatsLeft, slotPattern, nextSlot, isPastEnd,
+  getSlotStatus, SC, seatsLeft, slotPattern, nextSlot,
   buildCatalog, GENERAL_MODULE_ID as GENERAL,
   type ClassGroup, type SlotStatus, type CourseNode, type ModuleNode,
 } from '@/lib/classSchedule'
@@ -746,54 +746,6 @@ function ModuleHero({ node, position, course }: {
 
 /* ── The slot card ──────────────────────────────────────────────────────── */
 
-/** The run of sessions behind one weekly slot, drawn as a strip: hollow for
-    the ones already taught, solid for the ones still ahead, and the next one
-    (or the one you hold a seat in) larger and in the status colour. It answers
-    "how far into this series am I" in the space a sentence would have taken.
-
-    Past-ness is read from the CLOCK via isPastEnd, not from the index: the
-    strip must not depend on buildGroups still sorting its slots ascending, and
-    a cancelled session in the middle of a run is not a session you attended.
-    The window follows the next session, so session 10 of 12 still shows its
-    own dot instead of eight grey ones and a "+4". */
-function SessionStrip({ slots, markIds, color }: {
-  slots: LiveClass[]; markIds: string[]; color: string
-}) {
-  const MAX = 8
-  const focus = slots.findIndex(s => markIds.includes(s.id))
-  const start = Math.min(Math.max(0, (focus < 0 ? slots.length : focus) - 3),
-                         Math.max(0, slots.length - MAX))
-  const win   = slots.slice(start, start + MAX)
-  const after = slots.length - (start + win.length)
-
-  return (
-    <span aria-hidden className="flex flex-shrink-0 items-center gap-[3px]">
-      {start > 0 && (
-        <span className="mr-0.5 text-[9px] font-bold" style={{ color: 'var(--color-text-muted)' }}>
-          +{start}
-        </span>
-      )}
-      {win.map(s => {
-        const mark = markIds.includes(s.id)
-        const done = isPastEnd(s) || s.status === 'cancelled'
-        return (
-          <span key={s.id} className={`rounded-full ${mark ? 'h-2 w-2' : 'h-1.5 w-1.5'}`}
-            style={mark
-              ? { background: color }
-              : done
-                ? { background: 'var(--color-border)' }
-                : { background: 'var(--color-text-muted)', opacity: 0.45 }} />
-        )
-      })}
-      {after > 0 && (
-        <span className="ml-0.5 text-[9px] font-bold" style={{ color: 'var(--color-text-muted)' }}>
-          +{after}
-        </span>
-      )}
-    </span>
-  )
-}
-
 /* What the card's button says, and how loud it is.
 
    'primary' is the solid Delta blue every other screen uses for the one action
@@ -835,75 +787,70 @@ function SlotCard({ group, bookingMap, blocked, index, onOpen }: {
   const reduce   = useReducedMotion()
 
   /* A blocked module's sessions are listed but cannot be booked, so the badge
-     must not say "Open · 6 left" over a slot the modal will refuse. Only the
-     two states that promise a seat are downgraded; a booking you already hold,
-     a live class and every past state still say exactly what they are. */
+     must not say "Open" over a slot the modal will refuse. Only the two
+     states that promise a seat are downgraded; a booking you already hold, a
+     live class and every past state still say exactly what they are. */
   const shown: SlotStatus = blocked && (status === 'bookable' || status === 'full') ? 'locked' : status
   const c = SC[shown]
 
-  const cap   = next.sessionCapacity
-  const left  = Math.max(0, seatsLeft(next))
+  const cap    = next.sessionCapacity
+  const left   = Math.max(0, seatsLeft(next))
   /* CROSS-ACADEMY: on a shared class seatsLeft() is the caller's own
      allocation, not the room's remainder, so `cap - left` is not "seats
-     taken" — a guest with a floor of 5 and 4 left would have read 87% full on
-     a half-empty class. The count is still true; only the ratio is dropped. */
-  const yours = next.seatsLeftForYou != null
-  const seats = !blocked && cap > 0 && (shown === 'bookable' || shown === 'full' || shown === 'booked')
-  const taken = Math.min(100, Math.max(0, Math.round(((cap - left) / cap) * 100)))
+     taken" — a guest with a floor of 5 and 4 left would read 87% full on a
+     half-empty class. The count stays; only the ratio is dropped. */
+  const yours  = next.seatsLeftForYou != null
+  const showSeats = !blocked && cap > 0
+  const taken  = Math.min(100, Math.max(0, Math.round(((cap - left) / cap) * 100)))
   const scarce = left > 0 && left <= 3
 
-  const offline = next.isOnline === false
-  const where   = [next.location, next.room].filter(Boolean).join(' · ')
+  const offline  = next.isOnline === false
+  const where    = [next.location, next.room].filter(Boolean).join(' · ')
+  const language = (next as { language?: string }).language
 
-  const cta   = slotCta(shown, blocked, group.slots.length)
-  const marks = [still?.id, group.bookedSlot?.id].filter(Boolean) as string[]
+  const cta = slotCta(shown, blocked, group.slots.length)
 
-  const when = pattern
-    ? `${pattern.weekday}s at ${pattern.time}`
-    : `next ${fmtDate(next.scheduledStart)} at ${fmtTime(next.scheduledStart)}`
+  /* The DAY is the headline. slotPattern returns null the moment the sessions
+     in a group disagree on weekday or time, and then the date is shown
+     instead — a weekday that is only true for some of a series would send a
+     student to the wrong one. */
+  const day  = pattern ? `${pattern.weekday}s` : fmtDate(next.scheduledStart)
+  const time = pattern ? pattern.time          : fmtTime(next.scheduledStart)
 
   return (
-    /* ONE focusable element, as every other card on these three levels is. The
-       button below is a span that looks like one — a real nested button would
-       make the card unreachable by keyboard and invalid HTML. The focus ring is
-       an OUTLINE rather than a Tailwind `ring`, because a ring is a box-shadow
-       and cardHover animates boxShadow out from under it. */
+    /* ONE focusable element, as every other card on these three levels is.
+       The button below is a span that looks like one — a real nested button
+       would make the card unreachable by keyboard and invalid HTML. The focus
+       ring is an OUTLINE rather than a Tailwind `ring`, because a ring is a
+       box-shadow and cardHover animates boxShadow out from under it. */
     <motion.button type="button" onClick={onOpen}
       {...cardHover}
       initial={{ opacity: 0, y: 12 }}
-      /* Inside the animate target, not a top-level prop — see ModuleCard. */
+      /* Inside the animate target, never as a sibling `transition` prop: that
+         is framer's default for whileHover too, and after the spread it would
+         also replace cardHover's own spring. */
       animate={{ opacity: 1, y: 0, transition: { ...spring, delay: Math.min(index, 8) * 0.04 } }}
-      style={{ ...CARD, outlineColor: 'var(--color-primary-on-surface, var(--color-primary))' }}
-      aria-label={`${group.title} — ${when}, ${plural(group.slots.length, 'session')}, ${c.label}`}
-      className="dm group relative flex h-full w-full flex-col overflow-hidden rounded-2xl bg-[var(--color-bg-surface)] text-left outline-none focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2">
+      style={{ ...CARD, opacity: blocked ? 0.72 : 1 }}
+      aria-label={`${day} at ${time}${language ? `, ${language}` : ''}${group.instructor ? `, ${group.instructor.name}` : ''}, ${c.label}`}
+      className="dm group relative flex h-full w-full min-w-0 flex-col overflow-hidden rounded-2xl bg-[var(--color-bg-surface)] text-left outline-none focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[color:var(--color-primary-on-surface,var(--color-primary))]">
 
       {/* The status rail. Four pixels of the one colour that answers "can I
-          have this?", clipped by the card's own radius — the whole grid can be
-          read down its left edge before a single word is. Decorative, so it
-          carries the brand value rather than the lifted ink. */}
+          have this?", so a grid can be read down its left edge before a
+          single word is. */}
       <span aria-hidden className="absolute inset-y-0 left-0 w-1"
         style={{ background: c.color, opacity: shown === 'bookable' || shown === 'live' || shown === 'booked' ? 1 : 0.45 }} />
 
-      <div className="flex flex-1 flex-col p-3.5 pl-4 sm:p-4 sm:pl-[18px]">
+      <div className="flex flex-1 flex-col gap-2.5 p-3.5 pl-4">
 
-        {/* ── headline: the weekday and the clock ── */}
-        <div className="flex items-start justify-between gap-2.5">
-          <div className="min-w-0 flex-1">
-            <p className="truncate text-[10px] font-bold uppercase tracking-[0.14em]"
-              style={{ color: 'var(--color-text-muted)' }}>{titleCase(group.title)}</p>
-
-            {/* slotPattern returns null the moment the sessions disagree, and
-                the fallback shows the date instead. A weekday that is only true
-                for some of the series would send a student to the wrong one. */}
-            <p className="syne mt-1 truncate text-[19px] font-extrabold leading-tight sm:text-[21px]"
-              style={{ color: 'var(--color-text-primary)' }}>
-              {pattern ? `${pattern.weekday}s` : fmtDate(next.scheduledStart)}
-            </p>
-
-            <p className="mt-1 flex flex-wrap items-center gap-x-1.5 text-[12px] font-semibold"
+        {/* ── the day, and what state it is in ── */}
+        <div className="flex items-start justify-between gap-2">
+          <div className="min-w-0">
+            <p className="syne truncate text-[18px] font-extrabold leading-tight"
+              style={{ color: 'var(--color-text-primary)' }}>{day}</p>
+            <p className="mt-1 flex items-center gap-1.5 text-[12px] font-semibold"
               style={{ color: 'var(--color-text-secondary)' }}>
               <Clock size={11} strokeWidth={2.25} className="flex-shrink-0" />
-              {pattern ? pattern.time : fmtTime(next.scheduledStart)}
+              {time}
               <span aria-hidden style={{ color: 'var(--color-text-muted)' }}>·</span>
               <span style={{ color: 'var(--color-text-muted)' }}>{next.durationMins || 60} min</span>
             </p>
@@ -920,27 +867,44 @@ function SlotCard({ group, bookingMap, blocked, index, onOpen }: {
           </span>
         </div>
 
-        {offline && (
-          <p className="mt-2 flex items-center gap-1 text-[11px] font-medium"
-            style={{ color: 'var(--color-text-muted)' }}>
-            <MapPin size={10} strokeWidth={2.25} className="flex-shrink-0" />
-            <span className="truncate">{where || 'In person'}</span>
-          </p>
-        )}
-
-        {/* ── the series ── */}
-        <div className="mt-2.5 flex items-center gap-2">
-          <SessionStrip slots={group.slots} markIds={marks} color={c.color} />
-          <span className="truncate text-[10.5px] font-semibold" style={{ color: 'var(--color-text-muted)' }}>
-            {still
-              ? `${plural(group.slots.length, 'session')} · next ${fmtMonthDay(still.scheduledStart)}`
-              : plural(group.slots.length, 'session')}
+        {/* ── language, and where it happens ── */}
+        <div className="flex flex-wrap items-center gap-1.5">
+          {language && (
+            <span className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold"
+              style={{ background: 'rgba(14,204,142,0.08)', color: 'var(--color-success)', border: '1px solid rgba(14,204,142,0.20)' }}>
+              <Globe size={9} strokeWidth={2.5} />{language}
+            </span>
+          )}
+          <span className="inline-flex min-w-0 items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold"
+            style={offline
+              ? { background: 'rgba(0,87,184,0.08)', color: 'var(--color-primary-on-surface, var(--color-primary))', border: '1px solid rgba(0,87,184,0.20)' }
+              : { background: 'rgba(99,102,241,0.08)', color: '#6366F1', border: '1px solid rgba(99,102,241,0.20)' }}>
+            {offline ? <MapPin size={9} strokeWidth={2.5} /> : <Video size={9} strokeWidth={2.5} />}
+            <span className="truncate">{offline ? (where || 'In person') : 'Online'}</span>
           </span>
         </div>
 
+        {/* ── the instructor ── */}
+        <div className="flex items-center gap-2">
+          {group.instructor ? (
+            <>
+              <AvatarImg src={group.instructor.avatarUrl} name={group.instructor.name}
+                className="h-5 w-5 flex-shrink-0 rounded-full object-cover"
+                fallbackClassName="flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full text-[8px] font-bold"
+                fallbackStyle={{ background: 'var(--color-bg-subtle)', color: 'var(--color-text-muted)' }} />
+              <span className="min-w-0 flex-1 truncate text-[11.5px] font-semibold"
+                style={{ color: 'var(--color-text-secondary)' }}>{group.instructor.name}</span>
+            </>
+          ) : (
+            <span className="text-[11.5px] font-medium" style={{ color: 'var(--color-text-muted)' }}>
+              Instructor to be announced
+            </span>
+          )}
+        </div>
+
         {/* ── the seats ── */}
-        {seats && (
-          <div className="mt-3">
+        {showSeats && (
+          <div>
             <div className="flex items-center justify-between gap-2">
               <span className="truncate text-[10.5px] font-bold"
                 style={{ color: scarce ? 'var(--color-warning)' : 'var(--color-text-secondary)' }}>
@@ -951,9 +915,9 @@ function SlotCard({ group, bookingMap, blocked, index, onOpen }: {
                     : `${left} of ${cap} seats left`}
               </span>
               {!yours && (
-                <span className="flex flex-shrink-0 items-center gap-1 text-[9px] font-bold uppercase tracking-[0.12em]"
+                <span className="flex flex-shrink-0 items-center gap-1 text-[9px] font-bold uppercase tracking-[0.1em]"
                   style={{ color: 'var(--color-text-muted)' }}>
-                  <Users size={9} strokeWidth={2.5} />{taken}% full
+                  <Users size={9} strokeWidth={2.5} />{cap - left} booked
                 </span>
               )}
             </div>
@@ -969,27 +933,9 @@ function SlotCard({ group, bookingMap, blocked, index, onOpen }: {
           </div>
         )}
 
-        {/* ── the instructor ── */}
-        <div className="mt-auto flex items-center gap-2 pt-3.5"
-          style={{ borderTop: '1px solid var(--color-border)' }}>
-          {group.instructor ? (
-            <>
-              <AvatarImg src={group.instructor.avatarUrl} name={group.instructor.name}
-                className="h-6 w-6 flex-shrink-0 rounded-full object-cover"
-                fallbackClassName="flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-full text-[9px] font-bold"
-                fallbackStyle={{ background: 'var(--color-bg-subtle)', color: 'var(--color-text-muted)' }} />
-              <span className="min-w-0 flex-1 truncate text-[11.5px] font-semibold"
-                style={{ color: 'var(--color-text-secondary)' }}>{group.instructor.name}</span>
-            </>
-          ) : (
-            <span className="flex-1 text-[11.5px] font-medium" style={{ color: 'var(--color-text-muted)' }}>
-              Instructor to be announced
-            </span>
-          )}
-        </div>
-
+        {/* ── the one thing this card does ── */}
         <span aria-hidden
-          className="mt-2.5 flex w-full items-center justify-center gap-1.5 rounded-xl py-2.5 text-[12px] font-bold transition-opacity group-hover:opacity-90"
+          className="mt-auto flex w-full items-center justify-center gap-1.5 rounded-xl py-2.5 text-[12px] font-bold transition-opacity group-hover:opacity-90"
           style={cta.tone === 'primary'
             ? { background: 'var(--color-primary)', color: '#fff', boxShadow: '0 2px 8px rgba(0,87,184,0.25)' }
             : cta.tone === 'soft'
@@ -1064,10 +1010,19 @@ export function ModuleSheet({
      so a lone slot is capped at a card's width instead of being stretched or
      stranded. Counted over the whole sheet, not per language: two languages
      with one slot each is still a two-column screen. */
-  const total = groups.length
-  const cols  = total === 1 ? 'grid-cols-1 max-w-[560px]'
-              : total === 2 ? 'grid-cols-1 sm:grid-cols-2'
-              : 'grid-cols-1 sm:grid-cols-2 xl:grid-cols-3'
+  /* SMALL BOXES. Each card is one slot's facts and nothing else — day, time,
+     language, where, who, seats — so several fit across a desktop where the
+     old strip took the full width for one.
+
+     The column count is PER BAND, not for the sheet: a module with four
+     English slots and one Malayalam one would otherwise put that lone card in
+     a four-column grid with three empty columns beside it, which is the dead
+     space the strip had, wearing a different shape. */
+  const colsFor = (n: number) =>
+      n === 1 ? 'grid-cols-1 max-w-[340px]'
+    : n === 2 ? 'grid-cols-1 sm:grid-cols-2 max-w-[700px]'
+    : n === 3 ? 'grid-cols-1 sm:grid-cols-2 lg:grid-cols-3'
+    :           'grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4'
 
   return (
     <motion.div {...enter} transition={spring} key={`m:${course.id}:${node.id}`}>
@@ -1118,7 +1073,7 @@ export function ModuleSheet({
               {/* The fix for the dead space: a slot is a card in a grid, not a
                   strip drawn across 1200px with a seat count marooned at the
                   far right of it. */}
-              <div className={`grid gap-3.5 ${cols}`}>
+              <div className={`grid gap-3.5 ${colsFor(byLanguage.get(lang)!.length)}`}>
                 {byLanguage.get(lang)!.map((g, i) => (
                   <SlotCard key={g.id} group={g} bookingMap={bookingMap} blocked={node.blocked}
                     index={i} onOpen={() => onOpenGroup(g)} />
