@@ -29,10 +29,10 @@ import {
   zonedKey, toZonedDateStr, offlineDayOffset,
   isWithinLiveWindow, isBookingClosed, bookingClosedAt, isPastEnd,
   seatsLeft, isFull, effCourseId, effProgram, effSectionId, effSectionTitle,
-  getSlotStatus, SC, buildGroups, groupKeyOf,
+  getSlotStatus, SC, buildGroups, groupKeyOf, buildCatalog,
   type SlotStatus, type ClassGroup,
 } from '@/lib/classSchedule'
-import { Hierarchy, buildCatalog, allGroupsIn } from './Hierarchy'
+import { Hierarchy, allGroupsIn } from './Hierarchy'
 
 /* ── Google Fonts ──────────────────────────────────────────── */
 const FONT_CSS = `@import url('https://fonts.googleapis.com/css2?family=Syne:wght@600;700;800&family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;1,9..40,400&display=swap');.syne{font-family:'Syne',sans-serif}.dm{font-family:'DM Sans',sans-serif}`

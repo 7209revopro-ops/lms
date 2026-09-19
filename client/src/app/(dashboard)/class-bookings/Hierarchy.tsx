@@ -517,9 +517,6 @@ export function Hierarchy({
   )
 }
 
-export { buildCatalog }
-export type { CourseNode, ModuleNode }
-
 /* Exported so the page can resolve a group the hierarchy opened without
    going through `dateSections`, which the hierarchy does not build. */
 export function allGroupsIn(catalog: CourseNode[]): ClassGroup[] {
