@@ -81,7 +81,10 @@ function CouponFormModal({
   )
 
   const inputCls = "w-full rounded-xl px-3 py-2.5 text-sm text-white outline-none"
-  const inputStyle = { background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)' }
+  /* colorScheme: 'dark' — this style dresses a native <select> and a native
+     type="date"; without it both open light-mode chrome inside a dark modal
+     and the date field's picker glyph is drawn dark-on-dark. */
+  const inputStyle = { background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)', colorScheme: 'dark' as const }
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4"

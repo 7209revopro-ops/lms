@@ -113,7 +113,12 @@ export function EditLiveClassModal({ live, onClose, onSuccess }: Props) {
   const timeChanged = start !== originalStart
 
   const base     = 'w-full rounded-xl px-3 py-2 text-sm text-white outline-none placeholder:text-white/30'
-  const iStyle   = { background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.09)' } as const
+  /* `colorScheme: 'dark'` is what tells the browser these are dark controls.
+     Without it the native datetime-local draws its calendar-picker glyph as a
+     near-black icon on this near-black field — effectively invisible, and it
+     is the button you click to open the picker — and the dropdown calendar
+     itself opens as a white sheet inside the modal. */
+  const iStyle   = { background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.09)', colorScheme: 'dark' } as const
   const selStyle = { background: '#1e2035', border: '1px solid rgba(255,255,255,0.12)', color: 'white' } as const
 
   const handleCourseChange = (newCourseId: string) => {
@@ -331,9 +336,14 @@ export function EditLiveClassModal({ live, onClose, onSuccess }: Props) {
               className={base} style={{ ...iStyle, resize: 'none' }} />
           </div>
 
-          {/* Date + Duration + Capacity */}
-          <div className="grid grid-cols-3 gap-3">
-            <div>
+          {/* Date + Duration + Capacity.
+              Full-width start time below `sm`. This one holds a NATIVE
+              datetime-local, whose "dd/mm/yyyy --:--" face has a floor of
+              roughly 150px and does not shrink: in a 90px third of the modal
+              iOS simply clipped it, and the zone warning underneath had no
+              room to read either. */}
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+            <div className="col-span-2 sm:col-span-1">
               <label className="mb-1 block text-[10px] font-semibold uppercase tracking-widest"
                 style={{ color: 'rgba(255,255,255,0.35)' }}>
                 Start time{zoneTag && <span style={{ color: '#FBBF24' }}> · {zoneTag}</span>}
@@ -395,7 +405,13 @@ export function EditLiveClassModal({ live, onClose, onSuccess }: Props) {
                     maxLength={500}
                     placeholder="e.g. Instructor unavailable due to emergency; system maintenance required…"
                     className={base}
-                    style={{ ...iStyle, resize: 'none', fontSize: 13 }}
+                    /* No `fontSize` here on purpose. An inline font-size is the
+                       one thing the 16px phone floor in globals.css cannot beat
+                       — a style attribute outranks any stylesheet rule short of
+                       !important — so this field alone would keep zooming iOS
+                       in while every sibling field stopped. It now inherits
+                       `base` (text-sm) like the description textarea above it. */
+                    style={{ ...iStyle, resize: 'none' }}
                   />
                   <p className="mt-1 text-[10px]" style={{ color: 'rgba(255,255,255,0.28)' }}>
                     This reason will be included in 3 emails sent to all booked students over 24 hours.

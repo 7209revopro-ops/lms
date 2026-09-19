@@ -7,6 +7,7 @@ import { BookOpen, Plus, Trash2, Award, ChevronDown, ChevronUp } from 'lucide-re
 import { PageHeader } from '@/components/ui/PageHeader'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { apiGet, api } from '@/lib/axios'
+import { datetimeLocalToISO } from '@/lib/timezone'
 import Spinner from '@/components/ui/Spinner'
 
 /* ── Types ────────────────────────────────────────────── */
@@ -131,7 +132,16 @@ export default function HomeworkPage() {
               <div className="flex gap-2 pt-1">
                 <button
                   disabled={!title.trim() || createMutation.isPending}
-                  onClick={() => createMutation.mutate({ title, description, dueDate: dueDate ? new Date(dueDate).toISOString() : undefined })}
+                  /* datetimeLocalToISO, not `new Date(dueDate)`. A
+                     datetime-local value is a naive wall-clock string, and
+                     `new Date()` resolves it in the DEVICE zone — so a Dubai
+                     deadline typed as 6:00 PM on an IST laptop was stored as
+                     12:30 UTC. The list below renders through the patched
+                     Intl, i.e. the academy zone, so the deadline you had just
+                     typed came straight back as 4:30 PM. The helper reads the
+                     digits as academy wall-clock instead, which is the same
+                     clock the display uses, so the round-trip holds. */
+                  onClick={() => createMutation.mutate({ title, description, dueDate: dueDate ? datetimeLocalToISO(dueDate) : undefined })}
                   className="flex items-center gap-2 rounded-xl px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
                   style={{ background: 'linear-gradient(135deg,#0057b8,#003d80)' }}>
                   {createMutation.isPending ? <Spinner size={14} /> : <Plus size={14} />}

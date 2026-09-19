@@ -205,8 +205,11 @@ function QuickCreateModal({
   const { data: outline } = useCourseOutline(courseId)
   const sections = outline?.sections ?? []
   const base     = 'w-full rounded-xl px-3 py-2 text-sm text-white outline-none placeholder:text-white/30'
-  const iStyle   = { background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.09)' } as const
-  const selStyle = { background: '#1e2035', border: '1px solid rgba(255,255,255,0.12)', color: 'white' } as const
+  /* colorScheme: 'dark' — without it the native datetime-local's picker
+     glyph renders as a near-black icon on a near-black field, and its
+     dropdown calendar opens as a white sheet inside the dark modal. */
+  const iStyle   = { background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.09)', colorScheme: 'dark' } as const
+  const selStyle = { background: '#1e2035', border: '1px solid rgba(255,255,255,0.12)', color: 'white', colorScheme: 'dark' } as const
 
   const handle = async (e: React.FormEvent) => {
     e.preventDefault()

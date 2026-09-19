@@ -53,38 +53,40 @@ function SelectField<T extends string>({
           )}
         </button>
 
+        {/* Outside AnimatePresence on purpose — see the note in AddUserModal:
+            a fragment hides the panel from AnimatePresence's key tracking and
+            kills its exit animation. */}
+        {open && <div className="fixed inset-0 z-[60]" onClick={() => setOpen(false)} />}
         <AnimatePresence>
           {open && (
-            <>
-              <div className="fixed inset-0 z-[60]" onClick={() => setOpen(false)} />
-              <motion.div
-                initial={{ opacity: 0, y: -4, scale: 0.97 }}
-                animate={{ opacity: 1, y: 0, scale: 1 }}
-                exit={{ opacity: 0, y: -4, scale: 0.97 }}
-                transition={{ duration: 0.1 }}
-                className="absolute left-0 bottom-full z-[61] mb-1 w-full overflow-hidden rounded-xl py-1"
-                style={{
-                  background: '#131525',
-                  border: '1px solid rgba(255,255,255,0.12)',
-                  boxShadow: '0 20px 50px rgba(0,0,0,0.7)',
-                }}
-              >
-                {options.map(o => (
-                  <button
-                    key={o.value}
-                    type="button"
-                    onClick={() => { onChange(o.value); setOpen(false) }}
-                    className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-sm transition-colors hover:bg-white/[0.06]"
-                    style={{ color: o.value === value ? '#0057b8' : 'rgba(255,255,255,0.8)' }}
-                  >
-                    <span className="flex h-4 w-4 flex-shrink-0 items-center justify-center">
-                      {o.value === value && <Check size={12} />}
-                    </span>
-                    {o.label}
-                  </button>
-                ))}
-              </motion.div>
-            </>
+            <motion.div
+              key="menu"
+              initial={{ opacity: 0, y: -4, scale: 0.97 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: -4, scale: 0.97 }}
+              transition={{ duration: 0.1 }}
+              className="absolute left-0 bottom-full z-[61] mb-1 w-full overflow-hidden rounded-xl py-1"
+              style={{
+                background: '#131525',
+                border: '1px solid rgba(255,255,255,0.12)',
+                boxShadow: '0 20px 50px rgba(0,0,0,0.7)',
+              }}
+            >
+              {options.map(o => (
+                <button
+                  key={o.value}
+                  type="button"
+                  onClick={() => { onChange(o.value); setOpen(false) }}
+                  className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-sm transition-colors hover:bg-white/[0.06]"
+                  style={{ color: o.value === value ? '#0057b8' : 'rgba(255,255,255,0.8)' }}
+                >
+                  <span className="flex h-4 w-4 flex-shrink-0 items-center justify-center">
+                    {o.value === value && <Check size={12} />}
+                  </span>
+                  {o.label}
+                </button>
+              ))}
+            </motion.div>
           )}
         </AnimatePresence>
       </div>
@@ -287,12 +289,16 @@ export function EditUserModal({ user, me, onClose, onSuccess }: Props) {
           animate={{ opacity: 1, scale: 1, y: 0 }}
           exit={{ opacity: 0, scale: 0.96, y: 8 }}
           transition={{ type: 'spring', stiffness: 400, damping: 30 }}
-          className="relative w-full max-w-md rounded-2xl"
+          /* Same missing scroll container as AddUserModal — see the note there.
+             This panel is taller still (it carries the toggles as well), so it
+             overflowed a laptop viewport even before the phone case. */
+          className="relative w-full max-w-md overflow-y-auto rounded-2xl"
           style={{
             background: 'linear-gradient(145deg, #0e1022 0%, #0a0c18 100%)',
             border: '1px solid rgba(255,255,255,0.1)',
             boxShadow: '0 40px 80px rgba(0,0,0,0.8)',
             zIndex: 1,
+            maxHeight: '90vh',
           }}
         >
           {/* Header */}

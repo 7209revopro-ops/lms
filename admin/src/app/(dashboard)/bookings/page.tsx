@@ -800,7 +800,9 @@ export default function BookingsPage() {
   ]
 
   /* Styles */
-  const inputStyle = { background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.09)', color: 'rgba(255,255,255,0.80)' }
+  /* colorScheme: 'dark' — the two date fields below are native controls on a
+     dark bar; without it their picker glyphs render near-black on near-black. */
+  const inputStyle = { background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.09)', color: 'rgba(255,255,255,0.80)', colorScheme: 'dark' as const }
   const inputCls   = 'rounded-xl px-3 py-1.5 text-xs font-medium outline-none focus:border-orange-400/50'
 
   const STATUS_OPTS: { value: BookingStatus | ''; label: string }[] = [

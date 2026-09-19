@@ -1270,9 +1270,12 @@ function QuickCreateModal({ onClose, onSuccess, categoryProgram }: { onClose: ()
             placeholder="Session title…"
             className={base} style={iStyle} />
 
-          {/* Start + Duration + Max seats */}
-          <div className="grid grid-cols-3 gap-3">
-            <div>
+          {/* Start + Duration + Max seats.
+              Full-width start time below `sm` — same reason as the offline
+              modal: a third of this modal at 375px cannot show a picked date
+              and its time together. */}
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+            <div className="col-span-2 sm:col-span-1">
               <label className="mb-1 block text-[10px] font-semibold uppercase tracking-widest"
                 style={{ color: 'rgba(255,255,255,0.35)' }}>Start time</label>
               <DarkDateTimePicker value={start} onChange={setStart} />

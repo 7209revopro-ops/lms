@@ -180,6 +180,14 @@ const CAL_DAYS   = ['Su','Mo','Tu','We','Th','Fr','Sa']
 const HOURS      = Array.from({ length: 24 }, (_, i) => String(i).padStart(2, '0'))
 const MINUTES    = Array.from({ length: 60 }, (_, i) => String(i).padStart(2, '0'))
 
+/* The panel's real measurements, declared once and used both to lay it out and
+   to place it. They used to live only in the placement maths, as a magic 376
+   that did not match the box it was reserving room for. */
+const CAL_W   = 268                        // calendar column
+const TIME_W  = 126                        // HH / MM column
+const PANEL_W = CAL_W + 1 + TIME_W         // + 1px divider = 395
+const PANEL_H = 340
+
 function parseVal(v: string): Date | null {
   if (!v) return null
   const [dp, tp] = v.split('T')
@@ -212,11 +220,39 @@ export function DarkDateTimePicker({ value, onChange }: {
   const minuteRef = useRef<HTMLDivElement>(null)
   const [pos, setPos] = useState({ top: 0, left: 0 })
 
+  /* The panel is a FIXED-position element, so anything that lands outside the
+     viewport is not merely off to the side — it is unreachable. A fixed box
+     adds nothing to the scrollable area, so no amount of scrolling the page or
+     the modal will ever bring it back.
+
+     That is exactly what happened at 375px. The panel is 268 + 1 + 126 = 395px
+     wide and was pinned at `left: r.left`. Opened from the Date & Time column
+     of the offline-class modal the trigger starts at x=40 (16px backdrop +
+     24px modal padding), so the panel ran 40 → 435 on a 375px screen and the
+     whole MM column sat past the right edge: on a phone you could not set the
+     minutes of a class at all.
+
+     Vertically the old constant was simply wrong — it reserved 376px for a
+     panel that measures about 340 — and `r.top - 376` was never floored, so a
+     trigger 350px down a 667px screen produced top: -68 and hid the month
+     arrows above the top edge.
+
+     So: measure honestly, flip up only when down will not fit, and clamp both
+     axes into the viewport. On a laptop every clamp is a no-op and the panel
+     opens exactly where it always did. */
   const toggle = () => {
     if (!calOpen && btnRef.current) {
       const r   = btnRef.current.getBoundingClientRect()
-      const top = window.innerHeight - r.bottom < 370 ? r.top - 376 : r.bottom + 6
-      setPos({ top, left: r.left })
+      const M   = 8   // breathing room against the viewport edge
+
+      const below = window.innerHeight - r.bottom >= PANEL_H + M
+      const top   = below
+        ? r.bottom + 6
+        : Math.max(M, Math.min(r.top - PANEL_H - 6, window.innerHeight - PANEL_H - M))
+
+      const left = Math.max(M, Math.min(r.left, window.innerWidth - PANEL_W - M))
+
+      setPos({ top, left })
     }
     setCalOpen(v => !v)
   }
@@ -339,11 +375,19 @@ export function DarkDateTimePicker({ value, onChange }: {
               border: '1px solid rgba(255,255,255,0.09)',
               borderRadius: 16,
               boxShadow: '0 24px 64px rgba(0,0,0,0.65)',
-              overflow: 'hidden',
+              /* The clamp in toggle() keeps the panel's top-left on screen, but
+                 395px still does not fit a 375px phone, so the last ~30px would
+                 stay cut off with nowhere to scroll. Capping to the viewport and
+                 swapping `hidden` for `auto` makes the remainder reachable by
+                 swiping inside the panel. Both caps are larger than the panel on
+                 any laptop, so no scrollbar ever appears there. */
+              maxWidth:  'calc(100vw - 16px)',
+              maxHeight: 'calc(100vh - 16px)',
+              overflow: 'auto',
             }}
           >
             {/* ── Calendar section ── */}
-            <div style={{ width: 268, padding: '16px 14px 12px' }}>
+            <div style={{ width: CAL_W, flexShrink: 0, padding: '16px 14px 12px' }}>
               {/* Month navigation */}
               <div className="flex items-center justify-between mb-3">
                 <button type="button" onClick={prevMonth}
@@ -411,7 +455,7 @@ export function DarkDateTimePicker({ value, onChange }: {
             <div style={{ width: 1, background: 'rgba(255,255,255,0.07)', alignSelf: 'stretch', flexShrink: 0 }} />
 
             {/* ── Time picker ── */}
-            <div style={{ width: 126, padding: '16px 10px' }}>
+            <div style={{ width: TIME_W, flexShrink: 0, padding: '16px 10px' }}>
               <div className="flex items-center gap-1 justify-center mb-3">
                 <Clock size={11} style={{ color: 'rgba(255,255,255,0.3)' }} />
                 <span className="text-[10px] font-bold uppercase tracking-widest"

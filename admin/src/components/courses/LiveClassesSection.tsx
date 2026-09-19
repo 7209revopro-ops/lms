@@ -513,8 +513,11 @@ function CreateForm({
     setDurationMins(60); setSessionCapacity(500); setSectionId(''); setInstructorId('')
   }
 
-  const inputStyle = { background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.09)' } as const
-  const selStyle   = { background: '#1e2035', border: '1px solid rgba(255,255,255,0.12)', color: 'white' } as const
+  /* colorScheme: 'dark' — see the note in EditLiveClassModal. The
+     datetime-local below is unusable without it: its picker button is drawn
+     dark-on-dark. */
+  const inputStyle = { background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.09)', colorScheme: 'dark' } as const
+  const selStyle   = { background: '#1e2035', border: '1px solid rgba(255,255,255,0.12)', color: 'white', colorScheme: 'dark' } as const
   const base = 'w-full rounded-xl px-3 py-2 text-sm text-white outline-none placeholder:text-white/30'
 
   return (

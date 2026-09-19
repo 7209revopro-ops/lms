@@ -172,9 +172,15 @@ export function CreateOfflineClassModal({ onClose, onSuccess, categoryProgram, p
               className={base} style={iStyle} />
           </div>
 
-          {/* Date, Duration, Max Seats */}
-          <div className="grid grid-cols-3 gap-3">
-            <div>
+          {/* Date, Duration, Max Seats.
+              Two columns on a phone, three from `sm` up, with the date taking
+              the full first row below `sm`. A third of this modal at 375px is
+              about 90px, and after the field's own padding that left ~45px for
+              "Mon, 10 Mar 2026 · 09:00" — the one control whose whole job is to
+              show you what you picked. Duration and Max Seats are short numbers
+              and pair up happily underneath. */}
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+            <div className="col-span-2 sm:col-span-1">
               <label className="mb-1 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-widest"
                 style={{ color: 'rgba(255,255,255,0.35)' }}>
                 <Calendar size={9} /> Date & Time
