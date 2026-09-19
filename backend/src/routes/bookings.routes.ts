@@ -273,17 +273,25 @@ router.post('/', authenticate, requireEnrollmentApproval, validate(createBooking
         let rebooked
         try {
           rebooked = await ClassBookingModel.updateOne({ _id: existing._id, status: 'cancelled' }, {
-            status: 'booked',
-            bookedAt: new Date(),
-            cancelledAt: undefined,
-            /* Re-stamped, not kept: the student may be coming through a
-               different door than the one they cancelled from. */
-            ...seatStampFrom(reserved, entitlement.door),
-            reminderDayBeforeSent:  false,
-            reminderDayOfSent:      false,
-            reminderPreSessionSent: false,
-            reminder5MinSent:       false,
-            reminderAtTimeSent:     false,
+            $set: {
+              status: 'booked',
+              bookedAt: new Date(),
+              /* Re-stamped, not kept: the student may be coming through a
+                 different door than the one they cancelled from. */
+              ...seatStampFrom(reserved, entitlement.door),
+              reminderDayBeforeSent:  false,
+              reminderDayOfSent:      false,
+              reminderPreSessionSent: false,
+              reminder5MinSent:       false,
+              reminderAtTimeSent:     false,
+            },
+            /* $unset, NOT `cancelledAt: undefined`. Mongoose strips undefined
+               values out of an update before it is sent, so that line was a
+               no-op and every re-booked seat kept the stamp from the time it
+               was cancelled. Invisible until the booking history started
+               printing the pair, where an ACTIVE booking read
+               "Booked 20 Sep - Cancelled 20 Sep". */
+            $unset: { cancelledAt: 1 },
           })
         } catch (err) {
           /* Re-book failed — give the reserved seat back, to the pool it came

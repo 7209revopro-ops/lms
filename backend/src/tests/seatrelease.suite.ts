@@ -201,9 +201,49 @@ try {
     await call('POST', '/bookings', { jar: s.jar, body: { liveClassId: String(cls._id) } })
     const id = await seatIdOf(s.u._id, cls._id)
     await call('DELETE', `/bookings/${id}`, { jar: s.jar })
+
+    /* A cancelled seat carries the marks of a cycle that has ended: the stamp
+       saying when it was given up, and whichever reminders had already gone
+       out. Turn them all on, so that what the re-book clears is PROVED rather
+       than merely defaulted. */
+    const gaveUp = await ClassBookingModel.findById(id).lean() as any
+    check('the cancel stamped the row', !!gaveUp?.cancelledAt, String(gaveUp?.cancelledAt))
+    await ClassBookingModel.updateOne({ _id: id }, { $set: {
+      reminderDayBeforeSent: true, reminderDayOfSent: true, reminderPreSessionSent: true,
+      reminder5MinSent: true, reminderAtTimeSent: true,
+    } })
+
     const again = await call('POST', '/bookings', { jar: s.jar, body: { liveClassId: String(cls._id) } })
     check('the student can take the seat back', again.status === 201, why(again))
     check('and the counter is 1, not 2', (await counted(cls._id)).booked === 1)
+
+    /* THE ROW ITSELF, not the status code again.
+
+       The re-book passed `cancelledAt: undefined`. Mongoose strips undefined
+       out of an update before it is sent, so the field survived untouched and
+       every re-booked seat went on carrying the stamp from the moment it was
+       given up. Five suites were green straight through it, this one included,
+       because all of them stopped at the two lines above: 201, counter 1, done.
+
+       It surfaced only when the booking history began printing both dates side
+       by side and an ACTIVE booking read "Booked 20 Sep - Cancelled 20 Sep".
+       That is the shape of the whole class of bug this suite was written for -
+       a write that quietly does nothing looks exactly like a write that
+       worked, from the outside. So: read the row back. */
+    const row = await ClassBookingModel.findById(id).lean() as any
+    check('the seat is booked again', row?.status === 'booked', String(row?.status))
+    check('AND IT NO LONGER CARRIES A CANCELLATION STAMP', row?.cancelledAt == null,
+      `cancelledAt is ${String(row?.cancelledAt)}`)
+    check('the response says the same thing to the history that reads it',
+      again.body?.data?.cancelledAt == null, String(again.body?.data?.cancelledAt))
+    check('bookedAt is re-stamped, not kept from the first cycle',
+      +new Date(row?.bookedAt) >= +new Date(gaveUp?.cancelledAt),
+      `bookedAt ${String(row?.bookedAt)} vs cancelled ${String(gaveUp?.cancelledAt)}`)
+    check('and the reminders are armed again',
+      [row?.reminderDayBeforeSent, row?.reminderDayOfSent, row?.reminderPreSessionSent,
+       row?.reminder5MinSent, row?.reminderAtTimeSent].every(f => f === false),
+      JSON.stringify([row?.reminderDayBeforeSent, row?.reminderDayOfSent,
+        row?.reminderPreSessionSent, row?.reminder5MinSent, row?.reminderAtTimeSent]))
   }
 
   console.log(lines.join('\n'))
