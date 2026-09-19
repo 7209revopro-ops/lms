@@ -30,6 +30,29 @@ body {
 :focus-visible { outline: 2px solid #0057b8; outline-offset: 2px; border-radius: 4px; }
 ::selection { background: rgba(0,87,184,0.15); color: #003d80; }
 
+/* ── 16px MINIMUM ON EVERY PHONE-SIZED FORM CONTROL ──────────────────
+   iOS Safari zooms the whole page in whenever a focused input's font-size is
+   under 16px, and it does not zoom back out on blur. Measured on the admin
+   login page: the email and password fields render at 14px, so signing in on
+   a phone leaves you on a page ~280 CSS px wide with no way back but a pinch.
+
+   Admins do open this on a phone - taking a register from the back of a room,
+   approving an enrolment between meetings - so it is worth the floor even
+   though the app is mostly a laptop tool.
+
+   Scoped below `sm` so nothing about the desktop design moves. Each selector
+   carries its own attribute clause on purpose: a bare `textarea` is (0,0,1)
+   and loses to a Tailwind `text-sm` at (0,1,0), so it needs the :not() to
+   reach (0,1,1) and win without !important. Checkboxes, radios, ranges and
+   colour swatches are excluded - no text, and iOS does not zoom for them. */
+@media (max-width: 639.98px) {
+  input:not([type='checkbox']):not([type='radio']):not([type='range']):not([type='color']),
+  textarea:not([hidden]),
+  select:not([hidden]) {
+    font-size: 16px;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
 }
