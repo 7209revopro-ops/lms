@@ -137,7 +137,7 @@ export default function SettingsContent() {
   const { navLayout, setNavLayout } = useUIStore()
 
   /* active tab driven by URL ?tab=xxx, defaults to "profile".
-     Safe to read window here â€” this file is never server-rendered (ssr:false). */
+     Safe to read window here — this file is never server-rendered (ssr:false). */
   const [active, setActiveState] = useState(() =>
     new URLSearchParams(window.location.search).get('tab') ?? 'profile'
   )
@@ -271,7 +271,7 @@ export default function SettingsContent() {
     <motion.div variants={stagger} initial="hidden" animate="show"
       className="grid grid-cols-1 gap-6 md:grid-cols-[180px_1fr] lg:grid-cols-[220px_1fr]">
 
-      {/* â”€â”€ Sidebar menu â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
+      {/* ── Sidebar menu ──────────────────────────── */}
       <motion.div variants={fadeUp}
         className="rounded-2xl bg-[var(--color-bg-surface)] p-3 md:sticky md:top-[116px] md:self-start"
         style={{ border: '1px solid var(--color-border)' }}>
@@ -306,7 +306,7 @@ export default function SettingsContent() {
         </div>
       </motion.div>
 
-      {/* â”€â”€ Content panel â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
+      {/* ── Content panel ─────────────────────────── */}
       <motion.div variants={fadeUp} className="space-y-4 min-w-0">
 
         {active === 'profile' && (
@@ -334,7 +334,7 @@ export default function SettingsContent() {
               </div>
               {mounted && userLoading && (
                 <div className="mb-4 flex items-center gap-2 text-xs" style={{ color: 'var(--color-text-muted)' }}>
-                  <Spinner size={12} />Loading your profileâ€¦
+                  <Spinner size={12} />Loading your profile…
                 </div>
               )}
               <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
@@ -397,7 +397,7 @@ export default function SettingsContent() {
                     boxShadow: saved ? '0 4px 14px rgba(34,197,94,0.28)' : '0 4px 14px rgba(0,87,184,0.28)',
                   }}>
                   {updateMutation.isPending
-                    ? <><Spinner size={14} />Savingâ€¦</>
+                    ? <><Spinner size={14} />Saving…</>
                     : saved
                       ? <><Check size={14} />Saved!</>
                       : 'Save changes'}
@@ -569,7 +569,7 @@ export default function SettingsContent() {
                     boxShadow: pwSaved ? '0 4px 14px rgba(34,197,94,0.28)' : '0 4px 14px rgba(0,87,184,0.28)',
                   }}>
                   {changePasswordMutation.isPending
-                    ? <><Spinner size={14} />Updatingâ€¦</>
+                    ? <><Spinner size={14} />Updating…</>
                     : pwSaved
                       ? <><Check size={14} />Password updated!</>
                       : <><Lock size={14} />Update password</>}
@@ -690,7 +690,7 @@ export default function SettingsContent() {
               className="rounded-2xl bg-[var(--color-bg-surface)] p-10 flex flex-col items-center gap-4">
               <div className="flex h-14 w-14 items-center justify-center rounded-3xl text-2xl"
                 style={{ background: 'var(--color-primary-light)', border: '1px solid rgba(0,87,184,0.18)' }}>
-                {active === 'billing' ? 'ðŸ’³' : 'ðŸŒ'}
+                {active === 'billing' ? '💳' : '🌍'}
               </div>
               <p className="text-base font-bold" style={{ color: 'var(--color-text-primary)' }}>Coming soon</p>
               <p className="text-sm text-center max-w-xs" style={{ color: 'var(--color-text-muted)' }}>
