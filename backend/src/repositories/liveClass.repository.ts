@@ -54,7 +54,44 @@ export class LiveClassRepository extends BaseRepository<ILiveClass> {
       scheduledStart: { $gte: new Date(Date.now() - 60 * 60_000) },
     }
     if (courseIds && courseIds.length > 0) {
-      query['courseId'] = { $in: courseIds.map(id => new Types.ObjectId(id)) }
+      /* A STUDENT'S PROGRAMME IS JUDGED AGAINST THEIR OWN DOOR, NEVER THE
+         HOST'S.
+
+         This narrowed on `courseId`, which is the class's HOST course — the
+         one belonging to the academy that scheduled it. For a shared class the
+         caller's door is their OWN academy's course, and the two are different
+         courses in different academies with no reason to carry the same
+         programme. So a Bangalore student whose category is the guest course's
+         programme still lost the class here, because the Dubai course it was
+         filtered on carried a different one (or none at all).
+
+         That is the one rule this feature is built on — never compare a value
+         from one door against a value from another — broken in discovery while
+         entitlement got it right. The class was bookable and invisible.
+
+         Both arms are needed. The host arm keeps every ordinary class exactly
+         as it was; the guest arm admits a shared class when the caller's OWN
+         cohort course is in their programme. The guest arm is gated on the
+         feature switch for the same reason servedClassFilter's is: with the
+         switch off a guest academy must not see the class at all, and a filter
+         that widens while entitlement refuses produces a row that is visible
+         and unbookable. */
+      const ids = courseIds.map(id => new Types.ObjectId(id))
+      const categoryCourseFilter: Record<string, unknown> =
+        CROSS_ORG_CLASSES_ENABLED && callerOrg && Types.ObjectId.isValid(callerOrg)
+          ? { $or: [
+              { courseId: { $in: ids } },
+              { guestCohorts: { $elemMatch: {
+                organizationId: new Types.ObjectId(callerOrg),
+                courseId: { $in: ids },
+              } } },
+            ] }
+          : { courseId: { $in: ids } }
+      /* Under $and, never by assigning $or: servedClassFilter below also
+         contributes an $or, and a second assignment silently deletes the
+         first — the P-04 shape, whose symptom is a filter that quietly stops
+         filtering. */
+      andFilter(query, categoryCourseFilter)
     }
 
     /* THE BROWSE FEED HAD NO ACADEMY TERM AT ALL. Every other student-facing

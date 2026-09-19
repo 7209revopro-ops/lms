@@ -226,6 +226,77 @@ try {
       stillIn.status === 201, why(stillIn))
   }
 
+  /* ═══════════════════════════════════════════════════════ */
+  section('A student-s programme is judged against their OWN door')
+  {
+    /* WHY THIS WAS INVISIBLE UNTIL A REAL CLASS WAS MADE. Every fixture above
+       gives BOTH academies a course with the same `program`, so the feed's
+       category filter matched on the HOST course and the guest arm was never
+       exercised. Two academies author their courses independently; there is no
+       reason their programmes agree, and in the case that found this the Dubai
+       course carried none at all.
+
+       The filter narrowed on `courseId` — the class's HOST course — so a
+       Bangalore student whose category matched their OWN course still lost the
+       class, because the Dubai course it was filtered on carried a different
+       programme. Bookable and invisible: the one rule this feature rests on,
+       never compare a value from one door against a value from another, broken
+       in discovery while entitlement got it right. */
+    const hostCourse = await CourseModel.create({
+      title: 'dxb-forex', slug: `dxb-forex-${Date.now()}`, description: 'x',
+      price: 0, isFree: true, status: 'published', language: 'English',
+      organizationId: dubai._id, instructorId: teacher._id,
+      /* DELIBERATELY DIFFERENT from the guest course below. */
+      category: '4x-trading', program: '4x-trading',
+    })
+    const guestCourse = await CourseModel.create({
+      title: 'blr-ai', slug: `blr-ai-${Date.now()}`, description: 'x',
+      price: 0, isFree: true, status: 'published', language: 'English',
+      organizationId: blr._id, instructorId: teacher._id,
+      category: 'ai', program: 'ai',
+    })
+
+    const shared = await LiveClassModel.create({
+      courseId: hostCourse._id, instructorId: teacher._id,
+      title: 'Cross-programme shared class', type: 'external',
+      meetingUrl: 'https://meet.example/x',
+      scheduledStart: new Date(Date.now() + 3 * 3600_000), durationMins: 60,
+      organizationId: dubai._id, sessionCapacity: 10, bookedCount: 0,
+      hostSeatsLeft: 6, overflowSeatsLeft: 0,
+      guestCohorts: [{ organizationId: blr._id, courseId: guestCourse._id,
+                       seatFloor: 4, seatsLeft: 4 }],
+    })
+
+    /* Their category matches their OWN course, and nothing else. */
+    const pupil = await student('blr.ai@t.local', blr, guestCourse)
+    await UserModel.updateOne({ _id: pupil.u._id }, { $set: { category: 'ai' } })
+
+    const up = await call('GET', '/live-classes/upcoming?limit=100', { jar: pupil.jar })
+    const titles = (up.body?.data ?? []).map((c: any) => String(c.title))
+    check('the shared class survives a category filter it only matches through its GUEST course',
+      titles.includes('Cross-programme shared class'),
+      `${why(up)}  saw: ${titles.join(' | ') || '(nothing)'}`)
+
+    /* And the narrowing still narrows: a category matching NEITHER course must
+       not admit it, or the fix has simply disabled the filter. */
+    await UserModel.updateOne({ _id: pupil.u._id }, { $set: { category: 'jura' } })
+    const off = await call('GET', '/live-classes/upcoming?limit=100', { jar: pupil.jar })
+    const offTitles = (off.body?.data ?? []).map((c: any) => String(c.title))
+    check('and an unrelated category still filters it out',
+      !offTitles.includes('Cross-programme shared class'), offTitles.join(' | '))
+
+    /* The host academy is unaffected either way. */
+    await UserModel.updateOne({ _id: pupil.u._id }, { $set: { category: 'ai' } })
+    const dxb = await student('dxb.forex@t.local', dubai, hostCourse)
+    await UserModel.updateOne({ _id: dxb.u._id }, { $set: { category: '4x-trading' } })
+    const host = await call('GET', '/live-classes/upcoming?limit=100', { jar: dxb.jar })
+    const hostTitles = (host.body?.data ?? []).map((c: any) => String(c.title))
+    check('the host academy still finds it on its own course-s programme',
+      hostTitles.includes('Cross-programme shared class'), hostTitles.join(' | '))
+
+    void shared
+  }
+
   console.log(lines.join('\n'))
   console.log(`\ncrossorgclass.open.suite — ${pass} passed, ${failures.length} failed`)
   if (failures.length) console.error('\nFAILURES:\n' + failures.map(f => '  · ' + f).join('\n'))

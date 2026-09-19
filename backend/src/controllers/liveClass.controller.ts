@@ -125,7 +125,7 @@ function toDTO(doc: any, entitled = true, staff = true) {
        thing the cohort validator refuses to confirm even to an admin. `staff`
        defaults true because every ADMIN caller already relies on these; the
        student routes pass false. */
-    guestCohorts: staff && Array.isArray(j.guestCohorts)
+    guestCohorts: !staff ? undefined : Array.isArray(j.guestCohorts)
       ? j.guestCohorts.map((c: any) => ({
           organizationId:   String(c.organizationId),
           organizationSlug: orgSlugFor(c.organizationId),
@@ -143,10 +143,13 @@ function toDTO(doc: any, entitled = true, staff = true) {
        thing that stops two academies' staff mis-communicating about one
        session. Always at least one entry, so a consumer never has to special-
        case the unshared case. */
-    servesAcademies: [
+    /* Staff too. It is only slugs rather than ids, but it still says which
+       OTHER academy a class serves, and no student surface asks for it. Least
+       disclosure, and consistent with the two fields above. */
+    servesAcademies: staff ? [
       orgSlugFor(j.organizationId),
       ...(Array.isArray(j.guestCohorts) ? j.guestCohorts.map((c: any) => orgSlugFor(c.organizationId)) : []),
-    ].filter(Boolean),
+    ].filter(Boolean) : undefined,
 
     createdAt:      j.createdAt,
     updatedAt:      j.updatedAt,
