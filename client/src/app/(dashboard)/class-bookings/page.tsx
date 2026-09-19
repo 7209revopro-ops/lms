@@ -1171,7 +1171,11 @@ function MetricTile({ icon, label, value, accent, pulse = false, index = 0 }: {
       <div className="min-w-0">
         <p className="syne text-[24px] font-800 leading-none tabular-nums"
           style={{color:'var(--color-text-primary)'}}>{value}</p>
-        <p className="dm mt-1.5 truncate text-[11px] sm:text-[10px] font-semibold uppercase tracking-wider"
+        {/* Wraps rather than truncates on a phone: "Total Classes" and "My
+            Reservations" were both losing their ends in a 4-across grid, and
+            a metric whose label is cut is a metric you have to guess at.
+            Truncation returns at `sm`, where the tiles are wide enough. */}
+        <p className="dm mt-1.5 text-[11px] font-semibold uppercase leading-tight tracking-wider sm:truncate sm:text-[10px]"
           style={{color:'var(--color-text-muted)'}}>{label}</p>
       </div>
     </motion.div>
@@ -2000,7 +2004,7 @@ export default function ClassBookingsPage() {
                     <>
                       <p className="syne font-700 text-lg" style={{color: 'var(--color-text-primary)'}}>No classes this period</p>
                       <button type="button" onClick={()=>shiftRange(1)}
-                        className="flex items-center gap-1.5 rounded-full px-4 py-2 text-sm font-semibold"
+                        className="flex min-h-[44px] items-center gap-1.5 rounded-full px-4 text-sm font-semibold sm:min-h-0 sm:py-2"
                         style={{background:'rgba(0,87,184,0.10)',color: 'var(--color-primary)',border:'1px solid rgba(0,87,184,0.20)'}}>
                         <ChevronRight size={14}/>Next period
                       </button>
