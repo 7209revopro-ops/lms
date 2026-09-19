@@ -9,7 +9,8 @@
    deliberately set to different values, and the tree is asserted to have
    used neither.
    ───────────────────────────────────────────────────────────────────────── */
-import { buildCatalog, GENERAL_MODULE_ID, groupKeyOf, slotPattern } from '@/lib/classSchedule'
+import { buildCatalog, GENERAL_MODULE_ID, groupKeyOf, slotPattern,
+         moduleFacets, showFacet, filterGroups, buildGroups } from '@/lib/classSchedule'
 import type { LiveClass } from '@/lib/api/liveClasses'
 import type { MyBooking } from '@/lib/api/bookings'
 
@@ -237,6 +238,70 @@ console.log('\nG. Four weekly slots of one class are FOUR slots')
     `${groupKeyOf(rows[0]!)} vs ${groupKeyOf(rows[4]!)}`)
   check('G8 but two dates of the SAME weekly slot share it',
     groupKeyOf(rows[0]!) === groupKeyOf(rows[1]!))
+}
+
+console.log('\nH. A filter offers what is THERE, and nothing else')
+{
+  /* The rule the owner asked for: the language picker on a module taught in
+     English and Hindi offers exactly English and Hindi — never the five the
+     system accepts, because choosing Urdu could only ever empty the screen.
+     And a module with one instructor gets no instructor picker at all: a
+     control whose every option returns the same list is furniture. */
+  const at = (dayOffset: number, hour: number) => {
+    const d = new Date('2026-10-05T00:00:00Z')            // a Monday
+    d.setUTCDate(d.getUTCDate() + dayOffset)
+    d.setUTCHours(hour, 0, 0, 0)
+    return d.toISOString()
+  }
+  const slot = (id: string, lang: string, tutor: { id: string; name: string }, dayOffset: number, hour: number) =>
+    row({ ...HOST, id, title: 'Core Concepts', language: lang, instructor: tutor,
+          scheduledStart: at(dayOffset, hour), isEnrolled: true, isEntitled: true })
+
+  const alex  = { id: 'i-alex',  name: 'Alex Kim' }
+  const rania = { id: 'i-rania', name: 'Rania Haddad' }
+
+  /* Two languages, ONE instructor — the exact case in the screenshot. */
+  const oneTutor = buildGroups([
+    slot('a', 'English', alex, 0, 18),
+    slot('b', 'Hindi',   alex, 2, 11),
+  ], noBookings)
+  const f1 = moduleFacets(oneTutor)
+
+  check('H1 both languages are offered', JSON.stringify(f1.languages) === '["English","Hindi"]',
+    JSON.stringify(f1.languages))
+  check('H2 and ONLY those two', f1.languages.length === 2)
+  check('H3 the language filter is shown', showFacet(f1.languages) === true)
+  check('H4 the single instructor is NOT offered as a filter', showFacet(f1.instructors) === false,
+    JSON.stringify(f1.instructors.map(i => i.name)))
+
+  /* Add a second instructor and the picker earns its place. */
+  const twoTutors = buildGroups([
+    slot('a', 'English', alex,  0, 18),
+    slot('b', 'Hindi',   alex,  2, 11),
+    slot('c', 'English', rania, 4, 9),
+  ], noBookings)
+  const f2 = moduleFacets(twoTutors)
+
+  check('H5 now the instructor filter appears', showFacet(f2.instructors) === true)
+  check('H6 with both instructors, sorted by name',
+    JSON.stringify(f2.instructors.map(i => i.name)) === '["Alex Kim","Rania Haddad"]',
+    JSON.stringify(f2.instructors.map(i => i.name)))
+  check('H7 and still only the two real languages',
+    JSON.stringify(f2.languages) === '["English","Hindi"]', JSON.stringify(f2.languages))
+
+  /* The filtering itself. */
+  check('H8 language narrows', filterGroups(twoTutors, 'Hindi', null).length === 1)
+  check('H9 instructor narrows', filterGroups(twoTutors, null, 'i-rania').length === 1)
+  check('H10 the two combine', filterGroups(twoTutors, 'English', 'i-alex').length === 1)
+  check('H11 a combination with no slots yields none',
+    filterGroups(twoTutors, 'Hindi', 'i-rania').length === 0)
+  check('H12 nulls mean all', filterGroups(twoTutors, null, null).length === twoTutors.length)
+
+  /* A module with nothing in it must not offer anything. */
+  const none = moduleFacets([])
+  check('H13 no slots, no facets', none.languages.length === 0 && none.instructors.length === 0)
+  check('H14 and neither filter is drawn',
+    showFacet(none.languages) === false && showFacet(none.instructors) === false)
 }
 
 console.log(`\nclassSchedule.check — ${pass} passed, ${fail} failed\n`)

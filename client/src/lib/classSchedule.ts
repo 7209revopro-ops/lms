@@ -297,6 +297,56 @@ export function buildGroups(classes: LiveClass[], bookingMap: Map<string, MyBook
   })
 }
 
+/* ── What is worth offering as a filter ─────────────────────────── */
+
+export interface SlotFacets {
+  languages:   string[]
+  instructors: { id: string; name: string; avatarUrl?: string }[]
+}
+
+/**
+ * The languages and instructors THESE slots actually have.
+ *
+ * Never the full catalogue of either. A module taught in English and Hindi
+ * offers exactly English and Hindi; a picker listing all five languages the
+ * system accepts would let a student choose Urdu and be shown an empty
+ * screen, which is a filter that can only disappoint.
+ *
+ * The caller decides whether to render each one, and the rule is
+ * `showFacet` below: a filter with one option filters nothing.
+ */
+export function moduleFacets(groups: ClassGroup[]): SlotFacets {
+  const langs = new Set<string>()
+  const tutors = new Map<string, { id: string; name: string; avatarUrl?: string }>()
+  for (const g of groups) {
+    const lang = (g.slots[0] as { language?: string } | undefined)?.language
+    if (lang) langs.add(lang)
+    /* Read off the GROUP, not the first slot: the group key already includes
+       the instructor, so every session in one shares theirs. */
+    if (g.instructor && !tutors.has(g.instructor.id)) tutors.set(g.instructor.id, g.instructor)
+  }
+  return {
+    languages:   [...langs].sort(),
+    instructors: [...tutors.values()].sort((a, b) => a.name.localeCompare(b.name)),
+  }
+}
+
+/** A control that cannot change the answer is furniture. One option — or
+    none — means every slot already matches, so the filter is not drawn. */
+export const showFacet = (values: unknown[]): boolean => values.length > 1
+
+/** Narrow slots to a chosen language and instructor. `null` means "all". */
+export function filterGroups(
+  groups: ClassGroup[],
+  language: string | null,
+  instructorId: string | null,
+): ClassGroup[] {
+  if (!language && !instructorId) return groups
+  return groups.filter(g =>
+    (!language     || (g.slots[0] as { language?: string } | undefined)?.language === language) &&
+    (!instructorId || g.instructor?.id === instructorId))
+}
+
 /* ── How a group describes itself ───────────────────────────────────────── */
 
 const WEEKDAY = new Intl.DateTimeFormat('en-US', { timeZone: APP_TIMEZONE, weekday: 'long' })

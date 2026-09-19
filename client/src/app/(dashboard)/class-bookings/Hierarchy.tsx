@@ -21,11 +21,11 @@
      codes and the join clock already live.
    ───────────────────────────────────────────────────────────────────────── */
 
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { motion, useReducedMotion } from 'framer-motion'
 import {
   BookOpen, ChevronRight, Globe, Layers, Lock, Users, Clock,
-  Share2, Calendar, ArrowLeft, Radio, MapPin, Check, Video,
+  Share2, Calendar, ArrowLeft, Radio, MapPin, Check, Video, User,
 } from 'lucide-react'
 import type { LiveClass } from '@/lib/api/liveClasses'
 import type { MyBooking } from '@/lib/api/bookings'
@@ -33,6 +33,7 @@ import { titleCase } from '@/lib/titleCase'
 import { AvatarImg } from '@/components/ui/AvatarImg'
 import {
   getSlotStatus, SC, seatsLeft, slotPattern, nextSlot,
+  moduleFacets, showFacet, filterGroups,
   buildCatalog, GENERAL_MODULE_ID as GENERAL,
   type ClassGroup, type SlotStatus, type CourseNode, type ModuleNode,
 } from '@/lib/classSchedule'
@@ -974,6 +975,48 @@ function SectionHead({ icon, label, note }: {
   )
 }
 
+/** One row of filter chips. Rendered only when there is something to choose
+    between — see showFacet. */
+function FilterRow({ icon, label, options, value, onChange }: {
+  icon: React.ReactNode
+  label: string
+  options: { id: string; label: string; avatarUrl?: string }[]
+  value: string | null
+  onChange: (v: string | null) => void
+}) {
+  return (
+    <div className="flex flex-wrap items-center gap-1.5">
+      <span className="mr-0.5 inline-flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-[0.12em]"
+        style={{ color: 'var(--color-text-muted)' }}>
+        {icon}{label}
+      </span>
+
+      {/* "All" first and always present, so clearing a choice is one tap and
+          never requires knowing that tapping the active chip would do it. */}
+      {[{ id: '', label: 'All' }, ...options].map(o => {
+        const on = (o.id || null) === value
+        return (
+          <button key={o.id || '__all'} type="button"
+            aria-pressed={on}
+            onClick={() => onChange(o.id || null)}
+            className="dm inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11.5px] font-semibold outline-none transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[color:var(--color-primary-on-surface,var(--color-primary))]"
+            style={on
+              ? { background: 'rgba(0,87,184,0.10)', border: '1px solid rgba(0,87,184,0.30)', color: 'var(--color-primary-on-surface, var(--color-primary))' }
+              : { background: 'var(--color-bg-surface)', border: '1px solid var(--color-border)', color: 'var(--color-text-muted)' }}>
+            {o.avatarUrl !== undefined && (
+              <AvatarImg src={o.avatarUrl} name={o.label}
+                className="h-4 w-4 flex-shrink-0 rounded-full object-cover"
+                fallbackClassName="flex h-4 w-4 flex-shrink-0 items-center justify-center rounded-full text-[7px] font-bold"
+                fallbackStyle={{ background: 'var(--color-bg-subtle)', color: 'var(--color-text-muted)' }} />
+            )}
+            {o.label}
+          </button>
+        )
+      })}
+    </div>
+  )
+}
+
 export function ModuleSheet({
   course, node, position, bookingMap, search, onNavigate, onOpenGroup,
 }: {
@@ -987,42 +1030,54 @@ export function ModuleSheet({
 }) {
   const q = search.trim().toLowerCase()
 
+  const [language, setLanguage] = useState<string | null>(null)
+  const [tutorId,  setTutorId]  = useState<string | null>(null)
+
+  /* Reset when the module changes. Without this, walking from a module taught
+     in Hindi to one that is English-only would carry `language: 'Hindi'`
+     across and show an empty screen for a module that has sessions. */
+  useEffect(() => { setLanguage(null); setTutorId(null) }, [node.id])
+
   /* The search box stays on screen at every level, so it has to mean something
      at every level. Here it matches the class title, the instructor and the
      language — the three things that tell one slot of a module from another. */
-  const groups = q
+  const searched = q
     ? node.groups.filter(g =>
         g.title.toLowerCase().includes(q) ||
         (g.instructor?.name ?? '').toLowerCase().includes(q) ||
-        (g.slots[0]?.language ?? '').toLowerCase().includes(q))
+        ((g.slots[0] as { language?: string } | undefined)?.language ?? '').toLowerCase().includes(q))
     : node.groups
 
-  const byLanguage = new Map<string, ClassGroup[]>()
-  for (const g of groups) {
-    const lang = g.slots[0]?.language || 'Unspecified'
-    if (!byLanguage.has(lang)) byLanguage.set(lang, [])
-    byLanguage.get(lang)!.push(g)
-  }
-  const languages = [...byLanguage.keys()].sort()
+  /* THE OPTIONS ARE THIS MODULE'S, NOT THE SYSTEM'S — and they are computed
+     from what SEARCH left, so a chip can never offer a value that would come
+     back empty. */
+  const facets = useMemo(() => moduleFacets(searched), [searched])
+  const showLang  = showFacet(facets.languages)
+  const showTutor = showFacet(facets.instructors)
 
-  /* THE COLUMN COUNT FOLLOWS THE CONTENT. Three columns holding one card is
-     the same dead space the full-width strip was, wearing a different shape,
-     so a lone slot is capped at a card's width instead of being stretched or
-     stranded. Counted over the whole sheet, not per language: two languages
-     with one slot each is still a two-column screen. */
+  /* A chip that is no longer offered must not keep filtering from off-screen. */
+  useEffect(() => {
+    if (language && !facets.languages.includes(language)) setLanguage(null)
+    if (tutorId  && !facets.instructors.some(i => i.id === tutorId)) setTutorId(null)
+  }, [facets, language, tutorId])
+
+  const groups = useMemo(
+    () => filterGroups(searched, showLang ? language : null, showTutor ? tutorId : null),
+    [searched, language, tutorId, showLang, showTutor],
+  )
+
+  const filtered = groups.length !== node.groups.length
+
   /* SMALL BOXES. Each card is one slot's facts and nothing else — day, time,
      language, where, who, seats — so several fit across a desktop where the
-     old strip took the full width for one.
-
-     The column count is PER BAND, not for the sheet: a module with four
-     English slots and one Malayalam one would otherwise put that lone card in
-     a four-column grid with three empty columns beside it, which is the dead
-     space the strip had, wearing a different shape. */
-  const colsFor = (n: number) =>
-      n === 1 ? 'grid-cols-1 max-w-[340px]'
-    : n === 2 ? 'grid-cols-1 sm:grid-cols-2 max-w-[700px]'
-    : n === 3 ? 'grid-cols-1 sm:grid-cols-2 lg:grid-cols-3'
-    :           'grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4'
+     old strip took the full width for one. A lone slot is capped rather than
+     stretched: three empty columns beside one card is the dead space the
+     strip had, wearing a different shape. */
+  const cols =
+      groups.length === 1 ? 'grid-cols-1 max-w-[340px]'
+    : groups.length === 2 ? 'grid-cols-1 sm:grid-cols-2 max-w-[700px]'
+    : groups.length === 3 ? 'grid-cols-1 sm:grid-cols-2 lg:grid-cols-3'
+    :                       'grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4'
 
   return (
     <motion.div {...enter} transition={spring} key={`m:${course.id}:${node.id}`}>
@@ -1044,42 +1099,51 @@ export function ModuleSheet({
       <SectionHead
         icon={<Calendar size={12} strokeWidth={2.25} style={{ color: 'var(--color-primary-on-surface, var(--color-primary))' }} />}
         label="Available sessions"
-        note={q && groups.length !== node.groups.length
-          ? `${groups.length} of ${node.groups.length} match`
-          : undefined}
+        note={filtered ? `${groups.length} of ${node.groups.length}` : plural(node.groups.length, 'slot')}
       />
+
+      {/* ── FILTERS ──
+
+          Each row appears only when it would actually narrow something. A
+          module taught by one instructor does not get an instructor filter:
+          a control whose every option returns the same list is furniture,
+          and on a screen this small it is furniture in the way. The same
+          rule drops the language row on a single-language module.
+
+          Language used to be a section HEADING with the slots banded under
+          it. Now that each card carries its own language chip, a heading
+          saying the same word above it was the same fact twice — so the
+          bands are gone and one grid sits under the filters, which is both
+          cleaner and the pattern the Catalog already uses. */}
+      {(showLang || showTutor) && (
+        <div className="mb-4 flex flex-col gap-2 rounded-2xl px-3 py-2.5"
+          style={{ background: 'var(--color-bg-inset)', border: '1px solid var(--color-border)' }}>
+          {showLang && (
+            <FilterRow
+              icon={<Globe size={11} strokeWidth={2.5} style={{ color: 'var(--color-success)' }} />}
+              label="Language" value={language} onChange={setLanguage}
+              options={facets.languages.map(l => ({ id: l, label: l }))} />
+          )}
+          {showTutor && (
+            <FilterRow
+              icon={<User size={11} strokeWidth={2.5} style={{ color: 'var(--color-primary-on-surface, var(--color-primary))' }} />}
+              label="Instructor" value={tutorId} onChange={setTutorId}
+              options={facets.instructors.map(i => ({ id: i.id, label: i.name, avatarUrl: i.avatarUrl }))} />
+          )}
+        </div>
+      )}
 
       {groups.length === 0 ? (
         <Empty icon={<Calendar size={26} style={{ color: 'var(--color-primary)' }} />}
-          title={q ? 'No sessions match' : 'Nothing scheduled yet'}
-          body={q ? 'Try a different search term, or clear the search to see them all.'
-                  : 'This module has no upcoming sessions. Check back soon.'} />
+          title={q || language || tutorId ? 'No sessions match' : 'Nothing scheduled yet'}
+          body={q || language || tutorId
+            ? 'Try a different filter, or clear them to see every slot.'
+            : 'This module has no upcoming sessions. Check back soon.'} />
       ) : (
-        <div className="space-y-7">
-          {languages.map(lang => (
-            <section key={lang}>
-              {/* Language is a real fork in the road — the same module taught in
-                  two languages is two different classes to a student — so it
-                  heads its own band of the grid rather than sitting inside a
-                  card as a badge. Hidden when there is only one: a heading that
-                  never varies is furniture. */}
-              {languages.length > 1 && (
-                <SectionHead
-                  icon={<Globe size={12} strokeWidth={2.25} style={{ color: 'var(--color-success)' }} />}
-                  label={lang}
-                  note={plural(byLanguage.get(lang)!.length, 'slot')}
-                />
-              )}
-              {/* The fix for the dead space: a slot is a card in a grid, not a
-                  strip drawn across 1200px with a seat count marooned at the
-                  far right of it. */}
-              <div className={`grid gap-3.5 ${colsFor(byLanguage.get(lang)!.length)}`}>
-                {byLanguage.get(lang)!.map((g, i) => (
-                  <SlotCard key={g.id} group={g} bookingMap={bookingMap} blocked={node.blocked}
-                    index={i} onOpen={() => onOpenGroup(g)} />
-                ))}
-              </div>
-            </section>
+        <div className={`grid gap-3.5 ${cols}`}>
+          {groups.map((g, i) => (
+            <SlotCard key={g.id} group={g} bookingMap={bookingMap} blocked={node.blocked}
+              index={i} onOpen={() => onOpenGroup(g)} />
           ))}
         </div>
       )}
