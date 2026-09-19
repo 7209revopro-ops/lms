@@ -649,6 +649,10 @@ export class LiveClassController {
         delete (dto as any).muxPlaybackId
         delete (dto as any).playbackUrl
         ;(dto as any).isEnrolled = (d as any).isEnrolled ?? false
+        /* The blocked-module signal, as on GET /live-classes. The service
+           has resolved it since the door model landed; it was computed,
+           used to strip the stream fields, and then dropped. */
+        ;(dto as any).isEntitled = (d as any).isEntitled ?? false
         return dto
       }))
     } catch (err) { next(err) }
@@ -707,6 +711,7 @@ export class LiveClassController {
         /* Never to a student, entitled or not — see POST /:id/join. */
         delete (dto as any).meetingUrl
         ;(dto as any).isEnrolled   = isEnrolled
+        ;(dto as any).isEntitled   = isEntitled
         /* A seat AND a live enrolment — the click requires both. */
         ;(dto as any).isBooked     = isEnrolled && bookedIds.has(String((d as any)._id ?? (d as any).id))
         const w = (d as any).scheduledStart ? studentJoinWindow((d as any).scheduledStart) : null

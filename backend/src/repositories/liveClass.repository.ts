@@ -27,6 +27,13 @@ export class LiveClassRepository extends BaseRepository<ILiveClass> {
         ? { $or: [{ courseId }, { 'guestCohorts.courseId': courseId }] }
         : { courseId })
       .sort({ scheduledStart: 1 })
+      /* The course and the module. This read populated the instructor
+         and nothing else, so every row it returned carried a bare
+         ObjectId where its course and module names should be - toDTO
+         emits `course`/`section` only when the ref is populated, so the
+         course page's own session list had neither. */
+      .populate('courseId',     'title slug thumbnailUrl program')
+      .populate('sectionId',    'id title order description')
       .populate('instructorId', 'name avatarUrl')
       .exec()
   }
@@ -43,6 +50,7 @@ export class LiveClassRepository extends BaseRepository<ILiveClass> {
       .sort({ scheduledStart: 1 })
       .limit(limit)
       .populate('courseId',     'title slug thumbnailUrl')
+      .populate('sectionId',    'id title order description')
       .populate('instructorId', 'name avatarUrl')
       .exec()
   }
@@ -114,6 +122,7 @@ export class LiveClassRepository extends BaseRepository<ILiveClass> {
       .sort({ scheduledStart: 1 })
       .limit(limit)
       .populate('courseId',     'title slug thumbnailUrl')
+      .populate('sectionId',    'id title order description')
       .populate('instructorId', 'name avatarUrl')
       .exec()
   }

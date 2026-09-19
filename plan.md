@@ -580,3 +580,391 @@ contains only the Join button, not the video.
 unaffected. If per-viewer attribution on live video matters, that is a meeting-side
 feature request and it conflicts with the constraint that the meeting application is
 not to be modified. A1 is reopened in §0 rather than left reading as settled.
+
+---
+
+## 9. Course → Module → Class: restructuring the student Class Schedule
+
+**The ask.** Make `/class-bookings` navigate like `https://course.clt-academy.com`:
+a course, then its modules, then the classes inside a module.
+
+**The finding that shapes everything below.** The hierarchy is easy — we already
+hold every field it needs. What the reference does at its third level is *not*
+a layout we can copy, because the thing it books does not exist in our data.
+§9.2 is that decision; everything after it depends on the answer.
+
+### 9.1 What the reference actually does
+
+Walked by hand, all three levels (2026-09-19):
+
+| Level | Content |
+|---|---|
+| 1 | Programme cards — blurb, "10 Courses", **View Courses** |
+| 2 | Module cards — "Module 1", description, **"1 Languages · 7 Sessions"**, **Enroll Now** |
+| 3 | Modal — module description, then **Available Sessions grouped by language**: `Tuesday 2:00 PM [Select]`, `Thursday 11:30 AM [Select]` … then **Book This Slot** |
+
+Two details carry more weight than the layout:
+
+- **Level 3 has no dates.** Every row is a weekday and a time. The unit of
+  choice is *which weekly slot you attend this module in* — a standing
+  commitment, not an event.
+- **Sessions are grouped by language first**, slot second.
+
+Their vocabulary also collides with ours: the Level-1 card says "10 Courses"
+and Level 2 calls the same things "Module 1…10". **In our terms the Level-1
+card is a Course and the count is of Modules (`Section`).** This plan uses our
+words throughout; adopting theirs would import the confusion.
+
+### 9.2 THE DECISION: a slot is not a session
+
+Our model stores **dated one-offs**. `LiveClass.scheduledStart` is an instant
+(`schema.ts:996`). There is no `dayOfWeek`, no `rrule`, no template document.
+"Weekly" exists only as `POST /admin/live-classes/:id/repeat`, which
+materialises N dated copies and tags them with a shared `seriesId`
+(`liveClass.controller.ts:1236-1298`).
+
+And **`seriesId` is written once and never read.** A repo-wide search finds the
+three write sites, the schema field, its sparse index and a DTO emit — no
+query, no `$match`, no `$group`, no sort. The index has no reader. The student
+app reconstructs repeat-groups instead, from `title|instructor|course|section`
+(`class-bookings/page.tsx:1507`).
+
+So "Tuesday 2:00 PM" would have to be *derived*, and the derivation is unsafe:
+
+| Case | What happens |
+|---|---|
+| Untouched weekly series | Correct today. `setDate(+7*i)` preserves the wall clock, and neither Asia/Dubai nor Asia/Kolkata observes DST. A future academy in a DST zone drifts by an hour mid-series. |
+| A member is edited | **Wrong, silently.** Nothing constrains a series to one weekday or time — the repeat code states that editing a generated class afterwards "is a normal, independent edit and never affects the others" (`liveClass.controller.ts:1211-1217`). |
+| A member is rescheduled | **Wrong.** Reschedule is a plain `adminUpdate`; `seriesId` is untouched. Collapsing to one slot hides the moved session. |
+| A member is cancelled | Counted unless filtered — cancelled rows keep their `seriesId`. |
+| Created singly, never repeated | **No `seriesId` at all.** Only `repeat` sets it, so most of a hand-built timetable has none. |
+
+**Three options, and a recommendation.**
+
+- **(A) Hierarchy over dated sessions.** Course → Module → the module's dated
+  sessions, grouped by language, each labelled `Tuesdays 2:00 PM · next Mon 22
+  Sep`. One booking = one dated session, exactly as today.
+- **(B) Derived slots, single booking.** Present "Tuesday 2:00 PM" with the
+  date hidden; a click books the next occurrence. Looks like the reference,
+  and every row in the table above becomes a way to book the wrong thing.
+- **(C) A real recurrence model.** A `ClassSlot` template that owns weekday,
+  time, language, module and capacity; dated classes generated from it;
+  "Book This Slot" enrols you in the series. This is what the reference is
+  actually doing.
+
+**Recommend (A) now, (C) as its own project if the owner wants a standing
+commitment.** (A) delivers the requested navigation, keeps every safety
+property below intact, and its slot label is *more* informative than the
+reference's — it tells the student both the pattern and the next date. (B) is
+the trap: it looks like the goal and quietly detaches booking from the thing
+being booked. **Reject (B).**
+
+> The cost of (A), stated plainly: the student still books one dated session at
+> a time. If the owner's real requirement is "choose your weekly slot once and
+> be enrolled for the whole module", that is (C) and no amount of frontend work
+> substitutes for it. **That question should be answered before Phase 3.**
+
+### 9.3 What exists, and what is missing
+
+| Need | State |
+|---|---|
+| Module on a class | ✅ `LiveClass.sectionId` — **but optional** (`schema.ts:1024`), and every admin form labels it "Module (optional)" |
+| Language on a class | ✅ `LiveClass.language` — but **no schema enum** (enforced only in the admin route) and **no index** |
+| Repeat identity | ⚠️ `seriesId` exists, is never read, and does not constrain weekday or time |
+| Modules of a course | ✅ `GET /courses/:slug` → `{ course, sections, lessons }` |
+| Classes of a course | ✅ `GET /courses/:slug/live-classes`, already door-resolved |
+| **Classes of a MODULE** | ❌ **Does not exist.** No route, service or repository filters `LiveClass` by `sectionId` |
+| **Counts** ("7 Sessions · 1 Language") | ❌ Nothing produces them. No LiveClass aggregation exists anywhere in the codebase |
+| Indexes for a module-first query | ❌ None on `sectionId`, `language`, or `{courseId, sectionId}` |
+| The grouping itself | ✅ Already computed — `page.tsx:1499-1522` buckets by `title|instructor|course|module` and resolves `courseTitle`/`moduleTitle` |
+
+The last row is the good news: **most of the hierarchy is already being
+computed and then used only as labels.** The work is navigation, counts, and
+the decision in §9.2.
+
+### 9.4 The traps
+
+Each of these has bitten this codebase before; the citation is where it is
+recorded.
+
+1. **Module blocking fails open.** `GET /courses/:slug` returns `sections[]`
+   **unfiltered by `blockedLessons`** (`course.controller.ts:78-85`). Build
+   Level 2 from that list and a blocked module renders as browsable, with the
+   refusal arriving only as `MODULE_BLOCKED` at click time. Today the block is
+   invisible *because* the page only draws modules that arrived attached to a
+   class the server already judged.
+   → **Build every module node from the classes the server returned, never
+   from the section list.** This is an access-control regression, not a visual
+   one, and it is the highest risk in the change.
+
+2. **Cross-academy guests lose their door.** A guest's own course arrives as an
+   **id** (`yourCohort.courseId`), and both course endpoints are **slug-keyed**.
+   Group on the host's `course.id`/`sectionId` — the obvious fields — and a
+   guest's booked class vanishes from their own course and every label reads
+   the other academy's. Recorded three times already:
+   `liveClass.repository.ts:57-78`, `liveClass.controller.ts:624-633`,
+   `admin.routes.ts:2138-2167`.
+   → Key every node on `yourCohort.courseId ?? course.id` **and**
+   `yourCohort.sectionId ?? sectionId`; label with `yourCohort.courseTitle` /
+   `sectionTitle`.
+
+3. **The current page is already half-regressed here, and this change should
+   fix it.** `effCourseId` (`page.tsx:364`) is door-aware; `secKey`
+   (`:1506`) and `moduleTitle` (`:1515`) read the **host's** section.
+   `yourCohort.sectionTitle` is on the DTO and consumed nowhere in `client/src`.
+   So today's grouping key mixes the guest's course with the host's module.
+
+4. **Counting in Mongo gives the wrong number.** Entitlement is per-student
+   application code — `doorsFor()` walking `blockedLessons`
+   (`classEntitlement.service.ts:240-259`). A `$group` cannot see module
+   blocking or the caller's door, so "7 Sessions" would sit above three
+   bookable slots.
+   → Derive counts from the **same rows the student was served**, or accept
+   that a server count is "sessions in this module", not "sessions you can
+   book", and label it accordingly.
+
+5. **Classes with no module disappear.** `sectionId` is optional on both the
+   class and each guest cohort. A drill-down whose only path to a class runs
+   *through* a module hides every un-moduled one — and `/class-bookings` is the
+   sole booking entry in the nav (`ClientSidebar.tsx:16`), so those classes
+   become unbookable.
+   → A **"General sessions"** node per course, always rendered when non-empty.
+
+6. **`seatsLeftForYou`, not arithmetic.** Any new badge written as
+   `sessionCapacity - bookedCount` shows a guest the room's remainder and then
+   refuses `SESSION_FULL`. The client contract is one line
+   (`page.tsx:362-363`) and is trivially not-copied. A module-level total must
+   sum `seatsLeft(lc)`.
+
+7. **The booking state machine.** `getSlotStatus` (`page.tsx:128-188`) encodes
+   ten states and **the order is load-bearing**: existing-booking before
+   cutoff, cutoff before full/locked. `'locked'` (one reservation per group,
+   `:633`) is **group-scoped** — re-scoping it to "one per module" changes
+   booking semantics and is a product decision, not a refactor. Around it sit
+   the 60-minute cutoff, the 15-minute live lead, the 20-minute join grace, the
+   same-day in-person refusal (`:139-145`) and the 2× attendance cap.
+
+8. **Seven server error codes are mapped to specific copy** in `handleBook`
+   (`page.tsx:1570-1584`): `CONTACT_ADMIN`, `SESSION_FULL`, `ALREADY_BOOKED`,
+   `NOT_ENROLLED`, `MODULE_BLOCKED`, `PENDING_APPROVAL`, `ACCESS_REJECTED`,
+   plus the pending-registration pre-empt. A fresh handler ships with a generic
+   toast.
+
+9. **Timezone.** Weekday and time only exist relative to a zone. The student
+   app renders in the **device** zone (`lib/timezone.ts:24`), and day buckets
+   go through `zonedKey` with a UTC-noon header trick
+   (`page.tsx:1537-1550`) precisely because naive bucketing slips a day at
+   UTC+13. A weekday-first UI makes this *more* exposed.
+
+10. **`my-bookings` shares the cache.** It hydrates from the same
+    `useAllLiveClasses()` array (`my-bookings/page.tsx:194`). Changing that
+    query key, its params, or moving to a paginated endpoint silently empties
+    that page.
+
+11. **Pricing.** A Level-1 course grid is the first commerce-shaped surface in
+    `/class-bookings`, and the reference's Level-2 button is literally "Enroll
+    Now". `SHOW_PRICING` is not imported there today
+    (`lib/pricingVisibility.ts`) — it must be, or the pricing blackout leaks
+    through the new page.
+
+12. **`$or` composition.** A module/language query wants its own `$or`
+    (host-course arm + guest-cohort arm) *on top of* `servedClassFilter`'s.
+    Compose with `andFilter`; a second `$or` assignment silently deletes the
+    first — the P-04 shape, recorded at `tenancy.ts:148-154`.
+
+13. **Anonymous callers get an empty list.** `GET /courses/:slug/live-classes`
+    is `optionalAuthenticate`, but an anonymous caller resolves to
+    `ACCOUNT_GONE` and the handler short-circuits to `[]`
+    (`liveClass.controller.ts:620-621`). A public catalogue cannot use it as-is.
+
+14. **List and book disagree on enrolment status**, deliberately
+    (`classEntitlement.service.ts:34-43`): listing accepts `notDropped`,
+    booking requires `active`. A completed enrolment can see and join but not
+    book. Any "Book This Slot" built off the list will therefore show slots
+    that 403 — either pre-empt it in the UI or leave the refusal legible.
+
+### 9.4b What a read of the code corrected in the above
+
+Five claims in 9.1-9.4 were checked against the source and did not survive.
+They are corrected here rather than deleted, because each one changes a phase.
+
+1. **A blocked module is NOT filtered out by the server, and never was.**
+   `liveClasses.routes.ts:139` sets `isEnrolled = e.ok || e.code ===
+   'MODULE_BLOCKED'`, and the module is populated on the row either way
+   (`:109`). Only the Mux fields are stripped (`ENTITLED_ONLY_FIELDS`, `:32`).
+   `liveClass.service.ts:81` does the same for the course endpoint. So blocked
+   modules *already* render as browsable on the flat page today - which is
+   exactly why `handleBook` has a `MODULE_BLOCKED` branch at `page.tsx:1570`.
+   Trap #1's mitigation ("build from returned rows") therefore buys nothing:
+   those rows include the blocked ones.
+   **Resolution:** `isEntitled` is computed on both list paths but never put
+   on the wire (it appears nowhere in `client/src`). Emit it. Then the
+   hierarchy can draw a blocked module *locked* rather than either hiding it
+   (a behaviour change - rows that are visible today would vanish) or
+   pretending it is open (today's behaviour, which fails on the click).
+
+2. **Phase 1 is already done.** Trap #3 was accurate at `8422c4c`; the fix
+   landed during the review. `effSectionId`/`effSectionTitle` at
+   `page.tsx:377-385`, used in the group key `:1527`, the label `:1534` and
+   the search haystack `:1512`.
+
+3. **Phase 2's endpoint is redundant and its index would not be used.**
+   `GET /live-classes` is unpaginated and unwindowed and already returns every
+   served class carrying `yourCohort`, `seatsLeftForYou`, `bookingClosesAt`,
+   `joinOpensAt`, `joinClosesAt`, `isBooked` **and** the populated course and
+   section - a strict superset of what the proposed route would return. A
+   second route is a second source of truth that can drift from
+   `useAllLiveClasses`, which defeats Phase 5's own verify criterion. And
+   `{courseId:1, sectionId:1, scheduledStart:1}` cannot serve a query that has
+   no `sectionId` equality: Mongo would take the `courseId` prefix and
+   blocking-sort, strictly worse than the existing `{courseId:1,
+   scheduledStart:1}` (`schema.ts:1095`).
+   **Resolution:** no new endpoint, no new index. Build from the cache.
+
+4. **Module order and description never reach the client.** `Section` carries
+   `order` and `description` (`schema.ts:588-596`), but the populate selects
+   `'id title'` (`liveClasses.routes.ts:109`) and `toDTO` emits only those
+   (`liveClass.controller.ts:215-219`). Built from returned rows, Level 2
+   cannot sort Module 1..10 into course order and Level 3 cannot show the
+   description the reference modal is built around.
+   **Resolution:** widen the populate and the DTO. Two fields, additive.
+
+5. **The date window was never mentioned, and it breaks the counts.**
+   `windowClasses` (`page.tsx:1515`) clips the flat list to Monday-Sunday of
+   the current week by default, while `allClasses` is every served class for
+   all time. A module card counting the unclipped set reads "40 Sessions";
+   counting the clipped set disagrees with the flat view by construction.
+   **Resolution - the time policy, stated once:** *the hierarchy is a
+   catalogue, not a diary.* It shows every session from now forward, ignores
+   the week window entirely, and the range picker stays with the flat view
+   where it belongs. A module card's "N Sessions" means **N bookable sessions
+   still ahead of you*.
+
+Two smaller slips, corrected in place below: the 2x attendance cap is per
+class document (`bookings.routes.ts:233`), not per group; and `'locked'` is
+purely a client-side rule - the server has no one-reservation-per-group
+constraint, so re-scoping it is a UI change, not a booking-semantics change.
+
+And one constraint that argues *for* this design and was missed:
+`schema.ts:1068-1071` makes it unpersistable for a gated host class to carry
+an unmoduled guest cohort, so `yourCohort.sectionId ?? sectionId` can never
+silently fall back to the host's module. The inverse is legal - host module
+null, guest cohort moduled - so one class can sit under a module for the guest
+and under **General sessions** for the host. That is correct per-door
+behaviour, not a bug.
+
+### 9.5 The build
+
+Each phase ships on its own and is verifiable alone.
+
+- [x] **Phase 1 - Fix the door bug that is already there.** DONE. `secKey`
+      and `moduleTitle` are door-aware via `effSectionId`/`effSectionTitle`,
+      and the search haystack matches the guest's own course and module names.
+
+- [ ] **Phase 2 - Put the three missing fields on the wire.** No new endpoint
+      (9.4b #3). Widen the section populate to `'id title order description'`
+      on both list paths and emit `order`/`description` from `toDTO`; emit
+      `isEntitled` alongside `isEnrolled` so a blocked module can be drawn
+      locked (9.4b #1, #4). Align the client's `LANG_OPTIONS` with the
+      backend's `LIVE_LANGUAGES` - the client offers Tamil, which cannot
+      exist, and omits Arabic and Urdu, which can (`admin.routes.ts:1363`).
+      *Verify:* a guest row carries its own module's order and description;
+      a blocked row arrives `isEnrolled:true, isEntitled:false`; every
+      language a class can hold is reachable from the filter.
+
+- [ ] **Phase 3 - The tree, from the rows already cached.** Build from
+      `useAllLiveClasses()`: course (door-aware) -> module (`effSectionId`,
+      ordered by `section.order`, **General sessions** bucket for null) ->
+      language -> slot-group. Every count computed from the same filtered
+      array that is rendered beneath it, so they cannot disagree (trap #4).
+      Future-only, per the time policy in 9.4b #5.
+      *Verify:* counts equal the cards beneath them; an un-moduled class
+      appears under General; a blocked module appears **locked**, not hidden.
+
+- [ ] **Phase 4 - The three screens, plus URL state.** Level 1 course cards,
+      Level 2 module cards with "N Sessions / N Languages", Level 3 the slot
+      sheet grouped by language showing the module description. Reuse
+      `SlotModal`'s action block wholesale - it is where the ten states, the
+      seven error codes and the join clock live. **Do not rewrite it.**
+      URL state is part of this phase, not an afterthought: `?view=`,
+      `?course=`, `?module=`, `?class=`, so a drill-down is linkable and the
+      back button works.
+      *Verify:* every state in `getSlotStatus` still reachable; book, cancel,
+      full, locked, cutoff-passed and live-now behave as on the flat page.
+
+- [ ] **Phase 5 - Default to the hierarchy, keep the flat view, keep the
+      ~15 deep links working.** Ship the hierarchy as the landing view with
+      the chronological list behind a toggle. Roughly fifteen emails, cron
+      reminders, the digest and the booking routes link to `/class-bookings`
+      with no parameters (`email.service.ts:903,1077,1105,1143,1312,1319`;
+      `bookings.routes.ts:84,96,119,133`; `reminders.job.ts:120,208,220`;
+      `digest.job.ts:86`; `liveClass.controller.ts:439,454`;
+      `admin.routes.ts:1654,2573`) and every one of them is *about a specific
+      session*. Making the hierarchy the default without touching them puts
+      every reminder three drill-downs from its own class.
+      **Point them at `?view=sessions`** so they keep landing on the
+      chronological list.
+      *Verify:* `my-bookings` still hydrates from the shared cache (trap #10);
+      both views agree on the same class; a reminder link still lands on a
+      list containing its session.
+
+- [ ] **Phase 6 - Slot labels.** Render a group as `Tuesdays 2:00 PM / next
+      Mon 22 Sep`. Where a group's members disagree on weekday or time - a
+      rescheduled member - show the dates rather than a false pattern.
+      *Verify:* a deliberately drifted series does not claim a weekday.
+
+### 9.6 What I would not do
+
+- **Not weekday-only labels replacing the date.** Detaching the booking from
+  the dated thing booked makes every row of the 9.2 table a way to book the
+  wrong session. Note this is narrower than the plan's original blanket
+  rejection of (B): Phase 6 *is* the safe half of it - derive the pattern from
+  the rows in the group, and show dates the moment they disagree.
+- **Not a denormalised session count on `Section`.** It would drift. (The
+  original citation `schema.ts:1046-1050` was wrong - that comment belongs to
+  `LiveClassSchema.pre('validate')`; `SectionSchema` at `:588-600` has no
+  validator at all. The conclusion stands on its own.)
+- **Not a new `?sectionId=` filter on `GET /live-classes`.** Not because of
+  the query key - `useAllLiveClasses(status)` already takes and keys on a
+  param - but because the endpoint already returns everything the tree needs.
+- **Not re-scoping `'locked'` from group to module** without the owner
+  deciding. It is a client-only rule (the server enforces entitlement, the 2x
+  per-class cap, capacity and duplicate-booking, and nothing else), so this is
+  a product call about what the UI should permit, not a schema question.
+- **Not hiding blocked modules.** They are visible today (9.4b #1); removing
+  them is a behaviour change the owner has not asked for. Lock them instead.
+
+### 9.7 Open questions - for the owner, before Phase 5 lands
+
+1. **Is "Book This Slot" a standing weekly commitment, or one session?**
+   There is a fourth option between (A) and (C) that 9.2 missed:
+   **(D) dated sessions, series-level booking** - keep the schema exactly as
+   it is, and add one action that books every future member of an existing
+   group in a single call. The group key already exists at `page.tsx:1527`;
+   each booking still runs the unchanged entitlement, capacity, cutoff and cap
+   gates. No template document, no `seriesId` reader, no migration. (D) gives
+   the reference's actual semantics - *choose your weekly cohort once* - at a
+   fraction of (C)'s cost. Phases 1-6 are compatible with all of A, C and D.
+2. **Should a student be limited to one slot per module?** The reference
+   implies it. We allow one reservation per *group* in the UI and cap
+   attendance at 2x *per class document* - both different rules.
+3. **Does Level 1 list enrolled courses only, or the whole catalogue?**
+4. **What is shown for a course with no modules?** Every class falls into
+   "General sessions" and Level 2 becomes a single card - worth skipping
+   straight to Level 3 in that case.
+
+### 9.8 What this plan still does not cover
+
+Named here so it is a decision and not an oversight. The current page carries
+seven filters plus search (`page.tsx:1321`), status tabs with counts (`:1413`),
+**two different** four-tile metric rows - online (`:1720`) and in-person
+(`:1733`, fed by `offlineStats` at `:1444`) - three empty states, a delivery
+toggle, a mini-calendar and a range shifter. Under Course -> Module -> Class,
+`filterCourse` and `filterProgram` become redundant with the navigation axis
+itself and `filterLanguage` collides with Level 3's own language grouping.
+Phases 3-5 keep all of that chrome on the flat view and give the hierarchy
+only search; folding the tiles into the hierarchy is deferred until the owner
+has seen it. Separately: the 2038-line file contains no `aria-*` or `role=`
+attribute anywhere, and the modal is a mobile bottom sheet (`:588`) - a
+three-level drill-down needs focus management and a back affordance that a
+single-screen page never did. Phase 4 adds them for the new surfaces only.

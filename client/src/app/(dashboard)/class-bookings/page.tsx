@@ -364,6 +364,27 @@ const isFull     = (lc: LiveClass) => lc.sessionCapacity > 0 && seatsLeft(lc) <=
 const effCourseId = (lc: LiveClass) => lc.yourCohort?.courseId ?? lc.course?.id
 const effProgram  = (lc: LiveClass) => lc.yourCohort?.program  ?? (lc.course as { program?: string } | undefined)?.program
 
+/* THE MODULE THE CALLER REACHES THIS CLASS THROUGH — their own, not the host's.
+
+   effCourseId above has always preferred the guest's door and these two never
+   did, so a Bangalore student on a shared class was grouped by their own
+   COURSE and the host's MODULE: one key mixing two doors, and a module name
+   belonging to an academy they are not enrolled in. yourCohort.sectionTitle
+   has been on the DTO since the door work and was read nowhere.
+
+   Both fall back to the class's own fields, which is what a host caller wants
+   and what every unshared class has. */
+const effSectionId = (lc: LiveClass): string => {
+  if (lc.yourCohort?.sectionId) return lc.yourCohort.sectionId
+  const s = lc.sectionId
+  return typeof s === 'object' && s ? s.id : s ?? ''
+}
+const effSectionTitle = (lc: LiveClass): string | undefined => {
+  if (lc.yourCohort?.sectionTitle) return lc.yourCohort.sectionTitle
+  const s = lc.sectionId
+  return typeof s === 'object' && s ? s.title : undefined
+}
+
 function SlotChip({lc,status,isSelected,onClick}: {
   lc:LiveClass; status:SlotStatus; isSelected:boolean; onClick:()=>void
 }) {
@@ -1005,11 +1026,18 @@ function CourseDropdown({ value, onChange, options }: {
 }
 
 /* ── Language dropdown ─────────────────────────────────────── */
+/* THE SAME FIVE THE BACKEND ACCEPTS - see LIVE_LANGUAGES in
+   backend/src/routes/admin.routes.ts:1363, which the create and update
+   validators enforce. This list had drifted in both directions at once:
+   it offered Tamil, which no class can be, so picking it could only ever
+   empty the page; and it omitted Arabic and Urdu, which a class CAN be,
+   so those sessions were unreachable from the filter entirely. */
 const LANG_OPTIONS = [
   { value: 'English',   label: 'English',   flag: '🇬🇧' },
-  { value: 'Malayalam', label: 'Malayalam', flag: '🇮🇳' },
+  { value: 'Arabic',    label: 'Arabic',    flag: '🇦🇪' },
   { value: 'Hindi',     label: 'Hindi',     flag: '🇮🇳' },
-  { value: 'Tamil',     label: 'Tamil',     flag: '🇮🇳' },
+  { value: 'Malayalam', label: 'Malayalam', flag: '🇮🇳' },
+  { value: 'Urdu',      label: 'Urdu',      flag: '🇵🇰' },
 ]
 
 function LanguageDropdown({ value, onChange }: {
@@ -1479,9 +1507,19 @@ export default function ClassBookingsPage() {
       if(filterLanguage!=='all'      && (lc as any).language!==filterLanguage)       return false
       // Search
       if(q){
-        const sec = lc.sectionId
-        const mod = typeof sec==='object'&&sec?(sec as any).title??'':''
-        if(![lc.title,lc.instructor?.name??'',lc.course?.title??'',mod].join(' ').toLowerCase().includes(q)) return false
+        /* Search the names the CALLER sees. This matched the host's course and
+           module titles, so a guest student searching for their own module —
+           the only one they have ever been shown — matched nothing. Both
+           names are included rather than swapped: a host's title is still the
+           right answer for every unshared class, and for a guest the two are
+           simply different words for the same room. */
+        const hay = [
+          lc.title,
+          lc.instructor?.name ?? '',
+          lc.yourCohort?.courseTitle ?? '', lc.course?.title ?? '',
+          effSectionTitle(lc) ?? '',
+        ]
+        if(!hay.join(' ').toLowerCase().includes(q)) return false
       }
       return true
     })
@@ -1503,16 +1541,14 @@ export default function ClassBookingsPage() {
        all match — a real weekly repeat. Keying by title alone merged a class
        for instructor A into instructor B's bucket, and slots[0] (the earliest)
        then stamped B's name/course/module on the whole group. */
-    const secKey=(lc:LiveClass)=>{const s=lc.sectionId;return typeof s==='object'&&s?s.id:s??''}
-    windowClasses.forEach(lc=>{const k=[lc.title.trim(),lc.instructor?.id??'',effCourseId(lc)??'',secKey(lc)].join('|');if(!map.has(k))map.set(k,[]);map.get(k)!.push(lc)})
+    windowClasses.forEach(lc=>{const k=[lc.title.trim(),lc.instructor?.id??'',effCourseId(lc)??'',effSectionId(lc)].join('|');if(!map.has(k))map.set(k,[]);map.get(k)!.push(lc)})
     const res:ClassGroup[] = []
     map.forEach((slots,id)=>{
       slots.sort((a,b)=>new Date(a.scheduledStart).getTime()-new Date(b.scheduledStart).getTime())
       const bookedSlot = slots.find(s=>bookingMap.get(s.id)?.status==='booked')
-      const sec = slots[0].sectionId
       res.push({id, title:slots[0].title.trim(), instructor:slots[0].instructor??null, slots, bookedSlot,
         courseId:effCourseId(slots[0]), courseTitle:slots[0].yourCohort?.courseTitle ?? slots[0].course?.title,
-        moduleTitle:typeof sec==='object'&&sec?sec.title:undefined})
+        moduleTitle:effSectionTitle(slots[0])})
     })
     res.sort((a,b)=>{
       const r=(g:ClassGroup)=>g.slots.some(s=>s.status==='live')?0:g.bookedSlot?1:2

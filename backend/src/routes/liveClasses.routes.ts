@@ -106,7 +106,13 @@ router.get('/', authenticate, async (req: Request, res: Response, next: NextFunc
     const classes = await LiveClassModel.find(lcOrgFilter)
       .populate('instructorId', 'id name avatarUrl')
       .populate('courseId', 'id title slug thumbnailUrl program')
-      .populate('sectionId', 'id title')
+      /* `order` and `description` because the module list is a CATALOGUE,
+         not a feed: without `order` the modules arrive in whatever order
+         their classes were scheduled, so "Module 10" can head the list,
+         and without `description` the module has nothing to say for
+         itself. Both live on Section already (models/schema.ts:588-596)
+         and were simply never selected. */
+      .populate('sectionId', 'id title order description')
       .sort({ scheduledStart: 1 })
       .lean({ virtuals: true })
 
@@ -143,6 +149,15 @@ router.get('/', authenticate, async (req: Request, res: Response, next: NextFunc
         id:         c.id ?? String(c._id),
         status:     resolveLiveStatus(c.status, c.scheduledStart, c.durationMins ?? 60, now),
         isEnrolled,
+        /* ENROLLED IS NOT ENTITLED, AND THE DIFFERENCE IS THE WHOLE
+           POINT OF THIS FIELD. `isEnrolled` above is deliberately true
+           for MODULE_BLOCKED, so a student the admin locked out of a
+           module still SEES its sessions — that is long-standing and
+           stays. But it was the only signal on the wire, so the page had
+           no way to tell a session it can book from one it cannot, and
+           found out only when the click came back 403. Sent so the UI
+           can draw the lock BEFORE the click. */
+        isEntitled,
         /* When new bookings stop being accepted, computed by the SERVER.
            The schedule screen needs to grey out a seat an hour before the
            class, and deriving that in the browser would put the rule in two

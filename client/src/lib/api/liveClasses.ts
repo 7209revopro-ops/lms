@@ -48,7 +48,11 @@ export interface LiveClass {
   endedAt?:       string
 
   /* Module link */
-  sectionId?: string | { id: string; title: string }
+  /* `order` places the module in its course (Module 1 before Module 10);
+     `description` is what the module says for itself. Both optional: a
+     row from a read that does not populate the section carries the bare
+     id, which is a shape this field has always also had. */
+  sectionId?: string | { id: string; title: string; order?: number; description?: string }
 
   /* Capacity */
   sessionCapacity: number
@@ -84,6 +88,17 @@ export interface LiveClass {
    * enrollment in this session's course. False = show "Purchase to join" prompt.
    */
   isEnrolled?: boolean
+
+  /**
+   * Enrolled MINUS any module the admin blocked for this student.
+   *
+   * `isEnrolled` is true for a blocked module on purpose - the session
+   * stays listed. `isEntitled` is the one that says whether a booking
+   * will be accepted, so it is what a lock should be drawn from.
+   * Absent on older responses; treat absent as "assume entitled", which
+   * is how every screen behaved before it existed.
+   */
+  isEntitled?: boolean
 
   createdAt:      string
   updatedAt:      string
@@ -190,7 +205,10 @@ function normalizeLiveClass(c: any): LiveClass {
   const secRaw = c.sectionId
   const sectionId: LiveClass['sectionId'] =
     typeof secRaw === 'object' && secRaw
-      ? { id: secRaw.id ?? String(secRaw._id ?? ''), title: secRaw.title ?? '' }
+      /* Rebuilt field by field, so anything not named here is DROPPED -
+         which is what happened to order and description. */
+      ? { id: secRaw.id ?? String(secRaw._id ?? ''), title: secRaw.title ?? '',
+          order: secRaw.order, description: secRaw.description }
       : (secRaw ?? undefined)
 
   return {
