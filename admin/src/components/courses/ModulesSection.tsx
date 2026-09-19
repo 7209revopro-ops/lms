@@ -260,12 +260,14 @@ function AddLessonForm({ courseId, sectionId, onClose }: { courseId: string; sec
           <FormField
             label={type === 'video' ? 'Video content' : 'Article / resource'}
             hint={type === 'video' && duration > 0 ? `Detected length: ${duration} min` : undefined}>
+            {/* 'document', not 'image': an article's resource is as often a PDF
+                handout as a picture, and the image endpoint refuses one. */}
             <MediaUploadField
               mode="compact"
-              type={type === 'video' ? 'video' : 'image'}
+              type={type === 'video' ? 'video' : 'document'}
               value={contentUrl} onChange={setContentUrl}
               onDurationDetected={secs => setDuration(secondsToMinutes(secs))}
-              placeholder={type === 'video' ? 'Video URL or upload file' : 'Article / resource URL'} />
+              placeholder={type === 'video' ? 'Video URL or upload file' : 'PDF or image URL, or upload'} />
           </FormField>
         )}
         <div className="flex items-center justify-between rounded-xl px-4 py-3"
@@ -345,10 +347,12 @@ function LessonEditForm({
           <FormField
             label={type === 'video' ? 'Video content' : 'Article / resource'}
             hint={type === 'video' && duration > 0 ? `Detected length: ${duration} min` : undefined}>
-            <MediaUploadField mode="compact" type={type === 'video' ? 'video' : 'image'}
+            {/* 'document', not 'image': an article's resource is as often a PDF
+                handout as a picture, and the image endpoint refuses one. */}
+            <MediaUploadField mode="compact" type={type === 'video' ? 'video' : 'document'}
               value={contentUrl} onChange={setContentUrl}
               onDurationDetected={secs => setDuration(secondsToMinutes(secs))}
-              placeholder={type === 'video' ? 'Video URL or upload file' : 'Article / resource URL'} />
+              placeholder={type === 'video' ? 'Video URL or upload file' : 'PDF or image URL, or upload'} />
           </FormField>
         )}
         {(type === 'video' || type === 'article') && (

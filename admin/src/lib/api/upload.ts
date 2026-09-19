@@ -58,6 +58,27 @@ export async function uploadImage(file: File): Promise<string> {
   return res.data.data.url
 }
 
+/* ── Document upload (images AND PDF) ─────────────────────────────────────
+   A different endpoint from uploadImage, not a wider filter on that one.
+   /uploads/image is deliberately images-only and is used by avatars,
+   thumbnails and course art, where a PDF would be a mistake rather than a
+   feature. /uploads/document already accepted PDFs for enrollment paperwork:
+   10 MB, magic-byte verified against %PDF so a renamed file is refused, and
+   written under the `documents/` prefix, which the public asset proxy serves
+   (only `videos/` and `kyc/` are blocked there). That last part is what makes
+   it the right endpoint for a lesson resource: a student has to be able to
+   open it. */
+export async function uploadDocument(file: File): Promise<string> {
+  const form = new FormData()
+  form.append('file', file)
+  const res = await api.post<{ success: true; data: UploadImageResult }>(
+    '/uploads/document',
+    form,
+    { headers: { 'Content-Type': 'multipart/form-data' } },
+  )
+  return res.data.data.url
+}
+
 /* ── Presign: backend returns PUT URL → client uploads directly to R2 ── */
 export async function getPresignedUrl(
   filename:    string,
@@ -267,6 +288,12 @@ export async function uploadVideo(
 export function useUploadImage() {
   return useMutation({
     mutationFn: (file: File) => uploadImage(file),
+  })
+}
+
+export function useUploadDocument() {
+  return useMutation({
+    mutationFn: (file: File) => uploadDocument(file),
   })
 }
 

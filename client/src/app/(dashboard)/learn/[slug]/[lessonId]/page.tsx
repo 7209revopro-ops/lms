@@ -385,6 +385,14 @@ function ArticleReader({ lesson }: { lesson: LessonOutline }) {
      below is always there as the guaranteed fallback. */
   const canEmbed = !!url && !isImage
 
+  /* FitH tells the browser's built-in PDF viewer to fit the page WIDTH rather
+     than open at 100%, which on a phone lands the reader in the middle of a
+     page they then have to pinch out of. It is a fragment, so it never reaches
+     the server and is ignored by anything that is not a PDF viewer — but it is
+     only appended when the URL has no fragment of its own, because a caller
+     who wrote their own (#page=4) meant it. */
+  const embedUrl = isPdf && url && !url.includes('#') ? `${url}#view=FitH` : url
+
   if (!url && !body) {
     return (
       <div data-protected-content className="flex min-h-[320px] flex-col items-center justify-center gap-3 rounded-2xl"
@@ -420,9 +428,18 @@ function ArticleReader({ lesson }: { lesson: LessonOutline }) {
       )}
 
       {url && canEmbed && (
-        <div className="overflow-hidden rounded-2xl bg-[var(--color-bg-inset)]" style={{ border: '1px solid var(--color-border)', height: '78vh' }}>
+        <div
+          className="overflow-hidden rounded-2xl bg-[var(--color-bg-inset)]"
+          style={{
+            border: '1px solid var(--color-border)',
+            /* A document is read, not glanced at, so it gets more of the
+               window than a generic embed — and a floor in px so a short
+               viewport does not squeeze it into a letterbox. */
+            height: isPdf ? 'min(88vh, 1100px)' : '78vh',
+            minHeight: isPdf ? 420 : undefined,
+          }}>
           <iframe
-            src={url}
+            src={embedUrl}
             title={lesson.title}
             className="h-full w-full"
             style={{ border: 'none' }}

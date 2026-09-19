@@ -26,7 +26,7 @@
 import { useRef, useState, useEffect, useCallback, type DragEvent, type ChangeEvent } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Link, Upload, Image, Film, X, CheckCircle2, AlertCircle } from 'lucide-react'
-import { useUploadImage, uploadVideo } from '@/lib/api/upload'
+import { useUploadImage, uploadVideo, useUploadDocument } from '@/lib/api/upload'
 import { probeFileDuration, probeVideoDuration } from '@/lib/videoDuration'
 import Spinner from '@/components/ui/Spinner'
 
@@ -87,7 +87,10 @@ function useFilePicker({ accept, onPick }: UseFilePickerOptions) {
 export interface MediaUploadFieldProps {
   value:       string
   onChange:    (url: string) => void
-  type:        'image' | 'video'
+  /* 'document' is images PLUS PDF, uploaded through /uploads/document.
+     Kept separate from 'image' because the image endpoint is deliberately
+     images-only for avatars and course art. */
+  type:        'image' | 'video' | 'document'
   label?:      string
   hint?:       string
   error?:      string
@@ -126,12 +129,18 @@ export function MediaUploadField({
   const abortRef = useRef<AbortController | null>(null)
 
   const uploadImage = useUploadImage()
-  const isUploading = uploadImage.isPending || uploading
+  const uploadDoc   = useUploadDocument()
+  const isUploading = uploadImage.isPending || uploadDoc.isPending || uploading
   const uploadDone  = !!value && !!lastFile && !isUploading
 
   const accept = type === 'image'
     ? 'image/jpeg,image/png,image/gif,image/webp'
-    : 'video/mp4,video/webm,video/quicktime,video/x-msvideo,video/x-matroska'
+    : type === 'document'
+      /* Mirrors ALLOWED_DOCUMENT on the server exactly. GIF is absent there,
+         so it is absent here — an accept list the server disagrees with just
+         moves the refusal from the file picker to a failed upload. */
+      ? 'application/pdf,image/jpeg,image/png,image/webp'
+      : 'video/mp4,video/webm,video/quicktime,video/x-msvideo,video/x-matroska'
 
   /* ── Handle file pick (from either file-input or drop) ── */
   const handleFile = useCallback(async (file: File) => {
@@ -141,6 +150,8 @@ export function MediaUploadField({
       let url: string
       if (type === 'image') {
         url = await uploadImage.mutateAsync(file)
+      } else if (type === 'document') {
+        url = await uploadDoc.mutateAsync(file)
       } else {
         setUploading(true)
         setVidProgress(0)
@@ -173,7 +184,7 @@ export function MediaUploadField({
     } finally {
       abortRef.current = null
     }
-  }, [type, uploadImage, onChange, onDurationDetected])
+  }, [type, uploadImage, uploadDoc, onChange, onDurationDetected])
 
   const cancelUpload = useCallback(() => abortRef.current?.abort(), [])
 
@@ -227,7 +238,10 @@ export function MediaUploadField({
           <input
             value={value}
             onChange={e => { setLastFile(null); onChange(e.target.value) }}
-            placeholder={placeholder ?? (type === 'image' ? 'Image URL or upload ↗' : 'Video URL or upload ↗')}
+            placeholder={placeholder ?? (
+              type === 'image'    ? 'Image URL or upload ↗'
+            : type === 'document' ? 'PDF or image URL, or upload ↗'
+            :                       'Video URL or upload ↗')}
             disabled={disabled || isUploading}
             className={`${BASE_INPUT} pr-1`}
             style={{
