@@ -2,6 +2,11 @@ export type CourseStatus = 'draft' | 'published' | 'archived'
 export type CourseLevel  = 'beginner' | 'intermediate' | 'advanced'
 
 export interface Course {
+  /** The academy that owns this course. The cross-academy form needs it: the
+      server resolves a class's host academy as the caller's, falling back to
+      the course's, so without this the form cannot tell which academy to leave
+      OUT of the guest list. */
+  organizationId?: string
   id:            string
   title:         string
   slug:          string

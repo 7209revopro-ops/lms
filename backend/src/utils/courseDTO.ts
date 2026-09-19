@@ -28,6 +28,16 @@ export interface CourseDTO {
   language:       string
   tags?:          string[]
   instructorId:   string
+  /* The academy that OWNS this course. Needed by the admin form for
+     cross-academy classes: the server resolves a class's host academy as the
+     caller's, falling back to the course's, so a form that cannot see this
+     cannot tell which academy to leave OUT of the guest list — and offered the
+     host's own academy as a guest, which the server then refuses with "a class
+     cannot be a guest of its own academy" for reasons invisible from the form.
+
+     Not sensitive: tenancy already means a caller only ever sees courses of an
+     academy they belong to, so this names an academy they are already in. */
+  organizationId?: string
   categoryId?:    string
   program?:       '4x-trading' | 'digital-marketing' | 'ai' | 'jura'
   enrolledCount:  number
@@ -69,6 +79,7 @@ export function toCourseDTO(course: ICourse, lessonCount?: number): CourseDTO {
     createdAt:     json['createdAt']     as string | Date,
     updatedAt:     json['updatedAt']     as string | Date,
     instructorId:  '',
+    organizationId: json['organizationId'] ? String(json['organizationId']) : undefined,
   }
 
   const inst = json.instructorId

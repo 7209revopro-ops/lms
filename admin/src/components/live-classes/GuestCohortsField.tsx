@@ -28,6 +28,7 @@ import { useQuery } from '@tanstack/react-query'
 import { Plus, X } from 'lucide-react'
 import { api } from '@/lib/axios'
 import { useOrganizations } from '@/lib/api/organizations'
+import { DarkSelect } from '@/components/live-classes/FormWidgets'
 import { useCourseOutline } from '@/lib/api/outline'
 import type { GuestCohortInput } from '@/lib/api/liveClasses'
 
@@ -78,18 +79,19 @@ function CohortRow({
   return (
     <div className="rounded-xl p-3 space-y-2" style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.07)' }}>
       <div className="flex items-center gap-2">
-        <select
-          className={fieldBase} style={selectStyle} disabled={disabled}
-          value={cohort.organizationId}
-          /* Changing the academy invalidates the course, and the course
-             invalidates the module. Clearing them is not tidiness — a stale
-             courseId from the previous academy is exactly the state the server
-             refuses, and the admin would have no idea why. */
-          onChange={e => onChange({ ...cohort, organizationId: e.target.value, courseId: '', sectionId: undefined })}
-        >
-          <option value="">Select academy…</option>
-          {selectable.map(o => <option key={o.id} value={o.id}>{o.name}</option>)}
-        </select>
+        <div className="flex-1">
+          <DarkSelect
+            value={cohort.organizationId}
+            disabled={disabled}
+            placeholder="Select academy…"
+            options={selectable.map(o => ({ value: o.id, label: o.name }))}
+            /* Changing the academy invalidates the course, and the course
+               invalidates the module. Clearing them is not tidiness — a stale
+               courseId from the previous academy is exactly the state the
+               server refuses, and the admin would have no idea why. */
+            onChange={v => onChange({ ...cohort, organizationId: v, courseId: '', sectionId: undefined })}
+          />
+        </div>
         {!disabled && (
           <button type="button" onClick={onRemove}
             className="shrink-0 rounded-lg p-2 text-white/50 hover:text-white hover:bg-white/10"
@@ -99,30 +101,27 @@ function CohortRow({
         )}
       </div>
 
-      <select
-        className={fieldBase} style={selectStyle}
-        disabled={disabled || !cohort.organizationId || loadingCourses}
+      <DarkSelect
         value={cohort.courseId}
-        onChange={e => onChange({ ...cohort, courseId: e.target.value, sectionId: undefined })}
-      >
-        <option value="">
-          {!cohort.organizationId ? 'Pick an academy first…'
-            : loadingCourses ? 'Loading courses…' : 'Their equivalent course…'}
-        </option>
-        {courses.map(c => <option key={c.id} value={c.id}>{c.title}</option>)}
-      </select>
+        disabled={disabled || !cohort.organizationId}
+        loading={!!cohort.organizationId && loadingCourses}
+        loadingText="Loading their courses…"
+        placeholder={cohort.organizationId ? 'Their equivalent course…' : 'Pick an academy first…'}
+        options={courses.map(c => ({ value: c.id, label: c.title }))}
+        onChange={v => onChange({ ...cohort, courseId: v, sectionId: undefined })}
+      />
 
       <div className="flex gap-2">
-        <select
-          className={fieldBase} style={selectStyle}
-          disabled={disabled || !cohort.courseId}
-          value={cohort.sectionId ?? ''}
-          onChange={e => onChange({ ...cohort, sectionId: e.target.value || undefined })}
-        >
-          <option value="">{hostGated ? 'Their module (required)…' : 'Their module (optional)'}</option>
-          {sections.map((s: { id: string; title: string }) =>
-            <option key={s.id} value={s.id}>{s.title}</option>)}
-        </select>
+        <div className="flex-1">
+          <DarkSelect
+            value={cohort.sectionId ?? ''}
+            disabled={disabled || !cohort.courseId}
+            placeholder={hostGated ? 'Their module (required)…' : 'Their module (optional)'}
+            options={sections.map((sec: { id: string; title: string }) =>
+              ({ value: sec.id, label: sec.title }))}
+            onChange={v => onChange({ ...cohort, sectionId: v || undefined })}
+          />
+        </div>
         <input
           type="number" min={seatsHeld ?? 0} max={500}
           className={`${fieldBase} w-28`} style={selectStyle} disabled={disabled}
