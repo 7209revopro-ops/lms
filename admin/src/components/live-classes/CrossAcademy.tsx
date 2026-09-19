@@ -26,6 +26,7 @@ import type { LiveClass } from '@/lib/api/liveClasses'
 import { useCurrentUser } from '@/lib/api/user'
 import { useMyOrganization } from '@/lib/currency'
 import { useOrgStore } from '@/store/org.store'
+import { CrossAcademyBadge } from '@/components/ui/CrossAcademyBadge'
 
 /** 'dubai' → 'Dubai'. Organization.slug is a closed enum (see the backend
     model), so title-casing it is a label, not a guess. */
@@ -117,13 +118,14 @@ export function SharedAcademiesChip({ live }: { live: LiveClass }) {
   const academies = live.servesAcademies ?? []
   if (academies.length < 2) return null
 
+  /* Was a blue pill, which is this panel's own BRAND colour — the marker for
+     "this one is unusual" was painted in the colour every ordinary control
+     already wears, so it read as decoration. See CrossAcademyBadge. */
   return (
-    <span
-      className="whitespace-nowrap rounded-md px-1.5 py-0.5 text-[9px] font-semibold"
-      style={{ background: 'rgba(0,87,184,0.18)', color: '#7FB3FF' }}
-      title={`One room, shared with ${academies.length} academies. Each books through its own course.`}>
-      Shared · {academies.map(academyLabel).join(' + ')}
-    </span>
+    <CrossAcademyBadge
+      label={academies.map(academyLabel).join(' + ')}
+      title="One room, two rosters. Each academy books through its own course, from its own reserved seats."
+    />
   )
 }
 

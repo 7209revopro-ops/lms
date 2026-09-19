@@ -55,6 +55,13 @@ export interface AdminUser {
   isActive:         boolean
   headline?:        string
   bio?:             string
+  /* An instructor LENT to the other academy. They stay OWNED by the academy on
+     their organizationId -- both may list them and schedule classes for them,
+     which is what keeps "whose instructor is this" answerable for reporting.
+     The API has always sent this; nothing rendered it, so a lent instructor was
+     indistinguishable from an ordinary one in every list. */
+  sharedAcrossOrgs?: boolean
+  organizationId?:   string
   category?:        '4x-trading' | 'digital-marketing' | 'ai' | 'jura'
   categories?:      ('4x-trading' | 'digital-marketing' | 'ai' | 'jura')[]
   program?:         'ai' | 'digital_marketing' | 'forex' | 'jura'

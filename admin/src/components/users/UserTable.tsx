@@ -14,6 +14,7 @@ import { useToast } from '@/store/ui.store'
 import { EditStudentModal } from '@/components/users/EditStudentModal'
 import { EditInstructorModal } from '@/components/instructors/EditInstructorModal'
 import { StudentHistoryModal } from '@/components/users/StudentHistoryModal'
+import { CrossAcademyBadge, crossAccent } from '@/components/ui/CrossAcademyBadge'
 
 interface Props {
   role:  'student' | 'instructor'
@@ -196,6 +197,12 @@ function UserRow({ user, index, onEdit, onViewHistory }: {
      Hiding it here is a courtesy; the endpoint is the actual control. */
   const canViewAsStudent = me?.role === 'super_admin' && user.role === 'student'
 
+  /* Only an instructor can be lent: sharedInstructorFilter on the backend keys
+     the widening on `role: 'instructor'` as part of the clause rather than
+     assuming it, so the flag is meaningless on any other role and must not be
+     drawn there. */
+  const isLent = user.role === 'instructor' && !!user.sharedAcrossOrgs
+
   const viewAsStudent = async () => {
     setMenuOpen(false)
     if (!confirm(
@@ -262,15 +269,28 @@ function UserRow({ user, index, onEdit, onViewHistory }: {
             title="View student history"
             className="flex items-center gap-3 rounded-lg text-left transition-colors hover:bg-white/05"
             style={{ margin: '-4px', padding: '4px' }}>
+            {/* A lent instructor wears the cross-academy accent on the ring
+                itself, so a list of forty can be scanned without reading a
+                single badge. */}
             <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center overflow-hidden rounded-full"
-              style={{ background: 'rgba(0,87,184,0.15)', border: '1px solid rgba(0,87,184,0.25)' }}>
+              style={isLent
+                ? { background: crossAccent.bg, border: crossAccent.border }
+                : { background: 'rgba(0,87,184,0.15)', border: '1px solid rgba(0,87,184,0.25)' }}>
               <AvatarImg src={user.avatarUrl} name={user.name}
                 className="h-full w-full object-cover"
                 fallbackClassName="text-xs font-bold"
                 fallbackStyle={{ color: '#0057b8' }} />
             </div>
             <div className="min-w-0">
-              <p className="truncate text-sm font-semibold text-white">{user.name}</p>
+              <div className="flex items-center gap-1.5">
+                <p className="truncate text-sm font-semibold text-white">{user.name}</p>
+                {isLent && (
+                  <CrossAcademyBadge
+                    label="Both academies"
+                    title="Lent to the other academy. Both may list this instructor and schedule classes for them; they stay owned by their own academy for reporting."
+                  />
+                )}
+              </div>
               {user.headline && (
                 <p className="mt-0.5 truncate text-[11px]" style={{ color: 'rgba(255,255,255,0.35)', maxWidth: 240 }}>
                   {user.headline}
@@ -280,15 +300,28 @@ function UserRow({ user, index, onEdit, onViewHistory }: {
           </button>
         ) : (
           <div className="flex items-center gap-3">
+            {/* A lent instructor wears the cross-academy accent on the ring
+                itself, so a list of forty can be scanned without reading a
+                single badge. */}
             <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center overflow-hidden rounded-full"
-              style={{ background: 'rgba(0,87,184,0.15)', border: '1px solid rgba(0,87,184,0.25)' }}>
+              style={isLent
+                ? { background: crossAccent.bg, border: crossAccent.border }
+                : { background: 'rgba(0,87,184,0.15)', border: '1px solid rgba(0,87,184,0.25)' }}>
               <AvatarImg src={user.avatarUrl} name={user.name}
                 className="h-full w-full object-cover"
                 fallbackClassName="text-xs font-bold"
                 fallbackStyle={{ color: '#0057b8' }} />
             </div>
             <div className="min-w-0">
-              <p className="truncate text-sm font-semibold text-white">{user.name}</p>
+              <div className="flex items-center gap-1.5">
+                <p className="truncate text-sm font-semibold text-white">{user.name}</p>
+                {isLent && (
+                  <CrossAcademyBadge
+                    label="Both academies"
+                    title="Lent to the other academy. Both may list this instructor and schedule classes for them; they stay owned by their own academy for reporting."
+                  />
+                )}
+              </div>
               {user.headline && (
                 <p className="mt-0.5 truncate text-[11px]" style={{ color: 'rgba(255,255,255,0.35)', maxWidth: 240 }}>
                   {user.headline}
