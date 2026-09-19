@@ -122,7 +122,7 @@ function PanelChip({ active, onClick, count, children }: {
       }}>
       {children}
       {count !== undefined && (
-        <span className="rounded-full px-1.5 min-w-[18px] text-center text-[10px] font-semibold"
+        <span className="rounded-full px-1.5 min-w-[18px] text-center text-[11px] sm:text-[10px] font-semibold"
           style={{
             background:active?'rgba(0,87,184,0.15)':'var(--color-bg-subtle)',
             color:active?'#EA6010':'var(--color-text-muted)',
@@ -142,7 +142,7 @@ function PanelSection({ label, icon, children }: {
     <div>
       <div className="mb-2 flex items-center gap-1.5">
         <span style={{color: 'var(--color-text-muted)'}}>{icon}</span>
-        <span className="dm text-[10px] font-bold uppercase tracking-widest" style={{color: 'var(--color-text-muted)'}}>{label}</span>
+        <span className="dm text-[11px] sm:text-[10px] font-bold uppercase tracking-widest" style={{color: 'var(--color-text-muted)'}}>{label}</span>
       </div>
       <div className="flex flex-wrap gap-1.5">{children}</div>
     </div>
@@ -185,7 +185,10 @@ function MiniCalendar({rangeStart,rangeEnd,onRangeChange,onClose}: {
   return(
     <motion.div initial={{opacity:0,y:-6,scale:0.97}} animate={{opacity:1,y:0,scale:1}}
       exit={{opacity:0,y:-4,scale:0.97}} transition={{type:'spring',stiffness:420,damping:32}}
-      className="absolute right-0 top-full mt-2 z-30 w-[270px] rounded-2xl p-4"
+      /* Anchored left on a phone: the nav wraps onto its own line at the page
+         gutter, so right-0 pushed a 270px popover off the left edge and took
+         the Sunday column with it. 270 fits the 343px content box. */
+      className="absolute left-0 top-full z-30 mt-2 w-[270px] rounded-2xl p-4 sm:left-auto sm:right-0"
       style={{background: 'var(--color-bg-surface)',border: '1px solid var(--color-border)',boxShadow:'0 20px 48px rgba(0,0,0,0.13)'}}>
       <div className="mb-3 flex items-center justify-between">
         <button onClick={()=>setMonth(new Date(month.getFullYear(),month.getMonth()-1,1))}
@@ -226,7 +229,7 @@ function MiniCalendar({rangeStart,rangeEnd,onRangeChange,onClose}: {
       <div className="flex flex-wrap gap-1.5">
         {presets.map(p=>(
           <button key={p.l} onClick={p.f}
-            className="rounded-full px-2.5 py-1 text-[10px] font-semibold"
+            className="rounded-full px-2.5 py-1 text-[11px] sm:text-[10px] font-semibold"
             style={{background:'rgba(0,87,184,0.07)',color: 'var(--color-primary)',border:'1px solid rgba(0,87,184,0.16)'}}>
             {p.l}
           </button>
@@ -356,7 +359,7 @@ function ClassCard({group,bookingMap,onClick}: {
         {courseTitle&&(
           <div className="flex items-center gap-1.5">
             <BookOpen size={9} style={{color: 'var(--color-text-muted)'}} className="flex-shrink-0"/>
-            <span className="truncate text-[10px]" style={{color: 'var(--color-text-muted)'}}>{titleCase(courseTitle)}</span>
+            <span className="truncate text-[11px] sm:text-[10px]" style={{color: 'var(--color-text-muted)'}}>{titleCase(courseTitle)}</span>
             {isEnrolled
               ?<CheckCircle2 size={9} style={{color: 'var(--color-success)'}} className="ml-auto flex-shrink-0" strokeWidth={3}/>
               :<Lock size={9} style={{color: 'var(--color-text-muted)'}} className="ml-auto flex-shrink-0"/>}
@@ -365,13 +368,13 @@ function ClassCard({group,bookingMap,onClick}: {
         {instructor&&(
           <div className="flex items-center gap-1.5">
             <User size={9} style={{color: 'var(--color-text-muted)'}} className="flex-shrink-0"/>
-            <span className="truncate text-[10px]" style={{color: 'var(--color-text-muted)'}}>{instructor.name}</span>
+            <span className="truncate text-[11px] sm:text-[10px]" style={{color: 'var(--color-text-muted)'}}>{instructor.name}</span>
           </div>
         )}
         {isOffline&&(first as any)?.location&&(
           <div className="flex items-center gap-1.5">
             <MapPin size={9} style={{color: '#34D399'}} className="flex-shrink-0"/>
-            <span className="truncate text-[10px]" style={{color: 'var(--color-success)'}}>
+            <span className="truncate text-[11px] sm:text-[10px]" style={{color: 'var(--color-success)'}}>
               {(first as any).location}{(first as any).room?` · ${(first as any).room}`:''}
             </span>
           </div>
@@ -379,7 +382,7 @@ function ClassCard({group,bookingMap,onClick}: {
         {moduleTitle&&(
           <div className="flex items-center gap-1.5">
             <span className="h-1 w-1 rounded-full flex-shrink-0" style={{background: 'var(--color-primary)'}}/>
-            <span className="truncate text-[10px] font-medium" style={{color: 'var(--color-primary)'}}>{moduleTitle}</span>
+            <span className="truncate text-[11px] sm:text-[10px] font-medium" style={{color: 'var(--color-primary)'}}>{moduleTitle}</span>
           </div>
         )}
       </div>
@@ -390,7 +393,7 @@ function ClassCard({group,bookingMap,onClick}: {
         {nextSlot?(
           <div className="flex items-center gap-1">
             <Clock size={9} style={{color:bookedSlot?'#059669':'var(--color-text-muted)'}}/>
-            <span className="text-[10px] font-semibold" style={{color:bookedSlot?'#059669':'var(--color-text-secondary)'}}>
+            <span className="text-[11px] sm:text-[10px] font-semibold" style={{color:bookedSlot?'#059669':'var(--color-text-secondary)'}}>
               {fmtShortSlot(nextSlot.scheduledStart)}
             </span>
           </div>
@@ -473,18 +476,18 @@ function SlotModal({group,bookingMap,onBook,onCancel,bookPending,cancelPending,o
               )}
               <div className="mt-2 flex flex-wrap gap-1.5">
                 {slots[0]?.language&&(
-                  <span className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold"
+                  <span className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] sm:text-[10px] font-semibold"
                     style={{background:'rgba(5,150,105,0.08)',color: 'var(--color-success)',border:'1px solid rgba(5,150,105,0.18)'}}>
                     🌐 {slots[0].language}
                   </span>
                 )}
                 {isOff?(
-                  <span className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold"
+                  <span className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] sm:text-[10px] font-semibold"
                     style={{background:'rgba(5,150,105,0.08)',color: 'var(--color-success)',border:'1px solid rgba(5,150,105,0.18)'}}>
                     <Building2 size={9}/>In-Person
                   </span>
                 ):(
-                  <span className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold"
+                  <span className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] sm:text-[10px] font-semibold"
                     style={{background:'rgba(99,102,241,0.08)',color: '#6366F1',border:'1px solid rgba(99,102,241,0.16)'}}>
                     <Wifi size={9}/>Online
                   </span>
@@ -498,7 +501,7 @@ function SlotModal({group,bookingMap,onBook,onCancel,bookPending,cancelPending,o
           </div>
         </div>
         <div className="px-5 pt-4 pb-3">
-          <p className="mb-3 text-[10px] font-bold uppercase tracking-widest" style={{color: 'var(--color-text-muted)'}}>
+          <p className="mb-3 text-[11px] sm:text-[10px] font-bold uppercase tracking-widest" style={{color: 'var(--color-text-muted)'}}>
             {bookedSlot?'Your reservation · other times':'Choose a time slot'}
           </p>
           <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
@@ -832,7 +835,7 @@ function CourseDropdown({ value, onChange, options }: {
                     onChange={e => setQuery(e.target.value)}
                     placeholder="Search courses…"
                     autoFocus
-                    className="dm flex-1 bg-transparent text-[12px] outline-none placeholder:text-slate-400"
+                    className="dm flex-1 bg-transparent text-[16px] outline-none placeholder:text-slate-400 sm:text-[12px]"
                     style={{ color: 'var(--color-text-primary)' }}
                   />
                 </div>
@@ -849,7 +852,7 @@ function CourseDropdown({ value, onChange, options }: {
                   <BookOpen size={10} style={{ color: 'var(--color-text-muted)' }} />
                 </div>
                 <span>All Courses</span>
-                {value === 'all' && <span className="ml-auto text-blue-500 text-[10px]">✓</span>}
+                {value === 'all' && <span className="ml-auto text-blue-500 text-[11px] sm:text-[10px]">✓</span>}
               </button>
               {filtered.map(o => (
                 <button
@@ -864,7 +867,7 @@ function CourseDropdown({ value, onChange, options }: {
                     {o.label[0]?.toUpperCase()}
                   </div>
                   <span className="truncate">{o.label}</span>
-                  {value === o.value && <span className="ml-auto text-blue-500 text-[10px] flex-shrink-0">✓</span>}
+                  {value === o.value && <span className="ml-auto text-blue-500 text-[11px] sm:text-[10px] flex-shrink-0">✓</span>}
                 </button>
               ))}
               {filtered.length === 0 && (
@@ -971,7 +974,7 @@ function LanguageDropdown({ value, onChange }: {
                 <Globe size={10} style={{ color: 'var(--color-text-muted)' }} />
               </div>
               <span>All Languages</span>
-              {value === 'all' && <span className="ml-auto text-blue-500 text-[10px]">✓</span>}
+              {value === 'all' && <span className="ml-auto text-blue-500 text-[11px] sm:text-[10px]">✓</span>}
             </button>
             {LANG_OPTIONS.map(o => (
               <button
@@ -983,7 +986,7 @@ function LanguageDropdown({ value, onChange }: {
               >
                 <span className="text-sm leading-none w-5 text-center flex-shrink-0">{o.flag}</span>
                 <span>{o.label}</span>
-                {value === o.value && <span className="ml-auto text-blue-500 text-[10px]">✓</span>}
+                {value === o.value && <span className="ml-auto text-blue-500 text-[11px] sm:text-[10px]">✓</span>}
               </button>
             ))}
           </motion.div>
@@ -1092,7 +1095,7 @@ function InstructorFilterSelect({ value, onChange, instructors }: {
               >
                 <AvatarImg src={i.avatarUrl}
                   className="h-6 w-6 rounded-full object-cover flex-shrink-0 ring-1 ring-slate-200"
-                  fallback={<div className="h-6 w-6 rounded-full flex-shrink-0 flex items-center justify-center text-[10px] font-bold text-white" style={{ background: 'var(--color-primary)' }}>
+                  fallback={<div className="h-6 w-6 rounded-full flex-shrink-0 flex items-center justify-center text-[11px] sm:text-[10px] font-bold text-white" style={{ background: 'var(--color-primary)' }}>
                       {i.name[0]?.toUpperCase()}
                     </div>} />
                 <span className="truncate">{i.name}</span>
@@ -1165,7 +1168,7 @@ function MetricTile({ icon, label, value, accent, pulse = false, index = 0 }: {
       <div className="min-w-0">
         <p className="syne text-[24px] font-800 leading-none tabular-nums"
           style={{color:'var(--color-text-primary)'}}>{value}</p>
-        <p className="dm mt-1.5 truncate text-[10px] font-semibold uppercase tracking-wider"
+        <p className="dm mt-1.5 truncate text-[11px] sm:text-[10px] font-semibold uppercase tracking-wider"
           style={{color:'var(--color-text-muted)'}}>{label}</p>
       </div>
     </motion.div>
@@ -1612,7 +1615,7 @@ export default function ClassBookingsPage() {
                   style={{background: 'var(--color-primary)',boxShadow:'0 3px 10px rgba(0,87,184,0.30)'}}>
                   <CalendarDays size={12} color="white"/>
                 </div>
-                <span className="dm text-[10px] font-bold uppercase tracking-widest" style={{color: 'var(--color-primary)'}}>Class Schedule</span>
+                <span className="dm text-[11px] sm:text-[10px] font-bold uppercase tracking-widest" style={{color: 'var(--color-primary)'}}>Class Schedule</span>
               </div>
               <h1 className="syne text-[26px] font-800 leading-none tracking-tight" style={{color: 'var(--color-text-primary)'}}>
                 {isTree?'Browse Courses':filterStatus==='all'?fmtDateRange(rangeStart,rangeEnd):filterStatus==='live'?(isOfflineMode?"Today's Classes":'Live Now'):filterStatus==='upcoming'?'Upcoming Sessions':'Completed Sessions'}
@@ -1699,7 +1702,7 @@ export default function ClassBookingsPage() {
               ?{background: 'var(--color-text-primary)',color:'var(--color-text-inverse)',border:'1.5px solid transparent',fontWeight:700}
               :{background: 'var(--color-bg-surface)',color: 'var(--color-text-secondary)',border: '1px solid var(--color-border)'}}>
             All
-            <span className="rounded-full px-1.5 text-[10px] font-bold"
+            <span className="rounded-full px-1.5 text-[11px] sm:text-[10px] font-bold"
               style={{background:filterStatus==='all'?'rgba(255,255,255,0.15)':'var(--color-bg-muted)',color:filterStatus==='all'?'white':'var(--color-text-muted)'}}>
               {allClasses.length}
             </span>
@@ -1713,7 +1716,7 @@ export default function ClassBookingsPage() {
               {tab.icon}
               {tab.label}
               {(()=>{const cnt=(isOfflineMode&&tab.key==='live')?statusCounts.today:(statusCounts as Record<string,number>)[tab.key];return cnt>0&&(
-                <span className="ml-1.5 rounded-full px-1.5 text-[10px] font-bold"
+                <span className="ml-1.5 rounded-full px-1.5 text-[11px] sm:text-[10px] font-bold"
                   style={{
                     background:filterStatus===tab.key?'rgba(255,255,255,0.20)':'var(--color-bg-subtle)',
                     color:filterStatus===tab.key?'currentColor':'var(--color-text-muted)',
@@ -1768,7 +1771,7 @@ export default function ClassBookingsPage() {
                 style={{color:search?'#0057b8':'var(--color-text-muted)'}}/>
               <input type="text" value={search} onChange={e=>setSearch(e.target.value)}
                 placeholder="Search classes, instructors…"
-                className="dm h-11 w-full rounded-xl pl-8 pr-7 text-[12px] outline-none sm:h-auto sm:py-1.5"
+                className="dm h-11 w-full rounded-xl pl-8 pr-7 text-[16px] outline-none sm:h-auto sm:py-1.5 sm:text-[12px]"
                 style={{background:search?'rgba(0,87,184,0.04)':'var(--color-bg-inset)',color: 'var(--color-text-secondary)',
                   border:`1px solid ${search?'rgba(0,87,184,0.25)':'var(--color-border)'}`}}/>
               {search&&(
@@ -1916,7 +1919,7 @@ export default function ClassBookingsPage() {
              ['sessions','All sessions',<List key="l" size={12} strokeWidth={2.25}/>]] as const).map(([k,label,icon])=>(
             <button key={k} type="button" role="tab" aria-selected={view===k}
               onClick={()=>switchView(k as 'courses'|'sessions')}
-              className="dm inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-[12px] font-semibold transition-all"
+              className="dm inline-flex h-11 items-center gap-1.5 rounded-full px-3.5 text-[12px] font-semibold transition-all sm:h-auto sm:px-3 sm:py-1.5"
               style={view===k
                 ?{background: 'var(--color-bg-surface)',color: 'var(--color-text-primary)',boxShadow:'0 1px 4px rgba(15,23,42,0.10)',fontWeight:700}
                 :{background:'transparent',color: 'var(--color-text-muted)'}}>
@@ -2026,7 +2029,7 @@ export default function ClassBookingsPage() {
                           )}
                         </div>
                         <div className="h-px flex-1" style={{background: 'var(--color-border)'}}/>
-                        <span className="dm text-[10px]" style={{color: 'var(--color-text-muted)'}}>
+                        <span className="dm text-[11px] sm:text-[10px]" style={{color: 'var(--color-text-muted)'}}>
                           {sec.groups.length} class{sec.groups.length!==1?'es':''}
                         </span>
                       </div>

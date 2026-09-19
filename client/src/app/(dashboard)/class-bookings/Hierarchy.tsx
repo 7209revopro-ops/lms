@@ -74,7 +74,7 @@ function Pill({ icon, children, rgb = '0,87,184', solid }: {
   icon?: React.ReactNode; children: React.ReactNode; rgb?: string; solid?: string
 }) {
   return (
-    <span className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold"
+    <span className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] sm:text-[10px] font-semibold"
       style={{ background: `rgba(${rgb},0.08)`, color: solid ?? `rgb(${rgb})`, border: `1px solid rgba(${rgb},0.20)` }}>
       {icon}{children}
     </span>
@@ -89,7 +89,7 @@ function Crumbs({ trail }: { trail: { label: string; onClick?: () => void }[] })
           {i > 0 && <ChevronRight size={11} strokeWidth={2} style={{ color: 'var(--color-text-muted)' }} />}
           {c.onClick ? (
             <button type="button" onClick={c.onClick}
-              className="rounded font-semibold transition-opacity hover:opacity-70"
+              className="inline-flex min-h-[44px] items-center rounded px-1 font-semibold transition-opacity hover:opacity-70 sm:min-h-0"
               style={{ color: 'var(--color-primary-on-surface, var(--color-primary))' }}>
               {c.label}
             </button>
@@ -105,7 +105,7 @@ function Crumbs({ trail }: { trail: { label: string; onClick?: () => void }[] })
 function BackLink({ label, onClick }: { label: string; onClick: () => void }) {
   return (
     <button type="button" onClick={onClick}
-      className="mb-3 inline-flex items-center gap-1.5 rounded-lg px-2 py-1 text-[12px] font-semibold transition-colors"
+      className="-ml-2 mb-3 inline-flex min-h-[44px] items-center gap-1.5 rounded-lg px-3 py-1 text-[13px] font-semibold transition-colors sm:ml-0 sm:min-h-0 sm:px-2 sm:text-[12px]"
       style={{ color: 'var(--color-text-secondary)' }}>
       <ArrowLeft size={13} strokeWidth={2} />{label}
     </button>
@@ -373,7 +373,7 @@ function CourseCard({ node, index, onOpen }: {
 
         {/* Top-left: how much of this course is actually on. The Catalog puts
             the runtime here; the schedule's equivalent is what you can book. */}
-        <span className="absolute left-2.5 top-2.5 rounded-lg px-2 py-0.5 text-[10px] font-bold"
+        <span className="absolute left-2.5 top-2.5 rounded-lg px-2 py-0.5 text-[11px] sm:text-[10px] font-bold"
           style={{ background: 'rgba(13,15,26,0.68)', color: 'white', backdropFilter: 'blur(6px)' }}>
           {empty ? 'No sessions' : plural(node.sessionCount, 'session')}
         </span>
@@ -382,7 +382,7 @@ function CourseCard({ node, index, onOpen }: {
           /* The admin dashboard's cross-academy violet, as tint on glass —
              white on #A78BFA measures about 2:1 and was the weakest type on
              the card. */
-          <span className="absolute right-2.5 top-2.5 inline-flex max-w-[60%] items-center gap-1 rounded-full px-2 py-0.5 text-[9px] font-bold"
+          <span className="absolute right-2.5 top-2.5 inline-flex max-w-[60%] items-center gap-1 rounded-full px-2 py-0.5 text-[11px] sm:text-[9px] font-bold"
             style={{
               background: 'rgba(8,12,22,0.55)', border: `1px solid rgba(${SHARED_RGB},0.45)`,
               color: '#CFC0FF', backdropFilter: 'blur(6px)',
@@ -395,7 +395,7 @@ function CourseCard({ node, index, onOpen }: {
 
       {/* ── content, in the Catalog's order ── */}
       <div className="flex flex-1 flex-col gap-2 p-3.5">
-        <span className="inline-flex w-fit items-center gap-1 rounded-lg px-2 py-0.5 text-[10px] font-semibold"
+        <span className="inline-flex w-fit items-center gap-1 rounded-lg px-2 py-0.5 text-[11px] sm:text-[10px] font-semibold"
           style={{ background: 'rgba(0,87,184,0.08)', color: 'var(--color-primary-on-surface, var(--color-primary))' }}>
           <span className="h-1.5 w-1.5 rounded-full" style={{ background: 'var(--color-primary)' }} />
           Course
@@ -414,7 +414,7 @@ function CourseCard({ node, index, onOpen }: {
             <Layers size={10} strokeWidth={2} />{plural(moduleCount, 'module')}
           </span>
           {node.program && (
-            <span className="rounded-md px-1.5 py-0.5 text-[10px] font-medium"
+            <span className="rounded-md px-1.5 py-0.5 text-[11px] sm:text-[10px] font-medium"
               style={{ background: 'var(--color-bg-subtle)', color: 'var(--color-text-muted)' }}>
               {titleCase(node.program)}
             </span>
@@ -426,11 +426,11 @@ function CourseCard({ node, index, onOpen }: {
             because this card has exactly one thing to do. */}
         <div className="mt-auto flex items-center justify-between gap-2 pt-3"
           style={{ borderTop: '1px solid var(--color-border)' }}>
-          <span className="truncate text-[10px] capitalize" style={{ color: 'var(--color-text-muted)' }}>
+          <span className="truncate text-[11px] sm:text-[10px] capitalize" style={{ color: 'var(--color-text-muted)' }}>
             {level ?? 'All levels'}
           </span>
           {!empty && (
-            <span className="flex-shrink-0 text-[10px] font-semibold" style={{ color: 'var(--color-text-muted)' }}>
+            <span className="flex-shrink-0 text-[11px] sm:text-[10px] font-semibold" style={{ color: 'var(--color-text-muted)' }}>
               {plural(node.sessionCount, 'session')} ahead
             </span>
           )}
@@ -492,7 +492,7 @@ function ModuleCard({ node, position, index, courseTitle, onOpen }: {
         <ModuleGeometry skin={skin} />
 
         <div className="absolute inset-0 flex flex-col justify-end p-3.5">
-          <span className="dm text-[9px] font-bold uppercase tracking-[0.18em]"
+          <span className="dm text-[11px] sm:text-[9px] font-bold uppercase tracking-[0.18em]"
             style={{ color: 'rgba(255,255,255,0.72)' }}>
             {position !== null ? 'Module' : 'Sessions'}
           </span>
@@ -507,7 +507,7 @@ function ModuleCard({ node, position, index, courseTitle, onOpen }: {
         </div>
 
         {locked && (
-          <span className="absolute right-2 top-2 inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[9px] font-bold"
+          <span className="absolute right-2 top-2 inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] sm:text-[9px] font-bold"
             style={{ background: 'rgba(15,23,42,0.55)', color: '#fff', backdropFilter: 'blur(6px)' }}>
             <Lock size={8} strokeWidth={2.5} />Locked
           </span>
@@ -625,7 +625,7 @@ function StatTile({ icon, value, label, accent }: {
       <span className="min-w-0">
         <span className="syne block truncate text-[13px] font-extrabold leading-tight"
           style={{ color: 'var(--color-text-primary)' }}>{value}</span>
-        <span className="block truncate text-[9px] font-bold uppercase tracking-[0.12em]"
+        <span className="block truncate text-[11px] sm:text-[9px] font-bold uppercase tracking-[0.12em]"
           style={{ color: 'var(--color-text-muted)' }}>{label}</span>
       </span>
     </div>
@@ -674,7 +674,7 @@ function ModuleHero({ node, position, course }: {
 
         <div className="absolute inset-0 flex items-end gap-4 p-4 sm:gap-6 sm:p-6">
           <span className="flex-shrink-0 leading-none">
-            <span className="dm block text-[9px] font-bold uppercase tracking-[0.18em]"
+            <span className="dm block text-[11px] sm:text-[9px] font-bold uppercase tracking-[0.18em]"
               style={{ color: 'rgba(255,255,255,0.72)' }}>
               {position !== null ? 'Module' : 'Sessions'}
             </span>
@@ -702,7 +702,7 @@ function ModuleHero({ node, position, course }: {
         </div>
 
         {locked && (
-          <span className="absolute right-3 top-3 inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[9px] font-bold"
+          <span className="absolute right-3 top-3 inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] sm:text-[9px] font-bold"
             style={{ background: 'rgba(15,23,42,0.55)', color: '#fff', backdropFilter: 'blur(6px)' }}>
             <Lock size={8} strokeWidth={2.5} />Locked
           </span>
@@ -897,14 +897,14 @@ function DayHead({ bucket, headingId, reduce }: {
         )}
         <span className="truncate">{bucket.label}</span>
         {needsDate && (
-          <span className="dm flex-shrink-0 text-[10.5px] font-semibold"
+          <span className="dm flex-shrink-0 text-[11.5px] sm:text-[10.5px] font-semibold"
             style={{ color: 'var(--color-text-muted)' }}>{keyDateLabel(bucket.key)}</span>
         )}
       </h3>
 
       <span aria-hidden className="h-px min-w-[12px] flex-1" style={{ background: 'var(--color-border)' }} />
 
-      <span className="flex-shrink-0 text-[10px] font-bold uppercase tracking-[0.12em]"
+      <span className="flex-shrink-0 text-[11px] sm:text-[10px] font-bold uppercase tracking-[0.12em]"
         style={{ color: 'var(--color-text-muted)' }}>
         {plural(bucket.items.length, 'class', 'classes')}
       </span>
@@ -933,7 +933,7 @@ function ActionNote({ tint = NEUTRAL, icon, title, body }: {
       <span className="min-w-0">
         <span className="block text-[11.5px] font-bold" style={{ color: 'var(--color-text-primary)' }}>{title}</span>
         {body && (
-          <span className="mt-0.5 block break-words text-[10.5px] leading-relaxed"
+          <span className="mt-0.5 block break-words text-[11.5px] sm:text-[10.5px] leading-relaxed"
             style={{ color: 'var(--color-text-secondary)' }}>{body}</span>
         )}
       </span>
@@ -945,7 +945,9 @@ function ActionNote({ tint = NEUTRAL, icon, title, body }: {
     White on #0057b8 — pinned in BOTH themes — so the ink is safe either way,
     which is not true of white on --color-danger (2.8:1 once dark lifts it to
     #F87171). The liveness is said by the badge and the rail instead. */
-const PRIMARY_BTN = 'cs-focus flex w-full items-center justify-center gap-1.5 rounded-xl py-2.5 text-[12px] font-bold text-white outline-none transition-opacity hover:opacity-95 disabled:opacity-60'
+/* min-h on a phone: Level 3 is the only screen in the hierarchy where a
+   decision is actually made, and Book a seat was a 38px target. */
+const PRIMARY_BTN = 'cs-focus flex min-h-[44px] w-full items-center justify-center gap-1.5 rounded-xl py-2.5 text-[12px] font-bold text-white outline-none transition-opacity hover:opacity-95 disabled:opacity-60 sm:min-h-0'
 const PRIMARY_STYLE: React.CSSProperties = {
   background: 'var(--color-primary)', boxShadow: '0 2px 8px rgba(0,87,184,0.25)',
 }
@@ -1035,7 +1037,7 @@ function JoinArea({ lc, now, held, live }: {
         sessionId={lc.id} now={now} size="md" accent="var(--color-primary)"
         {...session} className="w-full" />
       {phase === 'closed' && (
-        <p className="text-[10.5px] leading-relaxed" style={{ color: 'var(--color-text-secondary)' }}>
+        <p className="text-[11.5px] sm:text-[10.5px] leading-relaxed" style={{ color: 'var(--color-text-secondary)' }}>
           Your seat was reserved, but the join link has closed. If you are still
           expecting to attend, contact your admin.
         </p>
@@ -1139,7 +1141,7 @@ function SessionAction({
           </div>
 
           {mailed && (
-            <p className="flex items-start gap-1 text-[10.5px] leading-relaxed"
+            <p className="flex items-start gap-1 text-[11.5px] sm:text-[10.5px] leading-relaxed"
               style={{ color: 'var(--color-text-secondary)' }}>
               <Clock size={10} strokeWidth={2} className="mt-[2px] flex-shrink-0" />
               {mins <= 5
@@ -1250,7 +1252,7 @@ function SessionAction({
               FILL value: as 10px ink on white it is ~2.1:1, and this is the
               one line whose entire purpose is to be read in the last two
               hours. The tint carries the urgency, the tokens carry the text. */}
-          <p className="mt-1.5 flex items-center justify-center gap-1 text-center text-[10px] font-semibold"
+          <p className="mt-1.5 flex items-center justify-center gap-1 text-center text-[11px] sm:text-[10px] font-semibold"
             style={{ color: urgent ? 'var(--color-text-primary)' : 'var(--color-text-muted)' }}>
             <Clock size={9} strokeWidth={2.25} className="flex-shrink-0"
               style={{ color: urgent ? 'var(--color-warning)' : undefined }} />
@@ -1433,17 +1435,25 @@ function SessionCard({
               style={{ color: 'var(--color-text-primary)' }}>
               {time}
             </p>
-            {/* No date here: the heading above the grid already carries it,
-                and "Sep 20" under a band reading "Today · Sat 20 Sep" is the
-                same fact twice, on every card on the screen. */}
+            {/* THE DATE, BUT ONLY ON A PHONE.
+
+                The reasoning for leaving it off was sound at two and three
+                columns: the band heading above the grid carries the day, so
+                "Sep 20" under a band reading "Today - Sat 20 Sep" is the same
+                fact twice on every card. At 375px the grid is ONE column and
+                each card is 280-330px tall, so by the second card the heading
+                that carried the day has scrolled away and every card on
+                screen says only "8:30 PM" - a time with no day attached, on
+                the screen where you commit to attending. */}
             <p className="mt-1.5 flex items-center gap-1 text-[11px] font-semibold"
               style={{ color: 'var(--color-text-muted)' }}>
               <Clock size={10} strokeWidth={2.25} className="flex-shrink-0" />
+              <span className="sm:hidden">{dayLabel} &middot; </span>
               {lc.durationMins || 60} min
             </p>
           </div>
 
-          <span className="flex flex-shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-bold"
+          <span className="flex flex-shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-[11px] sm:text-[10px] font-bold"
             style={{ background: c.bg, color: ink(c.color), border: `1px solid ${c.border}` }}>
             {shown === 'live' && (
               <motion.span aria-hidden className="h-1.5 w-1.5 rounded-full" style={{ background: c.color }}
@@ -1470,7 +1480,7 @@ function SessionCard({
               {language}
             </Pill>
           )}
-          <span className="inline-flex min-w-0 max-w-full items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold"
+          <span className="inline-flex min-w-0 max-w-full items-center gap-1 rounded-full px-2 py-0.5 text-[11px] sm:text-[10px] font-semibold"
             style={offline
               ? { background: 'rgba(0,87,184,0.08)', color: 'var(--color-primary-on-surface, var(--color-primary))', border: '1px solid rgba(0,87,184,0.20)' }
               : { background: 'rgba(99,102,241,0.08)', color: '#6366F1', border: '1px solid rgba(99,102,241,0.20)' }}>
@@ -1503,7 +1513,7 @@ function SessionCard({
         {showSeats && (
           <div>
             <div className="flex items-center justify-between gap-2">
-              <span className="flex min-w-0 items-center gap-1 truncate text-[10.5px] font-bold"
+              <span className="flex min-w-0 items-center gap-1 truncate text-[11.5px] sm:text-[10.5px] font-bold"
                 style={{ color: scarce ? 'var(--color-text-primary)' : 'var(--color-text-secondary)' }}>
                 {scarce && <Users size={10} strokeWidth={2.5} className="flex-shrink-0" style={{ color: 'var(--color-warning)' }} />}
                 {left === 0
@@ -1513,7 +1523,7 @@ function SessionCard({
                     : `${left} of ${cap} seats left`}
               </span>
               {!yours && (
-                <span className="flex flex-shrink-0 items-center gap-1 text-[9px] font-bold uppercase tracking-[0.1em]"
+                <span className="flex flex-shrink-0 items-center gap-1 text-[11px] sm:text-[9px] font-bold uppercase tracking-[0.1em]"
                   style={{ color: 'var(--color-text-muted)' }}>
                   <Users size={9} strokeWidth={2.5} />{cap - left} booked
                 </span>
@@ -1559,7 +1569,7 @@ function SectionHead({ icon, label, note }: {
         {icon}{label}
       </span>
       {note && (
-        <span className="flex-shrink-0 text-[10px] font-bold uppercase tracking-[0.12em]"
+        <span className="flex-shrink-0 text-[11px] sm:text-[10px] font-bold uppercase tracking-[0.12em]"
           style={{ color: 'var(--color-text-muted)' }}>{note}</span>
       )}
       <span aria-hidden className="h-px min-w-[16px] flex-1" style={{ background: 'var(--color-border)' }} />
@@ -1578,7 +1588,7 @@ function FilterRow({ icon, label, options, value, onChange }: {
 }) {
   return (
     <div className="flex flex-wrap items-center gap-1.5">
-      <span className="mr-0.5 inline-flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-[0.12em]"
+      <span className="mr-0.5 inline-flex w-full items-center gap-1.5 text-[11px] sm:text-[10px] font-bold uppercase tracking-[0.12em] sm:w-auto"
         style={{ color: 'var(--color-text-muted)' }}>
         {icon}{label}
       </span>
@@ -1591,7 +1601,7 @@ function FilterRow({ icon, label, options, value, onChange }: {
           <button key={o.id || '__all'} type="button"
             aria-pressed={on}
             onClick={() => onChange(o.id || null)}
-            className="dm inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11.5px] font-semibold outline-none transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[color:var(--color-primary-on-surface,var(--color-primary))]"
+            className="dm inline-flex min-h-[44px] items-center gap-1.5 rounded-full px-3.5 py-1 text-[12px] font-semibold outline-none transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[color:var(--color-primary-on-surface,var(--color-primary))] sm:min-h-0 sm:px-2.5 sm:text-[11.5px]"
             style={on
               ? { background: 'rgba(0,87,184,0.10)', border: '1px solid rgba(0,87,184,0.30)', color: 'var(--color-primary-on-surface, var(--color-primary))' }
               : { background: 'var(--color-bg-surface)', border: '1px solid var(--color-border)', color: 'var(--color-text-muted)' }}>
