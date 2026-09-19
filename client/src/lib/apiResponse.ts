@@ -26,8 +26,10 @@ export interface JsonEnvelope<T> {
   error?:  { code?: string; message?: string }
 }
 
-/** What a non-JSON response of this status actually means to whoever sent it. */
-function describe(status: number): string {
+/** What a response of this status actually means to whoever sent it.
+    Exported because a 5xx body is an internal error string, not user copy —
+    callers that DO get JSON back still want this sentence instead. */
+export function describeStatus(status: number): string {
   if (status === 413) return 'The file is too large for the server to accept. Please choose a smaller image and try again.'
   if (status === 429) return 'Too many attempts. Please wait a few minutes and try again.'
   if (status === 502 || status === 503 || status === 504)
@@ -55,6 +57,60 @@ export async function readJson<T>(res: Response): Promise<ReadResult<T>> {
   try {
     return { ok: true, body: JSON.parse(text) as JsonEnvelope<T> }
   } catch {
-    return { ok: false, message: describe(res.status) }
+    return { ok: false, message: describeStatus(res.status) }
   }
 }
+
+/* ─────────────────────────────────────────────────────
+   When there is no response AT ALL.
+
+   readJson above handles the case where the server answered with something
+   that is not JSON. This handles the case one step earlier: the request never
+   completed, so there is no status to describe and nothing to parse.
+
+   Every engine words that differently, and all of them word it for a
+   developer reading a console — never for the person who was filling in a
+   form:
+
+     Chrome / Edge   TypeError: Failed to fetch
+     Safari          TypeError: Load failed
+     Firefox         TypeError: NetworkError when attempting to fetch resource.
+     axios (XHR)     Network Error  /  timeout of 15000ms exceeded
+
+   "Failed to fetch" reached the last step of production registration, on a
+   phone, on roaming 4G, after four screens of typing. It says nothing about
+   what happened and nothing about what to do, and it is not even the same
+   sentence twice across browsers, so support cannot recognise it either.
+
+   Returns null when the failure is NOT a transport failure, so callers can
+   fall through to the message the API deliberately sent.
+───────────────────────────────────────────────────── */
+export function describeTransportError(err: unknown): string | null {
+  const e = err as { name?: string; code?: string; message?: string } | null | undefined
+  const name = e?.name ?? ''
+  const code = e?.code ?? ''
+  const msg  = e?.message ?? ''
+
+  /* Our own abort — see the timeout in the signup uploader. Distinguished
+     from a user-initiated abort only by the fact that nothing in this app
+     cancels these requests on purpose. */
+  if (name === 'AbortError' || name === 'TimeoutError' || code === 'ECONNABORTED' || /^timeout of \d+ms/.test(msg)) {
+    return 'That took too long and was stopped. Your connection may be slow — please try again.'
+  }
+
+  /* No response. Dropped connection, DNS, the tab going offline, or a proxy
+     or extension refusing the request. Same advice for all of them, because
+     the browser does not tell us which and the student cannot tell either. */
+  const looksLikeNetwork =
+    code === 'ERR_NETWORK' ||
+    msg === 'Network Error' ||
+    (name === 'TypeError' && /fetch|load failed|network/i.test(msg))
+  if (looksLikeNetwork) {
+    return 'We could not reach the server. Check your internet connection and try again.'
+  }
+
+  return null
+}
+
+/** True when the failure was a transport failure and so may be worth retrying. */
+export const isTransportError = (err: unknown): boolean => describeTransportError(err) !== null

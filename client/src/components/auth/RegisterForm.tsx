@@ -13,7 +13,8 @@ import { cn } from '@/lib/utils'
 import { TermsModal } from './TermsModal'
 import Spinner from '@/components/ui/Spinner'
 import { PROGRAMS, PROGRAM_GROUPS, programLabel } from '@/lib/programs'
-import { readJson } from '@/lib/apiResponse'
+import { describeTransportError } from '@/lib/apiResponse'
+import { uploadSignupDoc } from '@/lib/signupUpload'
 
 /* ── Types ─────────────────────────────────────────── */
 interface FormData {
@@ -270,8 +271,6 @@ const MAX_FILE_BYTES = 3 * 1024 * 1024 // 3 MB — enforced on all document uplo
 
 /* Stored signup documents, keyed by the File the user picked (M-05). A
    WeakMap so a discarded file is collectable; see uploadDoc() in submit(). */
-const uploadedSignupDocs = new WeakMap<File, string>()
-
 const ID_DOC_META: Record<string, { label: string; hint: string }> = {
   'Emirates ID':  { label: 'Emirates ID Card Copy',  hint: 'Front & back of your Emirates ID card (PDF, JPG, PNG, max 3 MB)' },
   'Passport':     { label: 'Passport Copy',           hint: 'PDF or image of your passport identity page (max 3 MB)' },
@@ -1172,40 +1171,7 @@ export function RegisterForm({ onSwitch }: { onSwitch: () => void }) {
          cap and its own hourly limit. `kind: 'photo'` selects the public
          prefix for the avatar; anything else lands under the private `kyc/`
          one, which is never served directly. */
-      async function uploadDoc(file: File, kind: 'kyc' | 'photo' = 'kyc'): Promise<string> {
-        /* Reuse what this exact file already stored. Registration can fail
-           after the uploads succeed — a taken email is the common case — and
-           without this, every retry would send all three files again, burn
-           through the hourly limit, and leave more orphans behind each time.
-           Keyed on the File object, so picking a different file re-uploads. */
-        const cached = uploadedSignupDocs.get(file)
-        if (cached) return cached
-
-        const fd = new FormData()
-        fd.append('file', file)
-        fd.append('kind', kind)
-        const res = await fetch('/api/v1/uploads/signup-doc', { method: 'POST', body: fd })
-
-        /* Read the body defensively. This request carries megabytes through a
-           reverse proxy, which is the one place in the whole signup that can
-           answer with an HTML error page instead of the API envelope — a 413
-           when the body is over nginx's client_max_body_size, a 502 while the
-           backend restarts. `await res.json()` threw on that HTML before
-           `res.ok` was ever consulted, and the browser's own parser message
-           was what the student was shown at the final step of registration:
-           "Unexpected token '<'" in Chrome, "The string did not match the
-           expected pattern." in Safari. */
-        const read = await readJson<{ url: string }>(res)
-        if (!read.ok) throw new Error(read.message)
-        if (!res.ok)  throw new Error(read.body.error?.message ?? 'Upload failed')
-
-        const url = read.body.data?.url
-        if (!url) throw new Error('The upload finished but no file reference came back. Please try again.')
-        uploadedSignupDocs.set(file, url)
-        return url
-      }
-
-      const passportUrl = await uploadDoc(data.passportFile, 'kyc')
+      const passportUrl = await uploadSignupDoc(data.passportFile, 'kyc', 'passport copy')
       /* The passport IS the ID document for these students, so send it as
          both rather than uploading the same bytes twice or leaving a required
          field empty. */
@@ -1215,9 +1181,16 @@ export function RegisterForm({ onSwitch }: { onSwitch: () => void }) {
            guard returns early when the file is missing. The type checker
            cannot see across it, and the assertion is narrower than widening
            uploadDoc to take a null it should never receive. */
-        : await uploadDoc(data.idDocFile!, 'kyc')
-      const photoUrl    = await uploadDoc(avatarFile,        'photo')
+        : await uploadSignupDoc(data.idDocFile!, 'kyc', ID_DOC_META[data.idType]?.label ?? 'ID document')
+      const photoUrl    = await uploadSignupDoc(avatarFile,        'photo', 'profile photo')
 
+      /* The global axios timeout is 15s, which is right for the reads this
+         app makes and wrong for this one request. It is the last step of a
+         four-screen form, it runs on a connection that has just carried up
+         to three files, and losing it to the clock discards everything the
+         student typed. The server side is quick — one bcrypt and a couple of
+         writes, with the emails fired and not awaited — so a longer budget
+         costs nothing and only ever helps a slow link. */
       const reg = await api.post('/auth/register', {
         name:             data.name.trim(),
         email:            data.email.trim().toLowerCase(),
@@ -1235,7 +1208,7 @@ export function RegisterForm({ onSwitch }: { onSwitch: () => void }) {
           hearAboutUs: data.hearAboutUs, referralName: data.referralName || undefined,
           programs: data.programs, paymentMethod: data.paymentMethod,
         },
-      })
+      }, { timeout: 45_000 })
 
       /* Verification-first mode issues no session, and nothing after this point
          needs one — the documents were stored above and travelled in with the
@@ -1249,7 +1222,15 @@ export function RegisterForm({ onSwitch }: { onSwitch: () => void }) {
     } catch (err: unknown) {
       const resp = (err as { response?: { data?: { error?: { message?: string; code?: string } } } })?.response?.data?.error
       const code = resp?.code
-      const msg  = resp?.message ?? (err instanceof Error ? err.message : undefined) ?? 'Registration failed. Please try again.'
+      /* An error the API SENT wins: it knows what was wrong. Only when there
+         is no response at all do we describe the transport, so the student
+         never reads "Failed to fetch" or "Network Error" — neither of which
+         is a sentence about them or their form. The uploader above already
+         returns prose, so its message passes through untouched. */
+      const msg  = resp?.message
+        ?? describeTransportError(err)
+        ?? (err instanceof Error ? err.message : undefined)
+        ?? 'Registration failed. Please try again.'
       if (code === 'EMAIL_TAKEN') {
         setStep(3)
         setErrors(e => ({ ...e, email: msg }))
@@ -1314,7 +1295,10 @@ export function RegisterForm({ onSwitch }: { onSwitch: () => void }) {
     } catch (err: unknown) {
       const resp = (err as { response?: { data?: { error?: { message?: string; code?: string } } } })?.response?.data?.error
       const code = resp?.code
-      const msg  = resp?.message ?? (err instanceof Error ? err.message : undefined) ?? 'Registration failed. Please try again.'
+      const msg  = resp?.message
+        ?? describeTransportError(err)
+        ?? (err instanceof Error ? err.message : undefined)
+        ?? 'Registration failed. Please try again.'
       if (code === 'EMAIL_TAKEN') {
         setExpressErrors(e => ({ ...e, email: msg }))
       } else {

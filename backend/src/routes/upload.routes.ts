@@ -50,8 +50,8 @@ const router = Router()
    fresh email than a taken one — a far louder oracle than the 250 ms bcrypt
    gap that finding started with.
 
-   Bounded by: its own hourly limiter (9/hour — three uploads is a complete
-   signup), a 3 MB cap, the same magic-byte check every other upload gets, and
+   Bounded by: its own hourly limiter (45/hour — fifteen complete signups,
+   see signupUploadRateLimit; this said 9 long after the number moved), a 3 MB cap, the same magic-byte check every other upload gets, and
    a `kind` that selects between the private KYC prefix and the public one.
    Identity scans still land under `kyc/`, unreadable without going through
    GET /documents/:userId/:field.
