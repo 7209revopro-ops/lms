@@ -116,10 +116,12 @@ export function AIChatPanel({ open, onClose }: AIChatPanelProps) {
   const clearHistory = () => setHistory([])
 
   return (
+      /* Two keyed children rather than one fragment. AnimatePresence tracks
+         its DIRECT children by key, and a fragment is a single unkeyed child,
+         so exit animations on what it wraps do not run. The keys were already
+         on the motion elements - they were one level too deep to count. */
     <AnimatePresence>
       {open && (
-        <>
-          {/* Backdrop (mobile) */}
           <motion.div
             key="ai-backdrop"
             className="fixed inset-0 z-40 sm:hidden"
@@ -127,8 +129,8 @@ export function AIChatPanel({ open, onClose }: AIChatPanelProps) {
             initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
             onClick={onClose}
           />
-
-          {/* Panel */}
+      )}
+      {open && (
           <motion.div
             key="ai-panel"
             className="fixed right-0 top-0 bottom-0 z-50 flex flex-col bg-[var(--color-bg-surface)] w-full sm:w-[380px]"
@@ -250,7 +252,6 @@ export function AIChatPanel({ open, onClose }: AIChatPanelProps) {
               </p>
             </div>
           </motion.div>
-        </>
       )}
     </AnimatePresence>
   )

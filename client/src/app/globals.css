@@ -225,6 +225,29 @@ body {
   filter: none;
 }
 
+/* ── 16px MINIMUM ON EVERY PHONE-SIZED FORM CONTROL ──────────────────
+   iOS Safari zooms the whole page in whenever a focused input's font-size is
+   under 16px, and it does not zoom back out on blur. The app's viewport does
+   not set maximum-scale (deliberately - that would break pinch-zoom for
+   anyone who needs it), so the only cure is the font size.
+
+   Every field in the client was under the line: the login form, the four-step
+   registration wizard, the support composer, the settings password fields,
+   the coupon box and all four search boxes. Tapping any of them left a student
+   on a page 280 CSS px wide with no way back except a manual pinch.
+
+   Scoped below `sm` so nothing about the desktop design moves, and the
+   specificity here (one element + one attribute selector) already beats a
+   Tailwind text-* utility, so no !important is needed. Checkboxes, radios and
+   ranges are excluded - they have no text and iOS does not zoom for them. */
+@media (max-width: 639.98px) {
+  input:not([type='checkbox']):not([type='radio']):not([type='range']):not([type='color']),
+  textarea,
+  select {
+    font-size: 16px;
+  }
+}
+
 /* ── Kill @tailwindcss/forms blue ring on every form element ── */
 input, textarea, select {
   --tw-ring-shadow:        0 0 #0000;

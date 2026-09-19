@@ -336,7 +336,7 @@ function Badge({ v }: { v: Verdict }) {
   return (
     <span
       title={v.note}
-      className="dm inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold"
+      className="dm inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11.5px] font-semibold sm:text-[10px]"
       style={{ background: `rgba(${v.rgb},0.08)`, border: `1px solid rgba(${v.rgb},0.20)`, color: v.ink }}
     >
       {pulse ? (
@@ -385,7 +385,7 @@ function StatTile({ icon, value, label, accent, meter, className = '' }: {
       <span className="min-w-0 flex-1">
         <span className="syne block truncate text-[14px] font-extrabold leading-tight tabular-nums"
           style={{ color: 'var(--color-text-primary)' }}>{value}</span>
-        <span className="dm block truncate text-[9px] font-bold uppercase tracking-[0.12em]"
+        <span className="dm block truncate text-[11px] font-bold uppercase tracking-[0.08em] sm:text-[9px] sm:tracking-[0.12em]"
           style={{ color: 'var(--color-text-muted)' }}>{label}</span>
         {meter != null && (
           <span className="mt-1 block h-[3px] w-full overflow-hidden rounded-full"
@@ -445,12 +445,18 @@ function CancelSeat({ booking }: { booking: MyBooking }) {
       onClick={onClick}
       disabled={cancel.isPending}
       aria-label={armed ? `Confirm cancelling your seat for ${title}` : `Cancel your seat for ${title}`}
-      className="bk-focus dm inline-flex flex-shrink-0 items-center gap-1 rounded-lg px-2 py-1 text-[10px] font-semibold transition-colors disabled:opacity-60"
+      /* 44px on a phone. This is the only way to release a seat, it arms on
+         the first tap and the SECOND tap is the irreversible one - and it was
+         a 25px box with 10px lettering, 6px under Join. Aiming for it outdoors
+         either armed nothing or hit Join and fetched a meeting link. The h-11
+         idiom is what class-bookings and courses already use. */
+      className="bk-focus dm inline-flex h-11 flex-shrink-0 items-center gap-1.5 rounded-lg px-3.5 text-[12px] font-semibold transition-colors disabled:opacity-60 sm:h-auto sm:gap-1 sm:px-2 sm:py-1 sm:text-[10px]"
       style={armed
         ? { background: 'rgba(239,68,68,0.10)', border: '1px solid rgba(239,68,68,0.32)', color: 'var(--color-danger)' }
         : { background: 'var(--color-bg-inset)', border: '1px solid var(--color-border)', color: 'var(--color-text-secondary)' }}
     >
-      {cancel.isPending ? <Spinner size={10} variant="gray" /> : <X size={11} strokeWidth={2.25} />}
+      {cancel.isPending ? <Spinner size={10} variant="gray" /> : <X size={13} strokeWidth={2.25} className="sm:hidden" />}
+      {!cancel.isPending && <X size={11} strokeWidth={2.25} className="hidden sm:block" />}
       {armed ? 'Confirm' : 'Cancel'}
     </button>
   )
@@ -466,18 +472,29 @@ function BookingRow({ row, now }: { row: Row; now: number }) {
 
   return (
     <li
-      className="bk-row flex items-start gap-3 px-3 py-3 sm:px-4"
+      /* WRAPS ON A PHONE. Measured at 375: 375 - 32 (page) - 24 (row) - 46
+         (date rail) - 24 (two gaps) leaves 249px to share, and the action
+         column is flex-shrink-0, so it took its max-content width first -
+         about 133px for "Join opens at 10:30 AM" - and handed the remaining
+         116px to the words. The course read "TypeScript From Ze...", the
+         module "01 - Core Conc...", and all four meta chips fell onto separate
+         lines, making the row TALLER for showing less.
+
+         Letting the row wrap puts the actions on their own line below, and the
+         text column goes from 116px to 261px. sm: restores the three-column
+         row exactly. */
+      className="bk-row flex flex-wrap items-start gap-x-3 gap-y-2.5 px-3 py-3 sm:flex-nowrap sm:gap-y-0 sm:px-4"
       style={{ borderTop: '1px solid var(--color-border)', opacity: dim ? 0.82 : 1 }}
     >
       {/* The scan anchor. Reading a year of history is reading a date column,
           so it gets a fixed width and never wraps. */}
       <div className="w-[46px] flex-shrink-0 rounded-xl py-1.5 text-center"
         style={{ background: 'var(--color-bg-inset)', border: '1px solid var(--color-border)' }}>
-        <span className="dm block text-[9px] font-bold uppercase tracking-[0.1em]"
+        <span className="dm block text-[10px] font-bold uppercase tracking-[0.1em] sm:text-[9px]"
           style={{ color: 'var(--color-text-muted)' }}>{row.mon}</span>
         <span className="syne block text-[15px] font-extrabold leading-none tabular-nums"
           style={{ color: 'var(--color-text-primary)' }}>{row.day}</span>
-        <span className="dm block text-[9px] font-semibold"
+        <span className="dm block text-[10px] font-semibold sm:text-[9px]"
           style={{ color: 'var(--color-text-muted)' }}>{row.weekday}</span>
       </div>
 
@@ -487,7 +504,7 @@ function BookingRow({ row, now }: { row: Row; now: number }) {
             can be filed under no module, and a deleted course leaves the
             reference unpopulated. */}
         {(row.course || row.module) && (
-          <p className="dm flex min-w-0 flex-wrap items-center gap-x-1 text-[10px] font-bold uppercase tracking-[0.09em]"
+          <p className="dm flex min-w-0 flex-wrap items-center gap-x-1 text-[11px] font-bold uppercase tracking-[0.06em] sm:text-[10px] sm:tracking-[0.09em]"
             style={{ color: BLUE_INK }}>
             <span className="min-w-0 max-w-full truncate">{row.course ?? 'General session'}</span>
             {row.module && (
@@ -558,7 +575,7 @@ function BookingRow({ row, now }: { row: Row; now: number }) {
         {/* The paper trail — quietest line on the row on purpose. It answers
             "when did I do this", it is not something to scan past. */}
         {(row.bookedOn || row.cancelledOn) && (
-          <p className="dm mt-1.5 text-[10px]" style={{ color: 'var(--color-text-muted)' }}>
+          <p className="dm mt-1.5 text-[11.5px] sm:text-[10px]" style={{ color: 'var(--color-text-muted)' }}>
             {row.bookedOn && <>Booked {row.bookedOn}</>}
             {row.bookedOn && row.cancelledOn && ' · '}
             {row.cancelledOn && <>Cancelled {row.cancelledOn}</>}
@@ -566,7 +583,7 @@ function BookingRow({ row, now }: { row: Row; now: number }) {
         )}
 
         {v.note && (
-          <p className="dm mt-1.5 flex items-start gap-1.5 text-[10px] leading-relaxed"
+          <p className="dm mt-1.5 flex items-start gap-1.5 text-[11.5px] leading-relaxed sm:text-[10px]"
             style={{ color: 'var(--color-text-muted)' }}>
             <AlertTriangle size={11} strokeWidth={2} className="mt-px flex-shrink-0"
               style={{ color: 'var(--color-warning)' }} />
@@ -578,7 +595,10 @@ function BookingRow({ row, now }: { row: Row; now: number }) {
       {/* Status, and what you may still do about it: walk in, or give the
           seat back. Join sits above Cancel because on a class about to
           start it is the one a student is reaching for. */}
-      <div className="flex flex-shrink-0 flex-col items-end gap-1.5">
+      {/* pl-[58px] is the date rail plus its gap, so on the wrapped line the
+          badge and buttons still start under the text column rather than
+          under the date. */}
+      <div className="flex w-full flex-shrink-0 flex-wrap items-center gap-2 pl-[58px] sm:w-auto sm:flex-col sm:items-end sm:gap-1.5 sm:pl-0">
         <Badge v={v} />
         {canJoin(row, v) && (
           <JoinMeetButton
@@ -634,7 +654,7 @@ function Group({ title, rows, now, accent, index }: {
           {title}
         </h2>
         <span aria-hidden className="h-px flex-1" style={{ background: 'var(--color-border)' }} />
-        <span className="dm flex-shrink-0 text-[10px] font-semibold tabular-nums"
+        <span className="dm flex-shrink-0 text-[11px] font-semibold tabular-nums sm:text-[10px]"
           style={{ color: 'var(--color-text-muted)' }}>
           {rows.length} {rows.length === 1 ? 'class' : 'classes'}
         </span>
@@ -690,13 +710,13 @@ function Tabs({ value, onChange, counts }: {
             type="button"
             aria-pressed={on}
             onClick={() => onChange(t.key)}
-            className="bk-focus dm inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-[12px] font-semibold transition-colors"
+            className="bk-focus dm inline-flex h-11 items-center gap-1.5 rounded-full px-3.5 text-[12px] font-semibold transition-colors sm:h-auto sm:px-3 sm:py-1.5"
             style={on
               ? { background: 'rgba(0,87,184,0.08)', border: '1px solid rgba(0,87,184,0.20)', color: BLUE_INK }
               : { background: 'var(--color-bg-surface)', border: '1px solid var(--color-border)', color: 'var(--color-text-muted)' }}
           >
             {t.label}
-            <span className="text-[10px] font-bold tabular-nums" style={{ opacity: on ? 0.8 : 0.65 }}>
+            <span className="text-[11px] font-bold tabular-nums sm:text-[10px]" style={{ opacity: on ? 0.8 : 0.65 }}>
               {counts[t.key]}
             </span>
           </button>
@@ -751,7 +771,7 @@ function EmptyState({ tab, search, onClear }: {
 
       {searching ? (
         <button type="button" onClick={onClear}
-          className="bk-focus dm rounded-full px-3 py-1.5 text-[12px] font-semibold"
+          className="bk-focus dm h-11 rounded-full px-3.5 text-[12px] font-semibold sm:h-auto sm:px-3 sm:py-1.5"
           style={{ background: 'rgba(0,87,184,0.08)', border: '1px solid rgba(0,87,184,0.20)', color: BLUE_INK }}>
           Clear search
         </button>
@@ -1012,7 +1032,7 @@ export default function MyBookingsPage() {
             </p>
           </div>
           <button type="button" onClick={() => void refetch()} disabled={isFetching}
-            className="bk-focus dm inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-[12px] font-semibold disabled:opacity-60"
+            className="bk-focus dm inline-flex h-11 items-center gap-1.5 rounded-full px-3.5 text-[12px] font-semibold disabled:opacity-60 sm:h-auto sm:px-3 sm:py-1.5"
             style={{ background: 'rgba(0,87,184,0.08)', border: '1px solid rgba(0,87,184,0.20)', color: BLUE_INK }}>
             {isFetching ? <Spinner size={11} /> : <RotateCw size={12} strokeWidth={2.5} />}
             Try again

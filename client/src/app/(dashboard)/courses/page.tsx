@@ -308,11 +308,14 @@ export default function CoursesPage() {
                 <ChevronDown size={13} className={`transition-transform ${showSort ? 'rotate-180' : ''}`} />
                 <span className="hidden sm:inline">Sort</span>
               </MotionButton>
+              {/* Outside AnimatePresence: it has no exit animation to run, which
+                  leaves the menu as a single keyed child that can be tracked. */}
+              {showSort && (
+                <div className="fixed inset-0 z-40" onClick={() => setShowSort(false)} />
+              )}
               <AnimatePresence>
                 {showSort && (
-                  <>
-                    <div className="fixed inset-0 z-40" onClick={() => setShowSort(false)} />
-                    <motion.div initial={{ opacity: 0, y: -8, scale: 0.96 }} animate={{ opacity: 1, y: 0, scale: 1 }}
+                    <motion.div key="sort-menu" initial={{ opacity: 0, y: -8, scale: 0.96 }} animate={{ opacity: 1, y: 0, scale: 1 }}
                       exit={{ opacity: 0, y: -8, scale: 0.96 }} transition={{ type: 'spring', stiffness: 400, damping: 28 }}
                       className="absolute right-0 top-full mt-1 w-52 rounded-2xl p-1.5 z-50 bg-[var(--color-bg-surface)]"
                       style={{ border: '1px solid var(--color-border)', boxShadow: '0 16px 40px rgba(0,0,0,0.10)' }}>
@@ -327,7 +330,6 @@ export default function CoursesPage() {
                         </Button>
                       ))}
                     </motion.div>
-                  </>
                 )}
               </AnimatePresence>
             </div>

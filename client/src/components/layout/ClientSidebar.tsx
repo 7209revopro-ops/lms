@@ -1,5 +1,6 @@
 'use client'
 
+import { useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
@@ -67,9 +68,10 @@ function SidebarContent({ onClose }: { onClose: () => void }) {
           className="h-8 w-auto object-contain"
         />
         <button onClick={onClose}
-          className="ml-auto flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-lg transition-colors hover:bg-[var(--color-hover)]"
+          aria-label="Close menu"
+          className="-mr-2.5 ml-auto flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-lg transition-colors hover:bg-[var(--color-hover)]"
           style={{ color: 'var(--color-primary)' }}>
-          <X size={15} />
+          <X size={18} />
         </button>
       </div>
 
@@ -139,8 +141,12 @@ function SidebarContent({ onClose }: { onClose: () => void }) {
             onClick={handleLogout}
             title="Sign out"
             aria-label="Sign out"
-            className="flex-shrink-0 transition-all hover:text-red-500" style={{ color: 'var(--color-text-muted)' }}>
-            <LogOut size={14} />
+            /* The hit area was the 14px glyph and nothing else - a fifth of
+               the 44px minimum, for the one control that ends your session,
+               12px from a link to Settings. -mr-2 keeps the row's optical
+               alignment while the target grows to 44. */
+            className="-mr-2 flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-lg transition-all hover:bg-[var(--color-hover-danger)] hover:text-red-500" style={{ color: 'var(--color-text-muted)' }}>
+            <LogOut size={16} />
           </button>
         </div>
       </div>
@@ -151,11 +157,53 @@ function SidebarContent({ onClose }: { onClose: () => void }) {
 export function ClientSidebar() {
   const { mobileNavOpen, setMobileNav } = useUIStore()
 
+  /* A DRAWER THAT IS OPEN IS A MODAL, AND THIS ONE DID NOT BEHAVE LIKE ONE.
+     Escape did nothing, and nothing locked the page behind it - so a thumb
+     landing on the 95px of dimmed strip beside the panel scrolled the page
+     underneath instead of dismissing anything, which on a phone is most of
+     what a thumb lands on. Closing then returned you somewhere else.
+
+     The scroll position is captured and restored rather than simply unset:
+     `overflow: hidden` on body drops iOS back to the top, so without this the
+     drawer would still lose your place, just more quietly. */
+  useEffect(() => {
+    if (!mobileNavOpen) return
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setMobileNav(false) }
+    window.addEventListener('keydown', onKey)
+
+    const y = window.scrollY
+    const { overflow, position, top, width } = document.body.style
+    document.body.style.overflow = 'hidden'
+    document.body.style.position = 'fixed'
+    document.body.style.top      = `-${y}px`
+    document.body.style.width    = '100%'
+
+    return () => {
+      window.removeEventListener('keydown', onKey)
+      document.body.style.overflow = overflow
+      document.body.style.position = position
+      document.body.style.top      = top
+      document.body.style.width    = width
+      window.scrollTo(0, y)
+    }
+  }, [mobileNavOpen, setMobileNav])
+
   return (
+    /* TWO KEYED CHILDREN, NOT ONE FRAGMENT.
+
+       AnimatePresence tracks its own DIRECT children by key. A fragment is a
+       single child and carries no key, so the backdrop and the drawer inside
+       it were invisible to it and their exit animations did not run: the
+       drawer vanished rather than sliding out. The keys were already on the
+       motion elements - they were one level too deep to count.
+
+       (An earlier version of this comment claimed the fragment also left the
+       backdrop mounted for ever, blocking the page. That was wrong. It was an
+       artifact of measuring in a hidden browser pane, where rAF never ticks,
+       so no exit animation can ever complete and AnimatePresence rightly
+       keeps waiting. Nothing here was broken for a real user.) */
     <AnimatePresence>
       {mobileNavOpen && (
-        <>
-          {/* Backdrop */}
           <motion.div
             key="client-mobile-backdrop"
             initial={{ opacity: 0 }}
@@ -165,18 +213,28 @@ export function ClientSidebar() {
             className="fixed inset-0 z-40 bg-black/50"
             onClick={() => setMobileNav(false)}
           />
-          {/* Drawer */}
+      )}
+      {mobileNavOpen && (
           <motion.aside
             key="client-mobile-drawer"
             initial={{ x: '-100%' }}
             animate={{ x: 0 }}
             exit={{ x: '-100%' }}
             transition={{ type: 'spring', stiffness: 300, damping: 30 }}
-            className="fixed left-0 top-0 z-50 flex h-screen w-[min(280px,85vw)] flex-col overflow-hidden bg-[var(--color-bg-surface)]"
+            /* 100dvh, NOT h-screen. On iOS Safari 100vh is the LARGE viewport -
+               the height the page would have if the toolbars were retracted -
+               so an h-screen drawer runs about 85px below the glass. This one
+               is overflow-hidden with a flex-shrink-0 footer, so that 85px was
+               the Settings row, the account card and Sign out, with nothing
+               able to scroll them into view. The only navigation below 1024px
+               and you could not sign out of it. dvh is the visible viewport. */
+            role="dialog"
+            aria-modal="true"
+            aria-label="Main menu"
+            className="fixed left-0 top-0 z-50 flex h-[100dvh] w-[min(280px,85vw)] flex-col overflow-hidden bg-[var(--color-bg-surface)]"
             style={{ borderRight: '1px solid var(--color-border)' }}>
             <SidebarContent onClose={() => setMobileNav(false)} />
           </motion.aside>
-        </>
       )}
     </AnimatePresence>
   )

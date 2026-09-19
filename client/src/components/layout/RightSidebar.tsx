@@ -125,10 +125,12 @@ export function RightSidebar() {
   const weekMins       = activity?.week.minutesWatched   ?? 0
 
   return (
+      /* Two keyed children rather than one fragment. AnimatePresence tracks
+         its DIRECT children by key, and a fragment is a single unkeyed child,
+         so exit animations on what it wraps do not run. The keys were already
+         on the motion elements - they were one level too deep to count. */
     <AnimatePresence>
       {rightPanelOpen && (
-        <>
-          {/* Mobile backdrop */}
           <motion.div
             key="right-backdrop"
             className="fixed inset-0 z-20 bg-black/30 lg:hidden"
@@ -138,8 +140,8 @@ export function RightSidebar() {
             transition={{ duration: 0.18 }}
             onClick={() => setRightPanel(false)}
           />
-
-          {/* Panel */}
+      )}
+      {rightPanelOpen && (
           <motion.aside
             key="right-panel"
             initial={{ x: 340, opacity: 0 }}
@@ -149,7 +151,9 @@ export function RightSidebar() {
             /* Offsets read the header token rather than repeating its value:
                hardcoded 100px here left the panel's first 13px tucked behind
                the header once the header grew. */
-            className="fixed right-0 top-0 z-30 flex h-screen w-[min(320px,100vw)] flex-col lg:z-20 lg:top-[var(--app-header-h)] lg:h-[calc(100vh-var(--app-header-h))]"
+            /* dvh on mobile for the same reason as the nav drawer; the lg rule
+               keeps vh, because a desktop viewport has no retracting toolbar. */
+            className="fixed right-0 top-0 z-30 flex h-[100dvh] w-[min(320px,100vw)] flex-col lg:z-20 lg:top-[var(--app-header-h)] lg:h-[calc(100vh-var(--app-header-h))]"
             style={{
               background: 'var(--color-bg-inset)',
               borderLeft: '1px solid var(--color-border)',
@@ -383,7 +387,6 @@ export function RightSidebar() {
 
             </div>
           </motion.aside>
-        </>
       )}
     </AnimatePresence>
   )

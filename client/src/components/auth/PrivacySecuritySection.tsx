@@ -517,18 +517,30 @@ function DangerCard(p: DangerCardProps) {
         {p.confirmLabel}
       </button>
 
+      {/* Two keyed children rather than one fragment: AnimatePresence tracks
+          direct children by key, so a fragment hides them from it and their
+          exit animations never run. */}
       <AnimatePresence>
         {open && (
-          <>
             <motion.div
+              key="confirm-backdrop"
               initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
               onClick={() => !pending && !done && setOpen(false)}
               className="fixed inset-0 z-50"
               style={{ background: 'rgba(0,0,0,0.55)', backdropFilter: 'blur(4px)' }} />
+        )}
+        {open && (
             <motion.div
+              key="confirm-dialog"
               initial={{ opacity: 0, scale: 0.95, y: 12 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.95 }}
               transition={{ type: 'spring', stiffness: 360, damping: 28 }}
-              className="fixed left-1/2 top-1/2 z-50 w-full max-w-[440px] -translate-x-1/2 -translate-y-1/2 rounded-3xl bg-[var(--color-bg-surface)] p-6"
+              /* max-h + scroll, because this dialog asks you to TYPE. Centred
+                 with -translate-y-1/2 and no height cap, the phrase field, the
+                 password field and the confirm button sat under the iOS
+                 keyboard with no way to reach them - on the one dialog in the
+                 app that deletes an account. 90dvh is the visible viewport,
+                 not the toolbar-retracted one. */
+              className="fixed left-1/2 top-1/2 z-50 max-h-[90dvh] w-[calc(100vw-2rem)] max-w-[440px] -translate-x-1/2 -translate-y-1/2 overflow-y-auto overscroll-contain rounded-3xl bg-[var(--color-bg-surface)] p-6"
               style={{ boxShadow: '0 30px 80px rgba(13,15,26,0.18)' }}>
               <button onClick={() => !pending && !done && setOpen(false)}
                 className="absolute right-4 top-4 flex h-7 w-7 items-center justify-center rounded-lg transition-colors hover:bg-[var(--color-bg-muted)]"
@@ -610,7 +622,6 @@ function DangerCard(p: DangerCardProps) {
                 </>
               )}
             </motion.div>
-          </>
         )}
       </AnimatePresence>
     </div>

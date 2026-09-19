@@ -136,10 +136,12 @@ export function TermsModal({ open, onClose }: TermsModalProps) {
   }, [open, onClose])
 
   return (
+      /* Two keyed children rather than one fragment. AnimatePresence tracks
+         its DIRECT children by key, and a fragment is a single unkeyed child,
+         so exit animations on what it wraps do not run. The keys were already
+         on the motion elements - they were one level too deep to count. */
     <AnimatePresence>
       {open && (
-        <>
-          {/* Backdrop */}
           <motion.div
             key="terms-backdrop"
             className="fixed inset-0 z-[80]"
@@ -149,8 +151,8 @@ export function TermsModal({ open, onClose }: TermsModalProps) {
             exit={{ opacity: 0 }}
             onClick={onClose}
           />
-
-          {/* Modal */}
+      )}
+      {open && (
           <motion.div
             key="terms-modal"
             className="fixed inset-0 z-[81] flex items-center justify-center p-4"
@@ -259,7 +261,6 @@ export function TermsModal({ open, onClose }: TermsModalProps) {
               </div>
             </div>
           </motion.div>
-        </>
       )}
     </AnimatePresence>
   )

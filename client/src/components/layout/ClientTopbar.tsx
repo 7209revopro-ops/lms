@@ -523,15 +523,30 @@ export function ClientTopbar() {
                 )}
               </motion.button>
 
+              {/* The click-catcher leaves AnimatePresence: it has no exit
+                  animation to run, so it does not belong in there, and that
+                  leaves the panel as a single keyed child AnimatePresence can
+                  actually track. */}
+              {notifOpen && (
+                <div className="fixed inset-0 z-40" onClick={() => setNotifOpen(false)} />
+              )}
               <AnimatePresence>
                 {notifOpen && (
-                  <>
-                    <div className="fixed inset-0 z-40" onClick={() => setNotifOpen(false)} />
                     <motion.div
+                      key="notif-panel"
                       initial={{ opacity: 0, y: -8, scale: 0.96 }} animate={{ opacity: 1, y: 0, scale: 1 }}
                       exit={{ opacity: 0, y: -8, scale: 0.96 }}
                       transition={{ type: 'spring', stiffness: 400, damping: 28 }}
-                      className="absolute right-0 top-full mt-2 w-[calc(100vw-2rem)] sm:w-72 rounded-2xl overflow-hidden z-50 bg-[var(--color-bg-surface)]"
+                      /* ANCHORED TO THE SCREEN ON A PHONE, NOT TO THE BELL.
+                         `w-[calc(100vw-2rem)]` is 343px, but `absolute right-0`
+                         pinned it to the bell's right edge at x=303 - so it
+                         spanned -40 to 303 and its first 40px, the unread dot
+                         and half the icon column, were off the left of the
+                         screen. Pinning both edges to the viewport puts it
+                         where it belongs; from `sm` it goes back to hanging
+                         off the bell. The height cap is dvh so the last row
+                         cannot end up under Safari's toolbar unreachable. */
+                      className="fixed left-4 right-4 top-[calc(var(--app-header-h)+4px)] z-50 max-h-[70dvh] overflow-y-auto overscroll-contain rounded-2xl bg-[var(--color-bg-surface)] sm:absolute sm:left-auto sm:right-0 sm:top-full sm:mt-2 sm:max-h-[70vh] sm:w-72"
                       style={{ border: '1px solid var(--color-border)', boxShadow: '0 8px 32px rgba(0,0,0,0.12)' }}>
                       <div className="flex items-center justify-between px-4 py-3" style={{ borderBottom: '1px solid var(--color-border)' }}>
                         <span className="text-sm font-semibold" style={{ color: 'var(--color-text-primary)' }}>Notifications</span>
@@ -594,7 +609,6 @@ export function ClientTopbar() {
                           </motion.div>
                       })}
                     </motion.div>
-                  </>
                 )}
               </AnimatePresence>
             </div>

@@ -444,7 +444,7 @@ function SlotModal({group,bookingMap,onBook,onCancel,bookPending,cancelPending,o
       <motion.div initial={{opacity:0,y:40}} animate={{opacity:1,y:0}} exit={{opacity:0,y:40}}
         transition={{type:'spring',stiffness:360,damping:32}} onClick={e=>e.stopPropagation()}
         className="dm relative w-full overflow-y-auto bg-[var(--color-bg-surface)] sm:max-w-md"
-        style={{borderRadius:'24px 24px 20px 20px',maxHeight:'92vh',boxShadow:'0 -8px 48px rgba(15,23,42,0.20)'}}>
+        style={{borderRadius:'24px 24px 20px 20px',maxHeight:'92dvh',boxShadow:'0 -8px 48px rgba(15,23,42,0.20)'}}>
         <div className="flex justify-center pb-1 pt-3 sm:hidden">
           <div className="h-1 w-10 rounded-full" style={{background: 'var(--color-border-strong)'}}/>
         </div>
