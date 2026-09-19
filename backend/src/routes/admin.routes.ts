@@ -22,8 +22,10 @@ import {
   requireSameOrgUser, callerMayAccess, instructorOwnsSession, callerOrgForRead,
   servedClassFilter, classServesOrg, andFilter,
 } from '@/utils/tenancy.ts'
+import { CROSS_ORG_CLASSES_ENABLED } from '@/utils/featureFlags.ts'
 import { reserveSeat, releaseSeat, seatStampFrom } from '@/services/seatPool.service.ts'
 import { ensureOrgSlugs, orgSlugFor } from '@/utils/orgSlugs.ts'
+import { academyClock } from '@/utils/academyClock.ts'
 import { documentRef } from '@/utils/documentRef.ts'
 import { UserService } from '@/services/user.service.ts'
 import { adminListDevices, adminApproveDevice, adminRevokeDevice } from '@/services/device.service.ts'
@@ -1635,7 +1637,16 @@ router.post('/bookings/book-for-student', requireAnyAdmin, validate(bookForStude
 
     /* Post-booking: notify + email student (fire-and-forget) */
     const notifSvc = new NotificationService()
-    const dateLabel = new Date(session.scheduledStart).toLocaleString('en-US', { dateStyle: 'full', timeStyle: 'short' })
+    /* Awaited, and the STUDENT's academy. This was a bare toLocaleString: no
+       timeZone, so it took the server's (Asia/Dubai, pinned in
+       config/timezone.ts), and no tag, so nothing said which clock it meant.
+       An admin of one academy can book a seat for a student of another on a
+       shared class, so the reader is routinely not in the server's zone. The
+       warm has to be awaited here too — orgSlugFor is synchronous and a
+       fire-and-forget warm loses the race on the first request after boot. */
+    await ensureOrgSlugs()
+    const dateLabel = academyClock(session.scheduledStart,
+      orgSlugFor((student as { organizationId?: unknown }).organizationId)).full
     const joinUrl = (session as any).meetingUrl ?? `${process.env['CLIENT_URL'] ?? 'http://localhost:3000'}/live-classes/${liveClassId}/watch`
 
     notifSvc.create(studentId, {
@@ -1644,7 +1655,6 @@ router.post('/bookings/book-for-student', requireAnyAdmin, validate(bookForStude
     }).catch(() => {/* non-fatal */})
 
     import('@/services/email.service.ts').then(({ sendBookingConfirmation }) => {
-      void ensureOrgSlugs()
       sendBookingConfirmation(
         (student as any).email, (student as any).name, session.title, session.scheduledStart,
         /* The STUDENT's academy, not the admin's: an admin of one academy can
@@ -2125,6 +2135,37 @@ async function buildBookingFilter(
     }
   }
 
+  /* A COURSE IS JUDGED AGAINST THE CALLER'S OWN DOOR, NEVER THE HOST'S.
+
+     Both course clauses below used to be written straight onto
+     `lcFilter.courseId`, which is the class's HOST course — the one belonging
+     to the academy that scheduled it. A guest academy reaches the same class
+     through its OWN course, named in `guestCohorts[].courseId`, and nothing
+     requires the two to share a programme (liveClass.service.ts says so in as
+     many words: the cohort course's programme "is a hint for the picker and
+     can never be the check"). So the class was widened into scope at :2124 and
+     then dropped again one clause later, and a Bangalore admin who picked
+     their own course from the dropdown — or who is simply programme-scoped —
+     got an empty roster, a zero stats strip and an empty CSV for a class their
+     own students are sitting in, with no way to mark that cohort present.
+
+     Same two-arm shape as liveClass.repository.ts's categoryCourseFilter, and
+     the guest arm carries the same feature gate for the same reason: with the
+     switch off a guest academy must not reach the class at all, and a filter
+     that widens while entitlement refuses produces a row that is visible and
+     unbookable. An instructor caller keeps callerOrgId === null and so keeps
+     today's host-only behaviour byte for byte. */
+  const courseDoorFilter = (clause: unknown): Record<string, unknown> =>
+    CROSS_ORG_CLASSES_ENABLED && callerOrgId && Types.ObjectId.isValid(callerOrgId)
+      ? { $or: [
+          { courseId: clause },
+          { guestCohorts: { $elemMatch: {
+            organizationId: new Types.ObjectId(callerOrgId),
+            courseId: clause,
+          } } },
+        ] }
+      : { courseId: clause }
+
   // Programme-scoped admins (sub_admin) only see their program's bookings
   const scope = (req.user as any)?.categoryScope as string | undefined
   let scopedCourseIds: MongoTypes.ObjectId[] | null = null
@@ -2132,7 +2173,7 @@ async function buildBookingFilter(
     const { CourseModel } = await import('@/models/schema.ts')
     const scopedCourses = await CourseModel.find({ program: scope }, '_id').lean()
     scopedCourseIds = scopedCourses.map((c: any) => c._id)
-    lcFilter['courseId'] = { $in: scopedCourseIds }
+    andFilter(lcFilter, courseDoorFilter({ $in: scopedCourseIds }))
   }
 
   /* Narrow to one course — but INTERSECT with the programme scope, never
@@ -2145,7 +2186,12 @@ async function buildBookingFilter(
     const requested = new Types.ObjectId(q.courseId)
     const inScope   = !scopedCourseIds || scopedCourseIds.some(id => String(id) === String(requested))
     if (!inScope) return null   // out of scope → caller sees an empty result
-    lcFilter['courseId'] = requested
+    /* Composed under $and rather than assigned over the programme clause, which
+       is what keeps "more specific means narrower" true now that both clauses
+       are $or shapes: assigning would delete the programme scope outright. The
+       inScope guard above has already proved the request is inside it, so the
+       intersection is the same set it was, one door wider. */
+    andFilter(lcFilter, courseDoorFilter(requested))
   }
 
   if (q.language) {
@@ -2493,11 +2539,20 @@ router.patch('/bookings/:id/cancel', requireInstructor, requirePermission('booki
     void (async () => {
       try {
         const [student, lc] = await Promise.all([
-          UserModel.findById(existing.userId).select('name email').lean(),
+          /* organizationId, or the academy clock below has nothing to resolve
+             and silently renders in the server's zone — the cache warmed a few
+             lines down was being queried for a field that never arrived. */
+          UserModel.findById(existing.userId).select('name email organizationId').lean(),
           LiveClassModel.findById(existing.liveClassId).select('title scheduledStart').lean(),
         ])
         const title = (lc as any)?.title ?? 'Session'
         const start = (lc as any)?.scheduledStart ? new Date((lc as any).scheduledStart) : null
+        /* Warmed BEFORE the first orgSlugFor read below, not after it.
+           orgSlugFor is synchronous and answers undefined from a cold cache,
+           so a warm that runs later in the handler leaves the bell rendering
+           in the default zone on the first request after every boot — and the
+           mail two lines further on rendering correctly, disagreeing with it. */
+        await ensureOrgSlugs()
 
         /* In-app notification FIRST, and unconditionally. The student path
            (afterBookingCancelled in bookings.routes.ts) always creates one, and
@@ -2505,7 +2560,10 @@ router.patch('/bookings/:id/cancel', requireInstructor, requirePermission('booki
            trace in the bell, and a student with no working mailbox had no way to
            learn about it. It also does not depend on a mail server being up. */
         const dateLabel = start
-          ? start.toLocaleString('en-US', { dateStyle: 'full', timeStyle: 'short', timeZone: 'Asia/Dubai' })
+          /* The STUDENT's academy, not the server's. This was pinned to Dubai
+             with timeStyle 'short', which emits no zone at all, so a Bangalore
+             student read a Dubai time and nothing said so. */
+          ? academyClock(start, orgSlugFor((student as { organizationId?: unknown }).organizationId)).full
           : 'its scheduled date'
         const { NotificationService: NotifSvc } = await import('@/services/notification.service.ts')
         await new NotifSvc().create(String(existing.userId), {
@@ -2523,7 +2581,6 @@ router.patch('/bookings/:id/cancel', requireInstructor, requirePermission('booki
            17, 2026 at 10:00 PM" is not a parseable date, so the mail went out
            reading "your scheduled class on Invalid Date at Invalid Date has
            been cancelled". The type accepted it; only the output showed it. */
-        await ensureOrgSlugs()
         await sendCancelledNotification(
           (student as any).email,
           (student as any).name ?? '',
@@ -2667,6 +2724,14 @@ router.get('/reports/attendance', requireInstructor, requirePermission('reports'
       if (from) filter['bookedAt']['$gte'] = new Date(from)
       if (to)   filter['bookedAt']['$lte'] = new Date(to)
     }
+    /* Resolved ONCE, above both scopes. The class scope below used to read
+       req.user!.organizationId blind while the row scope resolved the same
+       academy through callerOrgForRead, so on a token minted without the field
+       the two disagreed: the class set went unscoped while the rows did not.
+       One resolution, one answer. */
+    const reportCaller = await callerOrgForRead(req)
+    if (reportCaller.gone) { sendSuccess(res, []); return }
+
     /* Scope the sessions this caller may report on, then resolve to ids.
        Org isolation was here; the INSTRUCTOR scope was not (P-13), so an
        instructor received every student's attendance across the whole academy
@@ -2681,9 +2746,23 @@ router.get('/reports/attendance', requireInstructor, requirePermission('reports'
     /* Same reasoning as buildBookingFilter: the instructor clause above is
        already the narrower of the two, so stacking the academy on top only
        drops a LENT instructor's own borrowing-academy sessions and silently
-       under-reports their students. Every other role keeps the academy. */
-    if (!reportingInstructor && req.user!.organizationId && Types.ObjectId.isValid(req.user!.organizationId)) {
-      lcScope['organizationId'] = new Types.ObjectId(req.user!.organizationId)
+       under-reports their students. Every other role keeps the academy.
+
+       WIDEN to classes this academy owns OR is named a guest cohort on — the
+       widen half of the split buildBookingFilter does at :2124, which the
+       comment below already claimed to match while implementing only the
+       narrow half. Owner equality alone meant a shared class was not in the
+       candidate set at all for the guest academy, and the per-seat clause
+       below is composed under $and so it can only subtract: it could never
+       re-admit a class this line had already removed. The guest academy's own
+       attendance on every shared class was silently missing from its own
+       report and its CSV, with the rate computed off the short total.
+
+       servedClassFilter is called WITHOUT includeUnowned, so classes with no
+       academy stay excluded exactly as owner equality excluded them, and its
+       guest arm is gated on the feature switch — off means byte-identical. */
+    if (!reportingInstructor) {
+      andFilter(lcScope, servedClassFilter(reportCaller.org))
     }
     if (Object.keys(lcScope).length > 0) {
       const scopedClassIds = await LiveClassModel.find(lcScope, '_id').lean()
@@ -2698,21 +2777,19 @@ router.get('/reports/attendance', requireInstructor, requirePermission('reports'
 
        An unstamped seat is the host's, so it is only included for a caller who
        owns the class — the same rule, and the same reason: matching it
-       unconditionally would show a guest academy the host's legacy roster. */
-    {
-      const reportCaller = await callerOrgForRead(req)
-      if (reportCaller.gone) { sendSuccess(res, []); return }
-      if (!reportingInstructor && reportCaller.org && Types.ObjectId.isValid(reportCaller.org)) {
-        const oid = new Types.ObjectId(reportCaller.org)
-        const owned = await LiveClassModel.find({ organizationId: oid }, '_id').lean()
-        filter['$and'] = [
-          ...((filter['$and'] as unknown[]) ?? []),
-          { $or: [
-            { seatOrganizationId: oid },
-            { seatOrganizationId: { $exists: false }, liveClassId: { $in: owned.map((l: any) => l._id) } },
-          ] },
-        ]
-      }
+       unconditionally would show a guest academy the host's legacy roster.
+       `owned` therefore stays strict owner equality even though the class
+       scope above is now the wider "serves this academy" set. */
+    if (!reportingInstructor && reportCaller.org && Types.ObjectId.isValid(reportCaller.org)) {
+      const oid = new Types.ObjectId(reportCaller.org)
+      const owned = await LiveClassModel.find({ organizationId: oid }, '_id').lean()
+      filter['$and'] = [
+        ...((filter['$and'] as unknown[]) ?? []),
+        { $or: [
+          { seatOrganizationId: oid },
+          { seatOrganizationId: { $exists: false }, liveClassId: { $in: owned.map((l: any) => l._id) } },
+        ] },
+      ]
     }
     const bookings = await ClassBookingModel.find(filter)
       .populate('userId', 'id name email')
@@ -2829,6 +2906,65 @@ async function assertLiveClassEditable(liveClassId: string, req: Request): Promi
   return true
 }
 
+/* ─────────────────────────────────────────────────────
+   seatScopedUserIds(req, liveClassId)
+   ─────────────────────────────────────────────────────
+   WHOSE STUDENTS MAY THIS CALLER SEE IN THIS ROOM?
+
+   On a shared class one room has two rosters, so scoping the CLASS is no
+   longer enough — the three sibling surfaces that return student PII on a
+   live class each narrow per SEAT for exactly that reason: the roster
+   (buildBookingFilter), the attendance report, and the feedback route below.
+   This is that one narrowing, extracted, so the fourth surface cannot drift
+   away from the other three the way it already did once.
+
+   Homework carries no academy of its own — HomeworkSubmission is homeworkId,
+   userId and the submission fields, and nothing else — so the cohort has to be
+   resolved through the seat the student holds on this class. A student with no
+   seat row could not have attended, and an unstamped seat is the host's: it
+   was taken before the class was ever shared, so it is matched only for the
+   academy that OWNS the room.
+
+   The surface this was missing from leaked the opposite way from the rest of
+   this feature's bugs. `assertLiveClassEditable` resolves tenancy through the
+   HOST course, and a host-academy `admin` passes that unconditionally, so
+   GET /live-classes/:id/homework/submissions handed the host every guest
+   academy's student by name and email.
+
+   Returns null when no narrowing applies: super_admin is never scoped (rule
+   1), a caller with no academy on record is unscoped (rule 3b), and the
+   instructor sees the whole room by design — it is the one cross-academy PII
+   flow this feature accepts, because somebody has to be able to see everyone
+   in the class they are running. The instructor escape is `role ===
+   'instructor'` rather than `instructorOwnsSession` purely to match the
+   feedback route exactly; both are broader than assignment, and tightening
+   the pair together belongs in its own pass. */
+async function seatScopedUserIds(
+  req: Request,
+  liveClassId: string,
+): Promise<{ gone: true } | { gone: false; userIds: unknown[] | null }> {
+  const { LiveClassModel, ClassBookingModel } = await import('@/models/schema.ts')
+  const { Types } = await import('mongoose')
+
+  const caller = await callerOrgForRead(req)
+  if (caller.gone) return { gone: true }
+  if (req.user!.role === 'super_admin' || req.user!.role === 'instructor') return { gone: false, userIds: null }
+  if (!caller.org || !Types.ObjectId.isValid(caller.org)) return { gone: false, userIds: null }
+  if (!Types.ObjectId.isValid(liveClassId)) return { gone: false, userIds: [] }
+
+  const oid  = new Types.ObjectId(caller.org)
+  const lcId = new Types.ObjectId(liveClassId)
+  const cls  = await LiveClassModel.findById(lcId).select('organizationId').lean()
+  const ownsClass = String((cls as { organizationId?: unknown } | null)?.organizationId ?? '') === String(oid)
+  const mine = await ClassBookingModel.find(
+    ownsClass
+      ? { liveClassId: lcId, $or: [{ seatOrganizationId: oid }, { seatOrganizationId: { $exists: false } }] }
+      : { liveClassId: lcId, seatOrganizationId: oid },
+    'userId',
+  ).lean()
+  return { gone: false, userIds: mine.map((b: any) => b.userId) }
+}
+
 /* Same check, resolved through a homework document → live class → course. */
 async function assertHomeworkEditable(homeworkId: string, req: Request): Promise<boolean> {
   const { SessionHomeworkModel } = await import('@/models/schema.ts')
@@ -2879,7 +3015,18 @@ router.get('/live-classes/:id/homework/submissions', requireRole('super_admin', 
     }
     const homeworks = await SessionHomeworkModel.find({ liveClassId }).lean({ virtuals: true })
     const hwIds = homeworks.map(h => h._id)
-    const submissions = await HomeworkSubmissionModel.find({ homeworkId: { $in: hwIds } })
+    /* NARROWED PER SEAT, like the roster, the attendance report and the
+       feedback route. These rows are populated with the student's name and
+       email, and the gate above resolves tenancy through the HOST course — so
+       on a shared class this handed the host academy's admin every guest
+       academy's student. */
+    const seats = await seatScopedUserIds(req, liveClassId)
+    if (seats.gone) {
+      res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Session not found' } }); return
+    }
+    const subFilter: Record<string, unknown> = { homeworkId: { $in: hwIds } }
+    if (seats.userIds) subFilter['userId'] = { $in: seats.userIds }
+    const submissions = await HomeworkSubmissionModel.find(subFilter)
       .populate('userId', 'id name email')
       .populate('homeworkId', 'id title')
       .populate('gradedBy', 'id name')
@@ -2920,10 +3067,21 @@ router.delete('/homework/:id', requireRole('super_admin', 'admin', 'instructor')
 
 router.patch('/homework-submissions/:id/grade', requireRole('super_admin', 'admin', 'instructor'), validate(gradeHomeworkSchema), async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { HomeworkSubmissionModel } = await import('@/models/schema.ts')
+    const { HomeworkSubmissionModel, SessionHomeworkModel } = await import('@/models/schema.ts')
     const id = String(req.params['id'] ?? '')
-    const existing = await HomeworkSubmissionModel.findById(id).select('homeworkId').lean()
+    const existing = await HomeworkSubmissionModel.findById(id).select('homeworkId userId').lean()
     if (!existing || !(await assertHomeworkEditable(String(existing.homeworkId), req))) {
+      res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Submission not found' } }); return
+    }
+    /* THE SAME SEAT SCOPE THE LIST APPLIES, because the gate above is the same
+       host-course gate and a row this caller may not READ is not one they may
+       grade. Without it the host academy's admin could write a grade and
+       written feedback onto a guest academy's student — reaching, by id, the
+       rows the list no longer shows them. 404 rather than 403, so the reply
+       never confirms the submission exists on the other academy's roster. */
+    const hw = await SessionHomeworkModel.findById(String(existing.homeworkId)).select('liveClassId').lean()
+    const seats = await seatScopedUserIds(req, String((hw as { liveClassId?: unknown } | null)?.liveClassId ?? ''))
+    if (seats.gone || (seats.userIds && !seats.userIds.some(u => String(u) === String(existing.userId)))) {
       res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Submission not found' } }); return
     }
     const { grade, feedback } = req.body as { grade: number; feedback?: string }
@@ -2940,7 +3098,7 @@ router.patch('/homework-submissions/:id/grade', requireRole('super_admin', 'admi
 /* GET /admin/live-classes/:id/feedback — feedback summary for a session */
 router.get('/live-classes/:id/feedback', requireInstructor, async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { ClassFeedbackModel, LiveClassModel, ClassBookingModel } = await import('@/models/schema.ts')
+    const { ClassFeedbackModel } = await import('@/models/schema.ts')
     const { Types } = await import('mongoose')
     const liveClassId = String(req.params['id'] ?? '')
     if (!Types.ObjectId.isValid(liveClassId)) {
@@ -2961,25 +3119,18 @@ router.get('/live-classes/:id/feedback', requireInstructor, async (req: Request,
        Feedback carries no seat stamp of its own, so the cohort is resolved
        through the seat the student holds on this class. A student with no seat
        row could not have attended, and their feedback is treated as the
-       host's — the same rule an unstamped seat gets. */
-    const fbCaller = await callerOrgForRead(req)
-    if (fbCaller.gone) {
+       host's — the same rule an unstamped seat gets.
+
+       The resolution itself now lives in seatScopedUserIds beside the homework
+       routes, which needed the identical block. One implementation rather than
+       three copies, because the copy that was never written is what let the
+       submissions endpoint hand the host every guest academy's student. */
+    const fbSeats = await seatScopedUserIds(req, liveClassId)
+    if (fbSeats.gone) {
       res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Live class not found' } }); return
     }
     const fbFilter: Record<string, unknown> = { liveClassId: new Types.ObjectId(liveClassId) }
-    if (req.user!.role !== 'super_admin' && req.user!.role !== 'instructor'
-        && fbCaller.org && Types.ObjectId.isValid(fbCaller.org)) {
-      const oid = new Types.ObjectId(fbCaller.org)
-      const cls = await LiveClassModel.findById(liveClassId).select('organizationId').lean()
-      const ownsClass = String((cls as { organizationId?: unknown } | null)?.organizationId ?? '') === String(oid)
-      const mine = await ClassBookingModel.find(
-        ownsClass
-          ? { liveClassId: new Types.ObjectId(liveClassId), $or: [{ seatOrganizationId: oid }, { seatOrganizationId: { $exists: false } }] }
-          : { liveClassId: new Types.ObjectId(liveClassId), seatOrganizationId: oid },
-        'userId',
-      ).lean()
-      fbFilter['userId'] = { $in: mine.map((b: any) => b.userId) }
-    }
+    if (fbSeats.userIds) fbFilter['userId'] = { $in: fbSeats.userIds }
     const docs = await ClassFeedbackModel.find(fbFilter)
       .populate('userId', 'id name email avatarUrl')
       .sort({ createdAt: -1 })

@@ -169,18 +169,33 @@ async function assertAdminMayObserve(live: ILiveClass, ctx: JoinContext): Promis
      academy the class was shared with. Until sharing is switched on this is
      exactly the host comparison it replaces, falsy guards included. */
   const { doorsFor } = await import('@/services/classEntitlement.service.ts')
-  const servesCaller = doorsFor(live).some(d =>
+  /* KEEP THE DOOR, do not just prove one exists. Gate 2 below needs to know
+     WHICH door admitted this caller: it used to admit through any serving door
+     and then read live.courseId — the HOST's — for the programme check.
+
+     That failed in both directions. A programme admin who owns the guest
+     cohort was locked out whenever the two academies file their equivalent
+     courses under different programmes, which they routinely do. And worse, a
+     sub-admin whose scope happened to match the HOST course was admitted to a
+     class they have nothing to do with, because nothing ever looked at the
+     door they actually came through.
+
+     doorsFor returns the host door first, so a host caller matches exactly
+     what they matched before and this is verdict-identical for them. */
+  const admittedDoor = doorsFor(live).find(d =>
     !d.organizationId || !ctx.organizationId || String(d.organizationId) === String(ctx.organizationId))
-  if (!servesCaller) {
+  if (!admittedDoor) {
     throw new JoinError('WRONG_ACADEMY', 'This class belongs to another academy.', 403)
   }
 
   /* 2. Programme. Only the scoped roles carry a categoryScope; for everyone
-     else this is a no-op. The class's PROGRAMME lives on its course, which is
-     where the admin panel reads it from too. */
-  if (ctx.categoryScope && live.courseId) {
+     else this is a no-op. The programme lives on the course of THE DOOR THEY
+     CAME THROUGH, which for a guest academy's staff is their own course — the
+     same one their admin panel reads it from. */
+  const doorCourseId = admittedDoor.courseId ?? live.courseId
+  if (ctx.categoryScope && doorCourseId) {
     const { CourseModel } = await import('@/models/schema.ts')
-    const course = await CourseModel.findById(String(live.courseId)).select('program').lean()
+    const course = await CourseModel.findById(String(doorCourseId)).select('program').lean()
     if (!course || (course as { program?: string }).program !== ctx.categoryScope) {
       throw new JoinError('OUT_OF_SCOPE',
         'This class belongs to another programme.', 403)

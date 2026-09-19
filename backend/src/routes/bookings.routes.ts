@@ -34,6 +34,7 @@ import { NotificationService } from '@/services/notification.service.ts'
 
    Anything that serialises a stored asset URL has to go through here. */
 import { sendSuccess, buildPaginationMeta } from '@/utils/response.ts'
+import { academyClock } from '@/utils/academyClock.ts'
 
 const router = Router()
 const notifSvc = new NotificationService()
@@ -50,8 +51,15 @@ const bookingQuerySchema = z.object({
 })
 
 /* ── Helper ─────────────────────────────────── */
-function fmtDate(iso: string | Date): string {
-  return new Date(iso).toLocaleString('en-US', { dateStyle: 'full', timeStyle: 'short' })
+/* THE READER'S CLOCK, TAGGED.
+
+   This was a bare toLocaleString: no timeZone, so it rendered in whatever zone
+   the process runs in — Asia/Dubai, because backend/src/config/timezone.ts
+   pins it — and no tag, so nothing on the page said which clock it meant. On a
+   shared class the reader is routinely in the OTHER academy, and a Bangalore
+   student was told a Dubai time, unlabelled, 90 minutes off their own. */
+function fmtDate(iso: string | Date, academySlug?: string | null): string {
+  return academyClock(iso, academySlug).full
 }
 
 /* ── Fire-and-forget: notify + email on booking created ── */
@@ -66,7 +74,7 @@ async function afterBookingCreated(
      differ, and the reader thinks in their own academy's clock. */
   academySlug?: string | null,
 ): Promise<void> {
-  const dateLabel = fmtDate(sessionStart)
+  const dateLabel = fmtDate(sessionStart, academySlug)
 
   /* 1. In-app notification — always */
   await notifSvc.create(userId, {
@@ -97,8 +105,11 @@ async function afterBookingCancelled(
   userName: string,
   sessionTitle: string,
   sessionStart: string | Date,
+  /* THE RECIPIENT'S academy, not the class's — same rule as the create path
+     above. Without it both the bell and the email fell back to Dubai. */
+  academySlug?: string | null,
 ): Promise<void> {
-  const dateLabel = fmtDate(sessionStart)
+  const dateLabel = fmtDate(sessionStart, academySlug)
 
   /* 1. In-app notification — always */
   await notifSvc.create(userId, {
@@ -111,7 +122,9 @@ async function afterBookingCancelled(
   /* 2. Cancellation email — if it fails, add a system notification */
   try {
     const { sendBookingCancelledByStudent } = await import('@/services/email.service.ts')
-    await sendBookingCancelledByStudent(userEmail, userName, sessionTitle, dateLabel)
+    /* The Date and the academy, never a pre-formatted label: the leaf formats
+       it, so the zone and its tag are decided in one place. */
+    await sendBookingCancelledByStudent(userEmail, userName, sessionTitle, sessionStart, academySlug)
   } catch {
     await notifSvc.create(userId, {
       kind:  'system',
@@ -426,14 +439,19 @@ router.delete('/:id', authenticate, async (req: Request, res: Response, next: Ne
     const sessionTitle = lc?.title ?? 'Session'
     const sessionStart = lc?.scheduledStart ?? new Date().toISOString()
 
-    UserModel.findById(userId).then(user => {
+    UserModel.findById(userId).then(async user => {
       if (!user) return
+      /* Awaited, not fire-and-forget: orgSlugFor is SYNCHRONOUS and answers
+         undefined from a cold cache, which silently restores the Dubai
+         default. The create path above warms it the same way. */
+      await ensureOrgSlugs()
       afterBookingCancelled(
         userId,
         user.email,
         user.name,
         sessionTitle,
         sessionStart,
+        orgSlugFor(user.organizationId),
       ).catch(() => {/* non-fatal */})
     }).catch(() => {/* non-fatal */})
 

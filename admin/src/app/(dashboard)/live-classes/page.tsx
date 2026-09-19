@@ -23,6 +23,10 @@ import { useOrgStore } from '@/store/org.store'
 import { useUsers } from '@/lib/api/users'
 import { useCurrentUser } from '@/lib/api/user'
 import { EditLiveClassModal } from '@/components/live-classes/EditLiveClassModal'
+import {
+  useViewerAcademy, useAcademyView, academyViewOf,
+  SharedAcademiesChip, GuestReadOnlyNote, seatBarColor, seatBreakdown,
+} from '@/components/live-classes/CrossAcademy'
 import { CreateOfflineClassModal } from '@/components/live-classes/CreateOfflineClassModal'
 import { BookForStudentModal } from '@/components/live-classes/BookForStudentModal'
 import { DarkSelect, DarkDateTimePicker, PillToggle } from '@/components/live-classes/FormWidgets'
@@ -471,8 +475,13 @@ function TableRow({ live, index, showInstructor }: { live: LiveClass; index: num
   const [editOpen, setEditOpen] = useState(false)
   const [bookOpen, setBookOpen] = useState(false)
 
+  /* Whose room is this, and how much of it is actually THIS viewer's? A host
+     with an exhausted floor and a guest academy reading the host's counter
+     were both shown the same half-full green bar. */
+  const { isHost, mine, hostLabel } = useAcademyView(live)
+
   const fillPct = live.sessionCapacity > 0 ? Math.min(100, (live.bookedCount / live.sessionCapacity) * 100) : 0
-  const barColor = fillPct >= 90 ? '#EF4444' : fillPct >= 70 ? '#F59E0B' : '#22C55E'
+  const barColor = seatBarColor(fillPct, mine)
 
   const sectionTitle = typeof live.sectionId === 'object' ? live.sectionId?.title : undefined
 
@@ -529,6 +538,7 @@ function TableRow({ live, index, showInstructor }: { live: LiveClass; index: num
                   {isInternal ? 'In-App' : 'External'}
                 </span>
               )}
+              <SharedAcademiesChip live={live} />
             </div>
             <span className={`text-sm font-semibold text-white leading-tight max-w-[220px] truncate ${isCancelled ? 'line-through opacity-40' : ''}`}>
               {live.title}
@@ -581,10 +591,24 @@ function TableRow({ live, index, showInstructor }: { live: LiveClass; index: num
 
         {/* Seats */}
         <td className="px-4 py-3 text-sm">
-          <div className="flex flex-col gap-1 min-w-[80px]">
-            <span className="text-xs" style={{ color: 'rgba(255,255,255,0.55)' }}>
-              {live.bookedCount} / {live.sessionCapacity}
-            </span>
+          {/* On a shared class the room total answers a question nobody is
+              asking. What the admin needs first is how many seats THEIR OWN
+              students can still take; the room stays, demoted. */}
+          <div className="flex flex-col gap-1 min-w-[80px]" title={seatBreakdown(live)}>
+            {mine !== null ? (
+              <>
+                <span className="text-xs font-semibold" style={{ color: mine <= 0 ? '#F87171' : 'rgba(255,255,255,0.75)' }}>
+                  {mine} left for you
+                </span>
+                <span className="text-[10px]" style={{ color: 'rgba(255,255,255,0.3)' }}>
+                  {live.bookedCount} / {live.sessionCapacity} in the room
+                </span>
+              </>
+            ) : (
+              <span className="text-xs" style={{ color: 'rgba(255,255,255,0.55)' }}>
+                {live.bookedCount} / {live.sessionCapacity}
+              </span>
+            )}
             <div className="h-1 w-full rounded-full overflow-hidden" style={{ background: 'rgba(255,255,255,0.08)' }}>
               <div
                 className="h-full rounded-full transition-all"
@@ -620,8 +644,14 @@ function TableRow({ live, index, showInstructor }: { live: LiveClass; index: num
               </a>
             )}
 
+            {/* OWNER ONLY, below. Managing a class stays with the academy that
+                owns it — only seats are shared — so monitor, edit and
+                book-for-student all funnel through callerMayManageSession and
+                answer 404 across the wall. Offering them to a guest academy's
+                admin promised something the server will always refuse. */}
+
             {/* Monitor / Go Live — internal + live or scheduled only */}
-            {isInternal && (isLiveNow || isScheduled) && (
+            {isHost && isInternal && (isLiveNow || isScheduled) && (
               <Button
                 variant="ghost"
                 size="icon-sm"
@@ -634,18 +664,22 @@ function TableRow({ live, index, showInstructor }: { live: LiveClass; index: num
             )}
 
             {/* Edit */}
-            <Button
-              variant="ghost"
-              size="icon-sm"
-              onClick={() => setEditOpen(true)}
-              className="h-7 w-7 rounded-lg"
-              style={{ color: 'rgba(255,255,255,0.4)' }}
-              title="Edit session">
-              <Pencil size={12} />
-            </Button>
+            {isHost && (
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                onClick={() => setEditOpen(true)}
+                className="h-7 w-7 rounded-lg"
+                style={{ color: 'rgba(255,255,255,0.4)' }}
+                title="Edit session">
+                <Pencil size={12} />
+              </Button>
+            )}
+
+            {!isHost && <GuestReadOnlyNote hostLabel={hostLabel} />}
 
             {/* Book for Student — offline scheduled classes only */}
-            {canAdminBook && (
+            {isHost && canAdminBook && (
               <Button
                 variant="ghost"
                 size="icon-sm"
@@ -1359,6 +1393,10 @@ function QuickCreateModal({ onClose, onSuccess, categoryProgram }: { onClose: ()
 function GridCalendarView({ items, onEditClick }: { items: LiveClass[]; onEditClick: (live: LiveClass) => void }) {
   const router = useRouter()
   const [editLive, setEditLive] = useState<LiveClass | null>(null)
+  /* Resolved ONCE for the whole grid. The cards are rendered from a map, not
+     from a component, so a hook per card would change hook order whenever the
+     list length changes — academyViewOf() is the pure half for exactly this. */
+  const viewer = useViewerAcademy()
 
   const sorted = useMemo(() =>
     [...items].sort((a, b) => new Date(a.scheduledStart).getTime() - new Date(b.scheduledStart).getTime())
@@ -1407,8 +1445,9 @@ function GridCalendarView({ items, onEditClick }: { items: LiveClass[]; onEditCl
               const isEnded     = live.status === 'ended'
               const isCancelled = live.status === 'cancelled'
               const isInternal  = live.type === 'internal'
+              const { isHost, mine, hostLabel } = academyViewOf(live, viewer)
               const fillPct     = live.sessionCapacity > 0 ? Math.min(100, (live.bookedCount / live.sessionCapacity) * 100) : 0
-              const barColor    = fillPct >= 90 ? '#EF4444' : fillPct >= 70 ? '#F59E0B' : '#22C55E'
+              const barColor    = seatBarColor(fillPct, mine)
 
               const accentColor  = isLive ? '#EF4444' : isScheduled ? '#0057b8' : 'rgba(255,255,255,0.18)'
               const cardBg       = isLive ? 'rgba(239,68,68,0.06)' : isScheduled ? 'rgba(0,87,184,0.05)' : 'rgba(255,255,255,0.025)'
@@ -1470,6 +1509,7 @@ function GridCalendarView({ items, onEditClick }: { items: LiveClass[]; onEditCl
                           {isInternal ? 'In-App' : 'External'}
                         </span>
                       )}
+                      <SharedAcademiesChip live={live} />
                     </div>
 
                     {/* Title */}
@@ -1503,15 +1543,27 @@ function GridCalendarView({ items, onEditClick }: { items: LiveClass[]; onEditCl
                       <span style={{ color: 'rgba(255,255,255,0.25)' }}>{fmtDuration(live.durationMins)}</span>
                     </div>
 
-                    {/* Seats progress */}
-                    <div className="space-y-1">
+                    {/* Seats progress — on a shared class the viewer's OWN pool
+                        leads and the room total follows, because "15 / 30" is a
+                        true figure about a room their students may already be
+                        locked out of. */}
+                    <div className="space-y-1" title={seatBreakdown(live)}>
                       <div className="flex items-center justify-between text-[10px]" style={{ color: 'rgba(255,255,255,0.32)' }}>
                         <span>Seats</span>
-                        <span>{live.bookedCount} / {live.sessionCapacity}</span>
+                        {mine !== null
+                          ? <span className="font-semibold" style={{ color: mine <= 0 ? '#F87171' : 'rgba(255,255,255,0.7)' }}>
+                              {mine} left for you
+                            </span>
+                          : <span>{live.bookedCount} / {live.sessionCapacity}</span>}
                       </div>
                       <div className="h-1 w-full overflow-hidden rounded-full" style={{ background: 'rgba(255,255,255,0.08)' }}>
                         <div className="h-full rounded-full transition-all" style={{ width: `${fillPct}%`, background: barColor }} />
                       </div>
+                      {mine !== null && (
+                        <p className="text-[10px]" style={{ color: 'rgba(255,255,255,0.25)' }}>
+                          {live.bookedCount} / {live.sessionCapacity} in the room
+                        </p>
+                      )}
                     </div>
                   </div>
 
@@ -1524,7 +1576,8 @@ function GridCalendarView({ items, onEditClick }: { items: LiveClass[]; onEditCl
                         style={{ color: 'rgba(255,255,255,0.4)' }} title="Attendance">
                         <UserCheck size={13} />
                       </Link>
-                      {isInternal && (isLive || isScheduled) && (
+                      {/* Owner only — see the note in the table row. */}
+                      {isHost && isInternal && (isLive || isScheduled) && (
                         <Button
                           variant="ghost"
                           size="icon-sm"
@@ -1535,15 +1588,19 @@ function GridCalendarView({ items, onEditClick }: { items: LiveClass[]; onEditCl
                           {isLive ? <Radio size={13} /> : <PlayCircle size={13} />}
                         </Button>
                       )}
-                      <Button
-                        variant="ghost"
-                        size="icon-sm"
-                        onClick={() => setEditLive(live)}
-                        className="h-7 w-7 rounded-lg"
-                        style={{ color: 'rgba(255,255,255,0.4)' }}
-                        title="Edit">
-                        <Pencil size={12} />
-                      </Button>
+                      {isHost ? (
+                        <Button
+                          variant="ghost"
+                          size="icon-sm"
+                          onClick={() => setEditLive(live)}
+                          className="h-7 w-7 rounded-lg"
+                          style={{ color: 'rgba(255,255,255,0.4)' }}
+                          title="Edit">
+                          <Pencil size={12} />
+                        </Button>
+                      ) : (
+                        <GuestReadOnlyNote hostLabel={hostLabel} />
+                      )}
                     </div>
                     {live.course && (
                       <Link

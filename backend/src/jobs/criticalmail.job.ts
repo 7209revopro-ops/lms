@@ -41,6 +41,8 @@
 ───────────────────────────────────────────────────── */
 import cron from 'node-cron'
 import { logger } from '@/utils/logger.ts'
+import { academyClock } from '@/utils/academyClock.ts'
+import { ensureOrgSlugs, orgSlugFor } from '@/utils/orgSlugs.ts'
 import {
   sendCancelledNotification,
   sendRescheduledNotification,
@@ -190,11 +192,17 @@ export function isUrgent(scheduledStart?: Date | string | null, now = new Date()
   return startsIn <= DEBOUNCE_MINS * 60_000
 }
 
+/* Every one of these templates has accepted a trailing academy slug since the
+   mail work; this type stopped at the dates, so the value could not be handed
+   over even once it was known. A sender with fewer parameters is still
+   assignable, which is why the omission type-checked and why every recipient —
+   including a guest academy's students on a shared class — has been reading
+   these in the host academy's clock. */
 export type CriticalSenders = {
-  cancelled:    (to: string, name: string, title: string, when: Date) => Promise<void>
-  rescheduled:  (to: string, name: string, title: string, from: Date, to_: Date) => Promise<void>
-  delayed:      (to: string, name: string, title: string, when: Date) => Promise<void>
-  instructor:   (to: string, name: string, title: string, oldN: string, newN: string, when: Date) => Promise<void>
+  cancelled:    (to: string, name: string, title: string, when: Date, slug?: string | null) => Promise<void>
+  rescheduled:  (to: string, name: string, title: string, from: Date, to_: Date, slug?: string | null) => Promise<void>
+  delayed:      (to: string, name: string, title: string, when: Date, slug?: string | null) => Promise<void>
+  instructor:   (to: string, name: string, title: string, oldN: string, newN: string, when: Date, slug?: string | null) => Promise<void>
 }
 
 const REAL_SENDERS: CriticalSenders = {
@@ -282,6 +290,35 @@ export async function flushCriticalMail(opts: {
   }).select('liveClassId userId').lean() as any[]
   const activePairs = new Set(stillBooked.map(b => `${String(b.liveClassId)}|${String(b.userId)}`))
 
+  /* ── Whose clock each of these is written in ────────────────────────────
+     THE RECIPIENT'S academy, never the class's. On a shared class the two
+     differ by ninety minutes, and these are the four mails a student has to
+     act on — a cancellation, a move, a delay, a change of instructor.
+
+     None of it reached here. The parked row carries the student's name and
+     address and nothing about where they study, so every recipient was
+     rendered in the default zone: a Bangalore student read a 23:30 GST class
+     as Friday night when their own app, and their own calendar, had always
+     said 01:00 Saturday.
+
+     Resolved HERE, at send time, rather than copied onto the row when it is
+     parked. Two reasons. It is one batched read for the whole flush instead
+     of a field on every row and a schema to carry it — and, more to the
+     point, it cannot be forgotten by a caller: parkCriticalMail has several,
+     and a renderer that depends on all of them remembering to pass the
+     academy is a renderer that silently falls back to the default the first
+     time one does not. A student's academy does not change inside a
+     ten-minute buffer, so reading it now is the same answer with fewer ways
+     to be wrong. */
+  await ensureOrgSlugs().catch(() => {/* non-fatal — falls back to the default */})
+  const { UserModel } = await import('@/models/schema.ts')
+  const recipients = await UserModel
+    .find({ _id: { $in: [...new Set(rows.map(r => String(r.userId)))] } })
+    .select('organizationId').lean() as any[]
+  const slugByUser = new Map<string, string | undefined>(
+    recipients.map(u => [String(u._id), orgSlugFor(u.organizationId)]),
+  )
+
   /* The cap is read from the database ONCE per student per flush and then
      advanced in memory as each mail goes out. Re-reading per row would be a
      query each; reading once and NOT advancing it would let a single flush
@@ -305,6 +342,7 @@ export async function flushCriticalMail(opts: {
 
   for (const row of rows) {
     const userId = String(row.userId)
+    const slug   = slugByUser.get(userId)
 
     /* CLAIM FIRST. `rows` was read before any of this, so a flush that
        started at the same moment is holding the same list; the row goes to
@@ -369,7 +407,7 @@ export async function flushCriticalMail(opts: {
           userId,
           kind:  `critical-${row.kind}`,
           title: String(row.title),
-          body:  bodyFor(row),
+          body:  bodyFor(row, slug),
           link:  `/live-classes/${String(row.liveClassId)}/watch`,
         })
         await CriticalMailModel.updateOne({ _id: row._id },
@@ -384,7 +422,7 @@ export async function flushCriticalMail(opts: {
     }
 
     try {
-      await sendOne(row, senders)
+      await sendOne(row, senders, slug)
       /* Stamped only after the send resolves, so a throw leaves the row
          pending for the next tick rather than silently dropping it.
 
@@ -422,35 +460,41 @@ function isSameDay(a: Date | string, b: Date | string): boolean {
   return day(a) === day(b)
 }
 
-function bodyFor(row: any): string {
+/* This body is what a capped student gets INSTEAD of the mail, in tonight's
+   digest, and digest.job.ts stores and sends it verbatim — there is nothing
+   downstream that could add a zone to it later. It used to hard-code
+   'Asia/Dubai' and print no tag at all, which made the folded notice the one
+   surface in the whole product that stated a time with no way to tell whose
+   clock it was. */
+function bodyFor(row: any, academySlug?: string | null): string {
   switch (row.kind) {
     case 'cancelled':
       return 'The session you booked has been cancelled.'
     case 'rescheduled':
-      return `The session has moved to ${new Date(row.newStart ?? Date.now())
-        .toLocaleString('en-US', { timeZone: 'Asia/Dubai' })}.`
+      return `The session has moved to ${academyClock(row.newStart ?? Date.now(), academySlug).full}.`
     default:
       return `${row.oldInstructorName ?? 'your instructor'} has been replaced by ${row.newInstructorName ?? 'another instructor'}.`
   }
 }
 
-async function sendOne(row: any, senders: CriticalSenders): Promise<void> {
+async function sendOne(row: any, senders: CriticalSenders, academySlug?: string | null): Promise<void> {
   const oldStart = row.oldStart ? new Date(row.oldStart) : new Date()
   const newStart = row.newStart ? new Date(row.newStart) : new Date()
 
   if (row.kind === 'cancelled') {
-    return senders.cancelled(row.email, row.name ?? '', row.title, oldStart)
+    return senders.cancelled(row.email, row.name ?? '', row.title, oldStart, academySlug)
   }
   if (row.kind === 'rescheduled') {
     return isSameDay(oldStart, newStart)
-      ? senders.delayed(row.email, row.name ?? '', row.title, newStart)
-      : senders.rescheduled(row.email, row.name ?? '', row.title, oldStart, newStart)
+      ? senders.delayed(row.email, row.name ?? '', row.title, newStart, academySlug)
+      : senders.rescheduled(row.email, row.name ?? '', row.title, oldStart, newStart, academySlug)
   }
   return senders.instructor(
     row.email, row.name ?? '', row.title,
     row.oldInstructorName ?? 'your instructor',
     row.newInstructorName ?? 'another instructor',
     newStart,
+    academySlug,
   )
 }
 

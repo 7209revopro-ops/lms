@@ -145,7 +145,31 @@ export class LiveClassRepository extends BaseRepository<ILiveClass> {
       query['courseId'] = { $in: filter.courseIds.map(id => new Types.ObjectId(id)) }
     }
     if (filter.organizationId && Types.ObjectId.isValid(filter.organizationId)) {
-      query['organizationId'] = new Types.ObjectId(filter.organizationId)
+      /* CLASSES THIS ACADEMY IS SERVED BY, not only the ones it owns.
+
+         Plain owner equality was the last class-indexed read still asking the
+         HOST door's question on behalf of a GUEST caller. listForCourse,
+         listAllUpcoming, the admin bookings roster and the observer gate were
+         all widened to "serves this academy"; this one was not, so a Bangalore
+         admin's console list, timetable grid, status tabs and live badge were
+         all missing a Dubai-hosted class their own cohort is sitting in — a
+         class whose seats they may already mark attendance on through
+         /admin/bookings.
+
+         Composed under $and, never by assigning $or: the live/ended status
+         buckets below assign query.$or, and a second $or assignment silently
+         deletes the first. That is the P-04 shape and its symptom is a filter
+         that quietly stops filtering.
+
+         WITHOUT includeUnowned — this list has always excluded classes with no
+         academy, and widening that is not what this is for. The guest arm
+         carries CROSS_ORG_CLASSES_ENABLED inside servedClassFilter, so with
+         the switch off the query is byte-identical to what it was.
+
+         READS ONLY. Ownership still decides who may move, edit, cancel, start
+         or delete; those all run through #canManage and callerMayManageSession
+         and are untouched. */
+      andFilter(query, servedClassFilter(filter.organizationId))
     }
     if (filter.instructorId && Types.ObjectId.isValid(filter.instructorId)) {
       query['instructorId'] = new Types.ObjectId(filter.instructorId)

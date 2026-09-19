@@ -134,6 +134,20 @@ function fmtTime(d: Date, academySlug?: string | null): string {
   return academyTime(d, academySlug)
 }
 
+/* orgSlugFor() is synchronous, and on a cold cache it answers `undefined` —
+   which renders every reminder in the default zone. That is the precise bug
+   the threading below exists to fix, restored silently and with nothing to
+   show for it. startReminderJobs() warms the map at boot, but that is ONE
+   attempt: a process that starts before the organizations are readable never
+   tries again, and every run* function here is also exported and called
+   directly, with no boot at all. Warming per run is a cached read when the map
+   is already warm and a real one when it is not — cheap either way at these
+   intervals, and it is what makes "the recipient's academy arrived" true
+   rather than hoped for. */
+async function warmSlugs(): Promise<void> {
+  await ensureOrgSlugs().catch(() => {/* non-fatal — falls back to the default */})
+}
+
 /**
  * Dispatch one reminder:
  *   1. In-app notification (always)
@@ -149,14 +163,26 @@ async function dispatch(
      that is the moment the student needs the room and nothing else will do.
      Every other reminder keeps sending them to their schedule. */
   notifLink?:   string,
+  /* The READER's academy. Every caller here already resolves it for the mail;
+     the bell was the one surface that did not receive it, so it rendered in
+     the default zone while the email beside it rendered in the student's.
+     Same booking, same minute, two different times — and the mail was the
+     only one of the two that was right. */
+  academySlug?: string | null,
 ): Promise<void> {
-  const dateLabel = fmtFull(sessionStart)
-  const timeLabel = fmtTime(sessionStart)
+  const dateLabel = fmtFull(sessionStart, academySlug)
+  const timeLabel = fmtTime(sessionStart, academySlug)
 
   /* ── Notification body by kind ── */
+  /* 'day-of' states the date rather than claiming "today", for the reason the
+     day-of job records at its window: the batch is picked from the BACKEND's
+     midnight, so a late-evening Dubai class is selected as today's while
+     already being tomorrow's for a reader further east. The mail beside this
+     notice stopped asserting the day for the same reason; the two must not
+     disagree about the one thing the student acts on. */
   const notifBody = {
     'day-before':  `📅 Reminder: "${sessionTitle}" is tomorrow at ${timeLabel}. Make sure you're ready!`,
-    'day-of':      `⏰ Today's class: "${sessionTitle}" starts at ${timeLabel}. Join on time!`,
+    'day-of':      `⏰ Coming up: "${sessionTitle}" starts ${dateLabel}. Join on time!`,
     'pre-session': `🚀 "${sessionTitle}" starts in ~30 minutes. Get ready to join!`,
     'five-min':    `⏱️ "${sessionTitle}" starts in ~5 minutes. Join now so you're ready!`,
     'at-time':     `🎯 "${sessionTitle}" is starting now. Join immediately!`,
@@ -164,7 +190,7 @@ async function dispatch(
 
   const notifTitle = {
     'day-before':  `Class tomorrow: ${sessionTitle}`,
-    'day-of':      `Class today: ${sessionTitle} at ${timeLabel}`,
+    'day-of':      `Coming up: ${sessionTitle} at ${timeLabel}`,
     'pre-session': `Starting soon: ${sessionTitle}`,
     'five-min':    `Starting in 5 min: ${sessionTitle}`,
     'at-time':     `Live now: ${sessionTitle}`,
@@ -200,6 +226,7 @@ async function dispatch(
 export async function runDayBeforeReminders(): Promise<void> {
   try {
     const { ClassBookingModel } = await import('@/models/schema.ts')
+    await warmSlugs()
     const now  = new Date()
     const from = new Date(now.getTime() + 23 * 60 * 60 * 1000)
     const to   = new Date(now.getTime() + 25 * 60 * 60 * 1000)
@@ -221,13 +248,15 @@ export async function runDayBeforeReminders(): Promise<void> {
       const userId   = b.userId.id ?? b.userId._id?.toString()
       const start    = new Date(b.liveClassId.scheduledStart)
       const joinUrl  = getJoinUrl(b.liveClassId)
+      const slug     = orgSlugFor((b.userId as { organizationId?: unknown }).organizationId)
 
       await dispatch(userId, b.liveClassId.title, start, 'day-before', () =>
         sendSessionLinkReminder(
           b.userId.email, b.userId.name, b.liveClassId.title,
-          fmtFull(start, orgSlugFor((b.userId as { organizationId?: unknown }).organizationId)),
+          fmtFull(start, slug),
           joinUrl,
         ),
+        undefined, slug,
       )
 
       await ClassBookingModel.findByIdAndUpdate(b._id, { reminderDayBeforeSent: true })
@@ -243,6 +272,7 @@ export async function runDayBeforeReminders(): Promise<void> {
 export async function runDayOfReminders(): Promise<void> {
   try {
     const { ClassBookingModel } = await import('@/models/schema.ts')
+    await warmSlugs()
     const now   = new Date()
     const start = new Date(now); start.setHours(0, 0, 0, 0)
     const end   = new Date(now); end.setHours(23, 59, 59, 999)
@@ -264,13 +294,20 @@ export async function runDayOfReminders(): Promise<void> {
       const userId  = b.userId.id ?? b.userId._id?.toString()
       const classAt = new Date(b.liveClassId.scheduledStart)
       const joinUrl = getJoinUrl(b.liveClassId)
+      const slug    = orgSlugFor((b.userId as { organizationId?: unknown }).organizationId)
 
+      /* fmtFull, not fmtTime. The window above is the BACKEND's calendar day,
+         so for a reader ahead of it a late-evening Dubai class is selected as
+         "today" when it is already tomorrow for them — and the mail used to
+         carry a clock time and nothing else, so there was no date on it to
+         notice that by. The day is now stated instead of asserted. */
       await dispatch(userId, b.liveClassId.title, classAt, 'day-of', () =>
         sendDayOfReminder(
           b.userId.email, b.userId.name, b.liveClassId.title,
-          fmtTime(classAt, orgSlugFor((b.userId as { organizationId?: unknown }).organizationId)),
+          fmtFull(classAt, slug),
           joinUrl,
         ),
+        undefined, slug,
       )
 
       await ClassBookingModel.findByIdAndUpdate(b._id, { reminderDayOfSent: true })
@@ -286,6 +323,7 @@ export async function runDayOfReminders(): Promise<void> {
 export async function runPreSessionReminders(): Promise<void> {
   try {
     const { ClassBookingModel } = await import('@/models/schema.ts')
+    await warmSlugs()
     const now  = new Date()
     const from = new Date(now.getTime() + 25 * 60 * 1000)
     const to   = new Date(now.getTime() + 35 * 60 * 1000)
@@ -306,9 +344,14 @@ export async function runPreSessionReminders(): Promise<void> {
     for (const b of due) {
       const userId  = b.userId.id ?? b.userId._id?.toString()
       const classAt = new Date(b.liveClassId.scheduledStart)
+      const slug    = orgSlugFor((b.userId as { organizationId?: unknown }).organizationId)
 
+      /* The mail itself carries no time, but the in-app notice and the
+         email-failure notice both do, so the reader's academy still has to
+         reach dispatch. */
       await dispatch(userId, b.liveClassId.title, classAt, 'pre-session', () =>
         sendPreSessionReminder(b.userId.email, b.userId.name, b.liveClassId.title, 30),
+        undefined, slug,
       )
 
       await ClassBookingModel.findByIdAndUpdate(b._id, { reminderPreSessionSent: true })
@@ -324,6 +367,7 @@ export async function runPreSessionReminders(): Promise<void> {
 export async function runFiveMinReminders(): Promise<void> {
   try {
     const { ClassBookingModel } = await import('@/models/schema.ts')
+    await warmSlugs()
     const now  = new Date()
     const from = new Date(now.getTime() + 3 * 60 * 1000)
     const to   = new Date(now.getTime() + 8 * 60 * 1000)
@@ -345,12 +389,13 @@ export async function runFiveMinReminders(): Promise<void> {
       const userId  = b.userId.id ?? b.userId._id?.toString()
       const classAt = new Date(b.liveClassId.scheduledStart)
       const joinUrl = getJoinUrl(b.liveClassId)
+      const slug    = orgSlugFor((b.userId as { organizationId?: unknown }).organizationId)
 
       await dispatch(userId, b.liveClassId.title, classAt, 'five-min', () =>
         sendFiveMinReminder(
-          b.userId.email, b.userId.name, b.liveClassId.title, joinUrl, classAt,
-          orgSlugFor((b.userId as { organizationId?: unknown }).organizationId),
+          b.userId.email, b.userId.name, b.liveClassId.title, joinUrl, classAt, slug,
         ),
+        undefined, slug,
       )
 
       await ClassBookingModel.findByIdAndUpdate(b._id, { reminder5MinSent: true })
@@ -366,6 +411,7 @@ export async function runFiveMinReminders(): Promise<void> {
 export async function runAtTimeReminders(): Promise<void> {
   try {
     const { ClassBookingModel } = await import('@/models/schema.ts')
+    await warmSlugs()
     const now  = new Date()
     const from = new Date(now.getTime() - 5 * 60 * 1000)   // up to 5 min ago
     const to   = new Date(now.getTime())                    // up to now
@@ -400,6 +446,7 @@ export async function runAtTimeReminders(): Promise<void> {
       await dispatch(userId, b.liveClassId.title, classAt, 'at-time', () =>
         sendClassStartingReminder(b.userId.email, b.userId.name, b.liveClassId.title, joinUrl),
         `/live-classes/${liveClassId}/watch`,
+        orgSlugFor((b.userId as { organizationId?: unknown }).organizationId),
       )
 
       await ClassBookingModel.findByIdAndUpdate(b._id, { reminderAtTimeSent: true })
@@ -415,6 +462,7 @@ export async function runAtTimeReminders(): Promise<void> {
 export async function runInstructor15MinReminders(): Promise<void> {
   try {
     const { LiveClassModel } = await import('@/models/schema.ts')
+    await warmSlugs()
     const now  = new Date()
     /* The window must be AT LEAST as wide as the poll interval, or start times
        fall between ticks and are never seen at all. This was [13,17] — four

@@ -642,9 +642,14 @@ export async function sendLiveClassScheduled(
   liveTitle: string,
   startsAt: Date,
   joinUrl: string,
+  /* The academy whose wall clock this reader thinks in. */
+  academySlug?: string | null,
 ): Promise<void> {
   const subject = `Live class scheduled: ${liveTitle}`
-  const when = startsAt.toLocaleString('en-US', { dateStyle: 'full', timeStyle: 'short' })
+  /* Had no timeZone and no zone tag, so it printed the server's own clock as
+     though it were the reader's. It currently has no callers — which is
+     precisely why it is worth fixing now: the next caller would copy it. */
+  const when = academyClock(startsAt, academySlug).full
   const html = wrap(subject, `
     <h2 style="margin:0 0 16px;font-size:20px;font-weight:700;color:#0D0F1A">A live class has been scheduled</h2>
     <p>Hi ${escapeHtml(name)}, a new live session is on the calendar for <strong>${escapeHtml(courseTitle)}</strong>.</p>
@@ -850,17 +855,25 @@ export async function sendSessionLinkReminder(
   await sender.send({ to, subject, html, text: `${sessionTitle} is tomorrow at ${date}. Join: ${joinUrl}` })
 }
 
+/* This mail used to ASSERT the day — subject "Today: …", body "is happening
+   today at 09:00" — and print nothing but a clock time. The job that sends it
+   picks its batch from the BACKEND's midnight (Asia/Dubai), so for a reader an
+   hour and a half ahead any class in the Dubai 22:30–23:59 band is on the next
+   day for them and still selected as "today". They were told a class was today
+   at a time that had already passed, and the mail carried no date to check it
+   against. It now states the full date and lets the reader see the day for
+   themselves, rather than asserting one this job cannot know. */
 export async function sendDayOfReminder(
   to: string,
   name: string,
   sessionTitle: string,
-  time: string,
+  when: string,
   joinUrl: string,
 ): Promise<void> {
-  const subject = `Today: ${sessionTitle} at ${time}`
+  const subject = `${sessionTitle} — ${when}`
   const html = wrap(subject, `
-    <h2 style="margin:0 0 16px;font-size:20px;font-weight:700;color:#0D0F1A">Session today! ⏰</h2>
-    <p>Hi ${escapeHtml(name)}, <strong>${escapeHtml(sessionTitle)}</strong> is happening today at <strong>${escapeHtml(time)}</strong>.</p>
+    <h2 style="margin:0 0 16px;font-size:20px;font-weight:700;color:#0D0F1A">Your session is coming up ⏰</h2>
+    <p>Hi ${escapeHtml(name)}, <strong>${escapeHtml(sessionTitle)}</strong> is scheduled for <strong>${escapeHtml(when)}</strong>.</p>
     <p>Get ready and make sure your connection is stable.</p>
     <p style="margin:24px 0">
       <a href="${escapeHtml(sanitiseUrl(joinUrl))}" style="display:inline-block;background:linear-gradient(135deg,#0057b8,#2F6BFF);color:#fff;font-weight:600;padding:12px 24px;border-radius:12px;text-decoration:none">
@@ -868,7 +881,7 @@ export async function sendDayOfReminder(
       </a>
     </p>
   `)
-  await sender.send({ to, subject, html, text: `${sessionTitle} is today at ${time}. Join: ${joinUrl}` })
+  await sender.send({ to, subject, html, text: `${sessionTitle} is scheduled for ${when}. Join: ${joinUrl}` })
 }
 
 /**
@@ -1256,12 +1269,32 @@ export async function sendCancelledNotification(
   await sender.send({ to, subject, html, text: `Dear ${name},\n\nWe regret to inform you that your scheduled class on ${dateStr} at ${timeStr} has been cancelled.\n\nWe apologize for the inconvenience. A replacement session will be scheduled, and you will be notified once it is available.\n\nThank you for your understanding.\n\nDelta Academy` })
 }
 
+/* THE ONE CLASS MAIL THAT NEVER SAID WHICH CLOCK IT MEANT. Its caller formatted
+   the time itself, in the process timezone, with no zone tag, and handed the
+   finished string across — the exact boundary academyClock.ts bans. A guest
+   academy's student cancelling a shared class read the host academy's wall
+   clock and had nothing on the page to tell them so.
+
+   `sessionStart` is now what it should always have been: the instant, formatted
+   at the leaf in the READER's academy and always labelled.
+
+   The string arm is a bridge, not a design. bookings.routes.ts:114 still passes
+   a pre-formatted label, and `new Date('Tuesday, September 22, 2026 at 9:00 AM')`
+   is an Invalid Date — so formatting it blindly would print a dash where a time
+   used to be, which is worse than an unlabelled time. Anything that does not
+   parse is therefore passed through as the caller wrote it. Once that call site
+   passes the Date, this arm stops being reached and can go. */
 export async function sendBookingCancelledByStudent(
   to: string,
   name: string,
   sessionTitle: string,
-  date: string,
+  sessionStart: Date | string,
+  academySlug?: string | null,
 ): Promise<void> {
+  const clock = academyClock(sessionStart, academySlug)
+  const date  = clock.full === '—' && typeof sessionStart === 'string' && sessionStart.trim()
+    ? sessionStart
+    : clock.full
   const subject = `Booking cancelled: ${sessionTitle}`
   const html = wrap(subject, `
     <h2 style="margin:0 0 16px;font-size:20px;font-weight:700;color:#0D0F1A">Booking cancelled</h2>

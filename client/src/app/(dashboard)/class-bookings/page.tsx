@@ -151,12 +151,12 @@ function getSlotStatus(lc: LiveClass, booking: MyBooking|undefined, hasOther: bo
       if (booking.status === 'missed')    return 'missed'
       if (booking.status === 'cancelled') {
         if (hasOther) return 'locked'
-        if (lc.sessionCapacity > 0 && lc.bookedCount >= lc.sessionCapacity) return 'full'
+        if (isFull(lc)) return 'full'
         return 'bookable'
       }
     }
     if (hasOther) return 'locked'
-    if (lc.sessionCapacity > 0 && lc.bookedCount >= lc.sessionCapacity) return 'full'
+    if (isFull(lc)) return 'full'
     return 'bookable'
   }
 
@@ -174,7 +174,7 @@ function getSlotStatus(lc: LiveClass, booking: MyBooking|undefined, hasOther: bo
     if (booking.status === 'cancelled') {
       if (isBookingClosed(lc)) return 'closed'
       if (hasOther) return 'locked'
-      if (lc.sessionCapacity > 0 && lc.bookedCount >= lc.sessionCapacity) return 'full'
+      if (isFull(lc)) return 'full'
       return 'bookable'
     }
   }
@@ -183,7 +183,7 @@ function getSlotStatus(lc: LiveClass, booking: MyBooking|undefined, hasOther: bo
      the only answer that tells the student what actually happened. */
   if (isBookingClosed(lc)) return 'closed'
   if (hasOther) return 'locked'
-  if (lc.sessionCapacity > 0 && lc.bookedCount >= lc.sessionCapacity) return 'full'
+  if (isFull(lc)) return 'full'
   return 'bookable'
 }
 
@@ -349,11 +349,28 @@ function MiniCalendar({rangeStart,rangeEnd,onRangeChange,onClose}: {
 }
 
 /* ── Slot chip ─────────────────────────────────────────────── */
+/* ── CROSS-ACADEMY: read YOUR door, not the room ──────────────────────────
+   On a shared class the room's remainder is not the caller's. The server
+   resolves the caller's own door and sends `seatsLeftForYou`; it is absent on
+   any class with no allocation in force, which is every unshared class, so the
+   fallback is the arithmetic this file always used and nothing changes there.
+
+   Same for the catalogue: a guest reaches the class through their OWN
+   academy's course and module, while `course`/`sectionId` still name the
+   host's. Filtering and grouping on the host's ids made a booked class vanish
+   from the student's own course and programme chips. */
+const seatsLeft  = (lc: LiveClass) => lc.seatsLeftForYou ?? (lc.sessionCapacity - lc.bookedCount)
+const isFull     = (lc: LiveClass) => lc.sessionCapacity > 0 && seatsLeft(lc) <= 0
+const effCourseId = (lc: LiveClass) => lc.yourCohort?.courseId ?? lc.course?.id
+const effProgram  = (lc: LiveClass) => lc.yourCohort?.program  ?? (lc.course as { program?: string } | undefined)?.program
+
 function SlotChip({lc,status,isSelected,onClick}: {
   lc:LiveClass; status:SlotStatus; isSelected:boolean; onClick:()=>void
 }) {
   const clickable = ['bookable','booked','attended','ended','live'].includes(status)
   const c = SC[status]
+  /* The bar still shows how full the ROOM is — that is what it measures —
+     but the badge beside it now reports the caller's own remainder. */
   const capPct = lc.sessionCapacity>0 ? Math.min(100,(lc.bookedCount/lc.sessionCapacity)*100) : 0
   return(
     <motion.button type="button" onClick={clickable?onClick:undefined}
@@ -371,7 +388,7 @@ function SlotChip({lc,status,isSelected,onClick}: {
       <span className="syne mb-2 text-[14px] font-700" style={{color: 'var(--color-text-primary)'}}>{fmtTime(lc.scheduledStart)}</span>
       <span className="self-start rounded-full px-1.5 py-0.5 text-[9px] font-bold"
         style={{background:c.bg,color:c.color,border:`1px solid ${c.border}`}}>
-        {status==='bookable'&&lc.sessionCapacity>0 ? `${lc.sessionCapacity-lc.bookedCount} left` : c.label}
+        {status==='bookable'&&lc.sessionCapacity>0 ? `${Math.max(0, seatsLeft(lc))} left` : c.label}
       </span>
       {lc.sessionCapacity>0&&['bookable','booked','live'].includes(status)&&(
         <div className="mt-2 h-0.5 w-full overflow-hidden rounded-full" style={{background: 'var(--color-border)'}}>
@@ -1326,10 +1343,16 @@ export default function ClassBookingsPage() {
   const uniqueCourses = useMemo(()=>{
     const map = new Map<string,{id:string;title:string;count:number}>()
     allClasses.forEach(lc=>{
-      if(!lc.course?.id) return
-      const ex = map.get(lc.course.id)
+      /* The course the STUDENT reaches this class through, which on a shared
+         class is their own academy's rather than the host's. Listing the
+         host's here put a course in the filter that the student is not
+         enrolled in, and hid the one they are. */
+      const id    = effCourseId(lc)
+      const title = lc.yourCohort?.courseTitle ?? lc.course?.title
+      if(!id || !title) return
+      const ex = map.get(id)
       if(ex) ex.count++
-      else map.set(lc.course.id,{id:lc.course.id,title:lc.course.title,count:1})
+      else map.set(id,{id,title,count:1})
     })
     return Array.from(map.values()).sort((a,b)=>b.count-a.count)
   },[allClasses])
@@ -1347,19 +1370,19 @@ export default function ClassBookingsPage() {
 
   const programCounts = useMemo(()=>{
     const c:Record<string,number> = {'4x-trading':0,'digital-marketing':0,'ai':0,'jura':0}
-    allClasses.forEach(lc=>{const p=lc.course?.program;if(p&&p in c)c[p]++})
+    allClasses.forEach(lc=>{const p=effProgram(lc);if(p&&p in c)c[p]++})
     return c
   },[allClasses])
 
   /* Program-scoped course & instructor options for dropdowns */
   const programCourses = useMemo(()=>{
     if(filterProgram==='all') return uniqueCourses
-    return uniqueCourses.filter(c=>allClasses.some(lc=>lc.course?.id===c.id&&lc.course?.program===filterProgram))
+    return uniqueCourses.filter(c=>allClasses.some(lc=>effCourseId(lc)===c.id&&effProgram(lc)===filterProgram))
   },[uniqueCourses,filterProgram,allClasses])
 
   const programInstructors = useMemo(()=>{
     if(filterProgram==='all') return uniqueInstructors
-    return uniqueInstructors.filter(ins=>allClasses.some(lc=>lc.instructor?.id===ins.id&&lc.course?.program===filterProgram))
+    return uniqueInstructors.filter(ins=>allClasses.some(lc=>lc.instructor?.id===ins.id&&effProgram(lc)===filterProgram))
   },[uniqueInstructors,filterProgram,allClasses])
 
   /* Reset course & instructor when program changes */
@@ -1374,8 +1397,8 @@ export default function ClassBookingsPage() {
       if(filterDelivery==='online'  && isOffline)  return
       if(filterDelivery==='offline' && !isOffline) return
       // Apply content filters so tab counts match what renders
-      if(filterProgram!=='all'    && lc.course?.program!==filterProgram)   return
-      if(filterCourse!=='all'     && lc.course?.id!==filterCourse)                return
+      if(filterProgram!=='all'    && effProgram(lc)!==filterProgram)   return
+      if(filterCourse!=='all'     && effCourseId(lc)!==filterCourse)                return
       if(filterInstructor!=='all' && lc.instructor?.id!==filterInstructor)        return
       if(filterLanguage!=='all'   && (lc as any).language!==filterLanguage)       return
 
@@ -1405,7 +1428,7 @@ export default function ClassBookingsPage() {
     const myReservations = offline.filter(lc=>bookingMap.get(lc.id)?.status==='booked').length
     const availableSeats = offline
       .filter(lc=>lc.status==='scheduled'&&!isPastEnd(lc)&&!isWithinLiveWindow(lc))
-      .reduce((sum,lc)=>sum+Math.max(0,lc.sessionCapacity-lc.bookedCount),0)
+      .reduce((sum,lc)=>sum+Math.max(0,seatsLeft(lc)),0)
     return{total:offline.length,today:todayCount,myReservations,availableSeats}
   },[allClasses,bookingMap])
 
@@ -1450,8 +1473,8 @@ export default function ClassBookingsPage() {
       if(filterDelivery==='offline' &&a.isOnline!==false) return false
       // Other filters
       if(filterAccess==='mine'       && !a.isEnrolled)                      return false
-      if(filterProgram!=='all'       && lc.course?.program!==filterProgram) return false
-      if(filterCourse!=='all'        && lc.course?.id!==filterCourse)                return false
+      if(filterProgram!=='all'       && effProgram(lc)!==filterProgram) return false
+      if(filterCourse!=='all'        && effCourseId(lc)!==filterCourse)                return false
       if(filterInstructor!=='all'    && lc.instructor?.id!==filterInstructor)        return false
       if(filterLanguage!=='all'      && (lc as any).language!==filterLanguage)       return false
       // Search
@@ -1481,14 +1504,14 @@ export default function ClassBookingsPage() {
        for instructor A into instructor B's bucket, and slots[0] (the earliest)
        then stamped B's name/course/module on the whole group. */
     const secKey=(lc:LiveClass)=>{const s=lc.sectionId;return typeof s==='object'&&s?s.id:s??''}
-    windowClasses.forEach(lc=>{const k=[lc.title.trim(),lc.instructor?.id??'',lc.course?.id??'',secKey(lc)].join('|');if(!map.has(k))map.set(k,[]);map.get(k)!.push(lc)})
+    windowClasses.forEach(lc=>{const k=[lc.title.trim(),lc.instructor?.id??'',effCourseId(lc)??'',secKey(lc)].join('|');if(!map.has(k))map.set(k,[]);map.get(k)!.push(lc)})
     const res:ClassGroup[] = []
     map.forEach((slots,id)=>{
       slots.sort((a,b)=>new Date(a.scheduledStart).getTime()-new Date(b.scheduledStart).getTime())
       const bookedSlot = slots.find(s=>bookingMap.get(s.id)?.status==='booked')
       const sec = slots[0].sectionId
       res.push({id, title:slots[0].title.trim(), instructor:slots[0].instructor??null, slots, bookedSlot,
-        courseId:slots[0].course?.id, courseTitle:slots[0].course?.title,
+        courseId:effCourseId(slots[0]), courseTitle:slots[0].yourCohort?.courseTitle ?? slots[0].course?.title,
         moduleTitle:typeof sec==='object'&&sec?sec.title:undefined})
     })
     res.sort((a,b)=>{

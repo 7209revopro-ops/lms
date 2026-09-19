@@ -54,6 +54,31 @@ export interface LiveClass {
   sessionCapacity: number
   bookedCount:     number
 
+  /* ── CROSS-ACADEMY: the room's numbers are not your numbers ──────────────
+     A class shared with another academy splits its seats into a FLOOR per
+     academy plus a shared overflow, so `sessionCapacity - bookedCount` is the
+     ROOM's remainder and can be wildly optimistic about what YOU can take: a
+     guest student whose own floor is spent and whose overflow is empty was
+     shown "15 left" and then refused at booking.
+
+     The server resolves the caller's own door and sends the one number that
+     follows from it. Absent on a class with no allocation in force, which is
+     every class that is not shared — fall back to the old arithmetic there. */
+  seatsLeftForYou?: number
+
+  /* The course and module of YOUR OWN academy, present only when you reach
+     this class through a guest door. `course` and `sectionId` above still name
+     the HOST's, deliberately, because the admin surfaces depend on that — so a
+     guest student was being shown, and filtered by, a catalogue that is not
+     theirs. */
+  yourCohort?: {
+    courseId?:     string
+    courseTitle?:  string
+    program?:      string
+    sectionId?:    string
+    sectionTitle?: string
+  }
+
   /**
    * Annotated by the backend — true when the logged-in student has an active
    * enrollment in this session's course. False = show "Purchase to join" prompt.

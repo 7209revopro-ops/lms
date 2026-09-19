@@ -15,6 +15,8 @@ import { EnrollmentModel, LiveClassModel, UserModel, type ILiveClass, type LiveC
 import { roomNameFor } from '@/services/integrationTicket.service.ts'
 import { tryEnsureRoom } from '@/services/clt.service.ts'
 import { adjustOverflow, allocatePools, addGuestCohort, setGuestFloor, removeGuestCohort, repointGuestCohort } from '@/services/seatPool.service.ts'
+import { academyClock } from '@/utils/academyClock.ts'
+import { ensureOrgSlugs, orgSlugFor } from '@/utils/orgSlugs.ts'
 
 /* CLT caps a LiveKit room at 50 participants and 8 concurrent rooms. Kept here
    as a named constant so the admin UI and the tests quote the same number. */
@@ -886,6 +888,10 @@ export class LiveClassService {
       if (courseAfter) await this.#assertSectionBelongsToCourse(input.sectionId, courseAfter)
       patch.sectionId = new Types.ObjectId(input.sectionId) as any
     }
+    /* How far the overflow has to move for a capacity change, PLANNED here and
+       applied with the rest of the seat steps once the patch has landed. It is
+       a local rather than a write for the reason set out at the apply site. */
+    let capacityDelta = 0
     /* ── SEAT GUARDS ON THE EDIT PATH ──────────────────────────────────────
        The counters are a promise to two academies, and an edit is the one
        place that promise can be broken silently.
@@ -932,18 +938,20 @@ export class LiveClassService {
             + 'Lower a floor first.',
             400)
         }
-        /* $inc, NOT $set, and deliberately not part of the patch.
+        /* PLANNED, NOT WRITTEN — and that is the whole point of this line.
 
-           Writing an absolute overflowSeatsLeft computed from a read taken
-           moments earlier clobbers any booking that decremented it in between:
-           the student keeps their seat, the pool forgets it was taken, and the
-           invariant silently breaks. A relative move is correct under
-           concurrency and needs no read at all.
+           The move used to happen right here, before a single one of the cohort
+           rules below had been checked and long before the patch was written.
+           Eight validation throws sit between this point and the patch, and
+           every one of them left the overflow already enlarged for a capacity
+           that was never applied: the admin was told the save failed, the
+           counters said otherwise, and nothing scheduled ever looked. The next
+           capacity edit then recomputed its delta from the stale capacity and
+           compounded it.
 
-           It also has to go through the seat pool rather than the patch,
-           because the patch is written by findByIdAndUpdate and this is a
-           counter — the one thing check:seats exists to keep in one place. */
-        await adjustOverflow(id, delta)
+           The cohort plan below was moved after the patch for exactly this
+           reason; the capacity move was left behind. They move together now. */
+        capacityDelta = delta
       }
     }
 
@@ -1091,8 +1099,12 @@ export class LiveClassService {
              : s.kind === 'floor' ? Math.max(0, s.to - s.from) : 0), 0)
         const returned = cohortPlan.reduce((n, s) =>
           n + (s.kind === 'floor' ? Math.max(0, s.from - s.to) : 0), 0)
-        /* A capacity change in the same request is applied before this (see
-           adjustOverflow above), so its seats are already in the pool. */
+        /* A capacity change in the same request is applied FIRST in the apply
+           phase (see adjustOverflow below), so by the time any step here draws,
+           its seats are already in the pool. `current.overflowSeatsLeft` is the
+           snapshot taken before any of this ran, which is why capDelta is added
+           to it by hand rather than re-read — and why deferring the write does
+           not change this sum by one seat. */
         const capDelta = input.sessionCapacity != null
           ? input.sessionCapacity - ((current as any)?.sessionCapacity ?? 0) : 0
         const budget = ((current as any)?.overflowSeatsLeft ?? 0) + capDelta + freed + returned
@@ -1116,10 +1128,24 @@ export class LiveClassService {
         if (removals.length) {
           const { ClassBookingModel } = await import('@/models/schema.ts')
           for (const r of removals) {
+            /* EVERY STATUS BUT 'cancelled' HOLDS A SEAT, and the pre-check has
+               to ask the same question removeGuestCohort's filter asks or it
+               waves through a removal the apply step then refuses.
+
+               It counted 'booked' and 'attended' only. A no-show is written as
+               'missed' and NO code path ever returns that seat, so a cohort
+               whose single student missed the class had seatsLeft 4 against a
+               floor of 5: held came back 0, the pre-check passed, the patch was
+               written, and the apply step's seatsLeft === seatFloor test failed
+               — 409 with the title and the start time already live, reminder
+               flags not reset, and a message telling the admin to cancel a
+               booking both cancel routes refuse to touch once it is 'missed'.
+               $ne rather than a list so a status added later holds its seat by
+               default, which is the safe direction to be wrong in. */
             const held = await ClassBookingModel.countDocuments({
               liveClassId: new Types.ObjectId(id),
               seatOrganizationId: new Types.ObjectId(r.orgId),
-              status: { $in: ['booked', 'attended'] },
+              status: { $ne: 'cancelled' },
             })
             if (held > 0) {
               throw new LiveClassError('COHORT_IN_USE',
@@ -1133,6 +1159,29 @@ export class LiveClassService {
 
     const updated = await this.liveRepo.updateByIdPopulated(id, patch)
     if (!updated) throw new LiveClassError('LIVE_CLASS_NOT_FOUND', 'Live class not found', 404)
+
+    /* THE CAPACITY MOVE GOES FIRST, and the order is load-bearing: the budget
+       pre-check above folds capDelta into what the cohort steps may draw, so an
+       'add' or a raised 'floor' in the same request is entitled to the seats a
+       capacity raise brings — and they have to be in the pool before it reaches
+       for them.
+
+       $inc through the seat pool, never $set and never part of the patch. An
+       absolute overflowSeatsLeft computed from the snapshot taken at the top of
+       this method would clobber any booking that decremented it since: the
+       student keeps the seat, the pool forgets it was taken, and the invariant
+       breaks silently. A relative move needs no read at all.
+
+       The result is checked because it can legitimately fail. A negative delta
+       carries its floor guard in the filter, so a booking that lands between
+       the snapshot and this write makes the write a no-op — which used to be
+       invisible, since this was the one seat helper whose boolean nobody read,
+       and the capacity patch sailed on regardless. */
+    if (capacityDelta) {
+      const moved = await adjustOverflow(id, capacityDelta)
+      if (!moved) throw new LiveClassError('SEATS_MOVED',
+        'Somebody booked this class while you were editing it. Reopen it and try again.', 409)
+    }
 
     /* Seats move only once the patch has landed. Moving them first reproduces
        the torn-edit the capacity path is careful to avoid: the counters shift
@@ -1377,8 +1426,19 @@ export class LiveClassService {
     const { NotificationService } = await import('@/services/notification.service.ts')
     const notifications = new NotificationService()
 
-    const whenLabel = live.scheduledStart.toLocaleString('en-US',
-      { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
+    /* THE TIME IS RENDERED PER DOOR, not once for everybody.
+
+       This was a single hoisted toLocaleString with no timeZone and no tag, so
+       it took the process zone — Asia/Dubai, pinned in config/timezone.ts —
+       and every recipient got it. On a shared class the guest academy's cohort
+       is in a different one, and the string travels further than it looks: the
+       digest stores this body and mails it verbatim, so nothing downstream can
+       correct it afterwards.
+
+       perDoor already carries the door beside its rows, and a student reached
+       through a door is by definition of that door's academy, so the zone is
+       right there — no wider projection needed. */
+    await ensureOrgSlugs()
 
     /* Who is this session actually FOR?
 
@@ -1420,7 +1480,9 @@ export class LiveClassService {
       )
     }
 
-    for (const e of enrolledStudents) {
+    for (const { door, rows } of perDoor) {
+     const whenLabel = academyClock(live.scheduledStart, orgSlugFor(door.organizationId)).full
+     for (const e of rows) {
       const u = e.userId as unknown as {
         _id: { toString: () => string }
         email: string
@@ -1466,6 +1528,7 @@ export class LiveClassService {
       } catch (err) {
         logger.warn({ err, email: u.email }, 'live-class digest queue failed')
       }
+     }
     }
   }
 }

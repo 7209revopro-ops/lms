@@ -19,6 +19,9 @@ import { useCourseOutline } from '@/lib/api/outline'
 import { datetimeLocalToISO } from '@/lib/timezone'
 import { useUsers } from '@/lib/api/users'
 import { EditLiveClassModal } from '@/components/live-classes/EditLiveClassModal'
+import {
+  useAcademyView, SharedAcademiesChip, GuestReadOnlyNote,
+} from '@/components/live-classes/CrossAcademy'
 import Spinner from '@/components/ui/Spinner'
 
 /* ── Helpers ──────────────────────────────────────────── */
@@ -149,6 +152,20 @@ function LiveRow({
   const endMutation     = useEndLiveStream(courseId)
   const deleteMutation  = useDeleteLiveClass(courseId)
 
+  /* A GUEST ACADEMY ADMINISTERS ITS SEATS, NOT THE CLASS.
+
+     This row is reached through the guest's OWN course — a shared class is
+     listed under every door it serves — and it used to draw the owner's full
+     control set: Edit, Delete, Cancel, Go Live, End, OBS and the stream key.
+     Every one of those routes funnels through #canManage, which compares the
+     caller's academy against the HOST's, so all of them answered
+     404 "Live class not found". The controls were not merely useless, they
+     told a Bangalore admin that a Dubai session was theirs to cancel.
+
+     Deliberate, and staying that way: only SEATS are shared. So the row goes
+     read-only and says whose class it is instead. */
+  const { isHost, hostLabel } = useAcademyView(live)
+
   const isInternal  = live.type === 'internal'
   /* A CLT room has no stream key and no OBS endpoint, so the Mux-only controls
      below must not be offered for one. Same two-signal test the studio, monitor
@@ -204,6 +221,7 @@ function LiveRow({
               }}>
               {isInternal ? 'In-App' : 'External'}
             </span>
+            <SharedAcademiesChip live={live} />
             <p className={`truncate text-sm font-semibold ${isCancelled ? 'line-through opacity-50' : ''}`}
               style={{ color: 'white' }}>
               {live.title}
@@ -234,7 +252,7 @@ function LiveRow({
         <div className="flex items-center gap-1 flex-shrink-0">
           {/* Internal Mux only: Start stream → monitor page (OBS).
               A CLT room is started by walking into it, not by an encoder. */}
-          {isMuxStream && isScheduled && (
+          {isHost && isMuxStream && isScheduled && (
             <button
               onClick={async () => {
                 setStartError(null)
@@ -255,7 +273,7 @@ function LiveRow({
           )}
 
           {/* Internal: Stream from Browser → studio page */}
-          {isInternal && isScheduled && (
+          {isHost && isInternal && isScheduled && (
             <button
               onClick={() => router.push(`/live-classes/${live.id}/studio`)}
               title="Stream from browser"
@@ -266,7 +284,7 @@ function LiveRow({
           )}
 
           {/* Internal: Monitor button when already live */}
-          {isInternal && isLiveNow && (
+          {isHost && isInternal && isLiveNow && (
             <button
               onClick={() => router.push(`/live-classes/${live.id}/monitor`)}
               className="flex items-center gap-1 rounded-lg px-2.5 py-1 text-[10px] font-bold text-white hover:brightness-110 transition-all"
@@ -276,7 +294,7 @@ function LiveRow({
           )}
 
           {/* Internal: End stream button */}
-          {isInternal && isLiveNow && (
+          {isHost && isInternal && isLiveNow && (
             confirming === 'cancel' ? (
               <button
                 onClick={() => { endMutation.mutate(live.id); setConfirming(null) }}
@@ -297,7 +315,7 @@ function LiveRow({
           )}
 
           {/* Internal Mux only: OBS credentials — a CLT room has none */}
-          {isMuxStream && (isScheduled || isLiveNow) && (
+          {isHost && isMuxStream && (isScheduled || isLiveNow) && (
             <button
               onClick={() => setShowCreds(v => !v)}
               className="flex items-center gap-1 rounded-lg px-2.5 py-1 text-[10px] font-semibold transition-colors hover:bg-white/10"
@@ -316,7 +334,7 @@ function LiveRow({
           )}
 
           {/* External: Go Live Now — sets status to live */}
-          {!isInternal && isScheduled && (
+          {isHost && !isInternal && isScheduled && (
             <button
               onClick={() => updateMutation.mutate({ id: live.id, data: { status: 'live', scheduledStart: new Date().toISOString() } })}
               disabled={updateMutation.isPending}
@@ -338,7 +356,7 @@ function LiveRow({
           )}
 
           {/* External: End session button when live */}
-          {!isInternal && isLiveNow && (
+          {isHost && !isInternal && isLiveNow && (
             confirming === 'cancel' ? (
               <button
                 onClick={() => { updateMutation.mutate({ id: live.id, data: { status: 'ended' } }); setConfirming(null) }}
@@ -359,7 +377,7 @@ function LiveRow({
           )}
 
           {/* Cancel session (scheduled only) — sets status to cancelled */}
-          {isScheduled && (
+          {isHost && isScheduled && (
             confirming === 'cancel' ? (
               <button
                 onClick={() => { updateMutation.mutate({ id: live.id, data: { status: 'cancelled' } }); setConfirming(null) }}
@@ -373,16 +391,18 @@ function LiveRow({
           )}
 
           {/* Edit */}
-          <button
-            onClick={() => setEditOpen(true)}
-            className="flex h-7 w-7 items-center justify-center rounded-lg transition-colors hover:bg-white/10"
-            style={{ color: 'rgba(255,255,255,0.45)' }}
-            title="Edit session">
-            <Pencil size={11} />
-          </button>
+          {isHost && (
+            <button
+              onClick={() => setEditOpen(true)}
+              className="flex h-7 w-7 items-center justify-center rounded-lg transition-colors hover:bg-white/10"
+              style={{ color: 'rgba(255,255,255,0.45)' }}
+              title="Edit session">
+              <Pencil size={11} />
+            </button>
+          )}
 
           {/* Delete */}
-          {confirming === 'delete' ? (
+          {isHost && (confirming === 'delete' ? (
             <button
               onClick={() => { deleteMutation.mutate(live.id); setConfirming(null) }}
               className="flex items-center gap-1 rounded-lg px-2 py-1 text-[10px] font-semibold text-white"
@@ -395,7 +415,10 @@ function LiveRow({
               style={{ color: 'rgba(255,255,255,0.5)' }}>
               <Trash2 size={12} />
             </button>
-          )}
+          ))}
+
+          {/* Nothing above renders for a guest academy, so say why. */}
+          {!isHost && <GuestReadOnlyNote hostLabel={hostLabel} />}
         </div>
       </div>
 

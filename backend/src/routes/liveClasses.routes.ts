@@ -4,7 +4,7 @@ import { callerOrgForRead, andFilter, servedClassFilter } from '@/utils/tenancy.
 import { meetingDisplayName } from '@/utils/meetingIdentity.ts'
 import express from 'express'
 import { z } from 'zod'
-import { LiveClassController } from '@/controllers/liveClass.controller.ts'
+import { LiveClassController, seatsLeftForDoor, labelGuestDoors, yourCohortFrom } from '@/controllers/liveClass.controller.ts'
 import { authenticate, authenticateAny, injectCategoryScope } from '@/middleware/auth.middleware.ts'
 import { validate } from '@/middleware/validate.middleware.ts'
 import { resolveLiveStatus, bookingClosesAt, studentJoinWindow } from '@/utils/liveStatus.ts'
@@ -126,8 +126,16 @@ router.get('/', authenticate, async (req: Request, res: Response, next: NextFunc
     // a scheduled session reads 'live' from 15 min before start until its end
     // (resolveLiveStatus), 'ended' after. The STUDENT join window is a
     // different rule — start .. start+20m — carried separately below.
-    let annotated = (classes as any[]).map(c => {
-      const e = entitlementFrom(c as ClassDoors, index, caller.org)
+    /* The verdicts BEFORE the map, because the guest doors have to be labelled
+       together: their course and module belong to the caller's own academy's
+       catalogue, and resolving a name per row would be two queries per class
+       instead of two per request. Nothing is asked when no row came through a
+       guest door, which is every request until a class is actually shared. */
+    const verdicts  = (classes as any[]).map(c => entitlementFrom(c as ClassDoors, index, caller.org))
+    const labelDoor = await labelGuestDoors(verdicts.map(v => v.door))
+
+    let annotated = (classes as any[]).map((c, i) => {
+      const e = verdicts[i]!
       const isEnrolled = e.ok || e.code === 'MODULE_BLOCKED'
       const isEntitled = e.ok
       const dto: Record<string, unknown> = {
@@ -153,6 +161,28 @@ router.get('/', authenticate, async (req: Request, res: Response, next: NextFunc
         isBooked:     isEnrolled && bookedIds.has(String(c._id)),
         joinOpensAt:  c.scheduledStart ? studentJoinWindow(c.scheduledStart).opensAt.toISOString()  : undefined,
         joinClosesAt: c.scheduledStart ? studentJoinWindow(c.scheduledStart).closesAt.toISOString() : undefined,
+
+        /* THIS ROW IS THE CALLER'S DOOR'S TRUTH, NOT THE ROOM'S. Both fields
+           are derived on the server and sent as ONE resolved value each,
+           because the raw pools are deleted a few lines below for a reason —
+           see STAFF_ONLY_FIELDS. The spread above carries the HOST document,
+           so without these the schedule screen had only the host's course, the
+           host's module and the whole room's seat count to work from:
+
+             · `${sessionCapacity - bookedCount} left` counts seats reserved
+               for the other academy's floor. A guest whose own floor was spent
+               with the overflow at zero was shown the host's remaining seats
+               and then refused SESSION_FULL on every click.
+             · the course and module names, and the filters keyed on them, were
+               the host academy's — so this page's own programme and course
+               filters dropped a class the student holds a seat in.
+
+           `yourCohort` is absent whenever the caller came through the host
+           door, and `seatsLeftForYou` whenever no allocation is in force — so
+           on a class that is not shared, which is all of them today, both are
+           absent and the row serialises exactly as it did. */
+        seatsLeftForYou: e.door ? seatsLeftForDoor(c, e.door.organizationId) : undefined,
+        yourCohort:      yourCohortFrom(labelDoor(e.door)),
       }
       // Non-entitled students see the listing only — never the way in.
       if (!isEntitled) {

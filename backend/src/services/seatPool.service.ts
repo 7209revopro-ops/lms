@@ -222,21 +222,28 @@ export async function releaseSeat(booking: {
 
    Relative, so a booking that decrements the same counter between the caller's
    read and this write is not lost. An absolute $set computed from a stale read
-   is how a seat gets handed out twice. */
-export async function adjustOverflow(liveClassId: string, delta: number): Promise<void> {
-  if (!delta) return
+   is how a seat gets handed out twice.
+
+   Returns whether the move landed, like every other helper here. It used to
+   return void, which made it the one guarded write in this file whose refusal
+   nobody could see: a negative delta that lost the race below wrote nothing and
+   the caller applied the new capacity anyway, leaving the room's seats and its
+   capacity disagreeing with no error and no trace. */
+export async function adjustOverflow(liveClassId: string, delta: number): Promise<boolean> {
+  if (!delta) return true
   const { LiveClassModel } = await import('@/models/schema.ts')
   /* The floor guard belongs in the FILTER. A negative delta large enough to
      take the pool below zero must not apply at all, and a read-then-check
      loses to a booking that lands in between — which is the whole reason
      every other helper here puts its guard in the query. */
-  await LiveClassModel.updateOne(
+  const r = await LiveClassModel.updateOne(
     {
       _id: new Types.ObjectId(liveClassId),
       overflowSeatsLeft: delta < 0 ? { $gte: -delta } : { $exists: true },
     },
     { $inc: { overflowSeatsLeft: delta } },
   )
+  return r.modifiedCount > 0
 }
 
 /* First-time allocation of a class that already exists.

@@ -1,8 +1,9 @@
 import type { Request, Response, NextFunction } from 'express'
 import { Types } from 'mongoose'
-import { instructorOwnsSession, callerOrgForRead } from '@/utils/tenancy.ts'
+import { instructorOwnsSession, callerOrgForRead, classServesOrg } from '@/utils/tenancy.ts'
 import { ensureOrgSlugs, orgSlugFor } from '@/utils/orgSlugs.ts'
-import { doorsFor } from '@/services/classEntitlement.service.ts'
+import { academyClock } from '@/utils/academyClock.ts'
+import { doorsFor, entitlementFrom, loadEnrolmentIndex, type Door, type ClassDoors } from '@/services/classEntitlement.service.ts'
 import { logger } from '@/utils/logger.ts'
 import { LiveClassService, LiveClassError } from '@/services/liveClass.service.ts'
 import { SectionService } from '@/services/section.service.ts'
@@ -19,13 +20,152 @@ function isPopulated(v: unknown): v is Record<string, unknown> & { id: string } 
   return !!v && typeof v === 'object' && typeof (v as { id?: unknown }).id === 'string'
 }
 
+/* ─────────────────────────────────────────────────────
+   WHAT A STUDENT IS TOLD ABOUT A SHARED CLASS IS THEIR OWN DOOR'S TRUTH
+
+   Two things on a student payload used to be the ROOM's, and a room serving
+   two academies is not one truth. Both are derived here, from the door the
+   caller was actually admitted through, and both are sent as ONE resolved
+   value — never as the underlying pools, which stay staff-only for the reasons
+   STAFF_ONLY_FIELDS in routes/liveClasses.routes.ts sets out.
+───────────────────────────────────────────────────── */
+
+/* HOW MANY SEATS THIS CALLER COULD TAKE, counted the way reserveSeat takes one.
+
+   The mirror image of the reservation in services/seatPool.service.ts: a
+   student draws from their OWN academy's floor first and from the shared
+   overflow after it, and never from anybody else's floor. So the number they
+   may be shown is their floor's remainder plus the overflow.
+
+   `sessionCapacity - bookedCount` is the room, and it was the only seat
+   arithmetic a student ever received. On a shared class it is a promise the
+   booking route then breaks: with the guest floor spent and the overflow at
+   zero, a Bangalore student was shown the fifteen seats DUBAI still held, and
+   every click answered 400 SESSION_FULL while the card went on reading
+   "15 left". Overflow zero is the default, not a corner case.
+
+   READ-ONLY, deliberately — it moves no counter, so the seat-write rule is
+   untouched. Its natural home is beside the reservation it mirrors, and it
+   should move there; if the two ever disagree, the reservation is right.
+
+   undefined means NO ALLOCATION IN FORCE — `hostSeatsLeft` unset, which is
+   every class that predates cross-academy sharing. There the room really is
+   the whole truth, the field is absent, and those rows serialise exactly as
+   they did. */
+export function seatsLeftForDoor(
+  live: {
+    organizationId?:    unknown
+    hostSeatsLeft?:     unknown
+    overflowSeatsLeft?: unknown
+    guestCohorts?:      Array<{ organizationId?: unknown; seatsLeft?: number }>
+  },
+  doorOrgId: string | null,
+): number | undefined {
+  if (typeof live.hostSeatsLeft !== 'number') return undefined
+  const overflow = typeof live.overflowSeatsLeft === 'number' ? live.overflowSeatsLeft : 0
+
+  /* The same falsy semantics reserveSeat uses: a caller with no academy, or a
+     class with none, is the host. Tenancy rules 2 and 3b. */
+  const own    = live.organizationId
+  const isHost = !doorOrgId || (own != null && String(own) === String(doorOrgId))
+  if (isHost) return live.hostSeatsLeft + overflow
+
+  const cohort = (live.guestCohorts ?? []).find(c => String(c.organizationId) === String(doorOrgId))
+  return (cohort?.seatsLeft ?? 0) + overflow
+}
+
+/** A door carrying the labels its own academy's catalogue gives it. */
+export interface LabelledDoor extends Door {
+  courseTitle?:  string
+  program?:      string
+  sectionTitle?: string
+}
+
+/* The caller's own course and module titles, in ONE pair of queries per
+   request rather than two per row. A guest door names another academy's course
+   and module by id only, and the two student lists have to render their names.
+   Nothing is asked at all when no row admitted the caller through a guest door
+   — which is every request until a class is actually shared. */
+export async function labelGuestDoors(
+  doors: ReadonlyArray<Door | undefined>,
+): Promise<(door: Door | undefined) => LabelledDoor | undefined> {
+  const courseIds  = new Set<string>()
+  const sectionIds = new Set<string>()
+  for (const d of doors) {
+    if (!d || d.isHost) continue
+    if (d.courseId  && Types.ObjectId.isValid(d.courseId))  courseIds.add(d.courseId)
+    if (d.sectionId && Types.ObjectId.isValid(d.sectionId)) sectionIds.add(d.sectionId)
+  }
+
+  const courses  = new Map<string, { title?: string; program?: string }>()
+  const sections = new Map<string, string>()
+
+  if (courseIds.size > 0 || sectionIds.size > 0) {
+    const { CourseModel, SectionModel } = await import('@/models/schema.ts')
+    const [courseRows, sectionRows] = await Promise.all([
+      courseIds.size > 0
+        ? CourseModel.find({ _id: { $in: [...courseIds].map(id => new Types.ObjectId(id)) } })
+            .select('title program').lean()
+        : Promise.resolve([] as any[]),
+      sectionIds.size > 0
+        ? SectionModel.find({ _id: { $in: [...sectionIds].map(id => new Types.ObjectId(id)) } })
+            .select('title').lean()
+        : Promise.resolve([] as any[]),
+    ])
+    for (const c of courseRows as any[]) courses.set(String(c._id), { title: c.title, program: c.program })
+    for (const s of sectionRows as any[]) sections.set(String(s._id), s.title)
+  }
+
+  return (door: Door | undefined): LabelledDoor | undefined => {
+    /* A host door needs no labels: `course` and `section` on the DTO already
+       ARE its labels. It is returned untouched so the seat derivation above
+       still receives the academy it resolved. */
+    if (!door || door.isHost) return door
+    const course  = door.courseId  ? courses.get(door.courseId)   : undefined
+    const section = door.sectionId ? sections.get(door.sectionId) : undefined
+    return {
+      ...door,
+      ...(course?.title   ? { courseTitle:  course.title }   : {}),
+      ...(course?.program ? { program:      course.program } : {}),
+      ...(section         ? { sectionTitle: section }        : {}),
+    }
+  }
+}
+
+/* The caller's own door, as a student payload carries it — see the comment on
+   `yourCohort` in toDTO. Shared so the schedule route, which builds its rows
+   from the raw document rather than through toDTO, cannot describe the same
+   door differently. */
+export function yourCohortFrom(door: LabelledDoor | undefined): {
+  courseId?:     string
+  courseTitle?:  string
+  program?:      string
+  sectionId?:    string
+  sectionTitle?: string
+} | undefined {
+  if (!door || door.isHost) return undefined
+  return {
+    courseId:     door.courseId  ?? undefined,
+    courseTitle:  door.courseTitle,
+    program:      door.program,
+    sectionId:    door.sectionId ?? undefined,
+    sectionTitle: door.sectionTitle,
+  }
+}
+
 /* `entitled` gates every field that hands the caller the session itself.
    Mux playback ids are minted with a public playback policy, so the
    image.mux.com thumbnail — which embeds that id — is as good as the stream
    URL and is gated alongside it. Defaults to true: admin/instructor callers
    see everything. `mentorNotes` is deliberately never emitted — it is private
-   post-session staff commentary. */
-function toDTO(doc: any, entitled = true, staff = true) {
+   post-session staff commentary.
+
+   `door` is the door the CALLER was admitted through, labelled — the two
+   student handlers resolve it and pass it, admin callers pass nothing. Absent
+   means "not known", and the two caller-relative fields below are then omitted
+   entirely rather than guessed, so the consumer falls back to what it did
+   before. */
+function toDTO(doc: any, entitled = true, staff = true, door?: LabelledDoor | undefined) {
   const j              = doc.toJSON ? doc.toJSON() : doc
   const courseRef      = j.courseId
   const instructorRef  = j.instructorId
@@ -79,8 +219,30 @@ function toDTO(doc: any, entitled = true, staff = true) {
                        : undefined,
     section:         isPopulated(sectionRef) ? sectionRef : undefined,
 
+    /* THE CALLER'S OWN DOOR, when it is not the host's.
+
+       `courseId`/`course` and `sectionId`/`section` above are the HOST
+       document's and stay that way — every admin surface in this file, and the
+       cohort validator in services/liveClass.service.ts, mean the OWNER by
+       them, and rewriting them per caller would break both. But a guest student
+       reaches this class through THEIR OWN academy's course and module, and
+       those two fields were the only labels they got: the card named the Dubai
+       course they never bought, and then their own course and programme
+       filters — which compare against those same host fields — dropped a class
+       they were holding a seat in.
+
+       Only ever the caller's own academy's course and module, so it discloses
+       nothing across academies. Absent for a host caller, who is already
+       labelled correctly by the two fields above. */
+    yourCohort:      yourCohortFrom(door),
+
     sessionCapacity: j.sessionCapacity ?? 30,
     bookedCount:     j.bookedCount     ?? 0,
+    /* The seats THIS caller can take, not the room's — see seatsLeftForDoor.
+       Omitted when the door is unknown or no allocation is in force, and the
+       consumer then falls back to capacity minus booked, which is today's
+       behaviour and is right for both of those cases. */
+    seatsLeftForYou: door ? seatsLeftForDoor(j, door.organizationId) : undefined,
 
     /* When new bookings stop being accepted — the SERVER's answer, so the UI
        never has to hold its own copy of the rule and drift from it. */
@@ -318,7 +480,13 @@ export async function notifyBookedStudents(notice: BookingChangeNotice): Promise
 
   /* One query for every recipient rather than one per booking. */
   const userIds = bookings.map(b => b.userId)
-  const users   = await UserModel.find({ _id: { $in: userIds } }).select('name email').lean()
+  /* organizationId, because the bell below renders a time and the reader's
+     academy is the only thing that says which clock it is in. Without it on
+     the projection the renderer has nothing to resolve a zone from and falls
+     back to the server's — which is the whole bug. */
+  const users   = await UserModel.find({ _id: { $in: userIds } })
+    .select('name email organizationId').lean()
+  await ensureOrgSlugs()
 
   const instructorIds = [notice.oldInstructorId, notice.newInstructorId].filter(Boolean)
   const instructors   = instructorIds.length
@@ -331,6 +499,9 @@ export async function notifyBookedStudents(notice: BookingChangeNotice): Promise
   const newStart = notice.newStart ?? new Date()
 
   /* Same calendar day → a delay; a different day → a full reschedule. */
+  /* Still the CLASS's own day, deliberately: "same day → a delay, different
+     day → a reschedule" is a fact about the class, not about who is reading
+     it, and it must not change answer per recipient. */
   const day = (d: Date | string) => new Date(d).toLocaleDateString('en-US', { timeZone: 'Asia/Dubai' })
   const isReschedule = day(oldStart) !== day(newStart)
 
@@ -342,7 +513,12 @@ export async function notifyBookedStudents(notice: BookingChangeNotice): Promise
 
   let notified = 0, parked = 0
   for (const user of users) {
-    const u = user as { _id: unknown; name?: string; email?: string }
+    const u = user as { _id: unknown; name?: string; email?: string; organizationId?: unknown }
+    /* THE READER'S clock, not the server's. This bell said Asia/Dubai to every
+       recipient with no tag at all, while the email beside it had already been
+       fixed to use the reader's academy — so the two disagreed about the same
+       class, which is worse than both being wrong the same way. */
+    const readerSlug = orgSlugFor(u.organizationId)
     const messages: { title: string; body: string; kind?: CriticalKind }[] = []
 
     if (notice.wasCancelled) {
@@ -355,7 +531,7 @@ export async function notifyBookedStudents(notice: BookingChangeNotice): Promise
       if (notice.wasRescheduled) {
         messages.push({
           title: `Class rescheduled: ${notice.title}`,
-          body:  `The session has moved to ${new Date(newStart).toLocaleString('en-US', { timeZone: 'Asia/Dubai' })}.`,
+          body:  `The session has moved to ${academyClock(newStart, readerSlug).full}.`,
           kind:  'rescheduled',
         })
       }
@@ -444,12 +620,29 @@ export class LiveClassController {
       const courseCaller = await callerOrgForRead(req)
       if (courseCaller.gone) { sendSuccess(res, []); return }
       const docs   = await this.service.listForCourseSlug(slug, userId, courseCaller.org)
-      sendSuccess(res, docs.map(d => {
+
+      /* THE DOOR EACH ROW ADMITTED THIS CALLER THROUGH. The service resolves it
+         already, keeps isEnrolled/isEntitled and throws the door itself away —
+         so this list labelled a guest's class with the HOST academy's course
+         and counted the HOST's seats as theirs. This is the primary surface for
+         a guest cohort: the repository matches guestCohorts.courseId, so a
+         Bangalore student finds the class on their own Bangalore course page,
+         where every label they saw belonged to Dubai.
+
+         Re-resolved from the same index by the same pure function, so the two
+         answers cannot disagree; it costs one enrolment query per request. */
+      const index  = userId ? await loadEnrolmentIndex(userId, 'notDropped') : null
+      const doors  = docs.map(d => index
+        ? entitlementFrom(d as unknown as ClassDoors, index, courseCaller.org).door
+        : undefined)
+      const label  = await labelGuestDoors(doors)
+
+      sendSuccess(res, docs.map((d, i) => {
         /* Anonymous and non-entitled callers get no Mux-derived thumbnail and
            no recording — the playback id embedded in the thumbnail URL is
            enough to watch the stream. */
         /* staff=false: a student never receives the cross-academy pools. */
-        const dto = toDTO(d, (d as any).isEntitled ?? false, false)
+        const dto = toDTO(d, (d as any).isEntitled ?? false, false, label(doors[i]))
         /* Strip meeting URL and stream credentials from the course listing.
            Students receive the join link via email after booking a session. */
         delete (dto as any).meetingUrl
@@ -489,12 +682,20 @@ export class LiveClassController {
       ).lean()
       const bookedIds = new Set(seats.map((b: any) => String(b.liveClassId)))
 
-      sendSuccess(res, docs.map(d => {
+      /* The caller's own door per row — the feed carried the host academy's
+         course and module names and the whole room's seat count, neither of
+         which is a guest student's answer. Same index, same pure rule as the
+         service used; one extra enrolment query per request. */
+      const index  = await loadEnrolmentIndex(req.user!.id, 'notDropped')
+      const doors  = docs.map(d => entitlementFrom(d as unknown as ClassDoors, index, caller.org).door)
+      const label  = await labelGuestDoors(doors)
+
+      sendSuccess(res, docs.map((d, i) => {
         const isEnrolled = (d as any).isEnrolled ?? false
         /* Entitlement is enrolment MINUS any module the admin blocked for this
            student — a blocked module must not hand out the stream fields. */
         const isEntitled = (d as any).isEntitled ?? false
-        const dto        = toDTO(d, isEntitled, false)
+        const dto        = toDTO(d, isEntitled, false, label(doors[i]))
         /* The feed lists every upcoming session, enrolled or not — but only
            entitled students receive the stream fields. */
         if (!isEntitled) {
@@ -566,7 +767,23 @@ export class LiveClassController {
        2. OWNERSHIP — an instructor is further confined to their own sessions.
      Answers 404 rather than 403 across an academy boundary, so the endpoint
      never confirms that an id exists elsewhere. */
-  #canManage = async (req: Request, res: Response, id: string): Promise<boolean> => {
+  /* `mode` exists because READING a shared class and MANAGING one are different
+     questions, and this guard only ever asked the second.
+
+     Once the admin list was widened so a guest academy can see the classes
+     that serve it, every row in that list opened to a 404: the detail route
+     came through here, and here compared the caller's academy to the class's
+     OWNER with no guest arm. The academy could see the class and not open it.
+
+     Only reads are widened. Editing, cancelling, deleting and starting stay
+     owner-only — managing a CLASS belongs to whoever scheduled it, and only
+     SEATS are shared. crossorgclass.roster.suite.ts pins that a guest gets 404
+     on PATCH and DELETE, and it still does: 'write' is the default, so a caller
+     that forgets to pass a mode gets the stricter answer. */
+  #canManage = async (
+    req: Request, res: Response, id: string,
+    mode: 'read' | 'write' = 'write',
+  ): Promise<boolean> => {
     const role = req.user?.role
     if (role === 'super_admin') return true
 
@@ -576,7 +793,10 @@ export class LiveClassController {
     if (!Types.ObjectId.isValid(id)) {
       res.status(400).json({ success: false, error: { code: 'INVALID_ID', message: 'Invalid live class id' } }); return false
     }
-    const live = await LiveClassModel.findById(id).select('instructorId courseId organizationId').lean()
+    /* guestCohorts is in the projection because classServesOrg reads it; without
+       it the helper sees an empty array and every shared class looks unshared. */
+    const live = await LiveClassModel.findById(id)
+      .select('instructorId courseId organizationId guestCohorts').lean()
     if (!live) {
       res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Live class not found' } }); return false
     }
@@ -608,7 +828,12 @@ export class LiveClassController {
         res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Live class not found' } }); return false
       }
       const liveOrg = (live as { organizationId?: unknown }).organizationId
-      if (caller.org && liveOrg && String(liveOrg) !== String(caller.org)) {
+      const owner   = !caller.org || !liveOrg || String(liveOrg) === String(caller.org)
+      /* A guest academy may READ a class that serves it. classServesOrg is
+         itself gated on the feature switch, so with the switch off this is
+         exactly the owner test it always was. */
+      const served  = mode === 'read' && classServesOrg(live as never, caller.org ?? null)
+      if (!owner && !served) {
         res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Live class not found' } }); return false
       }
     }
@@ -665,7 +890,9 @@ export class LiveClassController {
   adminGetById = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     try {
       const id    = String(req.params['id'] ?? '')
-      if (!(await this.#canManage(req, res, id))) return
+      /* 'read': the detail view of a class a guest academy's staff can already
+         see in their list. Every write path below still defaults to 'write'. */
+      if (!(await this.#canManage(req, res, id, 'read'))) return
       await ensureOrgSlugs()
       const live  = await this.service.getById(id)
 
