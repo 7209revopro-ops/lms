@@ -68,8 +68,14 @@ export function BookmarksPanel({ lessonId, onSeek }: Props) {
               <button
                 onClick={() => del.mutate(bm.id)}
                 disabled={del.isPending}
-                className="flex-shrink-0 rounded-lg p-1 opacity-0 transition-opacity group-hover:opacity-100 disabled:opacity-40">
-                <Trash2 size={11} style={{ color: 'var(--color-danger)' }} />
+                aria-label="Delete bookmark"
+                /* opacity-0 until group-hover meant that on a touch screen
+                   this never appeared at all - there was no way to delete a
+                   bookmark on a phone, and an invisible button still sat
+                   there collecting taps meant for the row. Visible by
+                   default; the hover reveal survives where hover exists. */
+                className="flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-lg transition-opacity disabled:opacity-40 sm:h-auto sm:w-auto sm:p-1 sm:opacity-0 sm:group-hover:opacity-100">
+                <Trash2 size={13} style={{ color: 'var(--color-danger)' }} />
               </button>
             </div>
           ))}

@@ -20,6 +20,14 @@ interface UIState {
   navLayout:        NavLayout
   setNavLayout:     (v: NavLayout) => void
 
+  /* AI tutor panel. In the store rather than in ClientTopbar's local state
+     because the only trigger lived in a `hidden lg:flex` button, which left
+     the panel's whole mobile treatment - its sm:hidden backdrop, its w-full
+     sheet, its slide-in - unreachable on the devices it was written for. The
+     drawer opens it below `lg`. */
+  aiChatOpen:       boolean
+  setAiChat:        (v: boolean) => void
+
   /* Right-side activity panel */
   rightPanelOpen:   boolean
   toggleRightPanel: () => void
@@ -41,6 +49,9 @@ export const useUIStore = create<UIState>()(
       setMobileNav:     (v) => set({ mobileNavOpen: v }),
       navLayout:        'sidebar',
       setNavLayout:     (v) => set({ navLayout: v }),
+
+      aiChatOpen:       false,
+      setAiChat:        (v) => set({ aiChatOpen: v }),
 
       rightPanelOpen:   true,
       toggleRightPanel: () => set(s => ({ rightPanelOpen: !s.rightPanelOpen })),

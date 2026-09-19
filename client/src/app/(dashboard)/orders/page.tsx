@@ -99,7 +99,7 @@ export default function OrdersPage() {
           <p className="text-base font-bold" style={{ color: 'var(--color-text-primary)' }}>No orders yet</p>
           <p className="text-sm" style={{ color: 'var(--color-text-muted)' }}>Purchase a course to see it here.</p>
           <Link href="/courses"
-            className="mt-1 rounded-xl px-5 py-2 text-sm font-semibold transition-colors hover:opacity-90"
+            className="mt-1 inline-flex min-h-[44px] items-center rounded-xl px-5 text-sm font-semibold transition-colors hover:opacity-90 sm:min-h-0 sm:py-2"
             style={{ background: 'rgba(0,87,184,0.10)', color: 'var(--color-primary)' }}>
             Browse courses
           </Link>

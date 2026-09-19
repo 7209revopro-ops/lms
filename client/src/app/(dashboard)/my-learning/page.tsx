@@ -214,7 +214,7 @@ function ContinueCard({ enrollment }: { enrollment: MyEnrollment }) {
           </div>
           <Link href={href}>
             <motion.button whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.97 }}
-              className="mt-3 rounded-xl px-4 py-1.5 text-xs font-bold text-white"
+              className="mt-3 inline-flex min-h-[44px] items-center rounded-xl px-4 text-[13px] font-bold text-white sm:min-h-0 sm:py-1.5 sm:text-xs"
               style={{ background: 'var(--color-text-primary)' }}>
               Continue
             </motion.button>

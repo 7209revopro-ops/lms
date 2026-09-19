@@ -167,6 +167,8 @@ function ThemeToggle() {
 
 export function ClientTopbar() {
   const { setMobileNav } = useUIStore()
+  const aiChatOpen    = useUIStore(s => s.aiChatOpen)
+  const setAiChatOpen = useUIStore(s => s.setAiChat)
   const pathname = usePathname()
   const router = useRouter()
   const isSearchPage = pathname === '/search'
@@ -175,7 +177,6 @@ export function ClientTopbar() {
   const [query, setQuery] = useState('')
   const [debouncedQ, setDebouncedQ] = useState('')
   const [notifOpen, setNotifOpen] = useState(false)
-  const [aiChatOpen, setAiChatOpen] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
   const dropdownRef = useRef<HTMLDivElement>(null)
 
@@ -443,7 +444,7 @@ export function ClientTopbar() {
           <div className="ml-auto flex items-center gap-1.5">
             {/* Ask AI — orange primary */}
             <motion.button
-              onClick={() => setAiChatOpen(v => !v)}
+              onClick={() => setAiChatOpen(!aiChatOpen)}
               whileHover={{ scale: 1.02, boxShadow: '0 6px 20px rgba(0,87,184,0.35)' }} whileTap={{ scale: 0.97 }}
               className="hidden lg:flex items-center gap-1.5 rounded-xl px-3.5 py-2 text-xs font-semibold text-white"
               style={{ background: 'var(--color-primary)', boxShadow: '0 3px 12px rgba(0,87,184,0.22)' }}>

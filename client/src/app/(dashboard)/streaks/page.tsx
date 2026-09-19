@@ -129,7 +129,8 @@ function GoalEditor({ current }: { current: number }) {
           </span>
         ) : !editing ? (
           <button onClick={() => { setValue(current); setEditing(true) }}
-            className="text-xs font-semibold transition-opacity hover:opacity-70"
+            aria-label="Edit weekly goal"
+            className="-mr-2 inline-flex min-h-[44px] items-center rounded-lg px-2 text-[13px] font-semibold transition-opacity hover:opacity-70 sm:-mr-0 sm:min-h-0 sm:px-0 sm:text-xs"
             style={{ color: 'var(--color-primary)' }}>
             Edit
           </button>

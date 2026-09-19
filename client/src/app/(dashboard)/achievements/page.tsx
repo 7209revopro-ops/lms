@@ -121,7 +121,7 @@ function BadgeCard({ a, index }: { a: Achievement; index: number }) {
 
           {!a.earned && a.target > 1 && (
             <div className="mt-2.5">
-              <div className="flex items-center justify-between text-[10px]" style={{ color: 'var(--color-text-muted)' }}>
+              <div className="flex items-center justify-between text-[11px] sm:text-[10px]" style={{ color: 'var(--color-text-muted)' }}>
                 <span>{a.progress} / {a.target}</span>
                 <span>{pct}%</span>
               </div>
@@ -135,7 +135,7 @@ function BadgeCard({ a, index }: { a: Achievement; index: number }) {
           )}
 
           {a.earned && a.earnedAt && (
-            <p className="mt-1.5 text-[10px]" style={{ color: 'var(--color-text-muted)' }}>
+            <p className="mt-1.5 text-[11px] sm:text-[10px]" style={{ color: 'var(--color-text-muted)' }}>
               Earned {new Date(a.earnedAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
             </p>
           )}

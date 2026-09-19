@@ -323,7 +323,7 @@ export default function SettingsContent() {
                       className="h-full w-full object-cover"
                       fallback={(profile.name?.trim()?.[0]?.toUpperCase() ?? '?')} />
                   </div>
-                  <button className="absolute -bottom-1 -right-1 flex h-6 w-6 items-center justify-center rounded-full bg-[var(--color-bg-surface)] shadow-md"
+                  <button className="absolute -bottom-1 -right-1 flex h-11 w-11 items-center justify-center rounded-full bg-[var(--color-bg-surface)] shadow-md"
                     style={{ border: '1px solid var(--color-border)', color: 'var(--color-primary)' }}
                     title="Photo upload coming soon">
                     <Camera size={12} />
@@ -388,12 +388,12 @@ export default function SettingsContent() {
                 <button
                   type="button"
                   onClick={() => user && setProfile({ name: user.name, email: user.email, role: user.headline ?? '', bio: user.bio ?? '' })}
-                  className="rounded-xl px-4 py-2 text-sm font-semibold transition-colors hover:bg-[var(--color-bg-muted)]"
+                  className="min-h-[44px] rounded-xl px-4 text-sm font-semibold sm:min-h-0 sm:py-2 transition-colors hover:bg-[var(--color-bg-muted)]"
                   style={{ color: 'var(--color-text-muted)', border: '1px solid var(--color-border)' }}>Cancel</button>
                 <motion.button whileHover={{ y: -1 }} whileTap={{ scale: 0.97 }}
                   onClick={handleSave}
                   disabled={updateMutation.isPending || (mounted && userLoading)}
-                  className="flex items-center gap-2 rounded-xl px-5 py-2 text-sm font-bold text-white transition-all disabled:opacity-70"
+                  className="flex min-h-[44px] items-center gap-2 rounded-xl px-5 text-sm sm:min-h-0 sm:py-2 font-bold text-white transition-all disabled:opacity-70"
                   style={{
                     background: saved ? '#22C55E' : '#0057b8',
                     boxShadow: saved ? '0 4px 14px rgba(34,197,94,0.28)' : '0 4px 14px rgba(0,87,184,0.28)',
@@ -512,7 +512,7 @@ export default function SettingsContent() {
                       onBlur={e => { e.currentTarget.style.border = '1px solid var(--color-border)'; e.currentTarget.style.boxShadow = 'none' }}
                     />
                     <button type="button" onClick={() => setShowCur(v => !v)}
-                      className="absolute right-3 top-1/2 -translate-y-1/2 transition-opacity hover:opacity-70"
+                      className="absolute right-0 top-1/2 flex h-11 w-11 -translate-y-1/2 items-center justify-center rounded-lg transition-opacity hover:opacity-70"
                       style={{ color: 'var(--color-text-muted)' }}>
                       {showCur ? <EyeOff size={14} /> : <Eye size={14} />}
                     </button>
@@ -532,7 +532,7 @@ export default function SettingsContent() {
                       onBlur={e => { e.currentTarget.style.border = '1px solid var(--color-border)'; e.currentTarget.style.boxShadow = 'none' }}
                     />
                     <button type="button" onClick={() => setShowNew(v => !v)}
-                      className="absolute right-3 top-1/2 -translate-y-1/2 transition-opacity hover:opacity-70"
+                      className="absolute right-0 top-1/2 flex h-11 w-11 -translate-y-1/2 items-center justify-center rounded-lg transition-opacity hover:opacity-70"
                       style={{ color: 'var(--color-text-muted)' }}>
                       {showNew ? <EyeOff size={14} /> : <Eye size={14} />}
                     </button>
@@ -565,7 +565,7 @@ export default function SettingsContent() {
                 <motion.button whileHover={{ y: -1 }} whileTap={{ scale: 0.97 }}
                   onClick={handleChangePassword}
                   disabled={changePasswordMutation.isPending || !pwForm.current || !pwForm.next || !pwForm.confirm}
-                  className="flex items-center gap-2 rounded-xl px-5 py-2 text-sm font-bold text-white transition-all disabled:opacity-50"
+                  className="flex min-h-[44px] items-center gap-2 rounded-xl px-5 text-sm sm:min-h-0 sm:py-2 font-bold text-white transition-all disabled:opacity-50"
                   style={{
                     background: pwSaved ? '#22C55E' : '#0057b8',
                     boxShadow: pwSaved ? '0 4px 14px rgba(34,197,94,0.28)' : '0 4px 14px rgba(0,87,184,0.28)',

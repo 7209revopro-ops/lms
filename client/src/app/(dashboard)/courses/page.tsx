@@ -120,7 +120,7 @@ function TypeBadge({ type }: { type: string }) {
   }
   const s = map[type] ?? map['Course']
   return (
-    <span className="inline-flex items-center gap-1 rounded-lg px-2 py-0.5 text-[10px] font-semibold"
+    <span className="inline-flex items-center gap-1 rounded-lg px-2 py-0.5 text-[11px] sm:text-[10px] font-semibold"
       style={{ background: s.bg, color: s.color }}>
       <span className="h-1.5 w-1.5 rounded-full" style={{ background: s.dot }} />
       {type}
@@ -187,7 +187,7 @@ export default function CoursesPage() {
         transition={{ type: 'spring', stiffness: 280, damping: 26 }} className="mb-5">
         <div className="flex items-center gap-2 mb-1">
           <Sparkles size={13} style={{ color: 'var(--color-primary)' }} />
-          <span className="text-[10px] font-semibold uppercase tracking-widest" style={{ color: 'var(--color-primary)' }}>Catalogue</span>
+          <span className="text-[11px] sm:text-[10px] font-semibold uppercase tracking-widest" style={{ color: 'var(--color-primary)' }}>Catalogue</span>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
           <h1 className="text-2xl font-bold" style={{ color: 'var(--color-text-primary)', fontFamily: 'Bricolage Grotesque, sans-serif' }}>
@@ -309,6 +309,11 @@ export default function CoursesPage() {
             {/* Sort */}
             <div className="relative shrink-0">
               <MotionButton whileTap={{ scale: 0.96 }} onClick={() => setShowSort(v => !v)}
+                /* Below `sm` the word "Sort" is hidden, leaving a bare
+                   chevron next to a sliders icon - two unlabelled squares
+                   that read as one broken control. */
+                aria-label="Sort courses"
+                title="Sort courses"
                 variant="outline"
                 size="sm"
                 className="flex h-11 min-w-11 items-center justify-center gap-1.5 rounded-xl px-3 text-sm font-semibold lg:h-auto lg:min-w-0 lg:py-2"
@@ -352,7 +357,7 @@ export default function CoursesPage() {
               <div className="rounded-2xl bg-[var(--color-bg-surface)] p-4 space-y-3" style={{ border: '1px solid var(--color-border)' }}>
                 {/* Type */}
                 <div>
-                  <p className="mb-2 text-[10px] font-semibold uppercase tracking-wider" style={{ color: 'var(--color-text-muted)' }}>Type</p>
+                  <p className="mb-2 text-[11px] sm:text-[10px] font-semibold uppercase tracking-wider" style={{ color: 'var(--color-text-muted)' }}>Type</p>
                   <div className="flex flex-wrap gap-2">
                     {CONTENT_TYPES.map(t => (
                       <Button key={t.value} onClick={() => setContentType(t.value)}
@@ -369,7 +374,7 @@ export default function CoursesPage() {
                 </div>
                 {/* Level */}
                 <div>
-                  <p className="mb-2 text-[10px] font-semibold uppercase tracking-wider" style={{ color: 'var(--color-text-muted)' }}>Level</p>
+                  <p className="mb-2 text-[11px] sm:text-[10px] font-semibold uppercase tracking-wider" style={{ color: 'var(--color-text-muted)' }}>Level</p>
                   <div className="flex flex-wrap gap-2">
                     {LEVELS.map(l => (
                       <Button key={l} onClick={() => { setLevel(l); setPage(1) }}
@@ -386,7 +391,7 @@ export default function CoursesPage() {
                 </div>
                 {/* Category */}
                 <div>
-                  <p className="mb-2 text-[10px] font-semibold uppercase tracking-wider" style={{ color: 'var(--color-text-muted)' }}>Category</p>
+                  <p className="mb-2 text-[11px] sm:text-[10px] font-semibold uppercase tracking-wider" style={{ color: 'var(--color-text-muted)' }}>Category</p>
                   <div className="flex flex-wrap gap-2">
                     {categories.map(c => (
                       <Button key={c} onClick={() => { setCategory(c); setPage(1) }}
@@ -403,7 +408,7 @@ export default function CoursesPage() {
                 </div>
                 {/* Duration */}
                 <div>
-                  <p className="mb-2 text-[10px] font-semibold uppercase tracking-wider" style={{ color: 'var(--color-text-muted)' }}>Duration</p>
+                  <p className="mb-2 text-[11px] sm:text-[10px] font-semibold uppercase tracking-wider" style={{ color: 'var(--color-text-muted)' }}>Duration</p>
                   <div className="flex flex-wrap gap-2">
                     {DURATIONS.map(d => (
                       <Button key={d.key} onClick={() => { setDuration(d.key); setPage(1) }}
@@ -423,7 +428,7 @@ export default function CoursesPage() {
                     student to sort by something they cannot see. See
                     lib/pricingVisibility.ts. */}
                 <div style={SHOW_PRICING ? undefined : { display: 'none' }}>
-                  <p className="mb-2 text-[10px] font-semibold uppercase tracking-wider" style={{ color: 'var(--color-text-muted)' }}>Price</p>
+                  <p className="mb-2 text-[11px] sm:text-[10px] font-semibold uppercase tracking-wider" style={{ color: 'var(--color-text-muted)' }}>Price</p>
                   <div className="flex flex-wrap gap-2">
                     {PRICES.map(p => (
                       <Button key={p.key} onClick={() => { setPriceRange(p.key); setPage(1) }}
@@ -441,7 +446,7 @@ export default function CoursesPage() {
                 {/* Instructor */}
                 {instructors.length > 0 && (
                   <div>
-                    <p className="mb-2 text-[10px] font-semibold uppercase tracking-wider" style={{ color: 'var(--color-text-muted)' }}>Instructor</p>
+                    <p className="mb-2 text-[11px] sm:text-[10px] font-semibold uppercase tracking-wider" style={{ color: 'var(--color-text-muted)' }}>Instructor</p>
                     <div className="flex flex-wrap gap-2">
                       <Button
                         onClick={() => { setInstructor(''); setPage(1) }}
@@ -673,7 +678,7 @@ function MaterialCard({ course }: { course: Course }) {
           {/* Top-left: materials count */}
           <div className="absolute left-2.5 top-2.5 flex gap-1.5">
             {course.durationMins > 0 && (
-              <span className="rounded-lg px-2 py-0.5 text-[10px] font-bold"
+              <span className="rounded-lg px-2 py-0.5 text-[11px] sm:text-[10px] font-bold"
                 style={{ background: 'rgba(13,15,26,0.68)', color: 'white', backdropFilter: 'blur(6px)' }}>
                 {fmt(course.durationMins)}
               </span>
@@ -689,7 +694,7 @@ function MaterialCard({ course }: { course: Course }) {
               quotes nothing tells a student which courses cost money by
               omission, which is the fact being withheld. */}
           {SHOW_FREE_BADGE && isFree && (
-            <span className="absolute bottom-2.5 left-2.5 rounded-lg px-2 py-0.5 text-[10px] font-bold"
+            <span className="absolute bottom-2.5 left-2.5 rounded-lg px-2 py-0.5 text-[11px] sm:text-[10px] font-bold"
               style={{ background: 'rgba(34,197,94,0.18)', color: '#15803D', border: '1px solid rgba(34,197,94,0.28)', backdropFilter: 'blur(4px)' }}>
               FREE
             </span>
@@ -703,7 +708,7 @@ function MaterialCard({ course }: { course: Course }) {
           <div className="flex items-center justify-between gap-1 flex-wrap">
             <TypeBadge type="Course" />
             {course.ratingAvg >= 4.5 && (
-              <span className="text-[10px] font-semibold" style={{ color: 'var(--color-warning)' }}>✦ Top Rated</span>
+              <span className="text-[11px] sm:text-[10px] font-semibold" style={{ color: 'var(--color-warning)' }}>✦ Top Rated</span>
             )}
           </div>
 
@@ -730,7 +735,7 @@ function MaterialCard({ course }: { course: Course }) {
               <Users size={10} />{course.enrolledCount.toLocaleString()}
             </span>
             {course.category && (
-              <span className="rounded-md px-1.5 py-0.5 text-[10px] font-medium"
+              <span className="rounded-md px-1.5 py-0.5 text-[11px] sm:text-[10px] font-medium"
                 style={{ background: 'var(--color-bg-subtle)', color: 'var(--color-text-muted)' }}>{course.category.name}</span>
             )}
           </div>
@@ -750,7 +755,7 @@ function MaterialCard({ course }: { course: Course }) {
                 </span>
               ))}
               {course.level && (
-                <p className="text-[10px] capitalize" style={{ color: 'var(--color-text-muted)' }}>{course.level}</p>
+                <p className="text-[11px] sm:text-[10px] capitalize" style={{ color: 'var(--color-text-muted)' }}>{course.level}</p>
               )}
             </div>
 

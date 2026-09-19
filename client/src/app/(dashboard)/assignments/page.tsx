@@ -121,8 +121,12 @@ function FilePicker({
               <span className="min-w-0 flex-1 truncate text-xs font-medium" style={{ color: 'var(--color-text-primary)' }}>{f.name}</span>
               <span className="flex-shrink-0 text-[11px]" style={{ color: 'var(--color-text-muted)' }}>{fmtSize(f.sizeBytes)}</span>
               <button type="button" onClick={() => setFiles(files.filter((_, j) => j !== i))}
-                className="flex-shrink-0 transition-colors hover:text-red-500" style={{ color: 'var(--color-text-muted)' }}>
-                <X size={13} />
+                aria-label={`Remove ${f.name}`}
+                /* The hit area was the 13px glyph, 8px from the file size, on
+                   the only way to undo a wrong photo before submitting. */
+                className="-mr-2 flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-lg transition-colors hover:bg-[var(--color-hover-danger)] hover:text-red-500 sm:-mr-0 sm:h-auto sm:w-auto" style={{ color: 'var(--color-text-muted)' }}>
+                <X size={15} className="sm:hidden" />
+                <X size={13} className="hidden sm:block" />
               </button>
             </motion.li>
           ))}
@@ -417,7 +421,7 @@ export default function AssignmentsPage() {
               ['approved', `Approved (${count('approved')})`],
             ] as const).map(([key, label]) => (
               <button key={key} type="button" onClick={() => setFilter(key as typeof filter)}
-                className="rounded-full px-3 py-1.5 text-[11px] font-semibold transition-colors"
+                className="inline-flex min-h-[44px] items-center rounded-full px-3.5 text-[12px] font-semibold transition-colors sm:min-h-0 sm:px-3 sm:py-1.5 sm:text-[11px]"
                 style={filter === key
                   ? { background: 'var(--color-primary)', color: '#fff' }
                   : { background: 'var(--color-bg-surface)', color: 'var(--color-text-muted)', border: '1px solid var(--color-border)' }}>

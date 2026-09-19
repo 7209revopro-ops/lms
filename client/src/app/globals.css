@@ -237,13 +237,16 @@ body {
    on a page 280 CSS px wide with no way back except a manual pinch.
 
    Scoped below `sm` so nothing about the desktop design moves, and the
-   specificity here (one element + one attribute selector) already beats a
-   Tailwind text-* utility, so no !important is needed. Checkboxes, radios and
+   specificity here already beats a Tailwind text-* utility, so no !important
+   is needed - but each selector needs its own attribute clause to get there.
+   A bare `textarea` is (0,0,1) and loses to `text-sm` at (0,1,0), which is
+   exactly what happened to the settings Bio field on the first attempt;
+   `textarea:not([hidden])` is (0,1,1) and wins. Checkboxes, radios and
    ranges are excluded - they have no text and iOS does not zoom for them. */
 @media (max-width: 639.98px) {
   input:not([type='checkbox']):not([type='radio']):not([type='range']):not([type='color']),
-  textarea,
-  select {
+  textarea:not([hidden]),
+  select:not([hidden]) {
     font-size: 16px;
   }
 }

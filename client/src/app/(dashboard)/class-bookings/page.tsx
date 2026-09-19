@@ -495,7 +495,8 @@ function SlotModal({group,bookingMap,onBook,onCancel,bookPending,cancelPending,o
               </div>
             </div>
             <button type="button" onClick={onClose}
-              className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-xl hover:bg-[var(--color-bg-muted)]">
+              aria-label="Close"
+              className="flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-xl hover:bg-[var(--color-bg-muted)] sm:h-8 sm:w-8">
               <X size={14} style={{color: 'var(--color-text-muted)'}}/>
             </button>
           </div>
@@ -512,7 +513,9 @@ function SlotModal({group,bookingMap,onBook,onCancel,bookPending,cancelPending,o
             })}
           </div>
         </div>
-        <div className="px-5 pb-6 pt-1">
+        {/* The bottom sheet ends at the bottom of the glass, so its last
+            control needs to clear the home indicator. */}
+        <div className="px-5 pt-1 pb-[max(1.5rem,env(safe-area-inset-bottom))]">
           <AnimatePresence mode="wait">
             {sel&&selSt&&cfg&&(
               <motion.div key={sel.id+'-'+selSt}

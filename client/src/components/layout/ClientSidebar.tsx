@@ -7,9 +7,10 @@ import { usePathname } from 'next/navigation'
 import {
   BookOpen, GraduationCap, Trophy,
   Settings, LogOut, Flame, Map, X, Video, CalendarDays, LifeBuoy, ClipboardList,
-  Ticket, Receipt,
+  Ticket, Receipt, Sparkles, Sun, Moon, Monitor,
 } from 'lucide-react'
 import { useUIStore } from '@/store/ui.store'
+import { useThemeStore } from '@/store/theme.store'
 import { logout as apiLogout, useCurrentUser } from '@/lib/api/user'
 import { AvatarImg } from '@/components/ui/AvatarImg'
 
@@ -37,6 +38,12 @@ const itemVariants = {
 
 function SidebarContent({ onClose }: { onClose: () => void }) {
   const pathname = usePathname()
+  const setAiChat   = useUIStore(st => st.setAiChat)
+  const preference  = useThemeStore(st => st.preference)
+  const cycleTheme  = useThemeStore(st => st.cycleTheme)
+  const ThemeIcon   = preference === 'dark' ? Moon : preference === 'light' ? Sun : Monitor
+  const themeLabel  = preference === 'dark' ? 'Dark theme'
+                    : preference === 'light' ? 'Light theme' : 'System theme'
   const isActive = (href: string) =>
     href === '/' ? pathname === '/' : pathname.startsWith(href)
 
@@ -105,6 +112,33 @@ function SidebarContent({ onClose }: { onClose: () => void }) {
 
       {/* ── Bottom ────────────────────────────── */}
       <div className="flex-shrink-0 px-2 pb-4" style={{ borderTop: '1px solid var(--color-border)', paddingTop: 12 }}>
+
+        {/* TWO CONTROLS A PHONE OTHERWISE HAS NO WAY TO REACH.
+
+            Ask AI was a `hidden lg:flex` button in the topbar and the only
+            thing in the client that opened AIChatPanel - which ships a whole
+            mobile treatment (an sm:hidden backdrop, a full-width sheet, a
+            slide-in) that could therefore never be seen on a phone. The theme
+            control was the same story: useThemeStore is referenced in exactly
+            one file, behind `hidden sm:flex`, so below 640px light/dark/system
+            could not be changed at all. */}
+        <button type="button"
+          onClick={() => { setAiChat(true); onClose() }}
+          className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 transition-colors hover:bg-[var(--color-hover)] lg:hidden"
+          style={{ color: 'var(--color-text-muted)' }}>
+          <Sparkles size={17} strokeWidth={1.8} className="flex-shrink-0" />
+          <span className="whitespace-nowrap text-sm font-medium">Ask AI</span>
+        </button>
+
+        <button type="button"
+          onClick={cycleTheme}
+          aria-label={`${themeLabel} — tap to change`}
+          className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 transition-colors hover:bg-[var(--color-hover)] sm:hidden"
+          style={{ color: 'var(--color-text-muted)' }}>
+          <ThemeIcon size={17} strokeWidth={1.8} className="flex-shrink-0" />
+          <span className="whitespace-nowrap text-sm font-medium">{themeLabel}</span>
+        </button>
+
         {bottomItems.map((item) => {
           const Icon = item.icon
           return (

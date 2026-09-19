@@ -182,9 +182,13 @@ function CartItemCard({ item, onRemove }: { item: CartItem; onRemove: () => void
               )}
             </div>
             <button onClick={onRemove} aria-label="Remove from cart"
-              className="flex-shrink-0 flex h-7 w-7 items-center justify-center rounded-xl transition-colors hover:bg-[var(--color-hover-danger)]"
+              /* 28px, 8px from a two-line course title that is itself a link:
+                 aiming for the X and catching the title navigated away from
+                 the cart. */
+              className="-mr-1.5 -mt-1.5 flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-xl transition-colors hover:bg-[var(--color-hover-danger)] sm:-mr-0 sm:-mt-0 sm:h-7 sm:w-7"
               style={{ color: 'var(--color-text-muted)' }}>
-              <X size={13} />
+              <X size={15} className="sm:hidden" />
+              <X size={13} className="hidden sm:block" />
             </button>
           </div>
 
@@ -207,7 +211,9 @@ function CartItemCard({ item, onRemove }: { item: CartItem; onRemove: () => void
                  stays: the course is still in their basket, and removing it
                  from view would look like the cart had lost it. */
               <Link href={`/courses/${item.slug}`}
-                className="text-xs font-semibold transition-colors hover:opacity-70"
+                /* The only per-item action in the cart while pricing is
+                   hidden, and it was a 12px text link with a 16px hit box. */
+                className="inline-flex min-h-[44px] items-center text-[13px] font-semibold transition-colors hover:opacity-70 sm:min-h-0 sm:text-xs"
                 style={{ color: 'var(--color-primary)' }}>
                 View course
               </Link>
