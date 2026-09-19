@@ -18,6 +18,7 @@ import { TamaraProductWidget, TamaraCheckoutWidget } from '@/components/payments
 import { TabbyLogo } from '@/components/payments/TabbyLogo'
 import { formatPrice } from '@/lib/formatPrice'
 import { useCheckoutCurrency, coursePriceIn, discountedAmount } from '@/lib/coursePrice'
+import { SHOW_PRICING } from '@/lib/pricingVisibility'
 import { CertificateButton } from '@/components/learn/CertificateButton'
 import { CourseReviews } from '@/components/courses/CourseReviews'
 import { AINotesPanel } from '@/components/courses/AINotesPanel'
@@ -66,7 +67,12 @@ function CourseDetailInner({ slug }: { slug: string }) {
   const tabbyCheckout   = useTabbyCheckout({ onError: msg => setEnrollError(msg) })
   const abzerCheckout   = useAbzerCheckout({ onError: msg => setEnrollError(msg) })
   const tamaraCheckout  = useTamaraCheckout({ onError: msg => setEnrollError(msg) })
-  const gateways        = gatewayConfig?.gateways ?? []
+  /* TEMPORARY — see lib/pricingVisibility.ts. Emptied at the SOURCE rather
+     than hidden at each of the six places it reaches, because tabbyOffered and
+     tamaraOffered feed the product promos, the checkout cards, the BNPL
+     buttons and their pre-scoring queries. Cutting it here also stops the
+     prescore requests firing for an option nobody can see. */
+  const gateways        = SHOW_PRICING ? (gatewayConfig?.gateways ?? []) : []
 
   /* Tabby background pre-scoring — required by Tabby's QA before the option is
      shown, and the source of the AED figure the snippets must quote. */
@@ -440,7 +446,7 @@ function CourseDetailInner({ slug }: { slug: string }) {
 
               <div className="mb-5 flex items-center gap-3">
                 <div>
-                  {isPaid && couponInfo ? (
+                  {!SHOW_PRICING ? null : isPaid && couponInfo ? (
                     <div className="flex items-baseline gap-2">
                       <p className="text-3xl font-bold" style={{ color: 'var(--color-text-primary)', fontFamily: 'Bricolage Grotesque, sans-serif' }}>
                         {formatPrice(discountedPrice, displayed.currency)}
@@ -483,6 +489,13 @@ function CourseDetailInner({ slug }: { slug: string }) {
                     Continue learning
                   </motion.button>
                 </Link>
+              ) : isPaid && !SHOW_PRICING ? (
+                /* TEMPORARY — see lib/pricingVisibility.ts. With the gateways
+                   hidden there is nothing for a Buy button to do, and a dead
+                   button is worse than none: it invites a click that cannot
+                   succeed. The enrolled path above is untouched, so anyone who
+                   already owns the course still continues learning. */
+                null
               ) : isPaid ? (
                 <>
                   {/* Primary payment button */}
@@ -632,7 +645,10 @@ function CourseDetailInner({ slug }: { slug: string }) {
                   {isEnrolled
                     ? `${progress?.progressPercent ?? 0}% complete`
                     : isPaid
-                      ? '30-day money-back guarantee'
+                      /* TEMPORARY — see lib/pricingVisibility.ts. A refund
+                         promise is a statement about a purchase, and with
+                         checkout hidden there is no purchase to refund. */
+                      ? (SHOW_PRICING ? '30-day money-back guarantee' : 'Free preview included')
                       : 'Free preview included'}
                 </p>
               )}

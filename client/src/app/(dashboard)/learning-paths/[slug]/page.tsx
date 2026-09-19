@@ -10,6 +10,7 @@ import {
 import { useLearningPath, type LearningPathCourse } from '@/lib/api/learningpaths'
 import Spinner from '@/components/ui/Spinner'
 import { AvatarImg } from '@/components/ui/AvatarImg'
+import { SHOW_PRICING } from '@/lib/pricingVisibility'
 
 function fmt(mins: number) {
   const h = Math.floor(mins / 60)
@@ -96,7 +97,7 @@ function CourseCard({
               </div>
               <div className="mt-auto pt-1.5 flex items-center justify-between">
                 <span className="text-xs font-semibold" style={{ color: course.isFree ? '#22C55E' : 'var(--color-text-primary)' }}>
-                  {course.isFree ? 'Free' : `$${course.price}`}
+                  {SHOW_PRICING && (course.isFree ? 'Free' : `$${course.price}`)}
                 </span>
                 <ChevronRight size={13} style={{ color: 'var(--color-text-muted)' }}
                   className="transition-transform group-hover:translate-x-0.5" />

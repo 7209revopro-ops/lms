@@ -15,6 +15,7 @@ import { TamaraCartWidget } from '@/components/payments/TamaraWidget'
 import { TabbyLogo } from '@/components/payments/TabbyLogo'
 import Spinner from '@/components/ui/Spinner'
 import { useCheckoutCurrency, coursePriceIn } from '@/lib/coursePrice'
+import { SHOW_PRICING, SHOW_FREE_BADGE } from '@/lib/pricingVisibility'
 import { formatPrice } from '@/lib/formatPrice'
 
 /* ── helpers ─────────────────────────────────────────── */
@@ -87,7 +88,11 @@ function CartItemCard({ item, onRemove }: { item: CartItem; onRemove: () => void
   const tamaraCheckout  = useTamaraCheckout()
   const { data: gatewayConfig } = useGatewayConfig()
   const isUAE           = gatewayConfig?.currency === 'AED'
-  const gateways        = gatewayConfig?.gateways ?? []
+  /* TEMPORARY — see lib/pricingVisibility.ts. Emptied at the source so the
+     Tabby and Tamara promos, their buttons AND their pre-scoring requests all
+     stop together: there is no point asking a lender to score a purchase the
+     student is not being offered. */
+  const gateways        = SHOW_PRICING ? (gatewayConfig?.gateways ?? []) : []
   const itemCurrency    = useCheckoutCurrency()
   const isFree          = item.isFree || !item.price || item.price === 0
 
@@ -186,7 +191,7 @@ function CartItemCard({ item, onRemove }: { item: CartItem; onRemove: () => void
           {/* Price + action */}
           <div className="mt-2.5 flex items-center justify-between gap-2 flex-wrap">
             <div>
-              {isFree ? (
+              {!SHOW_PRICING ? null : isFree ? (
                 <span className="text-base font-bold" style={{ color: 'var(--color-success)' }}>Free</span>
               ) : (
                 <span className="text-base font-bold" style={{ color: 'var(--color-text-primary)' }}>
@@ -195,13 +200,24 @@ function CartItemCard({ item, onRemove }: { item: CartItem; onRemove: () => void
               )}
             </div>
 
-            {isFree ? (
+            {!isFree && !SHOW_PRICING ? (
+              /* TEMPORARY — see lib/pricingVisibility.ts. Every branch below
+                 this one leads to a gateway, so with payment hidden the whole
+                 column would be buttons that cannot complete. The row itself
+                 stays: the course is still in their basket, and removing it
+                 from view would look like the cart had lost it. */
+              <Link href={`/courses/${item.slug}`}
+                className="text-xs font-semibold transition-colors hover:opacity-70"
+                style={{ color: 'var(--color-primary)' }}>
+                View course
+              </Link>
+            ) : isFree ? (
               <Link href={`/courses/${item.slug}`}>
                 <motion.button
                   whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.97 }}
                   className="flex items-center gap-1.5 rounded-xl px-4 py-1.5 text-xs font-bold text-white"
                   style={{ background: 'var(--color-success)' }}>
-                  <GraduationCap size={11} />Enroll Free
+                  <GraduationCap size={11} />{SHOW_FREE_BADGE ? 'Enroll Free' : 'Enroll'}
                 </motion.button>
               </Link>
             ) : (
@@ -285,8 +301,10 @@ function CartItemCard({ item, onRemove }: { item: CartItem; onRemove: () => void
         </p>
       )}
 
-      {/* Coupon row — only for paid courses */}
-      {!isFree && (
+      {/* Coupon row — only for paid courses, and only while prices are on
+          screen. A discount field with no price to discount asks the student to
+          reduce a number they cannot see. TEMPORARY, see lib/pricingVisibility.ts */}
+      {!isFree && SHOW_PRICING && (
         <CouponRow
           courseId={item.id}
           onApply={(code) => setCoupon(code)}
@@ -396,10 +414,17 @@ export default function CartPage() {
             initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }}
             className="mt-4 rounded-2xl p-5"
             style={{ background: 'var(--color-bg-surface)', border: '1px solid var(--color-border)', boxShadow: '0 2px 8px rgba(0,0,0,0.04)' }}>
-            <h2 className="mb-3 text-sm font-bold" style={{ color: 'var(--color-text-primary)' }}>Order Summary</h2>
+            {/* "Order Summary" over an empty box reads as a page that failed
+                to load. Every figure under it is hidden, so the heading goes
+                with them and the card keeps only what still has meaning — the
+                free-course count and Continue shopping. TEMPORARY, see
+                lib/pricingVisibility.ts */}
+            {SHOW_PRICING && (
+              <h2 className="mb-3 text-sm font-bold" style={{ color: 'var(--color-text-primary)' }}>Order Summary</h2>
+            )}
 
             <div className="space-y-2 text-sm">
-              {paidItems.length > 0 && (
+              {SHOW_PRICING && paidItems.length > 0 && (
                 <div className="flex justify-between" style={{ color: 'var(--color-text-muted)' }}>
                   <span>{paidItems.length} paid course{paidItems.length !== 1 ? 's' : ''}</span>
                   <span className="font-semibold" style={{ color: 'var(--color-text-primary)' }}>{formatPrice(total, totalCurrency)}</span>
@@ -413,7 +438,7 @@ export default function CartPage() {
               )}
             </div>
 
-            {paidItems.length > 0 && (
+            {SHOW_PRICING && paidItems.length > 0 && (
               <div className="mt-3 flex items-center justify-between pt-3"
                 style={{ borderTop: '1px solid var(--color-border)' }}>
                 <span className="text-sm font-bold" style={{ color: 'var(--color-text-primary)' }}>Total</span>
@@ -421,9 +446,11 @@ export default function CartPage() {
               </div>
             )}
 
-            <p className="mt-3 text-[11px] text-center" style={{ color: 'var(--color-text-muted)' }}>
-              Each course has its own checkout. Click <strong>Checkout</strong> on individual paid courses above.
-            </p>
+            {SHOW_PRICING && (
+              <p className="mt-3 text-[11px] text-center" style={{ color: 'var(--color-text-muted)' }}>
+                Each course has its own checkout. Click <strong>Checkout</strong> on individual paid courses above.
+              </p>
+            )}
 
             <div className="mt-3 pt-3" style={{ borderTop: '1px solid var(--color-border)' }}>
               <Link href="/courses" className="flex items-center justify-center gap-1.5 text-xs font-semibold transition-colors hover:opacity-70"

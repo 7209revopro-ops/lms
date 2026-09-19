@@ -5,6 +5,7 @@ import Link from 'next/link'
 import { Star, Users, Clock, Sparkles } from 'lucide-react'
 import { useCourseRecommendations } from '@/lib/api/recommendations'
 import type { Course } from '@/types/index'
+import { SHOW_PRICING } from '@/lib/pricingVisibility'
 
 function fmt(mins: number) {
   const h = Math.floor(mins / 60)
@@ -96,7 +97,7 @@ function RecommendationCard({ course, i }: { course: Course; i: number }) {
                 </span>
               )}
               <span className="ml-auto text-sm font-bold" style={{ color: course.isFree ? '#10B981' : 'var(--color-text-primary)' }}>
-                {course.isFree ? 'Free' : `$${course.price.toFixed(2)}`}
+                {SHOW_PRICING && (course.isFree ? 'Free' : `$${course.price.toFixed(2)}`)}
               </span>
             </div>
           </div>

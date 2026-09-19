@@ -23,14 +23,19 @@ import type { Course } from '@/types/index'
 import Spinner from '@/components/ui/Spinner'
 import { useCheckoutCurrency, formatCoursePrice } from '@/lib/coursePrice'
 import { titleCase } from '@/lib/titleCase'
+import { SHOW_PRICING, SHOW_FREE_BADGE } from '@/lib/pricingVisibility'
 
 const STATUS_TABS = ['All Status', 'Not Started', 'In Progress', 'Completed']
 const SORTS = [
   { value: 'popular',  label: 'Most popular' },
   { value: 'rating',   label: 'Highest rated' },
   { value: 'newest',   label: 'Newest' },
-  { value: 'price_lo', label: 'Price: Low → High' },
-  { value: 'price_hi', label: 'Price: High → Low' },
+  /* The two price sorts are appended only while prices are on screen —
+     TEMPORARY, see lib/pricingVisibility.ts. */
+  ...(SHOW_PRICING
+    ? [{ value: 'price_lo', label: 'Price: Low → High' },
+       { value: 'price_hi', label: 'Price: High → Low' }]
+    : []),
 ]
 const LEVELS = ['all', 'beginner', 'intermediate', 'advanced'] as const
 
@@ -395,8 +400,11 @@ export default function CoursesPage() {
                     ))}
                   </div>
                 </div>
-                {/* Price */}
-                <div>
+                {/* Price — TEMPORARY: hidden with the prices themselves. A
+                    "$30 to $99" filter over cards that quote no figure asks the
+                    student to sort by something they cannot see. See
+                    lib/pricingVisibility.ts. */}
+                <div style={SHOW_PRICING ? undefined : { display: 'none' }}>
                   <p className="mb-2 text-[10px] font-semibold uppercase tracking-wider" style={{ color: 'var(--color-text-muted)' }}>Price</p>
                   <div className="flex flex-wrap gap-2">
                     {PRICES.map(p => (
@@ -659,8 +667,10 @@ function MaterialCard({ course }: { course: Course }) {
             <FavoriteButton courseId={course.id} variant="icon" />
           </div>
 
-          {/* Free badge */}
-          {isFree && (
+          {/* Free badge — TEMPORARY: a "FREE" flash while every other card
+              quotes nothing tells a student which courses cost money by
+              omission, which is the fact being withheld. */}
+          {SHOW_FREE_BADGE && isFree && (
             <span className="absolute bottom-2.5 left-2.5 rounded-lg px-2 py-0.5 text-[10px] font-bold"
               style={{ background: 'rgba(34,197,94,0.18)', color: '#15803D', border: '1px solid rgba(34,197,94,0.28)', backdropFilter: 'blur(4px)' }}>
               FREE
@@ -711,15 +721,16 @@ function MaterialCard({ course }: { course: Course }) {
           <div className="mt-auto flex items-center justify-between gap-2 pt-3"
             style={{ borderTop: '1px solid var(--color-border)' }}>
 
-            {/* Price */}
+            {/* Price — hidden while commerce is off; the level stays, so the
+                card keeps its footer rather than collapsing. */}
             <div>
-              {isFree ? (
+              {SHOW_PRICING && (isFree ? (
                 <span className="text-sm font-bold" style={{ color: 'var(--color-success)' }}>Free</span>
               ) : (
                 <span className="text-sm font-bold" style={{ color: 'var(--color-text-primary)' }}>
                   {formatCoursePrice(course, currency)}
                 </span>
-              )}
+              ))}
               {course.level && (
                 <p className="text-[10px] capitalize" style={{ color: 'var(--color-text-muted)' }}>{course.level}</p>
               )}
@@ -745,7 +756,11 @@ function MaterialCard({ course }: { course: Course }) {
                 : enroll.isPending
                   ? <><Spinner size={10} />Enrolling…</>
                   : isFree
-                    ? <><Play size={10} fill="white" />Enroll Free</>
+                    /* "Enroll Free" beside "Add to Cart" says which courses
+                       cost money just as plainly as the badge did — TEMPORARY,
+                       see lib/pricingVisibility.ts. The action is unchanged;
+                       only the word that quotes a price goes. */
+                    ? <><Play size={10} fill="white" />{SHOW_FREE_BADGE ? 'Enroll Free' : 'Enroll'}</>
                     : inCart
                       ? <><Check size={10} />Added</>
                       : <><ShoppingCart size={10} />Add to Cart</>

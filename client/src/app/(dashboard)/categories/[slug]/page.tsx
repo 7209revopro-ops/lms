@@ -8,6 +8,7 @@ import { useCourses } from '@/lib/api/courses'
 import { useCategories } from '@/lib/api/categories'
 import type { Course } from '@/types/index'
 import Spinner from '@/components/ui/Spinner'
+import { SHOW_PRICING, SHOW_FREE_BADGE } from '@/lib/pricingVisibility'
 
 const stagger  = { hidden: {}, show: { transition: { staggerChildren: 0.05 } } }
 const cardAnim = { hidden: { opacity: 0, y: 16 }, show: { opacity: 1, y: 0, transition: { type: 'spring' as const, stiffness: 280, damping: 26 } } }
@@ -96,8 +97,9 @@ export default function CategoryLandingPage({ params }: { params: Promise<{ slug
             <option value="popular">Most popular</option>
             <option value="rating">Highest rated</option>
             <option value="newest">Newest</option>
-            <option value="price_lo">Price: Low → High</option>
-            <option value="price_hi">Price: High → Low</option>
+            {/* TEMPORARY — see lib/pricingVisibility.ts */}
+            {SHOW_PRICING && <option value="price_lo">Price: Low → High</option>}
+            {SHOW_PRICING && <option value="price_hi">Price: High → Low</option>}
           </select>
         </div>
       </div>
@@ -183,7 +185,7 @@ function CategoryCard({ course, accent }: { course: Course; accent: string }) {
               <Play size={14} fill="white" color="white" />
             </div>
           </div>
-          {course.isFree && (
+          {SHOW_FREE_BADGE && course.isFree && (
             <span className="absolute right-3 top-3 rounded-lg px-2 py-0.5 text-[10px] font-bold"
               style={{ background: 'rgba(34,197,94,0.15)', color: 'var(--color-success)', border: '1px solid rgba(34,197,94,0.25)' }}>
               FREE
@@ -211,9 +213,11 @@ function CategoryCard({ course, accent }: { course: Course; accent: string }) {
                 <Users size={10} />{course.enrolledCount.toLocaleString()}
               </span>
             </div>
-            <span className="font-bold" style={{ color: 'var(--color-text-primary)' }}>
-              {course.isFree ? 'Free' : `$${course.price}`}
-            </span>
+            {SHOW_PRICING && (
+              <span className="font-bold" style={{ color: 'var(--color-text-primary)' }}>
+                {course.isFree ? 'Free' : `$${course.price}`}
+              </span>
+            )}
           </div>
         </div>
       </motion.div>
