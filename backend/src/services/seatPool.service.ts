@@ -226,8 +226,15 @@ export async function releaseSeat(booking: {
 export async function adjustOverflow(liveClassId: string, delta: number): Promise<void> {
   if (!delta) return
   const { LiveClassModel } = await import('@/models/schema.ts')
+  /* The floor guard belongs in the FILTER. A negative delta large enough to
+     take the pool below zero must not apply at all, and a read-then-check
+     loses to a booking that lands in between — which is the whole reason
+     every other helper here puts its guard in the query. */
   await LiveClassModel.updateOne(
-    { _id: new Types.ObjectId(liveClassId), overflowSeatsLeft: { $exists: true } },
+    {
+      _id: new Types.ObjectId(liveClassId),
+      overflowSeatsLeft: delta < 0 ? { $gte: -delta } : { $exists: true },
+    },
     { $inc: { overflowSeatsLeft: delta } },
   )
 }
@@ -367,6 +374,46 @@ export async function addGuestCohort(
     },
   )
   return r.modifiedCount > 0
+}
+
+/** Re-aim an existing cohort's DOOR without touching its seats.
+
+    The diff used to key a cohort on organizationId alone, so changing which of
+    that academy's courses (or modules) the class admits through was accepted
+    with 200 and then written nowhere: the patch path deletes guestCohorts
+    before it runs, and no seat helper carried the two fields. The form said
+    saved, the door never moved, and the only way to notice was to reopen the
+    class.
+
+    Seats deliberately do not move. A door is WHICH students may come in; the
+    floor is HOW MANY. Re-aiming the door at another module of the same academy
+    changes who qualifies, not how many seats that academy was promised — and
+    anyone already booked keeps the seat they hold, which is the same answer
+    releaseSeat gives for a cohort that disappears. */
+export async function repointGuestCohort(
+  liveClassId: string,
+  orgId:       string,
+  door:        { courseId: string; sectionId?: string },
+): Promise<boolean> {
+  const { LiveClassModel } = await import('@/models/schema.ts')
+  const org = new Types.ObjectId(orgId)
+  const r = await LiveClassModel.updateOne(
+    { _id: new Types.ObjectId(liveClassId), 'guestCohorts.organizationId': org },
+    {
+      $set: {
+        'guestCohorts.$[c].courseId': new Types.ObjectId(door.courseId),
+        ...(door.sectionId
+          ? { 'guestCohorts.$[c].sectionId': new Types.ObjectId(door.sectionId) }
+          : {}),
+      },
+      /* An ungated door is the ABSENCE of a module, not an empty one — a
+         stored null would fail the "every guest names a module" check that the
+         host-gated rule relies on. */
+      ...(door.sectionId ? {} : { $unset: { 'guestCohorts.$[c].sectionId': '' } }),
+    },
+    { arrayFilters: [{ 'c.organizationId': org }] },
+  )
+  return r.modifiedCount > 0 || r.matchedCount > 0
 }
 
 /** Remove an academy. ONLY when it is holding nothing.

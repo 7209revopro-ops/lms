@@ -25,7 +25,7 @@ function isPopulated(v: unknown): v is Record<string, unknown> & { id: string } 
    URL and is gated alongside it. Defaults to true: admin/instructor callers
    see everything. `mentorNotes` is deliberately never emitted — it is private
    post-session staff commentary. */
-function toDTO(doc: any, entitled = true) {
+function toDTO(doc: any, entitled = true, staff = true) {
   const j              = doc.toJSON ? doc.toJSON() : doc
   const courseRef      = j.courseId
   const instructorRef  = j.instructorId
@@ -120,7 +120,12 @@ function toDTO(doc: any, entitled = true) {
        module. Sent so the admin panel can show a "serves both" chip and so a
        guest academy's staff can see which of their courses this belongs to.
        Empty on every class that is not shared, which is all of them today. */
-    guestCohorts: Array.isArray(j.guestCohorts)
+    /* Staff only. toDTO is shared with two student-facing endpoints, and the
+       cohort array carries another academy's course and module ids — the very
+       thing the cohort validator refuses to confirm even to an admin. `staff`
+       defaults true because every ADMIN caller already relies on these; the
+       student routes pass false. */
+    guestCohorts: staff && Array.isArray(j.guestCohorts)
       ? j.guestCohorts.map((c: any) => ({
           organizationId:   String(c.organizationId),
           organizationSlug: orgSlugFor(c.organizationId),
@@ -130,8 +135,8 @@ function toDTO(doc: any, entitled = true) {
           seatsLeft:        c.seatsLeft,
         }))
       : [],
-    hostSeatsLeft:     j.hostSeatsLeft,
-    overflowSeatsLeft: j.overflowSeatsLeft,
+    hostSeatsLeft:     staff ? j.hostSeatsLeft : undefined,
+    overflowSeatsLeft: staff ? j.overflowSeatsLeft : undefined,
 
     /* Every academy this class serves, owner first. The admin panel draws its
        "serves Dubai + Bangalore" chip from this, and it is the single cheapest
@@ -440,7 +445,8 @@ export class LiveClassController {
         /* Anonymous and non-entitled callers get no Mux-derived thumbnail and
            no recording — the playback id embedded in the thumbnail URL is
            enough to watch the stream. */
-        const dto = toDTO(d, (d as any).isEntitled ?? false)
+        /* staff=false: a student never receives the cross-academy pools. */
+        const dto = toDTO(d, (d as any).isEntitled ?? false, false)
         /* Strip meeting URL and stream credentials from the course listing.
            Students receive the join link via email after booking a session. */
         delete (dto as any).meetingUrl
@@ -485,7 +491,7 @@ export class LiveClassController {
         /* Entitlement is enrolment MINUS any module the admin blocked for this
            student — a blocked module must not hand out the stream fields. */
         const isEntitled = (d as any).isEntitled ?? false
-        const dto        = toDTO(d, isEntitled)
+        const dto        = toDTO(d, isEntitled, false)
         /* The feed lists every upcoming session, enrolled or not — but only
            entitled students receive the stream fields. */
         if (!isEntitled) {
@@ -1003,6 +1009,22 @@ export class LiveClassController {
         await LiveClassModel.findByIdAndUpdate(sourceId, { seriesId: new Types.ObjectId(seriesId) })
       }
 
+      /* overflowSeatsLeft is a COUNTDOWN, not the overflow the class was
+         configured with: every seat already drawn from it is missing. Copying
+         it as if it were the configuration re-split every copy's pools, and
+         the difference was silently absorbed into the host floor — the one
+         place seatPool.service.ts says a difference must never land.
+
+         Reconstructed the way the reconciler does it: what is left, plus what
+         is currently held from it. */
+      const { ClassBookingModel: CBM } = await import('@/models/schema.ts')
+      const overflowHeld = await CBM.countDocuments({
+        liveClassId: (source as { _id: unknown })._id,
+        seatPoolKind: 'overflow',
+        status: { $in: ['booked', 'attended'] },
+      })
+      const repeatOverflow = Math.max(0, Number((source as any).overflowSeatsLeft ?? 0) + overflowHeld)
+
       await ensureOrgSlugs()
       const created: unknown[] = []
       for (let i = 1; i <= weeks; i++) {
@@ -1040,7 +1062,7 @@ export class LiveClassController {
                 ...(c['sectionId'] ? { sectionId: String(c['sectionId']) } : {}),
                 seatFloor:      Number(c['seatFloor'] ?? 0),
               })),
-              overflowSeats: Number((source as any).overflowSeatsLeft ?? 0) }
+              overflowSeats: repeatOverflow }
             : {}),
           organizationId:  source.organizationId ? String(source.organizationId) : undefined,
         }, req, seriesId)

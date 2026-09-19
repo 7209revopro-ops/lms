@@ -53,6 +53,16 @@ const STAFF_ONLY_FIELDS = [
   'mentorNotes',
   'meetingUrl',
   'googleMeetCode',
+  /* Cross-academy bookkeeping. This list is built by spreading the raw
+     document, so these arrived on a student's browse feed the moment the
+     first class was shared: which OTHER academy the class serves, that
+     academy's internal course and module ids, and a live seat breakdown of
+     every pool. None of it is a student's business, and the course ids in
+     particular are exactly what #assertCohortsUsable refuses to disclose to
+     an ADMIN of another academy. */
+  'guestCohorts',
+  'hostSeatsLeft',
+  'overflowSeatsLeft',
 ] as const
 
 /* ── GET /live-classes — ALL sessions visible to logged-in students ────────────

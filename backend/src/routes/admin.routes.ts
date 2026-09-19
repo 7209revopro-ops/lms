@@ -1465,7 +1465,11 @@ router.get   ('/live-classes',                            live.adminListAll)
 router.get   ('/live-classes/:id',                        live.adminGetById)
 router.post  ('/live-classes', requirePermission('live-classes','create'),                            validate(liveCreateSchema), audit('liveclass.create', 'LiveClass', undefined, r => ({ title: r.body.title, scheduledStart: r.body.scheduledStart })), live.adminCreate)
 const liveRepeatSchema = z.object({ weeks: z.coerce.number().int().min(1).max(52) })
-router.post  ('/live-classes/:id/repeat',                 validate(liveRepeatSchema), audit('liveclass.repeat', 'LiveClass', r => String(r.params['id'] ?? ''), r => ({ weeks: r.body.weeks })), live.adminRepeat)
+/* Repeat MINTS CLASSES, so it needs the same permission as create. It carried
+   only validate() while its three siblings above and below all carry the
+   matrix guard, so a custom role explicitly DENIED live-class creation could
+   still produce up to 52 of them by repeating one it was allowed to see. */
+router.post  ('/live-classes/:id/repeat',                 requirePermission('live-classes','create'), validate(liveRepeatSchema), audit('liveclass.repeat', 'LiveClass', r => String(r.params['id'] ?? ''), r => ({ weeks: r.body.weeks })), live.adminRepeat)
 router.patch ('/live-classes/:id', requirePermission('live-classes','update'),                        validate(liveUpdateSchema), audit('liveclass.update', 'LiveClass', r => String(r.params['id'] ?? '')), live.adminUpdate)
 router.delete('/live-classes/:id', requirePermission('live-classes','delete'),                        audit('liveclass.delete', 'LiveClass', r => String(r.params['id'] ?? '')), live.adminDelete)
 router.post  ('/live-classes/:id/start',                  live.adminStart)

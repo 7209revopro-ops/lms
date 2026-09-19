@@ -1322,7 +1322,10 @@ function QuickCreateModal({ onClose, onSuccess, categoryProgram }: { onClose: ()
               hostGated={!!sectionId}
               overflowSeats={overflow}
               onOverflowChange={setOverflow}
-              sessionCapacity={sessionCapacity === '' ? 0 : Number(sessionCapacity)}
+              /* A blank seat count is "not decided yet", not zero. Passing 0
+                 made the panel shout that every floor over-allocates a room
+                 the form would happily submit — the server defaults it. */
+              sessionCapacity={sessionCapacity === '' ? OPEN_SEATS_DEFAULT : Number(sessionCapacity)}
             />
           )}
 

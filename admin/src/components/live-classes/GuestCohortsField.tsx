@@ -125,11 +125,17 @@ function CohortRow({
         <input
           type="number" min={seatsHeld ?? 0} max={500}
           className={`${fieldBase} w-28`} style={selectStyle} disabled={disabled}
-          value={cohort.seatFloor}
-          /* Number(), not the raw string: the field is typed as a number and
-             a string would reach the server and fail its own coercion later,
-             for no visible reason. */
-          onChange={e => onChange({ ...cohort, seatFloor: Number(e.target.value) })}
+          /* An empty box stays empty. Number('') is 0, so coercing on every
+             keystroke snapped the field to 0 under the caret the moment it was
+             cleared — you could not select-all and retype. NaN carries the
+             empty state, and the summary reads it as 0, which is what an
+             empty floor means anyway. */
+          value={Number.isFinite(cohort.seatFloor) ? cohort.seatFloor : ''}
+          onChange={e => onChange({
+            ...cohort,
+            seatFloor: e.target.value === '' ? NaN : Number(e.target.value),
+          })}
+          aria-label="Seats reserved for this academy"
           placeholder="Seats"
           title="Seats reserved for this academy"
         />
@@ -151,7 +157,7 @@ function CohortRow({
 
 export function GuestCohortsField({
   value, onChange, hostOrgId, hostGated, overflowSeats, onOverflowChange,
-  sessionCapacity, readOnly, heldByOrg,
+  sessionCapacity, readOnly, heldByOrg, storedFloors, storedCapacity, readOnlySummary,
 }: {
   value:            GuestCohortInput[]
   onChange:         (next: GuestCohortInput[]) => void
@@ -163,11 +169,51 @@ export function GuestCohortsField({
   readOnly?:        boolean
   /** organizationId → seats that academy already holds. Edit path only. */
   heldByOrg?:       Record<string, number>
+  /** organizationId → the floor as STORED. Present only once the class has
+      pools, and its presence is what switches the summary to the allocated
+      arithmetic. */
+  storedFloors?:    Record<string, number>
+  /** Capacity as stored, so a capacity raise in the same save counts towards
+      the budget — the server applies it before the cohort plan. */
+  storedCapacity?:  number
+  /** Pre-rendered rows for a viewer who may not EDIT this. Supplied because
+      the editable controls cannot render for them at all: every one of the
+      three pickers is fed by a super-admin-only endpoint, so an org admin got
+      three placeholders and a shared class looked unconfigured. */
+  readOnlySummary?: Array<{ academy: string; seatFloor: number; seatsLeft?: number }>
 }) {
+  const { data: allOrgs = [] } = useOrganizations(true)
   const floors    = value.reduce((n, c) => n + (Number(c.seatFloor) || 0), 0)
   const overflow  = Number(overflowSeats ?? 0) || 0
+
+  /* TWO DIFFERENT SUMS, because the server does two different things.
+
+     On a class that is not yet shared, create() splits the whole room:
+     host = capacity - floors - overflow. That is the arithmetic below.
+
+     On a class that ALREADY has pools, nothing is re-split. A raised floor and
+     a new academy are both drawn from the OVERFLOW, and the host floor is
+     never touched. Showing the create-time sum there told an admin "this
+     academy keeps 60" for an edit the server can only refuse — and since this
+     panel is the only check before Save, the feature's most ordinary edit
+     dead-ended on a 409 after a green preview.
+
+     Removals are not credited, though they do free seats, because the preview
+     cannot know whether one will be allowed: an academy with students in the
+     room cannot be dropped. Under-promising is the safe direction. */
+  const allocated = !!storedFloors
+  const drawn = allocated
+    ? value.reduce((n, c) =>
+        n + Math.max(0, (Number(c.seatFloor) || 0) - (storedFloors[c.organizationId] ?? 0)), 0)
+    : 0
+  const budget = allocated
+    ? overflow + (sessionCapacity - (storedCapacity ?? sessionCapacity))
+    : 0
   const hostSeats = sessionCapacity - floors - overflow
-  const over      = hostSeats < 0
+  const over      = allocated ? drawn > budget : hostSeats < 0
+  /* Every academy is either already on the class or is the host. */
+  const noneLeft  = allOrgs.filter(o =>
+    o.id !== hostOrgId && !value.some(c => c.organizationId === o.id)).length === 0
 
   return (
     <div className="space-y-2">
@@ -182,7 +228,20 @@ export function GuestCohortsField({
         </p>
       )}
 
-      {value.map((c, i) => (
+      {readOnly && readOnlySummary && readOnlySummary.map((r, i) => (
+        <div key={i}
+          className="flex items-center justify-between rounded-xl px-3 py-2 text-sm"
+          style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.07)' }}>
+          <span className="text-white/80">{r.academy}</span>
+          <span className="text-[11px] text-white/45">
+            {r.seatFloor} seat{r.seatFloor === 1 ? '' : 's'} reserved
+            {typeof r.seatsLeft === 'number' && r.seatsLeft !== r.seatFloor
+              ? ` · ${r.seatFloor - r.seatsLeft} taken` : ''}
+          </span>
+        </div>
+      ))}
+
+      {!(readOnly && readOnlySummary) && value.map((c, i) => (
         <CohortRow
           key={i}
           cohort={c}
@@ -199,6 +258,9 @@ export function GuestCohortsField({
       {!readOnly && (
         <button
           type="button"
+          /* A row nobody can fill is worse than no row: it names no academy, so
+             it fails validation, and its seat count still skews the summary. */
+          disabled={noneLeft}
           onClick={() => onChange([...value, { organizationId: '', courseId: '', seatFloor: 10 }])}
           className="flex items-center gap-1.5 rounded-xl px-3 py-2 text-xs text-white/70 hover:text-white hover:bg-white/5"
           style={{ border: '1px dashed rgba(255,255,255,0.15)' }}
@@ -215,6 +277,8 @@ export function GuestCohortsField({
               type="number" min={0} max={500}
               className="w-24 rounded-lg px-2 py-1 text-sm text-white outline-none"
               style={selectStyle}
+              aria-label="Shared overflow seats"
+              title="Seats promised to nobody, which any academy may draw on"
               disabled={readOnly || !onOverflowChange}
               value={overflow}
               onChange={e => onOverflowChange?.(Number(e.target.value))}
@@ -224,16 +288,26 @@ export function GuestCohortsField({
             Seats promised to nobody. Any academy may draw on them once its own floor is gone.
           </p>
           <div className="flex flex-wrap gap-x-4 gap-y-1 pt-1 text-[11px]">
-            <span className="text-white/45">This academy keeps{' '}
-              <b className={over ? 'text-red-400' : 'text-white/80'}>{hostSeats}</b>
-            </span>
+            {allocated ? (
+              <span className="text-white/45">Unpromised{' '}
+                <b className={over ? 'text-red-400' : 'text-white/80'}>{Math.max(0, budget - drawn)}</b>
+              </span>
+            ) : (
+              <span className="text-white/45">This academy keeps{' '}
+                <b className={over ? 'text-red-400' : 'text-white/80'}>{hostSeats}</b>
+              </span>
+            )}
             <span className="text-white/45">Guests {floors}</span>
             <span className="text-white/45">Overflow {overflow}</span>
             <span className="text-white/45">of {sessionCapacity}</span>
           </div>
           {over && (
             <p className="text-[11px] text-red-400">
-              The floors and overflow come to {floors + overflow}, more seats than this class has.
+              {allocated
+                ? `That needs ${drawn} unpromised seat${drawn === 1 ? '' : 's'}, and `
+                  + `${Math.max(0, budget)} ${budget === 1 ? 'is' : 'are'} free. Raise the class `
+                  + `capacity, or lower another academy floor first.`
+                : `The floors and overflow come to ${floors + overflow}, more seats than this class has.`}
             </p>
           )}
         </div>

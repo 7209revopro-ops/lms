@@ -118,6 +118,13 @@ try {
   /* Belongs to a DIFFERENT Bangalore course — the sectionId-in-the-wrong-course case. */
   const strayB = await SectionModel.create({ courseId: otherB._id, title: 'M9', order: 9 })
 
+  /* NOTE for anyone adding a swap test: you cannot. Organization.slug is
+     enumerated ['dubai','bangalore'] (schema.ts), so the product has exactly
+     two academies — with one as the host there is only ever ONE possible
+     guest, and removing one academy while adding another cannot happen. The
+     removals-before-adds ordering still matters for the refused-removal case,
+     which the section below covers. */
+
   const bStudent = await mk('b.student@t.local', 'student', blr, { enrollmentStatus: 'approved' })
   await EnrollmentModel.create({ userId: bStudent._id, courseId: bCourse._id, status: 'active' })
 
@@ -322,6 +329,112 @@ try {
     check('the copy carries the cohort', !!p && p.cohorts.length === 1,
       p ? `${p.cohorts.length} cohort(s)` : 'no copy id')
     check('and the copy balances too', !!p && p.balances, JSON.stringify(p))
+  }
+
+  /* ═══════════════════════════════════════════════════════ */
+  section('Re-aiming a door moves who may enter, not how many seats')
+  {
+    /* The diff keyed a cohort on its ACADEMY alone, so changing which of that
+       academy's courses the class admitted was accepted with 200 and written
+       nowhere. The form said saved; the door never moved. */
+    const r = await call('POST', '/admin/live-classes', {
+      jar: superJar, body: body({ guestCohorts: [cohort({ sectionId: String(bSec._id) })] }),
+    })
+    const id = String(r.body?.data?.id ?? '')
+    check('a shared class to re-aim', r.status === 201, why(r))
+
+    const before = await pools(id)
+    const moved = await call('PATCH', `/admin/live-classes/${id}`, {
+      jar: superJar,
+      body: { guestCohorts: [{ organizationId: String(blr._id), courseId: String(otherB._id),
+                              seatFloor: 10 }] },
+    })
+    check('re-aiming at another of their courses succeeds', moved.status === 200, why(moved))
+
+    const after = await pools(id)
+    check('AND THE STORED DOOR ACTUALLY MOVED',
+      String(after.cohorts[0]?.courseId) === String(otherB._id),
+      `courseId ${String(after.cohorts[0]?.courseId).slice(-6)}, expected ${String(otherB._id).slice(-6)}`)
+    check('dropping the module clears it rather than storing an empty one',
+      after.cohorts[0]?.sectionId == null, String(after.cohorts[0]?.sectionId))
+    check('and not one seat moved',
+      after.cohorts[0]?.seatsLeft === before.cohorts[0]?.seatsLeft
+      && after.host === before.host && after.overflow === before.overflow,
+      JSON.stringify({ before, after }))
+    check('invariant holds', after.balances, JSON.stringify(after))
+  }
+
+  /* ═══════════════════════════════════════════════════════ */
+  section('A refused cohort change leaves the WHOLE edit unapplied')
+  {
+    const r = await call('POST', '/admin/live-classes', {
+      jar: superJar,
+      body: body({ title: 'Original title', sessionCapacity: 20,
+                   guestCohorts: [cohort({ seatFloor: 5 })], overflowSeats: 0 }),
+    })
+    const id = String(r.body?.data?.id ?? '')
+
+    /* The patch used to be written BEFORE the seats moved, so a refused seat
+       step returned 409 with the title change already live — the admin was
+       told the save failed while half of it had happened. */
+    const bad = await call('PATCH', `/admin/live-classes/${id}`, {
+      jar: superJar,
+      body: { title: 'Renamed while failing',
+              guestCohorts: [{ organizationId: String(blr._id), courseId: String(bCourse._id),
+                               seatFloor: 500 }] },
+    })
+    check('an impossible floor is refused', bad.status >= 400, why(bad))
+
+    const { LiveClassModel: LCM } = await import('@/models/schema.ts')
+    const doc = await LCM.findById(id).select('title').lean() as any
+    check('AND THE TITLE WAS NOT CHANGED', doc.title === 'Original title', doc.title)
+    check('invariant holds', (await pools(id)).balances)
+  }
+
+  /* ═══════════════════════════════════════════════════════ */
+  section('The two class-shape rules hold however the patch is phrased')
+  {
+    const r = await call('POST', '/admin/live-classes', {
+      jar: superJar, body: body({ guestCohorts: [cohort()] }),
+    })
+    const id = String(r.body?.data?.id ?? '')
+
+    /* Neither rule used to look at the STORED class, only at the request, so
+       a patch mentioning one field could produce a state create() refuses. */
+    const inPerson = await call('PATCH', `/admin/live-classes/${id}`, {
+      jar: superJar, body: { isOnline: false },
+    })
+    check('an already-shared class cannot be turned in-person', inPerson.status >= 400, why(inPerson))
+
+    const gate = await call('PATCH', `/admin/live-classes/${id}`, {
+      jar: superJar, body: { sectionId: String(dSec._id) },
+    })
+    check('nor gated to a module while a guest names none', gate.status >= 400, why(gate))
+    check('and the class is untouched', (await pools(id)).cohorts.length === 1)
+  }
+
+  /* ═══════════════════════════════════════════════════════ */
+  section('Removed seats go back to the OVERFLOW, not to the host')
+  {
+    /* The old removal test asserted only the invariant, which balances just as
+       well if the seats land in the wrong pool. */
+    const r = await call('POST', '/admin/live-classes', {
+      jar: superJar,
+      body: body({ sessionCapacity: 30, guestCohorts: [cohort({ seatFloor: 8 })], overflowSeats: 2 }),
+    })
+    const id = String(r.body?.data?.id ?? '')
+    const before = await pools(id)
+
+    const gone = await call('PATCH', `/admin/live-classes/${id}`, {
+      jar: superJar, body: { guestCohorts: [] },
+    })
+    check('the academy is removed', gone.status === 200, why(gone))
+    const after = await pools(id)
+    check('its 8 seats went to the overflow', after.overflow === before.overflow + 8,
+      `overflow ${before.overflow} -> ${after.overflow}`)
+    check('and the host floor did not move', after.host === before.host,
+      `host ${before.host} -> ${after.host}`)
+    check('invariant holds', after.balances, JSON.stringify(after))
   }
 
   /* ═══════════════════════════════════════════════════════ */

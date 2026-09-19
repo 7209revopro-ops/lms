@@ -607,6 +607,22 @@ export function EditLiveClassModal({ live, onClose, onSuccess }: Props) {
               overflowSeats={(live as any).overflowSeatsLeft ?? 0}
               readOnly={!isSuper}
               heldByOrg={heldByOrg}
+              /* Present only once the class HAS pools. Its presence switches
+                 the summary from create-time arithmetic (which re-splits the
+                 whole room) to the allocated one (where a raise is drawn from
+                 the overflow and the host floor never moves). */
+              storedFloors={typeof (live as any).hostSeatsLeft === 'number'
+                ? Object.fromEntries(((live as any).guestCohorts ?? [])
+                    .map((c: any) => [String(c.organizationId), Number(c.seatFloor ?? 0)]))
+                : undefined}
+              storedCapacity={(live as any).sessionCapacity}
+              readOnlySummary={!isSuper
+                ? ((live as any).guestCohorts ?? []).map((c: any) => ({
+                    academy:   String(c.organizationSlug ?? c.organizationId),
+                    seatFloor: Number(c.seatFloor ?? 0),
+                    seatsLeft: typeof c.seatsLeft === 'number' ? c.seatsLeft : undefined,
+                  }))
+                : undefined}
             />
           )}
 

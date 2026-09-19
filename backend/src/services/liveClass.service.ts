@@ -14,7 +14,7 @@ import { env } from '@/config/env.ts'
 import { EnrollmentModel, LiveClassModel, UserModel, type ILiveClass, type LiveClassType, type LiveClassProvider } from '@/models/schema.ts'
 import { roomNameFor } from '@/services/integrationTicket.service.ts'
 import { tryEnsureRoom } from '@/services/clt.service.ts'
-import { adjustOverflow, allocatePools, addGuestCohort, setGuestFloor, removeGuestCohort } from '@/services/seatPool.service.ts'
+import { adjustOverflow, allocatePools, addGuestCohort, setGuestFloor, removeGuestCohort, repointGuestCohort } from '@/services/seatPool.service.ts'
 
 /* CLT caps a LiveKit room at 50 participants and 8 concurrent rooms. Kept here
    as a named constant so the admin UI and the tests quote the same number. */
@@ -850,7 +850,7 @@ export class LiveClassService {
     // and a change of start time (which invalidates every reminder already sent)
     const current = await LiveClassModel.findById(id)
       .select('type status googleMeetCode recordingUrl scheduledStart organizationId '
-            + 'courseId isOnline provider sessionCapacity bookedCount '
+            + 'courseId sectionId isOnline provider sessionCapacity bookedCount '
             + 'hostSeatsLeft overflowSeatsLeft guestCohorts')
       .lean()
 
@@ -968,11 +968,21 @@ export class LiveClassService {
       seatFloor:      c.seatFloor,
     }))
 
-    if (input.isOnline === false && nextCohorts.length > 0) {
+    /* BOTH RULES ARE ABOUT THE CLASS AS IT WILL BE, not about what this one
+       request happens to mention. Reading only `input` left two ways through:
+       a PATCH carrying cohorts and nothing else could be applied to a class
+       that is ALREADY in-person, and a PATCH gating an already-shared class to
+       a module never checked the cohorts it was gating against. Both produce a
+       state create() refuses outright. */
+    const willBeOnline = input.isOnline ?? (current as { isOnline?: boolean } | null)?.isOnline
+    if (willBeOnline === false && nextCohorts.length > 0) {
       throw new LiveClassError('INVALID_COHORT',
         'An in-person class cannot be shared with another academy', 400)
     }
-    if (input.sectionId != null && input.sectionId !== '' && nextCohorts.some(c => !c.sectionId)) {
+    const willBeGated = input.sectionId !== undefined
+      ? input.sectionId
+      : (current as { sectionId?: unknown } | null)?.sectionId
+    if (willBeGated && String(willBeGated) !== '' && nextCohorts.some(c => !c.sectionId)) {
       throw new LiveClassError('INVALID_COHORT',
         'This class is gated to a module, so every guest cohort must name one too', 400)
     }
@@ -993,6 +1003,7 @@ export class LiveClassService {
       | { kind: 'add';    cohort: (typeof nextCohorts)[number] }
       | { kind: 'floor';  orgId: string; from: number; to: number }
       | { kind: 'remove'; orgId: string; floor: number }
+      | { kind: 'repoint'; orgId: string; door: { courseId: string; sectionId?: string } }
     let cohortPlan: CohortPlan[] = []
 
     if (input.guestCohorts != null) {
@@ -1025,21 +1036,97 @@ export class LiveClassService {
           cohortPlan.push({ kind: 'allocate', cohorts: nextCohorts, overflow })
         }
       } else {
-        const bySlug = new Map(storedCohorts.map(c => [String(c.organizationId), c]))
+        const byOrg  = new Map(storedCohorts.map(c => [String(c.organizationId), c]))
         const wanted = new Set(nextCohorts.map(c => String(c.organizationId)))
 
-        for (const c of nextCohorts) {
-          const key  = String(c.organizationId)
-          const have = bySlug.get(key)
-          const to   = Math.max(0, Math.trunc(c.seatFloor ?? 0))
-          if (!have) cohortPlan.push({ kind: 'add', cohort: { ...c, seatFloor: to } })
-          else if (have.seatFloor !== to) {
-            cohortPlan.push({ kind: 'floor', orgId: key, from: have.seatFloor, to })
-          }
-        }
+        /* REMOVALS ARE PLANNED FIRST, and applied first, for two reasons.
+           They FUND the rest — an academy dropped in the same save should pay
+           for the one that replaces it, and applying adds first meant a swap
+           needed enough spare overflow to hold both at once. And a removal
+           that is refused (its students are sitting in the room) must not
+           leave the replacement already added, which is the state the old
+           order produced: add applied, remove refused, 409, and a class
+           serving one more academy than the admin asked for. */
         for (const c of storedCohorts) {
           const key = String(c.organizationId)
           if (!wanted.has(key)) cohortPlan.push({ kind: 'remove', orgId: key, floor: c.seatFloor })
+        }
+
+        for (const c of nextCohorts) {
+          const key  = String(c.organizationId)
+          const have = byOrg.get(key)
+          const to   = Math.max(0, Math.trunc(c.seatFloor ?? 0))
+          if (!have) { cohortPlan.push({ kind: 'add', cohort: { ...c, seatFloor: to } }); continue }
+
+          /* THE DOOR, which the diff used to ignore entirely. Keyed on the
+             academy alone, a cohort whose course or module changed looked
+             identical to one that had not, so the edit was accepted with 200
+             and written nowhere. */
+          const doorMoved =
+            String(have.courseId) !== String(c.courseId) ||
+            (have.sectionId ? String(have.sectionId) : '') !== (c.sectionId ?? '')
+          if (doorMoved) {
+            cohortPlan.push({ kind: 'repoint', orgId: key,
+              door: { courseId: c.courseId, ...(c.sectionId ? { sectionId: c.sectionId } : {}) } })
+          }
+          if (have.seatFloor !== to) {
+            cohortPlan.push({ kind: 'floor', orgId: key, from: have.seatFloor, to })
+          }
+        }
+
+        /* ── PRE-CHECK, BEFORE THE PATCH IS WRITTEN ──────────────────────
+           The patch lands first and the seats move after, so a step refused
+           at apply time returns 409 with the rest of the edit already live —
+           the title changed, the time changed, and the admin is told the save
+           failed. Everything that can be known up front is therefore checked
+           up front, and only genuine races reach the apply loop.
+
+           The budget is one sum because the steps share one pool: removals
+           give seats back, raises and adds take them. Checking each step in
+           isolation would refuse a swap that balances exactly. */
+        const freed = cohortPlan.reduce((n, s) =>
+          n + (s.kind === 'remove' ? s.floor : 0), 0)
+        const drawn = cohortPlan.reduce((n, s) =>
+          n + (s.kind === 'add' ? Math.max(0, Math.trunc(s.cohort.seatFloor))
+             : s.kind === 'floor' ? Math.max(0, s.to - s.from) : 0), 0)
+        const returned = cohortPlan.reduce((n, s) =>
+          n + (s.kind === 'floor' ? Math.max(0, s.from - s.to) : 0), 0)
+        /* A capacity change in the same request is applied before this (see
+           adjustOverflow above), so its seats are already in the pool. */
+        const capDelta = input.sessionCapacity != null
+          ? input.sessionCapacity - ((current as any)?.sessionCapacity ?? 0) : 0
+        const budget = ((current as any)?.overflowSeatsLeft ?? 0) + capDelta + freed + returned
+        if (drawn > budget) {
+          throw new LiveClassError('OVERFLOW_TOO_SMALL',
+            `That needs ${drawn} unpromised seat(s) and only ${Math.max(0, budget)} are free. `
+            + 'Raise the class capacity, or lower another academy floor first.', 409)
+        }
+        for (const s of cohortPlan) {
+          if (s.kind === 'floor' && s.to < (byOrg.get(s.orgId)!.seatFloor - byOrg.get(s.orgId)!.seatsLeft)) {
+            throw new LiveClassError('FLOOR_BELOW_TAKEN',
+              'That floor is below the seats that academy has already taken.', 409)
+          }
+        }
+        /* A cohort may only be dropped when its academy is sitting in no seat
+           at all. seatsLeft === seatFloor answers that for a normal floor and
+           LIES for a floor of 0: those students are holding OVERFLOW seats,
+           which the countdown never recorded, and removing the door strands
+           them — booked, and refused at the door as WRONG_ACADEMY. */
+        const removals = cohortPlan.filter(s => s.kind === 'remove') as Array<{ orgId: string }>
+        if (removals.length) {
+          const { ClassBookingModel } = await import('@/models/schema.ts')
+          for (const r of removals) {
+            const held = await ClassBookingModel.countDocuments({
+              liveClassId: new Types.ObjectId(id),
+              seatOrganizationId: new Types.ObjectId(r.orgId),
+              status: { $in: ['booked', 'attended'] },
+            })
+            if (held > 0) {
+              throw new LiveClassError('COHORT_IN_USE',
+                `That academy has ${held} student(s) booked on this class, so it cannot be removed. `
+                + 'Cancel their bookings first.', 409)
+            }
+          }
         }
       }
     }
@@ -1076,6 +1163,12 @@ export class LiveClassService {
           step.to > step.from
             ? 'There are not enough unpromised seats to raise that floor.'
             : 'That floor cannot go below the seats that academy has already taken.', 409)
+      } else if (step.kind === 'repoint') {
+        /* Moves WHICH students may come in, not how many seats they were
+           promised, so no counter changes and there is nothing to race. */
+        ok = await repointGuestCohort(id, step.orgId, step.door)
+        if (!ok) throw new LiveClassError('COHORT_NOT_FOUND',
+          'That academy is no longer on this class. Reopen it and try again.', 409)
       } else {
         ok = await removeGuestCohort(id, step.orgId, step.floor)
         if (!ok) throw new LiveClassError('COHORT_IN_USE',
