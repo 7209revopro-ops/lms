@@ -232,6 +232,172 @@ export async function adjustOverflow(liveClassId: string, delta: number): Promis
   )
 }
 
+/* First-time allocation of a class that already exists.
+
+   create() computes the same thing, but it may assume bookedCount is 0. Here
+   it is not: seats already taken are spent and cannot be promised to anybody,
+   so the caller subtracts them and passes the host floor in.
+
+   The bookedCount compare-and-set is the point of doing it here. The
+   UNALLOCATED reserve path increments bookedCount with no counter to
+   compensate, so a booking landing between the caller's read and this write
+   makes the arithmetic wrong by exactly one seat — oversold, silently, with
+   the invariant broken from birth. Refusing and letting the caller retry is
+   the only honest answer. */
+export async function allocatePools(
+  liveClassId: string,
+  pools: {
+    bookedCount: number
+    hostSeatsLeft: number
+    overflowSeatsLeft: number
+    guestCohorts: Array<{ organizationId: string; courseId: string; sectionId?: string; seatFloor: number }>
+  },
+): Promise<boolean> {
+  const { LiveClassModel } = await import('@/models/schema.ts')
+  const r = await LiveClassModel.updateOne(
+    {
+      _id: new Types.ObjectId(liveClassId),
+      bookedCount: pools.bookedCount,
+      hostSeatsLeft: { $exists: false },
+    },
+    { $set: {
+      hostSeatsLeft:     pools.hostSeatsLeft,
+      overflowSeatsLeft: pools.overflowSeatsLeft,
+      guestCohorts:      pools.guestCohorts.map(c => ({
+        organizationId: new Types.ObjectId(c.organizationId),
+        courseId:       new Types.ObjectId(c.courseId),
+        ...(c.sectionId ? { sectionId: new Types.ObjectId(c.sectionId) } : {}),
+        seatFloor: Math.max(0, Math.trunc(c.seatFloor)),
+        seatsLeft: Math.max(0, Math.trunc(c.seatFloor)),
+      })),
+    } },
+  )
+  return r.modifiedCount > 0
+}
+
+/* ─────────────────────────────────────────────────────
+   Editing an academy's floor after the class exists
+
+   THE HOUSE RULE, copied from the capacity edit above: a change lands in the
+   OVERFLOW, never in somebody else's floor. A floor is what an academy was
+   promised, and quietly enlarging or shrinking one is the same surprise.
+
+   Let d = F' - F for the cohort being edited. Then
+
+       seatsLeft      += d
+       overflowSeatsLeft -= d
+       seatFloor       = F'
+
+   and the invariant survives, because the two counters move by equal and
+   opposite amounts and bookedCount is untouched.
+
+   EVERY GUARD IS IN THE FILTER, none is a read-then-check. A read-then-check
+   loses to a booking that lands in between, which is the whole reason the
+   counters count down.
+
+     · seatsLeft >= max(0, -d)   is algebraically F' >= held, so a floor can
+       never be cut below the seats that cohort is already sitting in. At the
+       boundary F' === held it passes and leaves seatsLeft 0, which is right.
+     · overflowSeatsLeft >= max(0, d) makes the donor prove it has the seats
+       before they are moved.
+     · seatFloor === F is a COMPARE-AND-SET, and it is not optional. Without
+       it two identical requests — a double-clicked Save, a retry — each
+       compute d from the same read and BOTH apply. The sum still equals
+       sessionCapacity so nothing detects it, the schema's sum check does not
+       run on findByIdAndUpdate, and the reconciler later "repairs" the
+       inflated seatsLeft back down, destroying seats that were never taken.
+       It also gives "an unchanged floor writes nothing" for free.
+───────────────────────────────────────────────────── */
+export async function setGuestFloor(
+  liveClassId: string,
+  orgId:       string,
+  currentFloor: number,
+  nextFloor:    number,
+): Promise<boolean> {
+  const d = nextFloor - currentFloor
+  if (d === 0) return true
+  const { LiveClassModel } = await import('@/models/schema.ts')
+  const _id = new Types.ObjectId(liveClassId)
+  const org = new Types.ObjectId(orgId)
+
+  const r = await LiveClassModel.updateOne(
+    {
+      _id,
+      overflowSeatsLeft: { $gte: Math.max(0, d) },
+      guestCohorts: { $elemMatch: {
+        organizationId: org,
+        seatFloor:      currentFloor,          // compare-and-set
+        seatsLeft:      { $gte: Math.max(0, -d) },
+      } },
+    },
+    {
+      $inc: { 'guestCohorts.$[c].seatsLeft': d, overflowSeatsLeft: -d },
+      $set: { 'guestCohorts.$[c].seatFloor': nextFloor },
+    },
+    { arrayFilters: [{ 'c.organizationId': org, 'c.seatFloor': currentFloor }] },
+  )
+  return r.modifiedCount > 0
+}
+
+/** Add an academy to a class that is ALREADY allocated. The seats come out of
+    the overflow, which must be able to cover them. */
+export async function addGuestCohort(
+  liveClassId: string,
+  cohort: { organizationId: string; courseId: string; sectionId?: string; seatFloor: number },
+): Promise<boolean> {
+  const { LiveClassModel } = await import('@/models/schema.ts')
+  const floor = Math.max(0, Math.trunc(cohort.seatFloor))
+  const org   = new Types.ObjectId(cohort.organizationId)
+
+  const r = await LiveClassModel.updateOne(
+    {
+      _id: new Types.ObjectId(liveClassId),
+      overflowSeatsLeft: { $gte: floor },
+      'guestCohorts.organizationId': { $ne: org },   // an academy appears once
+    },
+    {
+      $inc:  { overflowSeatsLeft: -floor },
+      $push: { guestCohorts: {
+        organizationId: org,
+        courseId:       new Types.ObjectId(cohort.courseId),
+        ...(cohort.sectionId ? { sectionId: new Types.ObjectId(cohort.sectionId) } : {}),
+        seatFloor: floor,
+        seatsLeft: floor,
+      } },
+    },
+  )
+  return r.modifiedCount > 0
+}
+
+/** Remove an academy. ONLY when it is holding nothing.
+
+    Removing a cohort whose students have booked strands them: doorsFor()
+    rebuilds the doors from this array, so their join answers WRONG_ACADEMY
+    while their booking row still reads 'booked'. Refusing follows the nearest
+    precedent in this codebase — CAPACITY_BELOW_BOOKED refuses rather than
+    reconciles — and reconciling would be a cancellation-and-refund feature,
+    not a seat move. The filter demands seatsLeft === seatFloor, which is
+    exactly "this academy has drawn nothing". */
+export async function removeGuestCohort(
+  liveClassId: string,
+  orgId:       string,
+  floor:       number,
+): Promise<boolean> {
+  const { LiveClassModel } = await import('@/models/schema.ts')
+  const org = new Types.ObjectId(orgId)
+  const r = await LiveClassModel.updateOne(
+    {
+      _id: new Types.ObjectId(liveClassId),
+      guestCohorts: { $elemMatch: { organizationId: org, seatFloor: floor, seatsLeft: floor } },
+    },
+    {
+      $inc:  { overflowSeatsLeft: floor },
+      $pull: { guestCohorts: { organizationId: org } },
+    },
+  )
+  return r.modifiedCount > 0
+}
+
 /* The three fields a booking is stamped with, from a reservation. Kept here so
    the four booking paths cannot disagree about the shape. */
 export function seatStampFrom(

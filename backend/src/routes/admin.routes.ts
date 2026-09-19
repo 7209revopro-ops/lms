@@ -1359,7 +1359,57 @@ router.put   ('/sections/:sectionId/lessons/reorder',     validate(reorderSchema
 
 /* ─── Live classes ────────────────────────────────── */
 const LIVE_LANGUAGES = ['English', 'Arabic', 'Hindi', 'Malayalam', 'Urdu'] as const
-const liveCreateSchema = z.object({
+/* ── CROSS-ACADEMY COHORTS ──────────────────────────────────────────────
+   One class, more than one academy. Each entry is a DOOR: the academy whose
+   students may come in, the course of THEIRS they must be enrolled in, and
+   optionally the module of that course. Entitlement never compares a value
+   from one door against a value from another.
+
+   These two fields were missing from this schema for the whole of phase 2, and
+   validate() assigns result.data over the body on a NON-STRICT object — so zod
+   STRIPPED them and the route answered 201 having quietly created a
+   single-academy class. No error, no log, and four green suites, because every
+   one of them authored cohorts through the service or the model rather than
+   over HTTP.
+
+   Only SHAPE is checked here. Everything that needs the database — does the
+   academy exist, is that course really its course, is that module really that
+   course's, is this cohort secretly the host's own academy — lives in
+   #assertCohortsUsable in liveClass.service.ts, which zod cannot reach. */
+const guestCohortSchema = z.object({
+  organizationId: z.string().min(1),
+  courseId:       z.string().min(1),
+  sectionId:      z.string().optional(),
+  /* Coerced like durationMins and sessionCapacity below, because a number
+     input hands back a string. .int().min(0) still refuses -1 and 2.9 —
+     coercion widens what is ACCEPTED, not what is ALLOWED. */
+  seatFloor:      z.coerce.number().int().min(0).max(500),
+})
+
+/* Ten is not a technical limit, it is a sanity bound: a class shared with more
+   academies than that is a data-entry accident, not a timetable. */
+const cohortsField  = z.array(guestCohortSchema).max(10).optional()
+const overflowField = z.coerce.number().int().min(0).max(500).optional()
+
+/* The two rules that have to see more than one field at once, so cannot sit on
+   a single member. Applied to create AND update — a rule enforced in only one
+   of the two is a rule that holds until the first edit. */
+const withCohortRules = (o: z.ZodTypeAny) => o
+  /* An overflow with nobody to share it with is a number that reaches the
+     service and is dropped: create() only enters the allocation branch when
+     there is at least one cohort. Refusing it beats repeating the exact
+     silent-discard bug this change exists to fix. */
+  .refine((v: any) => !(v.overflowSeats != null && !(v.guestCohorts ?? []).length),
+    { path: ['overflowSeats'],
+      message: 'Overflow seats need at least one guest academy to share them with' })
+  /* An in-person class is a room in a building. Admitting another academy's
+     students to it is not something anyone chose, so it is refused rather than
+     assumed. */
+  .refine((v: any) => !(v.isOnline === false && (v.guestCohorts ?? []).length),
+    { path: ['guestCohorts'],
+      message: 'An in-person class cannot be shared with another academy' })
+
+const liveCreateSchema = withCohortRules(z.object({
   courseId:        z.string().min(1),
   title:           z.string().min(3).max(255).trim(),
   description:     z.string().max(2000).optional(),
@@ -1381,8 +1431,10 @@ const liveCreateSchema = z.object({
   isOnline:        z.boolean().optional(),
   location:        z.string().max(500).optional(),
   room:            z.string().max(100).optional(),
-})
-const liveUpdateSchema = z.object({
+  guestCohorts:    cohortsField,
+  overflowSeats:   overflowField,
+}))
+const liveUpdateSchema = withCohortRules(z.object({
   title:           z.string().min(3).max(255).trim().optional(),
   description:     z.string().max(2000).optional(),
   scheduledStart:  z.string().refine(s => !isNaN(Date.parse(s)), 'Invalid date').optional(),
@@ -1404,7 +1456,9 @@ const liveUpdateSchema = z.object({
   location:          z.string().max(500).optional(),
   room:              z.string().max(100).optional(),
   rescheduleReason:  z.string().max(2000).optional(),
-})
+  guestCohorts:      cohortsField,
+  overflowSeats:     overflowField,
+}))
 
 router.get   ('/courses/:courseId/live-classes',          live.adminListForCourse)
 router.get   ('/live-classes',                            live.adminListAll)

@@ -4,7 +4,7 @@ import { instructorOwnsSession, callerOrgForRead } from '@/utils/tenancy.ts'
 import { ensureOrgSlugs, orgSlugFor } from '@/utils/orgSlugs.ts'
 import { doorsFor } from '@/services/classEntitlement.service.ts'
 import { logger } from '@/utils/logger.ts'
-import { LiveClassService } from '@/services/liveClass.service.ts'
+import { LiveClassService, LiveClassError } from '@/services/liveClass.service.ts'
 import { SectionService } from '@/services/section.service.ts'
 import { verifyWebhookSignature } from '@/services/mux.service.ts'
 import { createGoogleMeetLink } from '@/services/googleMeet.service.ts'
@@ -764,6 +764,11 @@ export class LiveClassController {
       isOnline?:        boolean
       location?:        string
       room?:            string
+      guestCohorts?:    Array<{ organizationId: string; courseId: string; sectionId?: string; seatFloor: number }>
+      overflowSeats?:   number
+      /* Pins the host academy instead of inheriting the caller's. Only repeat
+         uses it — see the note at its call site. */
+      organizationId?:  string
     },
     req: Request,
     seriesId?: string,
@@ -846,6 +851,28 @@ export class LiveClassController {
       }
     }
 
+    /* ── WHO MAY SHARE A CLASS WITH ANOTHER ACADEMY ──────────────────────
+       Super admins only, and this gate ships in the same change that first
+       lets cohorts through the validator — because forwarding them without it
+       IS the hole.
+
+       #assertCohortsUsable checks that a cohort is COHERENT (the academy
+       exists, the course is really that academy's) and never asks who is
+       asking. The route's own guard is requirePermission('live-classes',
+       'create'), which short-circuits for any account without a custom role.
+       So the moment cohorts reach the service, a Dubai sub_admin who guesses a
+       Bangalore organisation id can publish into Bangalore's timetable.
+
+       Gated on a NON-EMPTY array, never on the key being present: the edit
+       modal re-sends its whole form on every save, so refusing `[]` would make
+       every ordinary edit, on every class, fail for everyone who is not a
+       super admin. */
+    const wantsCohorts = Array.isArray(dto.guestCohorts) && dto.guestCohorts.length > 0
+    if (wantsCohorts && req.user?.role !== 'super_admin') {
+      throw new LiveClassError('CROSS_ACADEMY_FORBIDDEN',
+        'Only a super admin can share a class with another academy', 403)
+    }
+
     const live = await this.service.create({
       courseId:        dto.courseId,
       instructorId:    instructorId,
@@ -863,8 +890,18 @@ export class LiveClassController {
       isOnline,
       location:        dto.location,
       room:            dto.room,
-      organizationId:  req.user?.organizationId,
+      /* The caller's academy, EXCEPT when the caller pinned one. A super
+         admin's organizationId is whatever the org switcher last said, so a
+         copy of a Dubai class made while the switcher reads Bangalore would
+         otherwise be born a Bangalore class — and its inherited Bangalore
+         cohort would then be refused as "a class cannot be a guest of its own
+         academy". A copy belongs to whoever owned the original. */
+      organizationId:  dto.organizationId ?? req.user?.organizationId,
       seriesId,
+      /* Omitted entirely when absent, so a class with no cohorts takes the
+         byte-for-byte path it took before this feature existed. */
+      ...(wantsCohorts ? { guestCohorts: dto.guestCohorts } : {}),
+      ...(wantsCohorts && dto.overflowSeats != null ? { overflowSeats: dto.overflowSeats } : {}),
     })
 
     /* Notify assigned instructor — fire-and-forget, only for Google Meet sessions */
@@ -915,6 +952,16 @@ export class LiveClassController {
         body.instructorId = req.user.id
       }
       const { live } = await this.#createOne(body, req)
+      /* Warm the academy slug cache before rendering. toDTO builds
+         servesAcademies and every cohort's organizationSlug from it, and it is
+         populated lazily — ensureOrgSlugs was awaited on the three READ
+         endpoints and nowhere on a write. So on a freshly booted process the
+         create and update responses came back with servesAcademies EMPTY,
+         contradicting the field's own promise of at least one entry, until
+         some unrelated list request happened to warm it. Harmless while no
+         class was shared; it is the first thing an admin sees now that one
+         can be. */
+      await ensureOrgSlugs()
       sendSuccess(res, toDTO(live), 'Live class scheduled', 201)
     } catch (err: any) {
       if (err?.statusCode) {
@@ -956,6 +1003,7 @@ export class LiveClassController {
         await LiveClassModel.findByIdAndUpdate(sourceId, { seriesId: new Types.ObjectId(seriesId) })
       }
 
+      await ensureOrgSlugs()
       const created: unknown[] = []
       for (let i = 1; i <= weeks; i++) {
         const scheduledStart = new Date(source.scheduledStart)
@@ -975,6 +1023,26 @@ export class LiveClassController {
           isOnline:        source.isOnline,
           location:        source.location,
           room:            source.room,
+          /* A copy of a shared class is still a shared class. Dropping these
+             produced host-only copies from a cross-academy original, silently
+             — the guest academy's students simply found nothing on their
+             schedule for the repeated weeks.
+
+             Carrying them also supplies the authorisation: #createOne refuses
+             a non-empty cohort list from anyone who is not a super admin, and
+             this route has no requirePermission of its own, so copying was
+             otherwise a way to mint cross-academy classes without the rank to
+             author one. */
+          ...(Array.isArray((source as any).guestCohorts) && (source as any).guestCohorts.length
+            ? { guestCohorts: ((source as any).guestCohorts as Array<Record<string, unknown>>).map(c => ({
+                organizationId: String(c['organizationId']),
+                courseId:       String(c['courseId']),
+                ...(c['sectionId'] ? { sectionId: String(c['sectionId']) } : {}),
+                seatFloor:      Number(c['seatFloor'] ?? 0),
+              })),
+              overflowSeats: Number((source as any).overflowSeatsLeft ?? 0) }
+            : {}),
+          organizationId:  source.organizationId ? String(source.organizationId) : undefined,
         }, req, seriesId)
         created.push(toDTO(live))
       }
@@ -1005,6 +1073,11 @@ export class LiveClassController {
       }
       const dto = req.body as Record<string, unknown>
       const data: Parameters<LiveClassService['update']>[1] = {}
+      /* Read once, up here, because the cohort gate below has to compare the
+         incoming set against what is actually stored rather than against the
+         mere presence of a key. */
+      const { LiveClassModel: LCM } = await import('@/models/schema.ts')
+      const oldForCohorts = await LCM.findById(id).select('guestCohorts').lean()
       if (typeof dto['title']             === 'string')  data.title             = dto['title']
       if (typeof dto['description']       === 'string')  data.description       = dto['description']
       if (typeof dto['scheduledStart']    === 'string')  data.scheduledStart    = new Date(dto['scheduledStart'])
@@ -1050,6 +1123,38 @@ export class LiveClassController {
       if (typeof dto['location']          === 'string')  data.location          = dto['location']
       if (typeof dto['room']              === 'string')  data.room              = dto['room']
       if (typeof dto['rescheduleReason']  === 'string')  data.rescheduledReason = dto['rescheduleReason']
+
+      /* ── COHORTS ON THE EDIT PATH ──────────────────────────────────────
+         Gated on a NON-EMPTY array, and only when it actually differs from
+         what is stored. The edit modal re-sends its entire form on every
+         save, so refusing on the key's mere presence would break every
+         ordinary edit — a title change, a reschedule — for every admin who is
+         not a super admin, on every class in the panel.
+
+         Comparing against the stored set means re-sending a class's own
+         cohorts unchanged is a no-op that anyone allowed to edit the class may
+         perform, while actually changing who it is shared with is a super
+         admin's decision. */
+      if (Array.isArray(dto['guestCohorts'])) {
+        const incoming = dto['guestCohorts'] as Array<Record<string, unknown>>
+        const stored   = ((oldForCohorts as any)?.guestCohorts ?? []) as Array<Record<string, unknown>>
+        const shape = (c: Record<string, unknown>) => [
+          String(c['organizationId'] ?? ''), String(c['courseId'] ?? ''),
+          String(c['sectionId'] ?? ''), Number(c['seatFloor'] ?? 0),
+        ].join('|')
+        const same =
+          incoming.length === stored.length &&
+          [...incoming].map(shape).sort().join(',') === [...stored].map(shape).sort().join(',')
+
+        if (!same) {
+          if (req.user?.role !== 'super_admin') {
+            throw new LiveClassError('CROSS_ACADEMY_FORBIDDEN',
+              'Only a super admin can change which academies a class is shared with', 403)
+          }
+          data.guestCohorts = incoming as any
+        }
+      }
+      if (typeof dto['overflowSeats'] === 'number') data.overflowSeats = dto['overflowSeats']
 
       /* ── Tell the people who booked (feature: change notifications) ──────
          Snapshot BEFORE the update so old and new can be compared. Three
@@ -1120,6 +1225,16 @@ export class LiveClassController {
         }).catch(err => logger.error({ err, liveClassId: id }, 'live class change notification failed'))
       }
 
+      /* Warm the academy slug cache before rendering. toDTO builds
+         servesAcademies and every cohort's organizationSlug from it, and it is
+         populated lazily — ensureOrgSlugs was awaited on the three READ
+         endpoints and nowhere on a write. So on a freshly booted process the
+         create and update responses came back with servesAcademies EMPTY,
+         contradicting the field's own promise of at least one entry, until
+         some unrelated list request happened to warm it. Harmless while no
+         class was shared; it is the first thing an admin sees now that one
+         can be. */
+      await ensureOrgSlugs()
       sendSuccess(res, toDTO(live), 'Live class updated')
     } catch (err) { next(err) }
   }

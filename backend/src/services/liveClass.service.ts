@@ -14,7 +14,7 @@ import { env } from '@/config/env.ts'
 import { EnrollmentModel, LiveClassModel, UserModel, type ILiveClass, type LiveClassType, type LiveClassProvider } from '@/models/schema.ts'
 import { roomNameFor } from '@/services/integrationTicket.service.ts'
 import { tryEnsureRoom } from '@/services/clt.service.ts'
-import { adjustOverflow } from '@/services/seatPool.service.ts'
+import { adjustOverflow, allocatePools, addGuestCohort, setGuestFloor, removeGuestCohort } from '@/services/seatPool.service.ts'
 
 /* CLT caps a LiveKit room at 50 participants and 8 concurrent rooms. Kept here
    as a named constant so the admin UI and the tests quote the same number. */
@@ -839,6 +839,8 @@ export class LiveClassService {
     location:          string
     room:              string
     rescheduledReason: string
+    guestCohorts:      Array<{ organizationId: string; courseId: string; sectionId?: string; seatFloor: number }>
+    overflowSeats:     number
   }>): Promise<ILiveClass> {
     if (!Types.ObjectId.isValid(id)) {
       throw new LiveClassError('INVALID_ID', 'Invalid id', 400)
@@ -853,6 +855,12 @@ export class LiveClassService {
       .lean()
 
     const patch: Partial<ILiveClass> = { ...(input as any) }
+    /* NEVER let these reach findByIdAndUpdate. guestCohorts carries seatsLeft,
+       which is a counter: a $set here would overwrite live seat state from a
+       stale read, and check:seats would not catch it because it greps for $inc.
+       Both fields are applied below, through seatPool.service.ts. */
+    delete (patch as any).guestCohorts
+    delete (patch as any).overflowSeats
     if (input.instructorId != null) {
       /* Same rule as create(). Without it the create-side check is one PATCH
          away from being bypassed: schedule with a real instructor, then move
@@ -939,8 +947,142 @@ export class LiveClassService {
       }
     }
 
+    /* ── CROSS-ACADEMY COHORTS ON THE EDIT PATH ──────────────────────────
+       Two rules first, and they are checked against the STORED cohorts, not
+       the incoming ones. A PATCH need not mention guestCohorts at all to
+       break them: the edit modal re-sends isOnline and sectionId on every
+       save, so `{ isOnline: false }` alone would otherwise turn a shared class
+       into an in-person one with live guest cohorts, which is the exact state
+       create() refuses. A rule enforced on only one of the two paths is a rule
+       that holds until the first edit. */
+    const storedCohorts = ((current as any)?.guestCohorts ?? []) as Array<{
+      organizationId: unknown; courseId: unknown; sectionId?: unknown
+      seatFloor: number; seatsLeft: number
+    }>
+    /* What the class will have once this patch lands: the incoming set if one
+       was sent, otherwise what is already there. */
+    const nextCohorts = input.guestCohorts ?? storedCohorts.map(c => ({
+      organizationId: String(c.organizationId),
+      courseId:       String(c.courseId),
+      ...(c.sectionId ? { sectionId: String(c.sectionId) } : {}),
+      seatFloor:      c.seatFloor,
+    }))
+
+    if (input.isOnline === false && nextCohorts.length > 0) {
+      throw new LiveClassError('INVALID_COHORT',
+        'An in-person class cannot be shared with another academy', 400)
+    }
+    if (input.sectionId != null && input.sectionId !== '' && nextCohorts.some(c => !c.sectionId)) {
+      throw new LiveClassError('INVALID_COHORT',
+        'This class is gated to a module, so every guest cohort must name one too', 400)
+    }
+    /* The overflow is the balancing pool once a class is allocated: it moves
+       only as the counterpart of a floor or capacity change. Setting it
+       directly would need a second donor. Refused rather than ignored — a
+       silently dropped field is the bug this whole change exists to fix. */
+    if (input.overflowSeats != null && typeof (current as any)?.hostSeatsLeft === 'number') {
+      throw new LiveClassError('OVERFLOW_NOT_EDITABLE',
+        'Overflow seats are set when the class is first shared. Change an academy floor instead.', 400)
+    }
+
+    /* The diff is computed BEFORE the patch and applied AFTER it, so a patch
+       that fails validation cannot leave seats moved for a class that was
+       never edited. */
+    type CohortPlan =
+      | { kind: 'allocate'; cohorts: typeof nextCohorts; overflow: number }
+      | { kind: 'add';    cohort: (typeof nextCohorts)[number] }
+      | { kind: 'floor';  orgId: string; from: number; to: number }
+      | { kind: 'remove'; orgId: string; floor: number }
+    let cohortPlan: CohortPlan[] = []
+
+    if (input.guestCohorts != null) {
+      const classOrgId = (current as any)?.organizationId
+        ? new Types.ObjectId(String((current as any).organizationId))
+        : null
+      /* The same coherence checks create() runs: the academy exists, the
+         course is really that academy's, the module is really that course's,
+         no duplicates, and never the host's own academy. */
+      await this.#assertCohortsUsable(nextCohorts, classOrgId)
+
+      const allocated = typeof (current as any)?.hostSeatsLeft === 'number'
+      const capacity  = input.sessionCapacity ?? (current as any)?.sessionCapacity ?? 30
+      const booked    = (current as any)?.bookedCount ?? 0
+
+      if (!allocated) {
+        /* FIRST-TIME ALLOCATION on a class that may already have bookings.
+           create()'s formula assumes bookedCount is 0, which is true at create
+           and false here — those seats are already spent and cannot be
+           promised to anyone. */
+        if (nextCohorts.length > 0) {
+          const overflow = Math.max(0, Math.trunc(input.overflowSeats ?? 0))
+          const floors   = nextCohorts.reduce((n, c) => n + Math.max(0, Math.trunc(c.seatFloor ?? 0)), 0)
+          const host     = capacity - floors - overflow - booked
+          if (host < 0) {
+            throw new LiveClassError('SEATS_OVERALLOCATED',
+              `The guest floors and overflow come to ${floors + overflow}, and ${booked} seat(s) are `
+              + `already taken, which is more than the ${capacity} seats this class has`, 400)
+          }
+          cohortPlan.push({ kind: 'allocate', cohorts: nextCohorts, overflow })
+        }
+      } else {
+        const bySlug = new Map(storedCohorts.map(c => [String(c.organizationId), c]))
+        const wanted = new Set(nextCohorts.map(c => String(c.organizationId)))
+
+        for (const c of nextCohorts) {
+          const key  = String(c.organizationId)
+          const have = bySlug.get(key)
+          const to   = Math.max(0, Math.trunc(c.seatFloor ?? 0))
+          if (!have) cohortPlan.push({ kind: 'add', cohort: { ...c, seatFloor: to } })
+          else if (have.seatFloor !== to) {
+            cohortPlan.push({ kind: 'floor', orgId: key, from: have.seatFloor, to })
+          }
+        }
+        for (const c of storedCohorts) {
+          const key = String(c.organizationId)
+          if (!wanted.has(key)) cohortPlan.push({ kind: 'remove', orgId: key, floor: c.seatFloor })
+        }
+      }
+    }
+
     const updated = await this.liveRepo.updateByIdPopulated(id, patch)
     if (!updated) throw new LiveClassError('LIVE_CLASS_NOT_FOUND', 'Live class not found', 404)
+
+    /* Seats move only once the patch has landed. Moving them first reproduces
+       the torn-edit the capacity path is careful to avoid: the counters shift
+       and then updateByIdPopulated throws LIVE_CLASS_NOT_FOUND, leaving a
+       class nobody edited with seats nobody can account for. */
+    for (const step of cohortPlan) {
+      let ok = true
+      if (step.kind === 'allocate') {
+        const floors = step.cohorts.reduce((n, c) => n + Math.max(0, Math.trunc(c.seatFloor)), 0)
+        const booked = (current as any)?.bookedCount ?? 0
+        const cap    = input.sessionCapacity ?? (current as any)?.sessionCapacity ?? 30
+        ok = await allocatePools(id, {
+          bookedCount:       booked,
+          hostSeatsLeft:     cap - floors - step.overflow - booked,
+          overflowSeatsLeft: step.overflow,
+          guestCohorts:      step.cohorts,
+        })
+        if (!ok) throw new LiveClassError('SEATS_MOVED',
+          'Somebody booked this class while you were editing it. Reopen it and try again.', 409)
+      } else if (step.kind === 'add') {
+        ok = await addGuestCohort(id, step.cohort)
+        if (!ok) throw new LiveClassError('OVERFLOW_TOO_SMALL',
+          `There are not enough unpromised seats to give that academy ${step.cohort.seatFloor}. `
+          + 'Raise the class capacity, or lower another academy floor first.', 409)
+      } else if (step.kind === 'floor') {
+        ok = await setGuestFloor(id, step.orgId, step.from, step.to)
+        if (!ok) throw new LiveClassError('FLOOR_NOT_APPLIED',
+          step.to > step.from
+            ? 'There are not enough unpromised seats to raise that floor.'
+            : 'That floor cannot go below the seats that academy has already taken.', 409)
+      } else {
+        ok = await removeGuestCohort(id, step.orgId, step.floor)
+        if (!ok) throw new LiveClassError('COHORT_IN_USE',
+          'That academy has students booked on this class, so it cannot be removed. '
+          + 'Cancel their bookings first.', 409)
+      }
+    }
 
     /* Rescheduling moves the class, which invalidates every reminder already
        marked as sent — those flags describe a start time that no longer exists.
