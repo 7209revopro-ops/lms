@@ -17,6 +17,9 @@ import { CLASS_LANGUAGES } from '@/lib/languages'
 import { datetimeLocalToISO, zoneOf, foreignZoneTag } from '@/lib/timezone'
 import { useCourses } from '@/lib/api/courses'
 import { useCourseOutline } from '@/lib/api/outline'
+import { GuestCohortsField } from '@/components/live-classes/GuestCohortsField'
+import type { GuestCohortInput } from '@/lib/api/liveClasses'
+import { useOrgStore } from '@/store/org.store'
 import { useUsers } from '@/lib/api/users'
 import { useCurrentUser } from '@/lib/api/user'
 import { EditLiveClassModal } from '@/components/live-classes/EditLiveClassModal'
@@ -1085,8 +1088,25 @@ function QuickCreateModal({ onClose, onSuccess, categoryProgram }: { onClose: ()
   const [language,        setLanguage]        = useState('English')
   const [error,           setError]           = useState<string | null>(null)
 
+  /* Cross-academy sharing. The modal has no `me` of its own — the page's is a
+     sibling scope — so it reads the caller here. */
+  const { data: me } = useCurrentUser()
+  const isSuper = me?.role === 'super_admin'
+  const activeOrgId = useOrgStore((st: { activeOrgId: string | null }) => st.activeOrgId)
+  const [cohorts,  setCohorts]  = useState<GuestCohortInput[]>([])
+  const [overflow, setOverflow] = useState(0)
+
   const { data: outline } = useCourseOutline(courseId)
   const sections = outline?.sections ?? []
+
+  /* THE HOST ACADEMY is the one the server will stamp on the class, and that
+     is the org switcher when it is set — not the chosen course's academy. A
+     super admin switched to Bangalore creating a class from a Dubai course
+     gets a Bangalore class, so excluding Dubai from the guest list would be
+     the wrong exclusion. Falls back to the course's academy when the switcher
+     is off ("All Orgs"), which is what the server falls back to as well. */
+  const hostOrgId = activeOrgId
+    ?? (courses.find(c => c.id === courseId) as { organizationId?: string } | undefined)?.organizationId
 
   const handleCourseChange = (id: string) => { setCourseId(id); setSectionId('') }
 
@@ -1109,14 +1129,22 @@ function QuickCreateModal({ onClose, onSuccess, categoryProgram }: { onClose: ()
         sectionId:       sectionId || undefined,
         instructorId:    instructorId || undefined,
         language,
+        /* Omitted entirely unless there is something to send. The server
+           refuses a NON-EMPTY list from anyone who is not a super admin, so
+           an empty array would be harmless — but sending nothing keeps an
+           ordinary class on the exact request shape it had before. */
+        ...(isSuper && cohorts.length
+          ? { guestCohorts: cohorts, overflowSeats: overflow }
+          : {}),
       })
       onSuccess()
     } catch (err: any) {
-      setError(
-        err?.response?.data?.error?.message
-        ?? err?.response?.data?.error?.details?.[0]?.message
-        ?? 'Could not create session.',
-      )
+      /* details FIRST. validate() always fills `message` with the generic
+         'Request validation failed', and ?? only falls through on null — so
+         the field-level reason was unreachable and every rejected field read
+         as the same unhelpful sentence. */
+      const e = err?.response?.data?.error
+      setError(e?.details?.[0]?.message ?? e?.message ?? 'Could not create session.')
     }
   }
 
@@ -1285,6 +1313,18 @@ function QuickCreateModal({ onClose, onSuccess, categoryProgram }: { onClose: ()
               ]}
             />
           </div>
+
+          {isSuper && (
+            <GuestCohortsField
+              value={cohorts}
+              onChange={setCohorts}
+              hostOrgId={hostOrgId}
+              hostGated={!!sectionId}
+              overflowSeats={overflow}
+              onOverflowChange={setOverflow}
+              sessionCapacity={sessionCapacity === '' ? 0 : Number(sessionCapacity)}
+            />
+          )}
 
           {error && (
             <p className="flex items-center gap-1.5 text-xs" style={{ color: '#F87171' }}>

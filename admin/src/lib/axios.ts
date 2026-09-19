@@ -24,7 +24,11 @@ api.interceptors.request.use(config => {
       config.headers['Authorization'] = `Bearer ${token}`
     }
     const orgId = useOrgStore.getState().activeOrgId
-    if (orgId) {
+    /* The org switcher, UNLESS the caller already named an academy for this
+       one request. A super admin filling in a cross-academy class has to read
+       another academy's courses without moving the whole panel into it, and
+       the backend already restricts this header's effect to super admins. */
+    if (orgId && !config.headers?.['X-Organization-Id']) {
       config.headers = config.headers ?? {}
       config.headers['X-Organization-Id'] = orgId
     }

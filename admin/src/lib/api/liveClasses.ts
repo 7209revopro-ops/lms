@@ -5,6 +5,33 @@ import { api, apiGet, apiPost, apiPatch } from '@/lib/axios'
 export type LiveClassStatus = 'scheduled' | 'live' | 'ended' | 'cancelled'
 export type LiveClassType   = 'external' | 'internal'
 
+/* ── CROSS-ACADEMY COHORTS ──────────────────────────────────────────────
+   One class, more than one academy. Each cohort is a DOOR: the academy whose
+   students may come in, the course of THEIRS they must be enrolled in, and
+   optionally the module of that course.
+
+   The backend has emitted these on every live-class DTO since phase 2. They
+   were simply not declared here, so the data arrived over the wire and
+   TypeScript made it invisible to every consumer. */
+export interface GuestCohort {
+  organizationId:    string
+  organizationSlug?: string
+  courseId:          string
+  sectionId?:        string
+  /** Seats reserved for this academy that nobody else may take. */
+  seatFloor:         number
+  /** Counts DOWN as that academy books. seatFloor - seatsLeft is what it holds. */
+  seatsLeft?:        number
+}
+
+/** What the form sends. No seatsLeft — that is the server's to keep. */
+export interface GuestCohortInput {
+  organizationId: string
+  courseId:       string
+  sectionId?:     string
+  seatFloor:      number
+}
+
 export interface LiveClass {
   id:             string
   courseId:       string
@@ -43,6 +70,13 @@ export interface LiveClass {
   /* Module link */
   sectionId?:      string | { id: string; title: string }
   sessionCapacity: number
+
+  /* Cross-academy. Empty on every class that is not shared. */
+  guestCohorts?:      GuestCohort[]
+  hostSeatsLeft?:     number
+  overflowSeatsLeft?: number
+  /** Every academy this class serves, owner first. At least one entry. */
+  servesAcademies?:   string[]
   bookedCount:     number
 
   language:       string
@@ -147,9 +181,18 @@ export interface CreateLiveClassInput {
   isOnline?:        boolean      // false = offline physical session
   location?:        string       // venue address (offline only)
   room?:            string       // classroom number (offline only)
+  /* Super admin only — the backend answers CROSS_ACADEMY_FORBIDDEN otherwise,
+     and only when the list is non-empty. */
+  guestCohorts?:    GuestCohortInput[]
+  /** Seats promised to nobody, which any academy may draw on once its own
+      floor is gone. Only meaningful alongside guestCohorts. */
+  overflowSeats?:   number
 }
 
 export interface UpdateLiveClassInput {
+  /* Sending the stored set unchanged is a no-op any editor may perform;
+     CHANGING it is a super admin's decision. */
+  guestCohorts?:     GuestCohortInput[]
   courseId?:         string
   sectionId?:        string
   title?:            string

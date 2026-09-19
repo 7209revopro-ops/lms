@@ -16,6 +16,9 @@ import { useCourseOutline } from '@/lib/api/outline'
 import { useUsers } from '@/lib/api/users'
 import { isoToDatetimeLocal, datetimeLocalToISO, zoneOf, foreignZoneTag } from '@/lib/timezone'
 import Spinner from '@/components/ui/Spinner'
+import { GuestCohortsField } from '@/components/live-classes/GuestCohortsField'
+import type { GuestCohortInput } from '@/lib/api/liveClasses'
+import { useCurrentUser } from '@/lib/api/user'
 
 /* ── Helpers ──────────────────────────────────────────────
    No bare alias for isoToDatetimeLocal any more, on purpose. It and
@@ -83,6 +86,26 @@ export function EditLiveClassModal({ live, onClose, onSuccess }: Props) {
   const [language,     setLanguage]     = useState<string>((live as any).language ?? 'English')
   const [recordingUrl, setRecordingUrl] = useState<string>(live.recordingUrl ?? '')
   const [error,        setError]        = useState<string | null>(null)
+
+  /* Cross-academy sharing, pre-filled from what is stored. Only a super admin
+     may CHANGE it; everyone else sees it read-only, because the server refuses
+     a changed list with CROSS_ACADEMY_FORBIDDEN and a disabled control is a
+     better explanation than a 403. */
+  const { data: me } = useCurrentUser()
+  const isSuper = me?.role === 'super_admin'
+  const storedCohorts: GuestCohortInput[] = ((live as any).guestCohorts ?? []).map((c: any) => ({
+    organizationId: String(c.organizationId),
+    courseId:       String(c.courseId),
+    ...(c.sectionId ? { sectionId: String(c.sectionId) } : {}),
+    seatFloor:      Number(c.seatFloor ?? 0),
+  }))
+  const [cohorts, setCohorts] = useState<GuestCohortInput[]>(storedCohorts)
+  /* How many seats each academy is already sitting in, so a floor cannot be
+     dragged below them and the reason is visible before the round trip. */
+  const heldByOrg: Record<string, number> = {}
+  for (const c of ((live as any).guestCohorts ?? [])) {
+    heldByOrg[String(c.organizationId)] = Number(c.seatFloor ?? 0) - Number(c.seatsLeft ?? 0)
+  }
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [confirmRepeat, setConfirmRepeat] = useState(false)
   const [repeatWeeks,   setRepeatWeeks]   = useState(8)
@@ -135,15 +158,21 @@ export function EditLiveClassModal({ live, onClose, onSuccess }: Props) {
           sectionId:        sectionId || undefined,
           sessionCapacity:  sessionCapacity !== '' ? sessionCapacity : undefined,
           language,
+          /* Sent ONLY by a super admin. This modal re-sends its whole form on
+             every save and is mounted from five places, so including the key
+             for everyone else would put a cohort list on every ordinary edit
+             of every class — and the server's gate, which fires on a list that
+             DIFFERS from what is stored, would start refusing title changes. */
+          ...(isSuper ? { guestCohorts: cohorts } : {}),
         },
       })
       onSuccess()
     } catch (err: any) {
-      setError(
-        err?.response?.data?.error?.message
-        ?? err?.response?.data?.error?.details?.[0]?.message
-        ?? 'Failed to update session.',
-      )
+      /* details FIRST — validate() always fills `message` with the generic
+         'Request validation failed', so ?? never reached the field-level
+         reason and every rejected field read as the same sentence. */
+      const e = err?.response?.data?.error
+      setError(e?.details?.[0]?.message ?? e?.message ?? 'Failed to update session.')
     }
   }
 
@@ -561,6 +590,25 @@ export function EditLiveClassModal({ live, onClose, onSuccess }: Props) {
               </p>
             )}
           </div>
+
+          {(isSuper || cohorts.length > 0) && (
+            <GuestCohortsField
+              value={cohorts}
+              onChange={setCohorts}
+              /* The class already has an academy — its own — and it is not in
+                 the guest list. Read from the stored document rather than the
+                 org switcher, because the switcher can be pointed anywhere
+                 while this modal is open. */
+              hostOrgId={(live as any).organizationId
+                ? String((live as any).organizationId)
+                : undefined}
+              hostGated={!!sectionId}
+              sessionCapacity={sessionCapacity === '' ? 0 : Number(sessionCapacity)}
+              overflowSeats={(live as any).overflowSeatsLeft ?? 0}
+              readOnly={!isSuper}
+              heldByOrg={heldByOrg}
+            />
+          )}
 
           {error && (
             <p className="flex items-center gap-1.5 text-xs" style={{ color: '#F87171' }}>
