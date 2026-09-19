@@ -32,138 +32,13 @@ import type { MyBooking } from '@/lib/api/bookings'
 import { titleCase } from '@/lib/titleCase'
 import { AvatarImg } from '@/components/ui/AvatarImg'
 import {
-  buildGroups, effCourseId, effCourseTitle, effProgram, effSectionId,
-  effSectionTitle, effSectionOrder, effSectionDescription, isSharedWithYou,
-  getSlotStatus, SC, seatsLeft, slotPattern, nextSlot, isStillAhead,
-  type ClassGroup, type SlotStatus,
+  getSlotStatus, SC, seatsLeft, slotPattern, nextSlot,
+  buildCatalog, GENERAL_MODULE_ID as GENERAL,
+  type ClassGroup, type SlotStatus, type CourseNode, type ModuleNode,
 } from '@/lib/classSchedule'
-
-/* ── The tree ───────────────────────────────────────────────────────────── */
-
-export interface ModuleNode {
-  /** effSectionId — '' for sessions their course files under no module. */
-  id:           string
-  title:        string
-  description?: string
-  order?:       number
-  /** Every session here is one the admin has blocked this student out of.
-      They stay listed, as they always have; they are drawn locked. */
-  blocked:      boolean
-  languages:    string[]
-  groups:       ClassGroup[]
-  sessionCount: number
-}
-
-export interface CourseNode {
-  id:            string
-  title:         string
-  program?:      string
-  thumbnailUrl?: string
-  /** Reached through a GUEST door — this course belongs to the other academy
-      and is shared with yours. */
-  shared:        boolean
-  modules:       ModuleNode[]
-  sessionCount:  number
-}
-
-const GENERAL = ''
 
 /** "1 module" / "2 modules" — screen readers read the aria-label out loud. */
 const plural = (n: number, one: string, many = one + 's') => `${n} ${n === 1 ? one : many}`
-
-/**
- * Build the whole tree in one pass over the sessions still ahead.
- *
- * Bucketing by `effCourseId` then `effSectionId` is safe because both are
- * already inside the slot-group key (see groupKeyOf), so a group can never
- * straddle two courses or two modules.
- */
-export function buildCatalog(
-  classes: LiveClass[],
-  bookingMap: Map<string, MyBooking>,
-): CourseNode[] {
-  const ahead = classes.filter(isStillAhead)
-  const groups = buildGroups(ahead, bookingMap)
-
-  const courses = new Map<string, CourseNode>()
-
-  for (const g of groups) {
-    const first = g.slots[0]!
-    const cid   = effCourseId(first) ?? ''
-
-    let course = courses.get(cid)
-    if (!course) {
-      course = {
-        id:      cid,
-        title:   effCourseTitle(first) ?? 'Unassigned sessions',
-        program: effProgram(first),
-        /* Only ever the HOST's own artwork, and only for a host caller. A
-           guest's door names another academy's course by id; showing the
-           host's thumbnail beside the guest's course title would put two
-           doors in one card. */
-        thumbnailUrl: isSharedWithYou(first) ? undefined : first.course?.thumbnailUrl,
-        shared:  false,
-        modules: [],
-        sessionCount: 0,
-      }
-      courses.set(cid, course)
-    }
-    if (isSharedWithYou(first)) course.shared = true
-
-    const mid = effSectionId(first) || GENERAL
-    let mod = course.modules.find(m => m.id === mid)
-    if (!mod) {
-      mod = {
-        id:          mid,
-        title:       effSectionTitle(first) ?? 'General sessions',
-        description: effSectionDescription(first),
-        order:       effSectionOrder(first),
-        blocked:     true,          // narrowed below; one open session opens it
-        languages:   [],
-        groups:      [],
-        sessionCount: 0,
-      }
-      course.modules.push(mod)
-    }
-    mod.groups.push(g)
-    mod.sessionCount += g.slots.length
-    course.sessionCount += g.slots.length
-
-    for (const s of g.slots) {
-      /* A module is locked only when EVERY session in it is one this student
-         is enrolled for and has been blocked out of. A session they simply
-         have not bought is not a block — it is a course they have not taken,
-         and the booking flow already says so. */
-      if (!(s.isEnrolled === true && s.isEntitled === false)) mod.blocked = false
-      const lang = (s as { language?: string }).language
-      if (lang && !mod.languages.includes(lang)) mod.languages.push(lang)
-    }
-  }
-
-  for (const c of courses.values()) {
-    /* Module 1 before Module 10, by the module's own place in its own course.
-       A module with no order recorded sorts after the ordered ones rather
-       than at the front, and "General sessions" always sits last — it is the
-       leftovers bucket, not chapter zero. */
-    c.modules.sort((a, b) => {
-      if (a.id === GENERAL) return 1
-      if (b.id === GENERAL) return -1
-      const ao = a.order ?? Number.MAX_SAFE_INTEGER
-      const bo = b.order ?? Number.MAX_SAFE_INTEGER
-      return ao !== bo ? ao - bo : a.title.localeCompare(b.title)
-    })
-    for (const m of c.modules) {
-      m.languages.sort()
-      m.groups.sort((a, b) => {
-        const an = nextSlot(a.slots)?.scheduledStart ?? a.slots[0]!.scheduledStart
-        const bn = nextSlot(b.slots)?.scheduledStart ?? b.slots[0]!.scheduledStart
-        return new Date(an).getTime() - new Date(bn).getTime()
-      })
-    }
-  }
-
-  return [...courses.values()].sort((a, b) => a.title.localeCompare(b.title))
-}
 
 /* ── Shared chrome ──────────────────────────────────────────────────────── */
 
@@ -642,10 +517,12 @@ export function Hierarchy({
   )
 }
 
+export { buildCatalog }
+export type { CourseNode, ModuleNode }
+
 /* Exported so the page can resolve a group the hierarchy opened without
    going through `dateSections`, which the hierarchy does not build. */
 export function allGroupsIn(catalog: CourseNode[]): ClassGroup[] {
   return catalog.flatMap(c => c.modules.flatMap(m => m.groups))
 }
 
-export { GENERAL as GENERAL_MODULE_ID }
