@@ -176,57 +176,225 @@ function CourseCard({ node, index, onOpen }: {
   )
 }
 
-/* ── Level 2 — the modules ──────────────────────────────────────────────── */
+/* ── Level 2 — the modules ────────────────────────────────────────
 
-function ModuleCard({ node, position, index, onOpen }: {
-  node: ModuleNode; position: number | null; index: number; onOpen: () => void
-}) {
+   THE BANNER IS DERIVED, NOT UPLOADED.
+
+   A module has no artwork and never will — nobody is going to photograph
+   "Module 4". So the banner is computed FROM the module: one 32-bit FNV-1a
+   hash over its id and title, with each visual choice reading a different
+   window of that single number. Nothing calls Math.random and nothing reads
+   the clock, so the server and the browser paint the same card (no hydration
+   mismatch) and Module 03 looks the same today as it did last term.
+
+   It still reads as one family because the band is deliberately narrow: every
+   hue is one of six stops around Delta's own 212, lightness always runs 30%
+   → 18%, and all four motifs are built from ONE primitive — the delta — over
+   a light source and a hairline that every card carries.
+
+   Neighbours cannot collide: the starting point in the hue ring is seeded
+   from the COURSE, then `position` advances it by a stride of 5 in a ring of
+   6 (coprime, so it visits all six before repeating) and the motif by 1 in 4.
+   Two cards side by side therefore differ in both colour and geometry by
+   construction rather than by luck.
+
+   The banner's colours are fixed hsl(), not tokens, on purpose: a 30%–18%
+   surface is dark under both themes, so the light type on it is the one place
+   in this component where not using a token is correct. Everything below the
+   banner is tokens.
+   ──────────────────────────────────────────────────────────────────── */
+
+/** FNV-1a, 32 bits. Pure and integer-only, so SSR and the client agree. */
+function moduleHash(seed: string): number {
+  let h = 0x811c9dc5
+  for (let i = 0; i < seed.length; i++) {
+    h ^= seed.charCodeAt(i)
+    h = Math.imul(h, 0x01000193)
+  }
+  return h >>> 0
+}
+
+/** "01", "10" — always two glyphs at one width, so the numerals form a true
+    column down the grid and scanning a course becomes counting rather than
+    reading. */
+const pad2 = (n: number) => String(n).padStart(2, '0')
+
+/** The three points of a delta, the only shape these banners are drawn with.
+    Fixed to 2dp so the emitted markup is byte-identical on both sides. */
+function deltaPts(cx: number, cy: number, r: number, rot: number): string {
+  return [0, 120, 240].map(a => {
+    const t = ((a + rot) * Math.PI) / 180
+    return `${(cx + r * Math.sin(t)).toFixed(2)},${(cy - r * Math.cos(t)).toFixed(2)}`
+  }).join(' ')
+}
+
+/* Six stops with Delta's 212 IN the set, not either side of it. Saturation
+   rises toward the brand as the hue approaches it, so the blue card looks
+   like the product and the others look like its neighbours. */
+const HUES: [number, number][] = [
+  [196, 62], [204, 74], [212, 88], [220, 74], [228, 62], [188, 56],
+]
+
+interface Skin {
+  variant: number; tilt: number; ax: number; tile: number
+  wash: string; tint: string; uid: string
+}
+
+function moduleSkin(id: string, title: string, position: number | null, courseTitle: string): Skin {
+  const h    = moduleHash(`${id}·${title.trim().toLowerCase()}`)
+  /* The ring's STARTING point is a property of the course, not the module —
+     seeded from the module's own hash it collided one time in six between
+     adjacent cards. */
+  const ring = moduleHash(courseTitle || 'delta')
+  const bit  = (shift: number, n: number) => ((h >>> shift) & 0x1f) % n
+
+  const pos      = position ?? 0
+  const [hue, sat] = HUES[(ring + pos * 5) % HUES.length]!
+  const deepHue  = (hue + 18) % 360
+  const angle    = 118 + bit(25, 4) * 18
+
+  return {
+    variant: (bit(5, 4) + pos) % 4,
+    tilt:    -16 + bit(10, 5) * 8,
+    ax:       46 + bit(15, 5) * 22,
+    tile:     20 + bit(20, 4) * 6,
+    /* The deep stop stops at 18%, not 12%: at 12% the banner's foot matched
+       --color-bg-surface in dark mode and the card read as a hole with a
+       hairline floating in it. */
+    wash: `linear-gradient(${angle}deg, hsl(${hue} ${sat}% 30%) 0%, hsl(${deepHue} ${sat + 4}% 18%) 100%)`,
+    tint: `hsl(${hue} 92% 76%)`,
+    uid:  `dm${h.toString(36)}`,
+  }
+}
+
+function ModuleGeometry({ skin }: { skin: Skin }) {
+  const { variant, tilt, ax, tile, tint, uid } = skin
   return (
+    <svg viewBox="0 0 160 90" preserveAspectRatio="xMidYMid slice" aria-hidden
+      className="absolute inset-0 h-full w-full">
+      <defs>
+        <pattern id={`${uid}p`} width={tile} height={tile} patternUnits="userSpaceOnUse"
+          patternTransform={`rotate(${tilt})`}>
+          <polygon points={deltaPts(tile / 2, tile / 2, tile * 0.3, 0)} fill={tint} fillOpacity="0.17" />
+        </pattern>
+        <radialGradient id={`${uid}g`}>
+          <stop offset="0%"   stopColor={tint} stopOpacity="0.26" />
+          <stop offset="100%" stopColor={tint} stopOpacity="0" />
+        </radialGradient>
+      </defs>
+
+      {/* family constant #1 — one light source, on every card */}
+      <circle cx={ax} cy={34} r={58} fill={`url(#${uid}g)`} />
+
+      {variant === 0 && [1, 0.7, 0.45, 0.24].map((sc, i) => (
+        <polygon key={i} points={deltaPts(ax, 48, 54 * sc, tilt)}
+          fill="none" stroke={tint} strokeOpacity={0.12 + i * 0.07} strokeWidth="1.1" />
+      ))}
+      {variant === 1 && [0, 1, 2, 3, 4].map(i => (
+        <polygon key={i} points={deltaPts(ax - 40 + i * 24, 14 + i * 16, 15, tilt + i * 12)}
+          fill={tint} fillOpacity={0.06 + i * 0.045} />
+      ))}
+      {variant === 2 && <rect width="160" height="90" fill={`url(#${uid}p)`} />}
+      {variant === 3 && (
+        <>
+          <polygon points={deltaPts(ax, 42, 60, tilt)} fill={tint} fillOpacity="0.10" />
+          <polygon points={deltaPts(ax - 34, 66, 28, tilt + 180)}
+            fill="none" stroke={tint} strokeOpacity="0.30" strokeWidth="1.2" />
+        </>
+      )}
+
+      {/* family constant #2 — the hairline the whole set shares */}
+      <line x1="0" y1="89.4" x2="160" y2="89.4" stroke={tint} strokeOpacity="0.32" strokeWidth="1.2" />
+    </svg>
+  )
+}
+
+function ModuleCard({ node, position, index, courseTitle, onOpen }: {
+  node: ModuleNode; position: number | null; index: number
+  courseTitle: string; onOpen: () => void
+}) {
+  const skin = useMemo(
+    () => moduleSkin(node.id, node.title, position, courseTitle),
+    [node.id, node.title, position, courseTitle],
+  )
+
+  const locked = node.blocked
+  const empty  = node.sessionCount === 0
+  /* Locked and empty are different sentences, and a locked module with no
+     sessions must not offer to show them. */
+  const cta = empty ? 'Nothing scheduled' : locked ? 'View sessions' : 'Choose a slot'
+
+  return (
+    /* ONE focusable element, as CourseCard is. The CTA below is a span that
+       looks like a button — nesting a real button inside this one would make
+       the card unreachable by keyboard and invalid HTML. */
     <motion.button type="button" onClick={onOpen}
       {...cardHover}
       initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }}
       transition={{ ...spring, delay: index * 0.035 }}
-      style={{ ...CARD, opacity: node.blocked ? 0.72 : 1 }}
-      aria-label={`${node.title} — ${plural(node.sessionCount,'session')}${node.blocked ? ', locked' : ''}`}
-      className="dm flex w-full flex-col gap-2 rounded-2xl bg-[var(--color-bg-surface)] p-4 text-left">
+      style={CARD}
+      aria-label={`${node.title} — ${plural(node.sessionCount, 'session')}${locked ? ', locked' : ''}`}
+      className="dm group flex h-full w-full flex-col overflow-hidden rounded-2xl bg-[var(--color-bg-surface)] text-left">
 
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0 flex-1">
-          <p className="text-[10px] font-bold uppercase tracking-widest"
-            style={{ color: 'var(--color-text-muted)' }}>
-            {position !== null ? `Module ${position}` : 'Sessions'}
-          </p>
-          <h3 className="mt-0.5 text-sm font-bold leading-snug"
-            style={{ color: 'var(--color-text-primary)' }}>{titleCase(node.title)}</h3>
+      {/* ── the banner ── */}
+      <div className="relative aspect-video flex-shrink-0 overflow-hidden"
+        style={{ background: skin.wash, opacity: locked ? 0.55 : 1, filter: locked ? 'grayscale(0.9)' : undefined }}>
+        <ModuleGeometry skin={skin} />
+
+        <div className="absolute inset-0 flex flex-col justify-end p-3.5">
+          <span className="dm text-[9px] font-bold uppercase tracking-[0.18em]"
+            style={{ color: 'rgba(255,255,255,0.72)' }}>
+            {position !== null ? 'Module' : 'Sessions'}
+          </span>
+          {position !== null && (
+            /* Not pure #FFF: the dark palette stops at #E8EAF0 to avoid
+               haloing, and a 30px numeral is exactly that case. */
+            <span className="syne text-[30px] font-extrabold leading-none tracking-tight"
+              style={{ color: 'rgba(255,255,255,0.95)' }}>
+              {pad2(position)}
+            </span>
+          )}
         </div>
-        {node.blocked && (
-          <Pill icon={<Lock size={9} strokeWidth={2.5} />} rgb="107,114,128" solid="var(--color-text-muted)">
-            Locked
-          </Pill>
+
+        {locked && (
+          <span className="absolute right-2 top-2 inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[9px] font-bold"
+            style={{ background: 'rgba(15,23,42,0.55)', color: '#fff', backdropFilter: 'blur(6px)' }}>
+            <Lock size={8} strokeWidth={2.5} />Locked
+          </span>
         )}
       </div>
 
-      {node.description && (
-        <p className="line-clamp-2 text-xs leading-relaxed"
-          style={{ color: 'var(--color-text-secondary)' }}>{node.description}</p>
-      )}
+      {/* ── the body ── */}
+      <div className="flex flex-1 flex-col gap-1.5 p-3.5">
+        <h3 className="line-clamp-2 text-sm font-bold leading-snug"
+          style={{ color: 'var(--color-text-primary)' }}>{titleCase(node.title)}</h3>
 
-      <div className="mt-1 flex items-center justify-between gap-2 pt-2.5"
-        style={{ borderTop: '1px solid var(--color-border)' }}>
-        <span className="flex items-center gap-2.5 text-[11px] font-medium"
-          style={{ color: 'var(--color-text-muted)' }}>
+        {node.description && (
+          <p className="line-clamp-3 text-xs leading-relaxed"
+            style={{ color: 'var(--color-text-secondary)' }}>{node.description}</p>
+        )}
+
+        {/* The hairline every sibling card separates its footer with. */}
+        <div className="mt-auto flex items-center gap-3 pt-3 text-[11px] font-medium"
+          style={{ borderTop: '1px solid var(--color-border)', color: 'var(--color-text-muted)' }}>
           <span className="flex items-center gap-1">
-            <Globe size={10} strokeWidth={2} />
-            {node.languages.length} {node.languages.length === 1 ? 'Language' : 'Languages'}
+            <Globe size={10} strokeWidth={2} />{plural(node.languages.length, 'Language')}
           </span>
           <span className="flex items-center gap-1">
-            <Calendar size={10} strokeWidth={2} />
-            {node.sessionCount} {node.sessionCount === 1 ? 'Session' : 'Sessions'}
+            <Calendar size={10} strokeWidth={2} />{plural(node.sessionCount, 'Session')}
           </span>
-        </span>
-        <span className="flex items-center gap-1 text-[11px] font-bold"
-          style={{ color: node.blocked ? 'var(--color-text-muted)' : 'var(--color-primary-on-surface, var(--color-primary))' }}>
-          {node.blocked ? 'View' : 'Choose a slot'}<ChevronRight size={12} strokeWidth={2.5} />
+        </div>
+
+        {/* Delta blue and white, the primary CTA every other screen uses —
+            stable in both themes, unlike an ink button whose inverse text
+            flips with the palette. */}
+        <span aria-hidden
+          className="mt-2.5 flex w-full items-center justify-center gap-1.5 rounded-xl py-2.5 text-[12px] font-bold transition-opacity group-hover:opacity-90"
+          style={locked || empty
+            ? { background: 'var(--color-bg-inset)', color: 'var(--color-text-muted)', border: '1px solid var(--color-border)' }
+            : { background: 'var(--color-primary)', color: '#fff', boxShadow: '0 2px 8px rgba(0,87,184,0.25)' }}>
+          {locked ? <Lock size={12} strokeWidth={2.5} /> : <BookOpen size={12} strokeWidth={2.5} />}
+          {cta}
         </span>
       </div>
     </motion.button>
@@ -485,10 +653,14 @@ export function Hierarchy({
             body={q ? 'Try a different search term, or clear the search to see them all.'
                     : 'This course has no upcoming sessions.'} />
         ) : (
-          <div className="space-y-2.5">
+          /* A real course runs to ten modules, so this is a grid rather
+             than a column — ten stacked banners would be three screens of
+             scrolling to see a list the reference fits in two rows. */
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
             {modules.map((m, i) => (
               <ModuleCard key={m.id || 'general'} node={m} index={i}
                 position={m.id === GENERAL ? null : ordered.indexOf(m) + 1}
+                courseTitle={course.title}
                 onOpen={() => onNavigate(course.id, m.id)} />
             ))}
           </div>
