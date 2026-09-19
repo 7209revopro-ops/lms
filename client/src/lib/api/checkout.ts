@@ -115,6 +115,10 @@ export function useRazorpayCheckout(opts: UseRazorpayCheckoutOptions = {}) {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['enrollments'] })
       qc.invalidateQueries({ queryKey: ['courseProgress'] })
+      /* The purchase history is 30s stale-while-fresh, so without this a
+         student who pays in the Razorpay modal and goes straight to /orders
+         is served the list from before they paid. */
+      qc.invalidateQueries({ queryKey: orderKeys.mine })
       opts.onSuccess?.()
     },
     onError: (err: Error) => {
