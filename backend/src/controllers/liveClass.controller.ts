@@ -79,6 +79,11 @@ export function seatsLeftForDoor(
 export interface LabelledDoor extends Door {
   courseTitle?:  string
   program?:      string
+  /* The guest COURSE's own blurb and level. Same rule as the module's:
+     the host's `course` on the DTO carries both already, but they
+     describe a course this student is not enrolled in. */
+  courseDescription?: string
+  courseLevel?:       string
   sectionTitle?: string
   /* The guest module's OWN place in the guest course and its OWN blurb.
      The host's `section` on the DTO carries both already, but they belong
@@ -105,7 +110,7 @@ export async function labelGuestDoors(
     if (d.sectionId && Types.ObjectId.isValid(d.sectionId)) sectionIds.add(d.sectionId)
   }
 
-  const courses  = new Map<string, { title?: string; program?: string }>()
+  const courses  = new Map<string, { title?: string; program?: string; description?: string; level?: string }>()
   const sections = new Map<string, { title?: string; order?: number; description?: string }>()
 
   if (courseIds.size > 0 || sectionIds.size > 0) {
@@ -113,14 +118,14 @@ export async function labelGuestDoors(
     const [courseRows, sectionRows] = await Promise.all([
       courseIds.size > 0
         ? CourseModel.find({ _id: { $in: [...courseIds].map(id => new Types.ObjectId(id)) } })
-            .select('title program').lean()
+            .select('title program description level').lean()
         : Promise.resolve([] as any[]),
       sectionIds.size > 0
         ? SectionModel.find({ _id: { $in: [...sectionIds].map(id => new Types.ObjectId(id)) } })
             .select('title order description').lean()
         : Promise.resolve([] as any[]),
     ])
-    for (const c of courseRows as any[]) courses.set(String(c._id), { title: c.title, program: c.program })
+    for (const c of courseRows as any[]) courses.set(String(c._id), { title: c.title, program: c.program, description: c.description, level: c.level })
     for (const s of sectionRows as any[]) sections.set(String(s._id), { title: s.title, order: s.order, description: s.description })
   }
 
@@ -135,6 +140,8 @@ export async function labelGuestDoors(
       ...door,
       ...(course?.title   ? { courseTitle:  course.title }   : {}),
       ...(course?.program ? { program:      course.program } : {}),
+      ...(course?.description ? { courseDescription: course.description } : {}),
+      ...(course?.level       ? { courseLevel:       course.level }       : {}),
       ...(section?.title   ? { sectionTitle:       section.title }       : {}),
       ...(section?.order !== undefined ? { sectionOrder: section.order } : {}),
       ...(section?.description ? { sectionDescription: section.description } : {}),
@@ -150,6 +157,8 @@ export function yourCohortFrom(door: LabelledDoor | undefined): {
   courseId?:     string
   courseTitle?:  string
   program?:      string
+  courseDescription?: string
+  courseLevel?:       string
   sectionId?:    string
   sectionTitle?: string
   sectionOrder?:       number
@@ -160,6 +169,8 @@ export function yourCohortFrom(door: LabelledDoor | undefined): {
     courseId:     door.courseId  ?? undefined,
     courseTitle:  door.courseTitle,
     program:      door.program,
+    courseDescription: door.courseDescription,
+    courseLevel:       door.courseLevel,
     sectionId:    door.sectionId ?? undefined,
     sectionTitle: door.sectionTitle,
     sectionOrder:       door.sectionOrder,

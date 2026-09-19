@@ -86,6 +86,14 @@ export const effProgram  = (lc: LiveClass) => lc.yourCohort?.program  ?? (lc.cou
 export const effCourseTitle = (lc: LiveClass): string | undefined =>
   lc.yourCohort?.courseTitle ?? lc.course?.title
 
+/** The course blurb and level of the door the caller came through. Same rule
+    as the module's: a guest reads their OWN academy's course, never the
+    host's, so there is no fallback across doors. */
+export const effCourseDescription = (lc: LiveClass): string | undefined =>
+  lc.yourCohort?.courseId ? lc.yourCohort.courseDescription : lc.course?.description
+export const effCourseLevel = (lc: LiveClass): string | undefined =>
+  lc.yourCohort?.courseId ? lc.yourCohort.courseLevel : lc.course?.level
+
 /** True when this class reached the caller through a GUEST door — i.e. it
     belongs to the other academy and is shared with theirs. */
 export const isSharedWithYou = (lc: LiveClass): boolean => !!lc.yourCohort?.courseId
@@ -333,6 +341,8 @@ export interface CourseNode {
   id:            string
   title:         string
   program?:      string
+  description?:  string
+  level?:        string
   thumbnailUrl?: string
   /** Reached through a GUEST door — this course belongs to the other academy
       and is shared with yours. */
@@ -371,8 +381,10 @@ export function buildCatalog(
     if (!course) {
       course = {
         id:      cid,
-        title:   effCourseTitle(first) ?? 'Unassigned sessions',
-        program: effProgram(first),
+        title:       effCourseTitle(first) ?? 'Unassigned sessions',
+        program:     effProgram(first),
+        description: effCourseDescription(first),
+        level:       effCourseLevel(first),
         /* Only ever the HOST's own artwork, and only for a host caller. A
            guest's door names another academy's course by id; showing the
            host's thumbnail beside the guest's course title would put two

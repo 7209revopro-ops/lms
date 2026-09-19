@@ -105,7 +105,11 @@ router.get('/', authenticate, async (req: Request, res: Response, next: NextFunc
     andFilter(lcOrgFilter, servedClassFilter(caller.org, { includeUnowned: true }))
     const classes = await LiveClassModel.find(lcOrgFilter)
       .populate('instructorId', 'id name avatarUrl')
-      .populate('courseId', 'id title slug thumbnailUrl program')
+      /* `description` and `level` because the catalogue's top screen is a
+         card per course, and a card with only a title on it is a link
+         wearing a photograph. Both have been on Course since it was
+         written and were simply never selected. */
+      .populate('courseId', 'id title slug thumbnailUrl program description level')
       /* `order` and `description` because the module list is a CATALOGUE,
          not a feed: without `order` the modules arrive in whatever order
          their classes were scheduled, so "Module 10" can head the list,

@@ -8,7 +8,8 @@ export type LiveClassType   = 'external' | 'internal'
 export interface LiveClass {
   id:             string
   courseId:       string
-  course?:        { id: string; title: string; slug: string; thumbnailUrl?: string; program?: string }
+  course?:        { id: string; title: string; slug: string; thumbnailUrl?: string; program?: string
+                    description?: string; level?: string }
   instructorId:   string
   instructor?:    { id: string; name: string; avatarUrl?: string }
   title:          string
@@ -79,6 +80,11 @@ export interface LiveClass {
     courseId?:     string
     courseTitle?:  string
     program?:      string
+    /* The guest COURSE's own blurb and level, for the same reason as
+       sectionOrder below: the host's describe a course this student is
+       not enrolled in. */
+    courseDescription?: string
+    courseLevel?:       string
     sectionId?:    string
     sectionTitle?: string
     /* The guest module's OWN position and blurb, in the guest's OWN course.
@@ -200,7 +206,10 @@ function normalizeLiveClass(c: any): LiveClass {
   const courseRaw = c.courseId
   const course: LiveClass['course'] =
     typeof courseRaw === 'object' && courseRaw
-      ? { id: courseRaw.id ?? String(courseRaw._id ?? ''), title: courseRaw.title ?? '', slug: courseRaw.slug ?? '', thumbnailUrl: courseRaw.thumbnailUrl, program: courseRaw.program }
+      /* Rebuilt field by field, so anything not named here is DROPPED. */
+      ? { id: courseRaw.id ?? String(courseRaw._id ?? ''), title: courseRaw.title ?? '', slug: courseRaw.slug ?? '',
+          thumbnailUrl: courseRaw.thumbnailUrl, program: courseRaw.program,
+          description: courseRaw.description, level: courseRaw.level }
       : (c.course ?? undefined)
 
   const instrRaw = c.instructorId

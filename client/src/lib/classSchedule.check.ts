@@ -34,7 +34,8 @@ const row = (o: Row): LiveClass => ({
 /* The HOST's own course and module, identical on every row below, and always
    different from the guest's — so any leak is unmistakable. */
 const HOST = {
-  course:    { id: 'host-course', title: 'HOST COURSE', slug: 'h', thumbnailUrl: '/host.png' },
+  course:    { id: 'host-course', title: 'HOST COURSE', slug: 'h', thumbnailUrl: '/host.png',
+               description: 'HOST BLURB', level: 'advanced' },
   sectionId: { id: 'host-sec', title: 'HOST MODULE', order: 99, description: 'HOST BLURB' },
 }
 
@@ -45,6 +46,7 @@ const guest = (n: number, sec: { id: string; title: string; order?: number; desc
   isEnrolled: true, isEntitled: true,
   yourCohort: {
     courseId: 'guest-course', courseTitle: 'Advanced Derivatives', program: '4x-trading',
+    courseDescription: 'Guest course blurb', courseLevel: 'beginner',
     sectionId: sec.id, sectionTitle: sec.title,
     sectionOrder: sec.order, sectionDescription: sec.description,
   },
@@ -83,6 +85,10 @@ console.log('\nA. A guest never sees the host\'s catalogue')
     JSON.stringify(mods.map(m => m.sessionCount)))
   check('A10 course total equals the sum of its modules',
     cat[0]!.sessionCount === mods.reduce((n, m) => n + m.sessionCount, 0))
+  check('A12 the guest course\'s own blurb, not the host\'s',
+    cat[0]!.description === 'Guest course blurb', String(cat[0]!.description))
+  check('A13 the guest course\'s own level, not the host\'s',
+    cat[0]!.level === 'beginner', String(cat[0]!.level))
   check('A11 both languages counted on the shared module',
     mods[0]!.languages.length === 2, JSON.stringify(mods[0]!.languages))
 }
@@ -93,6 +99,9 @@ console.log('\nB. A host caller still sees their own')
   check('B1 the host course', cat[0]!.title === 'HOST COURSE')
   check('B2 not flagged shared', cat[0]!.shared === false)
   check('B3 its own thumbnail IS used', cat[0]!.thumbnailUrl === '/host.png')
+  check('B5 the host course keeps its own blurb and level',
+    cat[0]!.description === 'HOST BLURB' && cat[0]!.level === 'advanced',
+    `${cat[0]!.description} / ${cat[0]!.level}`)
   check('B4 the host module, with its own order', cat[0]!.modules[0]!.title === 'HOST MODULE' && cat[0]!.modules[0]!.order === 99)
 }
 
