@@ -245,7 +245,21 @@ export function ClientTopbar() {
         style={{ borderBottom: '1px solid var(--color-border)' }}>
 
         {/* ── Row 1: Logo (topbar mode) + search + actions ── */}
-        <div className="flex h-[68px] items-center gap-3 px-4 sm:gap-5 sm:px-8" style={{ borderBottom: '1px solid var(--color-border)' }}>
+        {/* MEASURED AT 375px, WHERE THIS ROW DID NOT FIT. Its contents ended at
+            411px in a 375px viewport, so the signed-in avatar was sliced in
+            half by the right edge on every screen in the app, and a stray
+            border-left hung past it. Nothing scrolled - the overflow was
+            simply cut, which is the version of this bug you do not notice
+            while developing at desktop width.
+
+            The 52px had to come from somewhere, so it comes from five places
+            that each cost nothing on a phone: a 60px row instead of 68, a
+            30px logo instead of 38, 8px gaps instead of 12, no padding around
+            the avatar, and the sign-out group hidden (it is in the drawer,
+            two inches from the thumb). Everything returns at `sm`.
+            --app-header-h in globals.css follows this height - the two are
+            one number in two files. */}
+        <div className="flex h-[60px] items-center gap-2 px-4 sm:h-[68px] sm:gap-5 sm:px-8" style={{ borderBottom: '1px solid var(--color-border)' }}>
 
           {/* Hamburger — always shown on mobile for the mobile drawer */}
           <button
@@ -260,11 +274,14 @@ export function ClientTopbar() {
           <div className="flex items-center mr-1 sm:mr-6 flex-shrink-0">
             {/* 38px in a 68px row — 56%, inside the 45-60% band a nav logo
                 should occupy. The row grew with it so the extra height buys
-                presence rather than crowding: 15px clear above and below. */}
+                presence rather than crowding: 15px clear above and below.
+                On a phone the ratio is held rather than the pixel count:
+                30px in a 60px row is 50%, still inside the band, and the 18px
+                it gives back is 18px the avatar is no longer pushed off by. */}
             <img
               src="/logo-dark.png"
               alt="Delta International"
-              className="h-[38px] w-auto object-contain"
+              className="h-[30px] w-auto object-contain sm:h-[38px]"
             />
           </div>
 
@@ -285,7 +302,14 @@ export function ClientTopbar() {
 
           {/* Capped rather than free-flowing: past ~460px a single-line search
               field stops reading as a control and starts reading as a gap. */}
-          <div className="relative hidden flex-1 sm:block sm:min-w-[200px] sm:max-w-[460px]">
+          {/* min-w 200 was a floor the row could not always afford. Between
+              `sm` and `lg` the header carries the hamburger, the logo and the
+              action cluster as well, and 200px of search on top of those put
+              the row 147px past a 700px screen - a real horizontal scroll on
+              every page, not a clipped edge. flex-1 still gives the field
+              everything left over (about 240px at 700, 274 at 1024); the
+              floor just stops it demanding space that is not there. */}
+          <div className="relative hidden flex-1 sm:block sm:min-w-[150px] sm:max-w-[460px]">
             <form
               onSubmit={e => {
                 e.preventDefault()
@@ -430,7 +454,10 @@ export function ClientTopbar() {
                 logo and search did not fit at 375px: the cluster ran to 437px
                 and the last controls sat off-screen with no way to scroll to
                 them. This one is a row in the drawer nav, so nothing is lost. */}
-            <Link href="/support" className="hidden sm:block">
+            {/* `lg`, not `sm`: between those two the drawer is the navigation
+                and it already carries Help & Support, so this is a duplicate
+                that costs 50px the row does not have. */}
+            <Link href="/support" className="hidden lg:block">
               <motion.div whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}
                 className="flex h-11 w-11 items-center justify-center rounded-xl transition-colors hover:bg-[var(--color-hover)] lg:h-9 lg:w-9"
                 style={{ color: 'var(--color-primary)' }}>
@@ -467,11 +494,13 @@ export function ClientTopbar() {
                 course and then never see the receipt again. It is an icon rather
                 than a twelfth tab because the tab row already overflows, and
                 because cart-then-receipts reads as one group. */}
-            <Link href="/orders">
+            {/* Hidden on the LINK, not on the div inside it: a hidden child
+                still leaves its parent in the flex row, collecting a gap. */}
+            <Link href="/orders" className="hidden lg:block">
               <motion.div whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}
                 title="Purchase history"
                 aria-label="Purchase history"
-                className="relative hidden h-11 w-11 items-center justify-center rounded-xl transition-colors hover:bg-[var(--color-hover)] sm:flex lg:h-9 lg:w-9"
+                className="relative flex h-11 w-11 items-center justify-center rounded-xl transition-colors hover:bg-[var(--color-hover)] lg:h-9 lg:w-9"
                 style={{ color: 'var(--color-primary)' }}>
                 <Receipt size={16} />
               </motion.div>
@@ -578,7 +607,7 @@ export function ClientTopbar() {
 
             {/* Profile */}
             <Link href="/settings">
-              <div className="flex cursor-pointer items-center gap-2.5 rounded-xl px-2 py-1 transition-colors hover:bg-[var(--color-hover)]">
+              <div className="flex cursor-pointer items-center gap-2.5 rounded-xl px-0 py-1 transition-colors hover:bg-[var(--color-hover)] sm:px-2">
                 <div className="flex h-11 w-11 items-center justify-center overflow-hidden rounded-full text-xs font-bold text-white ring-2 ring-blue-100 lg:h-9 lg:w-9"
                   style={{ background: 'var(--color-primary)' }}>
                   <AvatarImg src={user?.avatarUrl}
@@ -600,7 +629,7 @@ export function ClientTopbar() {
                 it looking bolted on: it closes the identity group rather than
                 extending the icon row. Red only on hover, so a destructive
                 action is never the loudest thing in the bar. */}
-            <div className="ml-1 flex items-center gap-1 pl-1.5"
+            <div className="ml-1 hidden items-center gap-1 pl-1.5 lg:flex"
               style={{ borderLeft: '1px solid var(--color-border)' }}>
               <button
                 type="button"
@@ -610,7 +639,7 @@ export function ClientTopbar() {
                 /* Same hover wash as every other icon in the bar so the row
                    reads as one control group — just tinted danger rather than
                    brand, which is the only cue that sets it apart. */
-                className="hidden h-11 w-11 items-center justify-center rounded-lg transition-colors hover:bg-[var(--color-hover-danger)] sm:flex lg:h-8 lg:w-8"
+                className="flex h-11 w-11 items-center justify-center rounded-lg transition-colors hover:bg-[var(--color-hover-danger)] lg:h-8 lg:w-8"
                 style={{ color: 'var(--color-text-muted)' }}
                 onMouseEnter={e => { e.currentTarget.style.color = 'var(--color-danger)' }}
                 onMouseLeave={e => { e.currentTarget.style.color = 'var(--color-text-muted)' }}>

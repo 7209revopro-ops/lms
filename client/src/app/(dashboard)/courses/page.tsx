@@ -243,7 +243,15 @@ export default function CoursesPage() {
 
         <div className="flex flex-col gap-2.5 sm:flex-row sm:items-center sm:justify-between">
           {/* Status tabs */}
-          <div className="flex w-full sm:w-auto shrink-0 items-center gap-1 overflow-x-auto rounded-2xl p-1 scrollbar-none self-start"
+          {/* SHRINKABLE, because it can already scroll. Both children of this
+              row were shrink-0, so from `sm` up the four status tabs (~400px)
+              and the search/filter/sort cluster (320px) simply refused to fit
+              a 700px screen and pushed the whole page to 770 - a horizontal
+              scroll on the catalogue, which is the page people buy from. The
+              tabs carry overflow-x-auto already, so letting them shrink costs
+              nothing they were not prepared for; min-w-0 is what lets a flex
+              child go below its content width at all. */}
+          <div className="flex w-full min-w-0 items-center gap-1 overflow-x-auto rounded-2xl p-1 scrollbar-none self-start sm:w-auto"
             style={{ background: 'var(--color-bg-subtle)' }}>
             {STATUS_TABS.map(tab => (
               <MotionButton key={tab} onClick={() => setActiveTab(tab)}

@@ -56,12 +56,15 @@
      places and disagreed, which clipped the top of the page content and hid
      the first 13px of the side panel behind the header.
 
-     MOBILE is shorter because the tab row is not rendered there: the links
-     live in the drawer instead, so the header is row 1 (68px) plus its own
-     1px bottom border. From `md` up the tab row returns: 68 + 1 + 44 = 113.
+     PHONE is shortest. The tab row is not rendered below `md` - those links
+     live in the drawer - and row 1 itself is 60px rather than 68px there,
+     because 68px of an 812px screen is chrome a thumb has to scroll past on
+     every page. So 60 + 1 = 61.
+     From `sm` up row 1 returns to 68: 68 + 1 = 69.
+     From `md` up the tab row returns as well: 68 + 1 + 44 = 113.
      The border is easy to forget and costs exactly the 1px of clipping this
      token exists to prevent. */
-  --app-header-h: 69px;
+  --app-header-h: 61px;
 
   /* Shadows read as "depth" on light and as "separation" on dark, where a
      drop shadow is nearly invisible — dark leans on borders instead. */
@@ -71,6 +74,11 @@
   --font-display:         'Bricolage Grotesque', sans-serif;
   --font-body:            'DM Sans', sans-serif;
   --font-mono:            'JetBrains Mono', monospace;
+}
+
+/* Row 1 grows back to 68px from `sm` up — see ClientTopbar. */
+@media (min-width: 640px) {
+  :root { --app-header-h: 69px; }
 }
 
 /* The tab row only exists from `md` up — see ClientTopbar. */
