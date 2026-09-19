@@ -281,13 +281,13 @@ section('I. Earlier reminders still point at the schedule')
   await runPreSessionReminders()
   const n30 = await NotificationModel.findOne({ userId: a.student._id }).sort({ createdAt: -1 }).lean() as any
   check('I1 the 30-minute notification still goes to the schedule',
-    String(n30?.link) === '/class-bookings', String(n30?.link))
+    String(n30?.link) === '/class-bookings?view=sessions', String(n30?.link))
 
   const b = await seat(5)
   await runFiveMinReminders()
   const n5 = await NotificationModel.findOne({ userId: b.student._id }).sort({ createdAt: -1 }).lean() as any
   check('I2 the 5-minute notification still goes to the schedule',
-    String(n5?.link) === '/class-bookings', String(n5?.link))
+    String(n5?.link) === '/class-bookings?view=sessions', String(n5?.link))
 }
 
 /* ═════════════════ J — no Meet link to point at ═════════════════ */

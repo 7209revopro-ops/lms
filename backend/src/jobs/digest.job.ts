@@ -22,6 +22,7 @@
 import cron from 'node-cron'
 import { logger } from '@/utils/logger.ts'
 import { sendDailyDigest } from '@/services/email.service.ts'
+import { scheduleUrl as buildScheduleUrl } from '@/utils/clientLinks.ts'
 
 /* 18:00 in the backend's timezone (Asia/Dubai — see config/timezone.ts),
    which is end-of-day for the academy rather than end-of-day UTC. */
@@ -83,7 +84,7 @@ export async function runDailyDigest(
     .lean() as any[]
   const userById = new Map(users.map(u => [String(u._id), u]))
 
-  const scheduleUrl = `${(process.env['CLIENT_URL'] ?? 'http://localhost:3000').replace(/\/+$/, '')}/class-bookings`
+  const scheduleUrl = buildScheduleUrl()
 
   for (const [userId, rows] of byUser) {
     const user = userById.get(userId)

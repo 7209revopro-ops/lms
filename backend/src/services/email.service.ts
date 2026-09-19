@@ -3,6 +3,7 @@ import { join } from 'path'
 import nodemailer, { type Transporter } from 'nodemailer'
 import { logger } from '@/utils/logger.ts'
 import { academyClock, academyTime } from '@/utils/academyClock.ts'
+import { scheduleUrl } from '@/utils/clientLinks.ts'
 
 /* ─────────────────────────────────────────────────────
    EmailService
@@ -900,7 +901,7 @@ export async function sendPreSessionReminder(
     <p>Hi ${escapeHtml(name)}, <strong>${escapeHtml(sessionTitle)}</strong> starts in <strong>${minutesLeft} minutes</strong>.</p>
     <p>Get ready — make sure your device and connection are set. The join link will arrive in a separate email 5 minutes before the session starts.</p>
     <p style="margin:24px 0">
-      <a href="${process.env['CLIENT_URL'] ?? 'http://localhost:3000'}/class-bookings"
+      <a href="${scheduleUrl()}"
         style="display:inline-block;background:linear-gradient(135deg,#0057b8,#2F6BFF);color:#fff;font-weight:600;padding:12px 24px;border-radius:12px;text-decoration:none">
         View my schedule →
       </a>
@@ -1074,7 +1075,7 @@ export async function sendRescheduledEmail1(args: RescheduledArgs): Promise<void
       </p>
     </div>
     <p style="margin:24px 0">
-      <a href="${process.env['CLIENT_URL'] ?? 'http://localhost:3000'}/class-bookings"
+      <a href="${scheduleUrl()}"
         style="display:inline-block;background:linear-gradient(135deg,#0057b8,#2F6BFF);color:#fff;font-weight:700;padding:14px 28px;border-radius:12px;text-decoration:none;font-size:15px">
         View my updated schedule →
       </a>
@@ -1102,7 +1103,7 @@ export async function sendRescheduledEmail2(args: RescheduledArgs): Promise<void
     <p>We understand that schedule changes can be inconvenient, and we truly appreciate your patience. Rest assured that the team is fully committed to delivering the best possible learning experience for you at this new time.</p>
     <p><strong>You don't need to do anything</strong> — your seat is confirmed and your booking has already been updated automatically.</p>
     <p style="margin:24px 0">
-      <a href="${process.env['CLIENT_URL'] ?? 'http://localhost:3000'}/class-bookings"
+      <a href="${scheduleUrl()}"
         style="display:inline-block;background:linear-gradient(135deg,#0057b8,#2F6BFF);color:#fff;font-weight:700;padding:14px 28px;border-radius:12px;text-decoration:none;font-size:15px">
         Check my bookings →
       </a>
@@ -1140,7 +1141,7 @@ export async function sendRescheduledEmail3(args: RescheduledArgs): Promise<void
     </div>
     <p>We would like to once again express our sincerest apologies for the rescheduling and thank you for your patience and flexibility. Your commitment to learning is truly appreciated.</p>
     <p style="margin:24px 0">
-      <a href="${process.env['CLIENT_URL'] ?? 'http://localhost:3000'}/class-bookings"
+      <a href="${scheduleUrl()}"
         style="display:inline-block;background:linear-gradient(135deg,#059669,#10B981);color:#fff;font-weight:700;padding:14px 28px;border-radius:12px;text-decoration:none;font-size:15px">
         View session details →
       </a>
@@ -1309,14 +1310,14 @@ export async function sendBookingCancelledByStudent(
     </table>
     <p>Your seat has been released. You can book a different time slot from the Class Schedule page.</p>
     <p style="margin:24px 0">
-      <a href="${process.env['CLIENT_URL'] ?? 'http://localhost:3000'}/class-bookings"
+      <a href="${scheduleUrl()}"
         style="display:inline-block;background:#F3F4F6;color:#374151;font-weight:600;padding:12px 24px;border-radius:12px;text-decoration:none">
         View Class Schedule →
       </a>
     </p>
     <p style="font-size:12px;color:#9CA3AF">If you didn't request this cancellation, please contact the admin team.</p>
   `)
-  await sender.send({ to, subject, html, text: `Your booking for ${sessionTitle} on ${date} has been cancelled. Book again: ${process.env['CLIENT_URL'] ?? 'http://localhost:3000'}/class-bookings` })
+  await sender.send({ to, subject, html, text: `Your booking for ${sessionTitle} on ${date} has been cancelled. Book again: ${scheduleUrl()}` })
 }
 
 const CATEGORY_LABEL: Record<string, string> = {

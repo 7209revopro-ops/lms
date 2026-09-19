@@ -158,7 +158,7 @@ await NotificationModel.insertMany([
     body: 'Seven days of learning in a row. Keep it going!', link: '/achievements',
     createdAt: new Date(Date.now() - 2 * 36e5) },
   { userId: user._id, kind: 'live-class-scheduled', title: 'New live class scheduled',
-    body: 'A new session has been added to your schedule.', link: '/class-bookings',
+    body: 'A new session has been added to your schedule.', link: '/class-bookings?view=sessions',
     createdAt: new Date(Date.now() - 6 * 36e5) },
   { userId: user._id, kind: 'lesson-complete', title: 'Lesson completed',
     body: 'Nice work — your progress has been saved.', link: '/my-learning',

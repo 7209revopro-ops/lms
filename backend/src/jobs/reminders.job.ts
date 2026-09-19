@@ -30,6 +30,7 @@ import {
   sendInstructor15MinReminder,
 } from '@/services/email.service.ts'
 import { wantsStaffEmail } from '@/utils/emailPrefs.ts'
+import { SCHEDULE_LINK } from '@/utils/clientLinks.ts'
 
 const notifSvc = new NotificationService()
 
@@ -117,7 +118,7 @@ function getJoinUrl(lc: NonNullable<BookingWithRefs['liveClassId']>): string {
      that 404s — in every reminder for a class with no meeting URL. Fall back to
      the schedule, which always works, rather than mailing a dead link. */
   const id = lc.id ?? (lc as { _id?: unknown })._id
-  return id ? `${base}/live-classes/${String(id)}/watch` : `${base}/class-bookings`
+  return id ? `${base}/live-classes/${String(id)}/watch` : `${base}${SCHEDULE_LINK}`
 }
 
 /* THESE TWO WERE MISSED BY THE MAIL WORK, and they are the day-before and
@@ -205,7 +206,7 @@ async function dispatch(
        room somewhere on it. Every reminder used to land on /class-bookings,
        so the meeting link existed ONLY inside the emails -- a student working
        from the notification bell had no way to reach the class from it. */
-    link:  notifLink ?? '/class-bookings',
+    link:  notifLink ?? SCHEDULE_LINK,
   }).catch(err => logger.error({ err, userId, kind }, '[Reminder] Failed to create in-app notification'))
 
   /* 2. Email — failure creates a system notification instead of silently dropping */
@@ -217,7 +218,7 @@ async function dispatch(
       kind:  'system',
       title: 'Reminder email could not be sent',
       body:  `We tried to email you about "${sessionTitle}" (${dateLabel}) but delivery failed. Check your Class Schedule to stay on track.`,
-      link:  '/class-bookings',
+      link:  SCHEDULE_LINK,
     }).catch(() => {/* truly non-fatal */})
   }
 }

@@ -35,6 +35,7 @@ import { NotificationService } from '@/services/notification.service.ts'
    Anything that serialises a stored asset URL has to go through here. */
 import { sendSuccess, buildPaginationMeta } from '@/utils/response.ts'
 import { academyClock } from '@/utils/academyClock.ts'
+import { SCHEDULE_LINK } from '@/utils/clientLinks.ts'
 
 const router = Router()
 const notifSvc = new NotificationService()
@@ -81,7 +82,7 @@ async function afterBookingCreated(
     kind:  'booking-confirmed',
     title: `Booking confirmed: ${sessionTitle}`,
     body:  `Your seat is confirmed for ${sessionTitle} on ${dateLabel}.`,
-    link:  '/class-bookings',
+    link:  SCHEDULE_LINK,
   })
 
   /* 2. Confirmation email — if it fails, add a system notification */
@@ -93,7 +94,7 @@ async function afterBookingCreated(
       kind:  'system',
       title: 'Booking confirmation email failed',
       body:  'We could not send your confirmation email, but your booking is confirmed. Check your Class Schedule.',
-      link:  '/class-bookings',
+      link:  SCHEDULE_LINK,
     }).catch(() => {/* truly non-fatal */})
   }
 }
@@ -116,7 +117,7 @@ async function afterBookingCancelled(
     kind:  'booking-cancelled',
     title: `Booking cancelled: ${sessionTitle}`,
     body:  `Your booking for ${sessionTitle} on ${dateLabel} has been cancelled.`,
-    link:  '/class-bookings',
+    link:  SCHEDULE_LINK,
   })
 
   /* 2. Cancellation email — if it fails, add a system notification */
@@ -130,7 +131,7 @@ async function afterBookingCancelled(
       kind:  'system',
       title: 'Cancellation email failed',
       body:  'We could not send your cancellation confirmation email. Your booking has still been cancelled successfully.',
-      link:  '/class-bookings',
+      link:  SCHEDULE_LINK,
     }).catch(() => {/* truly non-fatal */})
   }
 }

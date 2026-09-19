@@ -81,6 +81,13 @@ export interface LiveClass {
     program?:      string
     sectionId?:    string
     sectionTitle?: string
+    /* The guest module's OWN position and blurb, in the guest's OWN course.
+       The host's populated `sectionId` above carries both already, but they
+       describe a module of a course this student is not enrolled in —
+       ordering their module list by it would rank one course's module by a
+       position in another. */
+    sectionOrder?:       number
+    sectionDescription?: string
   }
 
   /**

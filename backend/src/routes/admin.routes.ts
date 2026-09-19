@@ -34,6 +34,7 @@ import { sendSuccess, buildPaginationMeta, parsePagination } from '@/utils/respo
 import { toSafeUser } from '@/models/types.ts'
 import { audit } from '@/middleware/audit.middleware.ts'
 import type { Request, Response, NextFunction } from 'express'
+import { SCHEDULE_LINK } from '@/utils/clientLinks.ts'
 
 const router     = Router()
 const ctrl       = new AdminController()
@@ -1651,7 +1652,7 @@ router.post('/bookings/book-for-student', requireAnyAdmin, validate(bookForStude
 
     notifSvc.create(studentId, {
       kind: 'booking-confirmed', title: `Booking confirmed: ${session.title}`,
-      body: `Your seat is confirmed for ${session.title} on ${dateLabel}.`, link: '/class-bookings',
+      body: `Your seat is confirmed for ${session.title} on ${dateLabel}.`, link: SCHEDULE_LINK,
     }).catch(() => {/* non-fatal */})
 
     import('@/services/email.service.ts').then(({ sendBookingConfirmation }) => {
@@ -2570,7 +2571,7 @@ router.patch('/bookings/:id/cancel', requireInstructor, requirePermission('booki
           kind:  'booking-cancelled',
           title: `Booking cancelled: ${title}`,
           body:  `Your booking for ${title} on ${dateLabel} has been cancelled.`,
-          link:  '/class-bookings',
+          link:  SCHEDULE_LINK,
         }).catch(() => { /* non-fatal */ })
 
         if (!student || !(student as any).email) return

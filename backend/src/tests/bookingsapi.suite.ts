@@ -523,7 +523,7 @@ section('K. an admin cancel reaches the student, legibly')
   check('K2 an in-app booking-cancelled notification is created', notes.length === 1,
     `found ${notes.length}`)
   check('K3 …and it links somewhere useful',
-    String((notes[0] as any)?.link ?? '') === '/class-bookings', JSON.stringify(notes[0] ?? null))
+    String((notes[0] as any)?.link ?? '') === '/class-bookings?view=sessions', JSON.stringify(notes[0] ?? null))
 
   const fresh = (await readMails()).filter(m => !before.includes(m))
   const mail  = fresh.find(m => m.includes('kcancel@ba.test'))

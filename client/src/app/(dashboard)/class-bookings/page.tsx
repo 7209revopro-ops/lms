@@ -7,7 +7,7 @@ import {
   Radio, CheckCircle2, Video, BookOpen, Globe,
   AlertCircle, User, Users, X, CalendarDays, Search,
   Building2, Lock, MapPin, Wifi, Flame, TrendingUp,
-  GraduationCap, UserCircle2, SlidersHorizontal, Zap, ChevronDown,
+  GraduationCap, UserCircle2, SlidersHorizontal, Zap, ChevronDown, LayoutGrid, List,
 } from 'lucide-react'
 import Link from 'next/link'
 import { useToast } from '@/store/ui.store'
@@ -21,6 +21,18 @@ import Spinner from '@/components/ui/Spinner'
 import { titleCase } from '@/lib/titleCase'
 import { AvatarImg } from '@/components/ui/AvatarImg'
 import { useAnchoredPosition } from '@/lib/useAnchoredPosition'
+/* THE SCHEDULE'S SHARED RULES — which door this class reached you through,
+   how many seats are left FOR YOU, and what you may do with a slot right now.
+   Lifted out of this file when the Course -> Module -> Class hierarchy was
+   added so the two views cannot answer the same question differently. */
+import {
+  zonedKey, toZonedDateStr, offlineDayOffset,
+  isWithinLiveWindow, isBookingClosed, bookingClosedAt, isPastEnd,
+  seatsLeft, isFull, effCourseId, effProgram, effSectionId, effSectionTitle,
+  getSlotStatus, SC, buildGroups, groupKeyOf,
+  type SlotStatus, type ClassGroup,
+} from '@/lib/classSchedule'
+import { Hierarchy, buildCatalog, allGroupsIn } from './Hierarchy'
 
 /* ── Google Fonts ──────────────────────────────────────────── */
 const FONT_CSS = `@import url('https://fonts.googleapis.com/css2?family=Syne:wght@600;700;800&family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;1,9..40,400&display=swap');.syne{font-family:'Syne',sans-serif}.dm{font-family:'DM Sans',sans-serif}`
@@ -28,14 +40,6 @@ const FONT_CSS = `@import url('https://fonts.googleapis.com/css2?family=Syne:wgh
 const FontLoader = () => <style dangerouslySetInnerHTML={{ __html: FONT_CSS }} />
 
 /* ── Date helpers ──────────────────────────────────────────── */
-/** The calendar day a moment falls on IN THE STUDENT'S OWN TIMEZONE
-    (APP_TIMEZONE = the device zone), as YYYY-MM-DD. A Dubai 11 PM Friday
-    class correctly files under Saturday for a student in India — the same
-    zone their clock times are rendered in, so labels and times always agree. */
-const zonedKey = (d: Date) =>
-  new Intl.DateTimeFormat('en-CA', {
-    timeZone: APP_TIMEZONE, year: 'numeric', month: '2-digit', day: '2-digit',
-  }).format(d)
 
 /* Day label for a session card.
 
@@ -88,117 +92,6 @@ function fmtDateRange(s: Date, e: Date): string {
   return `${s.toLocaleDateString('en-US',{month:'short',day:'numeric'})} to ${e.toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'})}`
 }
 
-/* ── Status ────────────────────────────────────────────────── */
-type SlotStatus = 'live'|'booked'|'bookable'|'closed'|'full'|'locked'|'attended'|'missed'|'cancelled'|'ended'
-const LIVE_LEAD_MINS = 15
-function isWithinLiveWindow(lc: LiveClass): boolean {
-  const s = new Date(lc.scheduledStart).getTime()
-  return Date.now() >= s - LIVE_LEAD_MINS*60_000 && Date.now() < s + (lc.durationMins||60)*60_000
-}
-/* Booking closes an hour before an online class starts.
-
-   The deadline comes from the server on every session. The local fallback is
-   only for payloads written before that field existed — if the two ever
-   disagree the SERVER is right, because it is the one that will refuse the
-   booking, and a screen that offers a seat the API then rejects is worse than
-   one that greys it out early. */
-const BOOKING_CUTOFF_MINS = 60
-function bookingClosedAt(lc: LiveClass): number {
-  return lc.bookingClosesAt
-    ? new Date(lc.bookingClosesAt).getTime()
-    : new Date(lc.scheduledStart).getTime() - BOOKING_CUTOFF_MINS * 60_000
-}
-function isBookingClosed(lc: LiveClass): boolean {
-  return Date.now() >= bookingClosedAt(lc)
-}
-
-function isPastEnd(lc: LiveClass): boolean {
-  return Date.now() >= new Date(lc.scheduledStart).getTime() + (lc.durationMins||60)*60_000
-}
-function toZonedDateStr(d: Date): string {
-  return new Intl.DateTimeFormat('en-CA', { timeZone: APP_TIMEZONE }).format(d)
-}
-function offlineDayOffset(scheduledStart: string): number {
-  const todayStr = toZonedDateStr(new Date())
-  const lcStr    = toZonedDateStr(new Date(scheduledStart))
-  const msPerDay = 86_400_000
-  return Math.round((new Date(lcStr).getTime() - new Date(todayStr).getTime()) / msPerDay)
-}
-
-function getSlotStatus(lc: LiveClass, booking: MyBooking|undefined, hasOther: boolean): SlotStatus {
-  if (lc.status === 'cancelled') return 'cancelled'
-
-  const isOffline = (lc as any).isOnline === false
-  const ended = (): SlotStatus => booking?.status === 'attended' ? 'attended' : booking?.status === 'missed' ? 'missed' : 'ended'
-
-  if (isOffline) {
-    if (lc.status === 'ended') return ended()
-    const offset = offlineDayOffset(lc.scheduledStart)
-    if (offset < 0) return ended()   // past calendar day → ended
-
-    if (offset === 0) {
-      // Today — booking window closed; only show existing booking status, no new bookings
-      if (booking?.status === 'booked')   return 'booked'
-      if (booking?.status === 'attended') return 'attended'
-      if (booking?.status === 'missed')   return 'missed'
-      return 'locked'   // no booking or cancelled → same-day booking not allowed
-    }
-
-    // offset > 0: future day — normal booking logic (book 1+ day in advance)
-    if (booking) {
-      if (booking.status === 'booked')    return 'booked'
-      if (booking.status === 'attended')  return 'attended'
-      if (booking.status === 'missed')    return 'missed'
-      if (booking.status === 'cancelled') {
-        if (hasOther) return 'locked'
-        if (isFull(lc)) return 'full'
-        return 'bookable'
-      }
-    }
-    if (hasOther) return 'locked'
-    if (isFull(lc)) return 'full'
-    return 'bookable'
-  }
-
-  const pastEnd = isPastEnd(lc)
-  const isLive  = lc.status === 'live' || (!pastEnd && isWithinLiveWindow(lc))
-  if (lc.status === 'ended' || (pastEnd && !isLive)) return ended()
-  if (isLive) return 'live'
-  /* A seat already held is unaffected by the deadline — checked BEFORE it, so
-     a booked student keeps seeing their booking (and the cancel button) right
-     up to the start. The cut-off stops NEW bookings, not existing ones. */
-  if (booking) {
-    if (booking.status === 'booked')    return 'booked'
-    if (booking.status === 'attended')  return 'attended'
-    if (booking.status === 'missed')    return 'missed'
-    if (booking.status === 'cancelled') {
-      if (isBookingClosed(lc)) return 'closed'
-      if (hasOther) return 'locked'
-      if (isFull(lc)) return 'full'
-      return 'bookable'
-    }
-  }
-  /* Ahead of 'full' and 'locked': once the hour has passed the seat count and
-     the one-per-slot rule are both beside the point, and "Booking Closed" is
-     the only answer that tells the student what actually happened. */
-  if (isBookingClosed(lc)) return 'closed'
-  if (hasOther) return 'locked'
-  if (isFull(lc)) return 'full'
-  return 'bookable'
-}
-
-const SC: Record<SlotStatus,{color:string;bg:string;border:string;label:string}> = {
-  live:      {color: 'var(--color-danger)',bg:'rgba(239,68,68,0.08)',  border:'rgba(239,68,68,0.22)',  label:'Live Now'},
-  closed:    {color: 'var(--color-text-muted)',bg:'var(--color-bg-inset)',border:'var(--color-border)',label:'Booking Closed'},
-  booked:    {color: 'var(--color-success)',bg:'rgba(5,150,105,0.08)',  border:'rgba(5,150,105,0.22)',  label:'Reserved'},
-  bookable:  {color: 'var(--color-primary)',bg:'rgba(0,87,184,0.08)', border:'rgba(0,87,184,0.22)', label:'Open'},
-  full:      {color: 'var(--color-text-muted)',bg:'rgba(107,114,128,0.07)',border:'rgba(107,114,128,0.18)',label:'Full'},
-  locked:    {color: 'var(--color-text-muted)',bg:'rgba(107,114,128,0.07)',border:'rgba(107,114,128,0.15)',label:'Locked'},
-  attended:  {color: '#2563EB',bg:'rgba(37,99,235,0.08)',  border:'rgba(37,99,235,0.20)',  label:'Attended'},
-  missed:    {color: '#D97706',bg:'rgba(217,119,6,0.08)',  border:'rgba(217,119,6,0.20)',  label:'Missed'},
-  cancelled: {color: 'var(--color-text-muted)',bg:'rgba(156,163,175,0.06)',border:'rgba(156,163,175,0.15)',label:'Cancelled'},
-  ended:     {color: 'var(--color-text-muted)',bg:'rgba(156,163,175,0.06)',border:'rgba(156,163,175,0.15)',label:'Ended'},
-}
 
 /* ── Types ─────────────────────────────────────────────────── */
 type AccessFilter   = 'all'|'mine'
@@ -206,11 +99,6 @@ type DeliveryFilter = 'all'|'online'|'offline'
 type ProgramFilter  = 'all'|'4x-trading'|'digital-marketing'|'ai'|'jura'
 type StatusFilter   = 'all'|'live'|'upcoming'|'ended'
 
-interface ClassGroup {
-  id:string; title:string; instructor:{id:string;name:string;avatarUrl?:string}|null
-  slots:LiveClass[]; bookedSlot:LiveClass|undefined
-  courseId?:string; courseTitle?:string; moduleTitle?:string
-}
 interface DateSection { dateKey:string; dateLabel:string; isToday:boolean; groups:ClassGroup[] }
 interface GroupKey { id:string; dateKey:string }
 
@@ -349,41 +237,6 @@ function MiniCalendar({rangeStart,rangeEnd,onRangeChange,onClose}: {
 }
 
 /* ── Slot chip ─────────────────────────────────────────────── */
-/* ── CROSS-ACADEMY: read YOUR door, not the room ──────────────────────────
-   On a shared class the room's remainder is not the caller's. The server
-   resolves the caller's own door and sends `seatsLeftForYou`; it is absent on
-   any class with no allocation in force, which is every unshared class, so the
-   fallback is the arithmetic this file always used and nothing changes there.
-
-   Same for the catalogue: a guest reaches the class through their OWN
-   academy's course and module, while `course`/`sectionId` still name the
-   host's. Filtering and grouping on the host's ids made a booked class vanish
-   from the student's own course and programme chips. */
-const seatsLeft  = (lc: LiveClass) => lc.seatsLeftForYou ?? (lc.sessionCapacity - lc.bookedCount)
-const isFull     = (lc: LiveClass) => lc.sessionCapacity > 0 && seatsLeft(lc) <= 0
-const effCourseId = (lc: LiveClass) => lc.yourCohort?.courseId ?? lc.course?.id
-const effProgram  = (lc: LiveClass) => lc.yourCohort?.program  ?? (lc.course as { program?: string } | undefined)?.program
-
-/* THE MODULE THE CALLER REACHES THIS CLASS THROUGH — their own, not the host's.
-
-   effCourseId above has always preferred the guest's door and these two never
-   did, so a Bangalore student on a shared class was grouped by their own
-   COURSE and the host's MODULE: one key mixing two doors, and a module name
-   belonging to an academy they are not enrolled in. yourCohort.sectionTitle
-   has been on the DTO since the door work and was read nowhere.
-
-   Both fall back to the class's own fields, which is what a host caller wants
-   and what every unshared class has. */
-const effSectionId = (lc: LiveClass): string => {
-  if (lc.yourCohort?.sectionId) return lc.yourCohort.sectionId
-  const s = lc.sectionId
-  return typeof s === 'object' && s ? s.id : s ?? ''
-}
-const effSectionTitle = (lc: LiveClass): string | undefined => {
-  if (lc.yourCohort?.sectionTitle) return lc.yourCohort.sectionTitle
-  const s = lc.sectionId
-  return typeof s === 'object' && s ? s.title : undefined
-}
 
 function SlotChip({lc,status,isSelected,onClick}: {
   lc:LiveClass; status:SlotStatus; isSelected:boolean; onClick:()=>void
@@ -1334,10 +1187,59 @@ export default function ClassBookingsPage() {
   const [filterInstructor, setFilterInstructor] = useState('all')
   const [filterLanguage,   setFilterLanguage]   = useState('all')
 
+  /* ── WHICH VIEW, AND WHERE IN IT ─────────────────────────────────────
+     'courses' is the catalogue: Course -> Module -> Class. 'sessions' is the
+     chronological list this page has always been. The hierarchy lands first
+     because that is how the schedule is meant to be read now, but every
+     reminder email, digest and booking notice links to a SPECIFIC session, so
+     those all carry ?view=sessions and keep arriving at the flat list.
+
+     Held in the URL rather than only in React so a drill-down can be linked,
+     bookmarked and backed out of. Read on mount rather than during render:
+     `window` does not exist server-side, and seeding state from it directly
+     would make the first client render disagree with the server's. */
+  const [view,    setView]    = useState<'courses'|'sessions'>('courses')
+  const [hCourse, setHCourse] = useState<string|null>(null)
+  const [hModule, setHModule] = useState<string|null>(null)
+
   const [openKey,    setOpenKey]    = useState<GroupKey|null>(null)
   const [showAdmin,  setShowAdmin]  = useState(false)
   const [bookPending,setBookPending]= useState<Set<string>>(new Set())
   const [cancelPend, setCancelPend] = useState<Set<string>>(new Set())
+
+  /* URL -> state, on mount and on every back/forward. */
+  useEffect(()=>{
+    const read=()=>{
+      const q=new URLSearchParams(window.location.search)
+      setView(q.get('view')==='sessions'?'sessions':'courses')
+      setHCourse(q.get('course'))
+      setHModule(q.get('module'))
+    }
+    read()
+    window.addEventListener('popstate',read)
+    return ()=>window.removeEventListener('popstate',read)
+  },[])
+
+  /* state -> URL. `push` for a navigation the back button should undo,
+     `replace` for the view toggle, which is a preference rather than a place. */
+  const syncUrl=(v:'courses'|'sessions',c:string|null,m:string|null,mode:'push'|'replace')=>{
+    const q=new URLSearchParams(window.location.search)
+    v==='sessions' ? q.set('view','sessions') : q.delete('view')
+    c ? q.set('course',c) : q.delete('course')
+    m !== null ? q.set('module',m) : q.delete('module')
+    const url=q.toString()?`${window.location.pathname}?${q}`:window.location.pathname
+    window.history[mode==='push'?'pushState':'replaceState'](null,'',url)
+  }
+
+  const navigate=(c:string|null,m:string|null)=>{
+    setHCourse(c); setHModule(m); syncUrl('courses',c,m,'push')
+    window.scrollTo({top:0,behavior:'smooth'})
+  }
+  const switchView=(v:'courses'|'sessions')=>{
+    setView(v)
+    if(v==='sessions'){ setHCourse(null); setHModule(null) }
+    syncUrl(v, v==='sessions'?null:hCourse, v==='sessions'?null:hModule, 'replace')
+  }
 
   const calRef   = useRef<HTMLDivElement>(null)
   const panelRef = useRef<HTMLDivElement>(null)
@@ -1587,10 +1489,23 @@ export default function ClassBookingsPage() {
     })
   },[allGroups,rangeStart,rangeEndIncl,useWindowRange])
 
+  /* THE CATALOGUE — every session still ahead, unclipped by the week window.
+     The hierarchy is a catalogue, not a diary (lib/classSchedule.isStillAhead),
+     so it deliberately does NOT go through `windowClasses`. It is built from
+     the same `allClasses` the flat list starts from, which is what keeps the
+     two views agreeing about any given class. */
+  const catalog = useMemo(()=>buildCatalog(allClasses,bookingMap),[allClasses,bookingMap])
+
+  /* A group the modal is open on can come from either view, and the two index
+     it differently: the flat list nests groups under a date, the hierarchy
+     under a module. Resolved against the flat list first, then the catalogue,
+     so the same SlotModal serves both without either knowing about the other. */
   const openGroup = useMemo(()=>{
     if(!openKey) return null
-    return dateSections.find(s=>s.dateKey===openKey.dateKey)?.groups.find(g=>g.id===openKey.id)??null
-  },[openKey,dateSections])
+    const dated = dateSections.find(s=>s.dateKey===openKey.dateKey)?.groups.find(g=>g.id===openKey.id)
+    if(dated) return dated
+    return allGroupsIn(catalog).find(g=>g.id===openKey.id) ?? null
+  },[openKey,dateSections,catalog])
 
   /* ── Stats ── */
   const stats = useMemo(()=>{
@@ -1642,6 +1557,12 @@ export default function ClassBookingsPage() {
   const hasAnyFilter = !!(search||filterAccess!=='all'||filterDelivery!=='all'||filterProgram!=='all'||filterCourse!=='all'||filterInstructor!=='all'||filterLanguage!=='all'||filterStatus!=='all')
   const clearAll = ()=>{setSearch('');setFilterStatus('all');setFilterAccess('all');setFilterDelivery('all');setFilterProgram('all');setFilterCourse('all');setFilterInstructor('all');setFilterLanguage('all')}
   const clearPanel = ()=>{setFilterAccess('all');setFilterProgram('all');setFilterCourse('all');setFilterInstructor('all');setFilterLanguage('all')}
+  /* The catalogue hides the chrome that only makes sense over a dated list —
+     the week shifter, the status tabs, the metric tiles and the panel filters
+     whose axes (course, programme) the tree navigates by instead. Search
+     stays: it is the one control the reference product keeps at every level. */
+  const isTree = view==='courses'
+
   const isLoading = loadCls||loadBk
 
   /* ── Status tab config ── */
@@ -1677,15 +1598,17 @@ export default function ClassBookingsPage() {
                 <span className="dm text-[10px] font-bold uppercase tracking-widest" style={{color: 'var(--color-primary)'}}>Class Schedule</span>
               </div>
               <h1 className="syne text-[26px] font-800 leading-none tracking-tight" style={{color: 'var(--color-text-primary)'}}>
-                {filterStatus==='all'?fmtDateRange(rangeStart,rangeEnd):filterStatus==='live'?(isOfflineMode?"Today's Classes":'Live Now'):filterStatus==='upcoming'?'Upcoming Sessions':'Completed Sessions'}
+                {isTree?'Browse Courses':filterStatus==='all'?fmtDateRange(rangeStart,rangeEnd):filterStatus==='live'?(isOfflineMode?"Today's Classes":'Live Now'):filterStatus==='upcoming'?'Upcoming Sessions':'Completed Sessions'}
               </h1>
               <p className="dm mt-1 text-[11px]" style={{color: 'var(--color-text-secondary)'}}>
                 Times are shown in your local time ({APP_TIMEZONE.replace(/_/g, ' ')})
               </p>
             </div>
 
-            {/* Date nav — only shown for 'all' status view */}
-            {filterStatus==='all'&&(
+            {/* Date nav — only shown for 'all' status view, and never in the
+                tree: the catalogue spans every upcoming week by design, so a
+                Mon-Sun shifter there would promise a filter it does not apply. */}
+            {!isTree&&filterStatus==='all'&&(
               <div className="relative flex items-center gap-2" ref={calRef}>
                 {!isCurrWeek&&(
                   <button type="button"
@@ -1723,7 +1646,7 @@ export default function ClassBookingsPage() {
         </motion.div>
 
         {/* ─── STATS ────────────────────────────────────────────── */}
-        {!isLoading&&filterDelivery!=='offline'&&(
+        {!isTree&&!isLoading&&filterDelivery!=='offline'&&(
           <div className="mb-5 grid grid-cols-2 gap-2 sm:grid-cols-4">
             <MetricTile index={0} icon={<CalendarDays size={18} strokeWidth={1.75}/>} label="Total Classes"   value={stats.total}    accent="var(--color-text-secondary)" />
             <MetricTile index={1} icon={<Flame size={18} strokeWidth={1.75}/>}        label="Live Now"        value={stats.liveNow}  accent="#EF4444" pulse={stats.liveNow>0} />
@@ -1734,7 +1657,7 @@ export default function ClassBookingsPage() {
 
         {/* ─── OFFLINE DASHBOARD ────────────────────────────────── */}
         <AnimatePresence>
-          {!isLoading&&filterDelivery==='offline'&&(
+          {!isTree&&!isLoading&&filterDelivery==='offline'&&(
             <motion.div initial={{opacity:0,y:8}} animate={{opacity:1,y:0}} exit={{opacity:0,y:-4}}
               transition={{type:'spring',stiffness:320,damping:28}}
               className="mb-5 grid grid-cols-2 gap-2 sm:grid-cols-4">
@@ -1747,7 +1670,10 @@ export default function ClassBookingsPage() {
         </AnimatePresence>
 
         {/* ─── STATUS TABS ──────────────────────────────────────── */}
-        <motion.div initial={{opacity:0,y:6}} animate={{opacity:1,y:0}} transition={{delay:0.04}}
+        {/* Hidden in the tree: live/upcoming/ended slice a chronological list,
+            and the catalogue is not one. Every slot still carries its own
+            status chip, which is where that answer belongs there. */}
+        {!isTree&&<motion.div initial={{opacity:0,y:6}} animate={{opacity:1,y:0}} transition={{delay:0.04}}
           className="mb-3 flex items-center gap-2 flex-wrap">
           {/* All tab */}
           <button type="button" onClick={()=>setFilterStatus('all')}
@@ -1780,7 +1706,7 @@ export default function ClassBookingsPage() {
               )})()}
             </button>
           ))}
-        </motion.div>
+        </motion.div>}
 
         {/* ─── FILTER BAR ───────────────────────────────────────── */}
         <div className="mb-4 relative" ref={panelRef}>
@@ -1794,7 +1720,10 @@ export default function ClassBookingsPage() {
             className="flex flex-wrap items-center gap-2 rounded-2xl bg-[var(--color-bg-surface)] px-3 py-2.5"
             style={{border: '1px solid var(--color-border)',boxShadow:'0 1px 6px rgba(15,23,42,0.05)'}}>
 
-            {/* Delivery toggles */}
+            {/* Delivery toggles — dated-list controls. In the tree a class's
+                delivery shows on the slot itself, and filtering the catalogue
+                by it would silently empty modules rather than explain why. */}
+            {!isTree&&<>
             <button type="button" onClick={()=>toggleDelivery('online')}
               className="dm flex h-11 flex-shrink-0 items-center gap-1.5 rounded-full px-3 text-[12px] font-semibold transition-all sm:h-auto sm:py-1.5"
               style={filterDelivery==='online'
@@ -1814,6 +1743,7 @@ export default function ClassBookingsPage() {
                 while they share a line. Once the ribbon wraps on a phone it
                 would trail the first row dividing nothing, so it goes. */}
             <div className="hidden h-5 w-px flex-shrink-0 sm:block" style={{background: 'var(--color-border)'}}/>
+            </>}
 
             {/* Search */}
             <div className="relative min-w-[200px] flex-1">
@@ -1833,7 +1763,7 @@ export default function ClassBookingsPage() {
             </div>
 
             {/* Filters button */}
-            <button type="button" onClick={()=>setShowPanel(v=>!v)}
+            {!isTree&&<button type="button" onClick={()=>setShowPanel(v=>!v)}
               className="dm flex h-11 flex-shrink-0 items-center gap-1.5 rounded-full px-3 text-[12px] font-semibold transition-all sm:h-auto sm:py-1.5"
               style={showPanel||panelFilterCount>0
                 ?{background:'rgba(0,87,184,0.10)',color: '#EA6010',border:'1.5px solid rgba(0,87,184,0.30)',fontWeight:600}
@@ -1846,9 +1776,9 @@ export default function ClassBookingsPage() {
                   {panelFilterCount}
                 </span>
               )}
-            </button>
+            </button>}
 
-            {hasAnyFilter&&(
+            {!isTree&&hasAnyFilter&&(
               <button type="button" onClick={clearAll}
                 className="dm hidden sm:flex items-center gap-1 rounded-full px-2.5 py-1.5 text-[11px] font-semibold flex-shrink-0"
                 style={{color: 'var(--color-danger)',border:'1px solid rgba(239,68,68,0.18)'}}>
@@ -1859,7 +1789,7 @@ export default function ClassBookingsPage() {
 
           {/* ─── FILTER PANEL (expandable) ──────────────────────── */}
           <AnimatePresence>
-            {showPanel&&(
+            {!isTree&&showPanel&&(
               <motion.div initial={{opacity:0,y:-6}} animate={{opacity:1,y:0}} exit={{opacity:0,y:-6}}
                 transition={{type:'spring',stiffness:380,damping:30}}
                 className="mt-2 rounded-2xl bg-[var(--color-bg-surface)] overflow-hidden"
@@ -1908,8 +1838,10 @@ export default function ClassBookingsPage() {
         </div>
 
         {/* ─── PROGRAM-SCOPED DROPDOWNS ─────────────────────────── */}
+        {/* Course and instructor pickers. The tree navigates by course, so
+            offering it as a filter there would be two ways to say one thing. */}
         <AnimatePresence>
-          {filterProgram!=='all'&&(programCourses.length>0||programInstructors.length>0)&&(
+          {!isTree&&filterProgram!=='all'&&(programCourses.length>0||programInstructors.length>0)&&(
             <motion.div
               initial={{opacity:0,y:-8,height:0}} animate={{opacity:1,y:0,height:'auto'}} exit={{opacity:0,y:-6,height:0}}
               transition={{type:'spring',stiffness:360,damping:30}}
@@ -1956,6 +1888,26 @@ export default function ClassBookingsPage() {
           )}
         </AnimatePresence>
 
+        {/* ─── VIEW TOGGLE ──────────────────────────────────────── */}
+        {/* Both views read the same sessions; they differ only in how they are
+            arranged. The flat list stays reachable because "what is on this
+            week" is a real question the tree answers badly. */}
+        <div className="mb-4 inline-flex items-center gap-1 rounded-full p-1"
+          role="tablist" aria-label="Schedule layout"
+          style={{background: 'var(--color-bg-inset)',border: '1px solid var(--color-border)'}}>
+          {([['courses','Courses',<LayoutGrid key="g" size={12} strokeWidth={2.25}/>],
+             ['sessions','All sessions',<List key="l" size={12} strokeWidth={2.25}/>]] as const).map(([k,label,icon])=>(
+            <button key={k} type="button" role="tab" aria-selected={view===k}
+              onClick={()=>switchView(k as 'courses'|'sessions')}
+              className="dm inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-[12px] font-semibold transition-all"
+              style={view===k
+                ?{background: 'var(--color-bg-surface)',color: 'var(--color-text-primary)',boxShadow:'0 1px 4px rgba(15,23,42,0.10)',fontWeight:700}
+                :{background:'transparent',color: 'var(--color-text-muted)'}}>
+              {icon}{label}
+            </button>
+          ))}
+        </div>
+
         {/* ─── CONTENT ──────────────────────────────────────────── */}
         {isLoading&&(
           <div className="flex flex-col items-center justify-center gap-3 py-24">
@@ -1965,7 +1917,29 @@ export default function ClassBookingsPage() {
           </div>
         )}
 
-        {!isLoading&&(
+        {!isLoading&&isTree&&(
+          <>
+            <Hierarchy
+              /* AnimatePresence identifies its child BY KEY — without one it
+                 cannot tell Level 1 from Level 2 and has nothing to cross-fade
+                 between, so the drill-down snapped. A key on the motion.div
+                 inside Hierarchy is invisible from out here. */
+              key={`${hCourse ?? ''}:${hModule ?? ''}`}
+              classes={allClasses} bookingMap={bookingMap} search={search}
+              courseId={hCourse} moduleId={hModule}
+              onNavigate={navigate}
+              /* The hierarchy hands the group back rather than opening
+                 anything: SlotModal is the page's, and it is where the ten
+                 slot states and the seven booking error codes live. The
+                 dateKey is the group's own first slot so the key stays stable
+                 across re-renders; openGroup resolves it from the catalogue
+                 when the flat list does not hold it. */
+              onOpenGroup={g=>setOpenKey({id:g.id,dateKey:zonedKey(new Date(g.slots[0]!.scheduledStart))})}
+            />
+          </>
+        )}
+
+        {!isLoading&&!isTree&&(
           <AnimatePresence mode="wait">
             <motion.div
               key={`${rangeStart.toISOString()}-${search}-${filterStatus}-${filterAccess}-${filterDelivery}-${filterProgram}-${filterCourse}-${filterInstructor}-${filterLanguage}`}
