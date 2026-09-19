@@ -2,11 +2,13 @@
 
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
+import Link from 'next/link'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
   User, Bell, Shield, CreditCard, Globe,
   Camera, Check, LogOut, LayoutDashboard,
-  PanelLeft, AlignJustify, Monitor, AlertCircle, Lock, Eye, EyeOff, FileText, Mail,} from 'lucide-react'
+  PanelLeft, AlignJustify, Monitor, AlertCircle, Lock, Eye, EyeOff, FileText, Mail,
+  Receipt, ArrowRight,} from 'lucide-react'
 import { useUIStore } from '@/store/ui.store'
 import {
   useCurrentUser, useUpdateProfile, useChangePassword,
@@ -685,12 +687,41 @@ export default function SettingsContent() {
             </div>
           )}
 
-          {(['billing', 'language'] as const).includes(active as never) && (
+          {/* BILLING IS NOT COMING SOON. It said so for as long as /orders -
+              a finished Purchase History page, receipts and all - sat in the
+              app with no link pointing at it from anywhere. The section that
+              should have been the way in was a placeholder apologising for
+              itself. */}
+          {active === 'billing' && (
+            <div key="billing" style={{ border: '1px solid var(--color-border)' }}
+              className="rounded-2xl bg-[var(--color-bg-surface)] p-6">
+              <div className="flex items-start gap-4">
+                <div className="flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-2xl"
+                  style={{ background: 'var(--color-primary-light)', border: '1px solid rgba(0,87,184,0.18)', color: 'var(--color-primary)' }}>
+                  <Receipt size={18} />
+                </div>
+                <div className="min-w-0">
+                  <p className="text-base font-bold" style={{ color: 'var(--color-text-primary)' }}>Purchase History</p>
+                  <p className="mt-1 text-sm leading-relaxed" style={{ color: 'var(--color-text-muted)' }}>
+                    Every course you have paid for, what it cost, and the receipt for it.
+                  </p>
+                  <Link href="/orders"
+                    className="mt-4 inline-flex items-center gap-1.5 rounded-xl px-4 py-2 text-sm font-semibold text-white transition-opacity hover:opacity-90"
+                    style={{ background: 'var(--color-primary)' }}>
+                    View purchases
+                    <ArrowRight size={14} />
+                  </Link>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {(['language'] as const).includes(active as never) && (
             <div key={active} style={{ border: '1px solid var(--color-border)' }}
               className="rounded-2xl bg-[var(--color-bg-surface)] p-10 flex flex-col items-center gap-4">
               <div className="flex h-14 w-14 items-center justify-center rounded-3xl text-2xl"
                 style={{ background: 'var(--color-primary-light)', border: '1px solid rgba(0,87,184,0.18)' }}>
-                {active === 'billing' ? '💳' : '🌍'}
+                <Globe size={24} />
               </div>
               <p className="text-base font-bold" style={{ color: 'var(--color-text-primary)' }}>Coming soon</p>
               <p className="text-sm text-center max-w-xs" style={{ color: 'var(--color-text-muted)' }}>

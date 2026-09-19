@@ -8,7 +8,7 @@ import {
   Search, Bell, X, MessageSquare, BookOpen,
   GraduationCap, Heart, Sparkles, Trophy,
   Settings, Clock, Star, Users, Video, Flame, Menu, ShoppingCart, Map, CalendarDays, LifeBuoy,
-  Ticket,
+  Ticket, Receipt,
   ClipboardList, LogOut, Sun, Moon, Monitor,
 } from 'lucide-react'
 import { useQuery } from '@tanstack/react-query'
@@ -456,6 +456,24 @@ export function ClientTopbar() {
                     </motion.span>
                   )}
                 </AnimatePresence>
+              </motion.div>
+            </Link>
+
+            {/* Purchase history - beside the cart, because that is where someone
+                looks for what they bought, and the receipt for it.
+
+                /orders is a complete "Purchase History" page that had no link
+                anywhere in the client, at any width. A student could pay for a
+                course and then never see the receipt again. It is an icon rather
+                than a twelfth tab because the tab row already overflows, and
+                because cart-then-receipts reads as one group. */}
+            <Link href="/orders">
+              <motion.div whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}
+                title="Purchase history"
+                aria-label="Purchase history"
+                className="relative hidden h-11 w-11 items-center justify-center rounded-xl transition-colors hover:bg-[var(--color-hover)] sm:flex lg:h-9 lg:w-9"
+                style={{ color: 'var(--color-primary)' }}>
+                <Receipt size={16} />
               </motion.div>
             </Link>
 
