@@ -176,7 +176,7 @@ function CourseDetailInner({ slug }: { slug: string }) {
   const continueLessonId = progress?.lastLessonId ?? lessons[0]?.id
 
   return (
-    <div className="mx-auto max-w-5xl">
+    <div className="mx-auto max-w-5xl pb-24 lg:pb-0">
       {/* Back */}
       <motion.div initial={{ opacity: 0, x: -12 }} animate={{ opacity: 1, x: 0 }}
         transition={{ type: 'spring', stiffness: 300, damping: 26 }} className="mb-6">
@@ -686,6 +686,47 @@ function CourseDetailInner({ slug }: { slug: string }) {
           </motion.div>
         </div>
       </div>
+
+      {/* THE ACTION, WITHIN REACH.
+
+          The CTA card is the second child of a two-column grid, so at one
+          column it renders AFTER the whole of the first: hero, thumbnail,
+          description, what-you'll-learn, the entire curriculum, the live
+          classes panel and the reviews. On a phone the only way to enrol is
+          to scroll past everything the page uses to persuade you - which is
+          the wrong way round, and this is the page the business sells from.
+
+          So the primary action is repeated in a bar fixed to the bottom,
+          below `lg` only. It is the same handler, not a second code path:
+          whatever the card would do, this does.
+
+          The left inset clears the activity-panel button parked at
+          bottom-6 left-4: measured, that button occupies x 36-80, so 88px
+          leaves 8px of gap - 72 would have overlapped it by 8. z-10 leaves
+          that button and the nav drawer above the bar rather than trapped
+          under it, and the safe-area inset is what stops the button sitting
+          under an iPhone's home indicator. */}
+      {(isEnrolled ? !!continueLessonId : !isPaid) && (
+        <div className="fixed inset-x-0 bottom-0 z-10 border-t py-3 pl-[88px] pr-4 lg:hidden"
+          style={{ background: 'var(--color-bg-surface)', borderColor: 'var(--color-border)',
+                   paddingBottom: 'calc(0.75rem + env(safe-area-inset-bottom))' }}>
+          {isEnrolled ? (
+            <Link href={`/learn/${course.slug}/${continueLessonId}`}
+              className="flex h-12 w-full items-center justify-center gap-2 rounded-2xl text-sm font-bold text-white active:scale-[0.98]"
+              style={{ background: 'var(--color-primary)' }}>
+              <Play size={15} fill="white" />Continue learning
+            </Link>
+          ) : (
+            <button onClick={onEnroll} disabled={enroll.isPending}
+              className="flex h-12 w-full items-center justify-center gap-2 rounded-2xl text-sm font-bold text-white active:scale-[0.98] disabled:opacity-70"
+              style={{ background: 'var(--color-primary)' }}>
+              {enroll.isPending
+                ? <><Spinner size={15} />Enrolling…</>
+                : <><Zap size={15} fill="white" />Enroll for free</>}
+            </button>
+          )}
+        </div>
+      )}
     </div>
   )
 }

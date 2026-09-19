@@ -204,7 +204,15 @@ export default function CoursesPage() {
       <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}
         transition={{ delay: 0.04, type: 'spring', stiffness: 280, damping: 26 }}
         className="mb-4">
-        <div className="flex items-center gap-2.5 overflow-x-auto scrollbar-none pb-0.5">
+        <div /* WRAPS ON A PHONE. This row is the whole catalogue's top-level
+                     segmentation - All / FOREX / JURA / Digital Marketing / AI -
+                     and at 375px five h-11 chips need ~556px inside a 343px box.
+                     It scrolled, but `scrollbar-none` removed the only cue that
+                     it did, so two of the five programs simply did not exist for
+                     anyone who did not think to swipe a row that looks static.
+                     Five chips are worth 44px of second row; a wrapped row has
+                     nothing hidden to advertise. Unchanged from `sm` up. */
+                  className="flex flex-wrap items-center gap-2.5 pb-0.5 sm:flex-nowrap sm:overflow-x-auto sm:scrollbar-none">
           {PROGRAM_FILTERS.map(p => {
             const Icon     = p.icon
             const isActive = program === p.id
@@ -251,7 +259,7 @@ export default function CoursesPage() {
               tabs carry overflow-x-auto already, so letting them shrink costs
               nothing they were not prepared for; min-w-0 is what lets a flex
               child go below its content width at all. */}
-          <div className="flex w-full min-w-0 items-center gap-1 overflow-x-auto rounded-2xl p-1 scrollbar-none self-start sm:w-auto"
+          <div className="flex w-full min-w-0 flex-wrap items-center gap-1 rounded-2xl p-1 self-start sm:w-auto sm:flex-nowrap sm:overflow-x-auto sm:overscroll-x-contain sm:scrollbar-none"
             style={{ background: 'var(--color-bg-subtle)' }}>
             {STATUS_TABS.map(tab => (
               <MotionButton key={tab} onClick={() => setActiveTab(tab)}
@@ -350,7 +358,7 @@ export default function CoursesPage() {
                       <Button key={t.value} onClick={() => setContentType(t.value)}
                         variant="ghost"
                         size="sm"
-                        className="rounded-xl px-3 py-1.5 text-xs font-semibold h-auto transition-all"
+                        className="rounded-xl px-3 py-1.5 text-xs font-semibold h-auto min-h-11 lg:min-h-0 transition-all"
                         style={contentType === t.value
                           ? { background: t.bg, color: t.color, border: `1px solid ${t.color}40` }
                           : { background: 'var(--color-bg-subtle)', color: 'var(--color-text-muted)', border: '1px solid var(--color-border)' }}>
@@ -367,7 +375,7 @@ export default function CoursesPage() {
                       <Button key={l} onClick={() => { setLevel(l); setPage(1) }}
                         variant="ghost"
                         size="sm"
-                        className="rounded-xl px-3 py-1.5 text-xs font-semibold capitalize h-auto transition-all"
+                        className="rounded-xl px-3 py-1.5 text-xs font-semibold capitalize h-auto min-h-11 lg:min-h-0 transition-all"
                         style={level === l
                           ? { background: 'rgba(0,87,184,0.10)', color: 'var(--color-primary)', border: '1px solid rgba(0,87,184,0.28)' }
                           : { background: 'var(--color-bg-subtle)', color: 'var(--color-text-muted)', border: '1px solid var(--color-border)' }}>
@@ -384,7 +392,7 @@ export default function CoursesPage() {
                       <Button key={c} onClick={() => { setCategory(c); setPage(1) }}
                         variant="ghost"
                         size="sm"
-                        className="rounded-xl px-3 py-1.5 text-xs font-semibold h-auto transition-all"
+                        className="rounded-xl px-3 py-1.5 text-xs font-semibold h-auto min-h-11 lg:min-h-0 transition-all"
                         style={category === c
                           ? { background: 'rgba(99,102,241,0.10)', color: '#4F46E5', border: '1px solid rgba(99,102,241,0.28)' }
                           : { background: 'var(--color-bg-subtle)', color: 'var(--color-text-muted)', border: '1px solid var(--color-border)' }}>
@@ -401,7 +409,7 @@ export default function CoursesPage() {
                       <Button key={d.key} onClick={() => { setDuration(d.key); setPage(1) }}
                         variant="ghost"
                         size="sm"
-                        className="rounded-xl px-3 py-1.5 text-xs font-semibold h-auto transition-all"
+                        className="rounded-xl px-3 py-1.5 text-xs font-semibold h-auto min-h-11 lg:min-h-0 transition-all"
                         style={duration === d.key
                           ? { background: 'rgba(59,130,246,0.10)', color: '#2563EB', border: '1px solid rgba(59,130,246,0.28)' }
                           : { background: 'var(--color-bg-subtle)', color: 'var(--color-text-muted)', border: '1px solid var(--color-border)' }}>
@@ -421,7 +429,7 @@ export default function CoursesPage() {
                       <Button key={p.key} onClick={() => { setPriceRange(p.key); setPage(1) }}
                         variant="ghost"
                         size="sm"
-                        className="rounded-xl px-3 py-1.5 text-xs font-semibold h-auto transition-all"
+                        className="rounded-xl px-3 py-1.5 text-xs font-semibold h-auto min-h-11 lg:min-h-0 transition-all"
                         style={priceRange === p.key
                           ? { background: 'rgba(34,197,94,0.10)', color: 'var(--color-success)', border: '1px solid rgba(34,197,94,0.28)' }
                           : { background: 'var(--color-bg-subtle)', color: 'var(--color-text-muted)', border: '1px solid var(--color-border)' }}>
@@ -438,7 +446,7 @@ export default function CoursesPage() {
                       <Button
                         onClick={() => { setInstructor(''); setPage(1) }}
                         variant="ghost" size="sm"
-                        className="flex items-center gap-1.5 rounded-xl px-3 py-1.5 text-xs font-semibold h-auto transition-all"
+                        className="flex items-center gap-1.5 rounded-xl px-3 py-1.5 text-xs font-semibold h-auto min-h-11 lg:min-h-0 transition-all"
                         style={!instructor
                           ? { background: 'rgba(0,87,184,0.10)', color: 'var(--color-primary)', border: '1px solid rgba(0,87,184,0.28)' }
                           : { background: 'var(--color-bg-subtle)', color: 'var(--color-text-muted)', border: '1px solid var(--color-border)' }}>
@@ -449,7 +457,7 @@ export default function CoursesPage() {
                           key={ins.id}
                           onClick={() => { setInstructor(instructor === ins.id ? '' : ins.id); setPage(1) }}
                           variant="ghost" size="sm"
-                          className="flex items-center gap-1.5 rounded-xl px-3 py-1.5 text-xs font-semibold h-auto transition-all"
+                          className="flex items-center gap-1.5 rounded-xl px-3 py-1.5 text-xs font-semibold h-auto min-h-11 lg:min-h-0 transition-all"
                           style={instructor === ins.id
                             ? { background: 'rgba(0,87,184,0.10)', color: 'var(--color-primary)', border: '1px solid rgba(0,87,184,0.28)' }
                             : { background: 'var(--color-bg-subtle)', color: 'var(--color-text-muted)', border: '1px solid var(--color-border)' }}>
@@ -468,7 +476,7 @@ export default function CoursesPage() {
                   <Button onClick={() => { setFree(v => !v); setPage(1) }}
                     variant="ghost"
                     size="sm"
-                    className="flex items-center gap-1.5 rounded-xl px-3 py-1.5 text-xs font-semibold h-auto transition-all"
+                    className="flex items-center gap-1.5 rounded-xl px-3 py-1.5 text-xs font-semibold h-auto min-h-11 lg:min-h-0 transition-all"
                     style={free
                       ? { background: 'rgba(34,197,94,0.10)', color: 'var(--color-success)', border: '1px solid rgba(34,197,94,0.25)' }
                       : { background: 'var(--color-bg-subtle)', color: 'var(--color-text-muted)', border: '1px solid var(--color-border)' }}>
@@ -481,7 +489,7 @@ export default function CoursesPage() {
                   }}
                     variant="ghost"
                     size="sm"
-                    className="flex items-center gap-1 text-xs font-semibold h-auto transition-colors hover:text-red-500"
+                    className="flex items-center gap-1 text-xs font-semibold h-auto min-h-11 lg:min-h-0 transition-colors hover:text-red-500"
                     style={{ color: 'var(--color-text-muted)' }}>
                     <X size={11} />Clear all
                   </Button>
