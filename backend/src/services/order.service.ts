@@ -1854,6 +1854,79 @@ export class OrderService {
     }
   }
 
+  /**
+   * Give a student their course because Delta Finance approved the enrolment.
+   *
+   * The sales team closes a lead, finance raises the invoice and an approver
+   * signs it off — and until now that was where it stopped. Somebody then
+   * provisioned the student by hand, from a script, off a list. This is that
+   * step, done by the system that already knows the approval happened.
+   *
+   * Built on `provisionManualPurchase`, which is the same act: an account, an
+   * enrolment, approval, and an order recording what was paid. What this adds
+   * is idempotency against the invoice. The finance side queues and retries,
+   * so the same approval will arrive more than once, and `provisionManualPurchase`
+   * writes an Order every time it is called — three retries would report three
+   * sales. The invoice id is carried on the order, and a second arrival finds
+   * the first rather than adding to it.
+   */
+  async provisionFinanceEnrolment(input: {
+    email: string
+    name?: string
+    phone?: string
+    courseSlug: string
+    /** The finance invoice this came from — the idempotency key. */
+    externalId: string
+    amount?: number
+  }): Promise<{
+    userId: string
+    created: boolean
+    alreadyProcessed: boolean
+    courseSlug: string
+    courseTitle: string
+    organizationSlug: string | null
+  }> {
+    const { OrderModel } = await import('@/models/schema.ts')
+
+    const prior = await OrderModel.findOne({
+      'externalRef.source': 'finance',
+      'externalRef.id': input.externalId,
+    }).select('_id userId courseId').lean()
+
+    if (prior) {
+      const course = await CourseModel.findById((prior as { courseId: unknown }).courseId)
+        .select('slug title organizationId').lean()
+      const { OrganizationModel } = await import('@/models/schema.ts')
+      const orgId = (course as unknown as { organizationId?: unknown } | null)?.organizationId
+      const org = orgId
+        ? await OrganizationModel.findById(String(orgId)).select('slug').lean()
+        : null
+      logger.info({ externalId: input.externalId }, 'finance enrolment already provisioned — skipping')
+      return {
+        userId: String((prior as { userId: unknown }).userId),
+        created: false,
+        alreadyProcessed: true,
+        courseSlug: (course as { slug?: string })?.slug ?? input.courseSlug,
+        courseTitle: (course as { title?: string })?.title ?? '',
+        organizationSlug: (org as { slug?: string })?.slug ?? null,
+      }
+    }
+
+    const result = await this.provisionManualPurchase(input)
+
+    /* The order provisionManualPurchase just wrote, stamped with where it came
+       from. Marked after the fact rather than by changing that method, because
+       its other caller — the hand-provisioning script — has no invoice and
+       should not be made to invent one. */
+    await OrderModel.findOneAndUpdate(
+      { userId: result.userId, 'externalRef.id': { $exists: false } },
+      { $set: { externalRef: { source: 'finance', id: input.externalId } } },
+      { sort: { createdAt: -1 } },
+    )
+
+    return { ...result, alreadyProcessed: false }
+  }
+
   private async _createEnrollment(userId: string, courseId: string): Promise<void> {
     const { EnrollmentRepository } = await import('@/repositories/enrollment.repository.ts')
     const { CourseRepository }     = await import('@/repositories/course.repository.ts')

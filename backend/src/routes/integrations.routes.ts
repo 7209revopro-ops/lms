@@ -167,4 +167,89 @@ router.post('/ai-academy/purchase', validate(aiaPurchaseSchema), async (req: Req
   } catch (err) { next(err) }
 })
 
+/* ────────────────────────────────────────────────────────────────────────────
+   POST /integrations/finance/enrolment   (Delta Finance → LMS)
+   ────────────────────────────────────────────────────────────────────────────
+   Called server-to-server when an approver signs off an enrolment invoice that
+   the sales CRM raised. Creates or reuses the student, enrols and approves them
+   on the mapped course, records the payment against the invoice, and emails a
+   one-click login link.
+
+   Idempotent on invoiceId: finance queues and retries, so the same approval
+   arrives more than once and must provision once. Secret is a shared value in
+   FINANCE_S2S_SECRET (unset → integration disabled). No cookie/session.
+
+   The course arrives as a slug, because a name cannot identify one: finance
+   holds nine spellings of three courses. Which slug belongs to which course is
+   decided in finance, on the item, and only a mapped item gets this far.
+──────────────────────────────────────────────────────────────────────────── */
+const financeEnrolmentSchema = z.object({
+  email:      z.string().email().toLowerCase(),
+  name:       z.string().max(120).optional(),
+  phone:      z.string().max(30).optional(),
+  courseSlug: z.string().min(1).max(200),
+  /* The finance invoice. The idempotency key, and the thing to quote when
+     somebody asks why a student has access. */
+  invoiceId:     z.string().min(1).max(200),
+  invoiceNumber: z.string().max(60).optional(),
+  amount:        z.coerce.number().min(0).optional(),
+})
+
+router.post('/finance/enrolment', validate(financeEnrolmentSchema), async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const secret = String(process.env['FINANCE_S2S_SECRET'] ?? '')
+    if (!secret) {
+      res.status(503).json({ success: false, error: { code: 'INTEGRATION_DISABLED', message: 'Finance integration is not configured' } })
+      return
+    }
+    if (!secretOk(req.headers['x-finance-secret'], secret)) {
+      logger.warn('Finance enrolment: invalid or missing X-Finance-Secret')
+      res.status(401).json({ success: false, error: { code: 'UNAUTHORISED', message: 'Bad secret' } })
+      return
+    }
+
+    const { email, name, phone, courseSlug, invoiceId, invoiceNumber, amount } = req.body as {
+      email: string; name?: string; phone?: string; courseSlug: string
+      invoiceId: string; invoiceNumber?: string; amount?: number
+    }
+
+    let result
+    try {
+      result = await orderSvc.provisionFinanceEnrolment({
+        email, courseSlug, externalId: invoiceId,
+        ...(name ? { name } : {}), ...(phone ? { phone } : {}),
+        ...(amount !== undefined ? { amount } : {}),
+      })
+    } catch (err) {
+      /* An unmapped or renamed slug is the caller's mistake and will fail the
+         same way every time, so it is a 422 rather than a 500: finance stops
+         retrying and shows somebody the invoice that needs mapping. */
+      const message = err instanceof Error ? err.message : 'Provisioning failed'
+      if (/No course with slug/i.test(message)) {
+        logger.warn({ courseSlug, invoiceId }, 'Finance enrolment: unknown course slug')
+        res.status(422).json({ success: false, error: { code: 'UNKNOWN_COURSE', message } })
+        return
+      }
+      throw err
+    }
+
+    /* Only on first provision, so a retry does not mail the student again. */
+    let loginLink: string | undefined
+    if (!result.alreadyProcessed) {
+      const invite = await authSvc.inviteToCourse(email, {
+        next: `/courses/${result.courseSlug}`,
+        ...(name ? { name } : {}),
+        courseName: result.courseTitle,
+      })
+      loginLink = invite.link
+    }
+
+    logger.info(
+      { invoiceId, invoiceNumber, email, courseSlug: result.courseSlug, created: result.created, repeat: result.alreadyProcessed },
+      'Finance enrolment provisioned in LMS',
+    )
+    sendSuccess(res, { ...result, ...(loginLink ? { loginLink } : {}) }, 'Enrolment provisioned')
+  } catch (err) { next(err) }
+})
+
 export default router

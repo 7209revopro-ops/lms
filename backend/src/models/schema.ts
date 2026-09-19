@@ -1455,6 +1455,17 @@ export interface IOrder extends Document {
   tamaraCheckoutId?:        string
   tamaraOrderId?:           string
   tamaraPaymentId?:         string
+  /**
+   * Where this order came from, when it came from outside.
+   *
+   * The gateway ids above each belong to one payment provider. An order raised
+   * by another Delta system — finance approving an enrolment the sales team
+   * closed — has no gateway id, and reusing one would say the money came from
+   * somewhere it did not. This is what makes such a provision idempotent: the
+   * same invoice arriving twice finds its own row rather than writing a second
+   * one and doubling the revenue it reports.
+   */
+  externalRef?: { source: string; id: string }
   amount:                   number    // charged amount in smallest unit (cents / fils)
   currency:                 string
   status:                   OrderStatus
@@ -1485,6 +1496,10 @@ const OrderSchema = new Schema<IOrder>(
     tamaraCheckoutId:        { type: String },
     tamaraOrderId:           { type: String },
     tamaraPaymentId:         { type: String },
+    externalRef: {
+      source: { type: String },
+      id:     { type: String },
+    },
     amount:                  { type: Number, required: true, min: 0 },
     currency:                { type: String, required: true, default: 'usd', maxlength: 3 },
     status:                  { type: String, enum: ['pending', 'paid', 'refunded', 'cancelled'], default: 'pending' },
@@ -1497,6 +1512,13 @@ const OrderSchema = new Schema<IOrder>(
   baseSchemaOptions,
 )
 
+// Sparse and unique together: the lookup that makes an external provision
+// idempotent, over the handful of orders that carry one, while the millions
+// raised by a gateway are untouched by it.
+OrderSchema.index(
+  { "externalRef.source": 1, "externalRef.id": 1 },
+  { unique: true, partialFilterExpression: { "externalRef.id": { $type: "string" } } },
+)
 OrderSchema.index({ userId: 1, createdAt: -1 })
 OrderSchema.index({ courseId: 1 })
 OrderSchema.index({ status: 1 })
