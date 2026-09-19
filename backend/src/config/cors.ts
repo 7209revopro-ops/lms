@@ -1,7 +1,11 @@
 import type { CorsOptions } from 'cors'
 import { env } from './env.ts'
 
-const allowedOrigins = [
+/* Exported because the asset proxy needs the same list for CSP
+   `frame-ancestors`: the set of front-ends allowed to EMBED a document is the
+   same set allowed to call the API, and keeping two lists is how one of them
+   silently goes stale. */
+export const allowedOrigins = [
   env.CLIENT_URL,
   env.ADMIN_URL,
   'http://localhost:3002',
