@@ -1,5 +1,6 @@
 'use client'
 
+import { useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
@@ -66,9 +67,13 @@ const instructorNavItems = [
   { label: 'Reviews',       href: '/reviews',             icon: Star },
 ]
 
-const bottomItems = [
-  { label: 'Settings', href: '/settings', icon: Settings },
-]
+/* Settings is platform configuration, and the page's own device-limit query
+   goes to GET /admin/settings/device-limit behind `requireAnyAdmin`
+   (backend/src/middleware/auth.middleware.ts:411) -- a list that does NOT
+   include `instructor`. The link was in the footer for every role, so an
+   instructor who tapped it got a page of bcrypt/JWT/rate-limit rows with a
+   403 in the middle of it. */
+const settingsItem = { label: 'Settings', href: '/settings', icon: Settings }
 
 interface SidebarContentProps {
   collapsed: boolean
@@ -101,6 +106,7 @@ function SidebarContent({ collapsed, onClose }: SidebarContentProps) {
     ? [...withClassroom, { label: 'Roles', href: '/roles', icon: ShieldCheck }]
     : withClassroom
   const roleLabel = isInstructor ? 'Instructor' : isManager ? 'Manager' : 'Admin'
+  const bottomItems = isInstructor ? [] : [settingsItem]
 
   const isActive = (href: string) =>
     href === '/' ? pathname === '/' : pathname.startsWith(href)
@@ -136,6 +142,7 @@ function SidebarContent({ collapsed, onClose }: SidebarContentProps) {
         {onClose && (
           <button
             onClick={onClose}
+            aria-label="Close menu"
             className="ml-auto flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-lg transition-colors hover:bg-white/10"
             style={{ color: 'rgba(255,255,255,0.4)' }}>
             <X size={15} />
@@ -281,13 +288,28 @@ export function AdminSidebar() {
   const { sidebarCollapsed, mobileNavOpen, setMobileNav, toggleSidebar } = useUIStore()
   const w = sidebarCollapsed ? 68 : 240
 
+  /* While the drawer is open it is the only thing you can interact with, so
+     the page behind it should not scroll under your thumb, and Escape should
+     close it the way it closes every other overlay in here. */
+  useEffect(() => {
+    if (!mobileNavOpen) return
+    const previous = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    const onKeyDown = (e: KeyboardEvent) => { if (e.key === 'Escape') setMobileNav(false) }
+    window.addEventListener('keydown', onKeyDown)
+    return () => {
+      document.body.style.overflow = previous
+      window.removeEventListener('keydown', onKeyDown)
+    }
+  }, [mobileNavOpen, setMobileNav])
+
   return (
     <>
       {/* ── Desktop sidebar: hidden below lg ──────────── */}
       <motion.aside
         animate={{ width: w }}
         transition={{ type: 'spring', stiffness: 300, damping: 30 }}
-        className="fixed left-0 top-0 z-40 hidden h-screen flex-col overflow-hidden lg:flex"
+        className="fixed left-0 top-0 z-40 hidden h-dvh flex-col overflow-hidden lg:flex"
         style={{ background: '#0D0F1A', borderRight: '1px solid rgba(255,255,255,0.06)' }}
       >
         <SidebarContent collapsed={sidebarCollapsed} />
@@ -334,8 +356,19 @@ export function AdminSidebar() {
               animate={{ x: 0 }}
               exit={{ x: -280 }}
               transition={{ type: 'spring', stiffness: 300, damping: 30 }}
-              className="fixed left-0 top-0 z-50 flex h-screen w-[280px] flex-col overflow-hidden lg:hidden"
+              /* h-dvh, not h-screen. 100vh on iOS Safari and Chrome Android
+                 is the toolbar-retracted height, ~90-115px taller than what
+                 you can actually see on load. This panel is
+                 `flex + overflow-hidden` with only the <nav> scrolling, so
+                 that surplus pushed the whole ~128px footer -- Settings, the
+                 user row, and its Sign out button -- below the fold with
+                 nothing to scroll it back. Sign out had no other route on a
+                 phone either: the topbar avatar was off-screen too. */
+              className="fixed left-0 top-0 z-50 flex h-dvh w-[280px] flex-col overflow-hidden lg:hidden"
               style={{ background: '#0D0F1A' }}
+              role="dialog"
+              aria-modal="true"
+              aria-label="Main navigation"
             >
               <SidebarContent collapsed={false} onClose={() => setMobileNav(false)} />
             </motion.aside>

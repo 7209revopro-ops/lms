@@ -7,7 +7,6 @@ import Link from 'next/link'
 import { useUIStore } from '@/store/ui.store'
 import { useCurrentUser, logout } from '@/lib/api/user'
 import { useRouter } from 'next/navigation'
-import { useIsMobile } from '@/hooks/useIsMobile'
 import { useImpersonationStore } from '@/store/impersonation.store'
 import { PROGRAM_LABEL } from '@/lib/programScope'
 import { useOrgStore } from '@/store/org.store'
@@ -31,7 +30,7 @@ const SCOPE_COLOR: Record<string, string> = {
 }
 
 export function AdminTopbar() {
-  const { sidebarCollapsed, setMobileNav } = useUIStore()
+  const { setMobileNav } = useUIStore()
   const [searchOpen,  setSearchOpen]  = useState(false)
   const [notifOpen,   setNotifOpen]   = useState(false)
   const [quickOpen,   setQuickOpen]   = useState(false)
@@ -39,8 +38,6 @@ export function AdminTopbar() {
   const [orgOpen,     setOrgOpen]     = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
   const unreadCount = notifications.filter(n => n.unread).length
-  const isMobile = useIsMobile()
-  const left = isMobile ? 0 : (sidebarCollapsed ? 68 : 240)
 
   const { data: user } = useCurrentUser()
   const router = useRouter()
@@ -57,10 +54,25 @@ export function AdminTopbar() {
   }
 
   return (
-    <motion.header
-      animate={{ left }}
-      transition={{ type: 'spring', stiffness: 300, damping: 30 }}
-      className="fixed top-0 right-0 z-30 flex h-[60px] items-center gap-3 px-5"
+    /* -- The 375px budget -------------------------------------------------
+       Measured as coded: the row needed 429px for an admin, 572px with the
+       super-admin org switcher and 678px with a sub-admin's scope badge. The
+       header is `fixed`, so that overflow produced NO document scrollWidth --
+       the avatar (the only way to sign out from up here) simply sat past the
+       right edge, at 377->409px on a 375px screen, with no way to reach it.
+       Nothing shrank on its own: `flex-1` keeps min-width:auto, so the search
+       trigger held its 144px min-content, and both badges were flex-shrink-0.
+
+       So below `sm` the search trigger is dropped (it is a dead control --
+       `searchQuery` is never read), Create goes icon-only, and the scope
+       badge waits for `md`; the org switcher and the impersonation banner
+       keep their controls and truncate their labels instead of disappearing.
+       Worst case on a phone is now 344px: super admin, impersonating.
+
+       `left` follows --admin-sb from the dashboard layout through a `lg:`
+       class, for the same first-paint reason documented over there. */
+    <header
+      className="fixed top-0 right-0 left-0 z-30 flex h-[60px] items-center gap-2 px-3 transition-[left] duration-300 ease-out sm:gap-3 sm:px-5 lg:left-[var(--admin-sb)]"
       style={{ background: 'rgba(8,10,18,0.85)', borderBottom: '1px solid rgba(255,255,255,0.06)', backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)' }}
     >
       {/* ── Hamburger (mobile only) ─────────────────── */}
@@ -73,7 +85,7 @@ export function AdminTopbar() {
       </button>
 
       {/* ── Search ──────────────────────────────────── */}
-      <div className="relative flex-1 max-w-[480px]">
+      <div className="relative hidden max-w-[480px] flex-1 sm:block">
         <AnimatePresence mode="wait">
           {searchOpen ? (
             <motion.div key="open" initial={{ opacity: 0, scaleX: 0.9 }} animate={{ opacity: 1, scaleX: 1 }}
@@ -94,7 +106,7 @@ export function AdminTopbar() {
           ) : (
             <motion.button key="closed" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
               onClick={() => setSearchOpen(true)}
-              className="flex items-center gap-2 rounded-xl px-3 py-1.5 transition-colors hover:bg-white/05"
+              className="flex items-center gap-2 rounded-xl px-3 py-1.5 transition-colors hover:bg-white/5"
               style={{ color: 'rgba(255,255,255,0.35)' }}>
               <Search size={14} />
               <span className="text-sm">Search…</span>
@@ -107,17 +119,17 @@ export function AdminTopbar() {
 
       {/* ── Org switcher (super_admin only) ──────────── */}
       {isSuperAdmin && (
-        <div className="relative flex-shrink-0">
+        <div className="relative min-w-[76px] shrink">
           <motion.button
             type="button"
             onClick={() => { setOrgOpen(v => !v); setNotifOpen(false); setQuickOpen(false); setAvatarOpen(false) }}
             whileHover={{ y: -1 }} whileTap={{ scale: 0.97 }}
-            className="flex items-center gap-2 rounded-xl px-3 py-1.5 text-xs font-semibold transition-all"
+            className="flex w-full min-w-0 items-center gap-2 rounded-xl px-3 py-1.5 text-xs font-semibold transition-all"
             style={activeOrgId
               ? { background: 'rgba(0,87,184,0.14)', border: '1px solid rgba(0,87,184,0.4)', color: '#60A5FA' }
               : { background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.12)', color: 'rgba(255,255,255,0.55)' }}>
-            <Building2 size={12} />
-            <span>{activeOrgName ?? 'All Orgs'}</span>
+            <Building2 size={12} className="flex-shrink-0" />
+            <span className="truncate">{activeOrgName ?? 'All Orgs'}</span>
             <ChevronDown size={11} style={{ transform: orgOpen ? 'rotate(180deg)' : 'none', transition: 'transform 0.15s', flexShrink: 0 }} />
           </motion.button>
 
@@ -133,7 +145,7 @@ export function AdminTopbar() {
                   <button
                     type="button"
                     onClick={() => { clearOrg(); setOrgOpen(false) }}
-                    className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-sm transition-colors hover:bg-white/06"
+                    className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-sm transition-colors hover:bg-white/[0.06]"
                     style={{ color: activeOrgId === null ? '#60A5FA' : 'rgba(255,255,255,0.7)' }}>
                     <span className="flex h-4 w-4 flex-shrink-0 items-center justify-center">
                       {activeOrgId === null && <Check size={12} />}
@@ -146,7 +158,7 @@ export function AdminTopbar() {
                       key={org.id}
                       type="button"
                       onClick={() => { setOrg(org.id, org.name, org.slug); setOrgOpen(false) }}
-                      className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-sm transition-colors hover:bg-white/06"
+                      className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-sm transition-colors hover:bg-white/[0.06]"
                       style={{ color: activeOrgId === org.id ? '#60A5FA' : 'rgba(255,255,255,0.7)' }}>
                       <span className="flex h-4 w-4 flex-shrink-0 items-center justify-center">
                         {activeOrgId === org.id && <Check size={12} />}
@@ -177,38 +189,41 @@ export function AdminTopbar() {
             : { label: 'Sub-Admin · no programme', color: '#94A3B8' }
         const rgb = scope.color
         return (
-          <div className="flex items-center gap-1.5 rounded-xl px-3 py-1.5 text-xs font-semibold flex-shrink-0"
+          <div className="hidden min-w-0 items-center gap-1.5 rounded-xl px-3 py-1.5 text-xs font-semibold md:flex"
             style={{ background: `${rgb}1F`, border: `1px solid ${rgb}4D`, color: rgb }}>
-            <span className="h-1.5 w-1.5 rounded-full flex-shrink-0" style={{ background: rgb }} />
-            {scope.label} scope
+            <span className="h-1.5 w-1.5 flex-shrink-0 rounded-full" style={{ background: rgb }} />
+            <span className="truncate">{scope.label} scope</span>
           </div>
         )
       })()}
 
       {/* ── Impersonation banner ────────────────────── */}
       {impersonatedUser && (
-        <div className="flex items-center gap-2 rounded-xl px-3 py-1.5 text-xs font-semibold"
+        <div className="flex min-w-0 items-center gap-2 rounded-xl px-3 py-1.5 text-xs font-semibold"
           style={{ background: 'rgba(250,204,21,0.12)', border: '1px solid rgba(250,204,21,0.3)', color: '#FACC15' }}>
-          <UserCog size={13} />
-          <span>Viewing as <strong>{impersonatedUser.name}</strong></span>
+          <UserCog size={13} className="flex-shrink-0" />
+          <span className="truncate">Viewing as <strong>{impersonatedUser.name}</strong></span>
           <button onClick={endImpersonation}
-            className="ml-1 transition-opacity hover:opacity-70"
+            aria-label="Stop viewing as this user"
+            className="ml-1 flex-shrink-0 transition-opacity hover:opacity-70"
             style={{ color: 'rgba(250,204,21,0.7)' }}>
             <X size={12} />
           </button>
         </div>
       )}
 
-      <div className="ml-auto flex items-center gap-2">
+      <div className="ml-auto flex flex-shrink-0 items-center gap-2">
         {/* ── Quick create ─────────────────────────── */}
         <div className="relative">
           <motion.button
             onClick={() => { setQuickOpen(v => !v); setNotifOpen(false) }}
             whileHover={{ y: -1 }} whileTap={{ scale: 0.96 }}
-            className="flex items-center gap-1.5 rounded-xl px-3 py-1.5 text-sm font-semibold text-white transition-all"
+            aria-label="Create"
+            title="Create"
+            className="flex items-center gap-1.5 rounded-xl px-2.5 py-1.5 text-sm font-semibold text-white transition-all sm:px-3"
             style={{ background: 'linear-gradient(135deg, #0057b8, #003d80)', boxShadow: '0 4px 16px rgba(0,87,184,0.30)' }}>
             <Plus size={14} />
-            <span>Create</span>
+            <span className="hidden sm:inline">Create</span>
             <ChevronDown size={12} style={{ transform: quickOpen ? 'rotate(180deg)' : 'rotate(0deg)', transition: 'transform 0.2s' }} />
           </motion.button>
 
@@ -220,17 +235,17 @@ export function AdminTopbar() {
                 className="absolute right-0 top-full mt-2 w-48 rounded-2xl p-1.5 z-50"
                 style={{ background: '#13162A', border: '1px solid rgba(255,255,255,0.08)', boxShadow: '0 20px 60px rgba(0,0,0,0.5)' }}>
                 <Link href="/courses/new" onClick={() => setQuickOpen(false)}>
-                  <div className="flex items-center gap-2.5 rounded-xl px-3 py-2 transition-colors hover:bg-white/05 cursor-pointer">
+                  <div className="flex items-center gap-2.5 rounded-xl px-3 py-2 transition-colors hover:bg-white/5 cursor-pointer">
                     <BookOpen size={14} style={{ color: '#0057b8' }} />
                     <span className="text-sm font-medium text-white">New Course</span>
                   </div>
                 </Link>
-                <button type="button" className="w-full flex items-center gap-2.5 rounded-xl px-3 py-2 transition-colors hover:bg-white/05"
+                <button type="button" className="w-full flex items-center gap-2.5 rounded-xl px-3 py-2 transition-colors hover:bg-white/5"
                   onClick={() => { setQuickOpen(false); router.push('/students?add=1') }}>
                   <Users size={14} style={{ color: '#0057b8' }} />
                   <span className="text-sm font-medium text-white">Add Student</span>
                 </button>
-                <button type="button" className="w-full flex items-center gap-2.5 rounded-xl px-3 py-2 transition-colors hover:bg-white/05"
+                <button type="button" className="w-full flex items-center gap-2.5 rounded-xl px-3 py-2 transition-colors hover:bg-white/5"
                   onClick={() => { setQuickOpen(false); router.push('/instructors?add=1') }}>
                   <GraduationCap size={14} style={{ color: '#0057b8' }} />
                   <span className="text-sm font-medium text-white">Add Instructor</span>
@@ -245,7 +260,7 @@ export function AdminTopbar() {
           <motion.button
             onClick={() => { setNotifOpen(v => !v); setQuickOpen(false) }}
             whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}
-            className="relative flex h-8 w-8 items-center justify-center rounded-xl transition-colors hover:bg-white/08"
+            className="relative flex h-8 w-8 items-center justify-center rounded-xl transition-colors hover:bg-white/[0.08]"
             style={{ color: 'rgba(255,255,255,0.55)' }}>
             <Bell size={16} />
             {unreadCount > 0 && (
@@ -273,7 +288,7 @@ export function AdminTopbar() {
                   <motion.div key={n.id}
                     initial={{ opacity: 0, x: 12 }} animate={{ opacity: 1, x: 0 }}
                     transition={{ delay: i * 0.05 }}
-                    className="flex items-start gap-3 px-4 py-3 transition-colors hover:bg-white/04 cursor-pointer"
+                    className="flex items-start gap-3 px-4 py-3 transition-colors hover:bg-white/[0.04] cursor-pointer"
                     style={{ borderBottom: i < notifications.length - 1 ? '1px solid rgba(255,255,255,0.04)' : 'none' }}>
                     <div className="mt-0.5 flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-lg"
                       style={{ background: n.unread ? 'rgba(0,87,184,0.15)' : 'rgba(255,255,255,0.05)' }}>
@@ -322,7 +337,7 @@ export function AdminTopbar() {
                   )}
                 </div>
                 <button onClick={handleLogout}
-                  className="flex w-full items-center gap-2 px-4 py-2.5 text-sm transition-colors hover:bg-white/04"
+                  className="flex w-full items-center gap-2 px-4 py-2.5 text-sm transition-colors hover:bg-white/[0.04]"
                   style={{ color: '#EF4444' }}>
                   <LogOut size={13} />Sign out
                 </button>
@@ -337,6 +352,6 @@ export function AdminTopbar() {
         <div className="fixed inset-0 z-40" onClick={() => { setNotifOpen(false); setQuickOpen(false); setAvatarOpen(false); setOrgOpen(false) }} />
       )}
 
-    </motion.header>
+    </header>
   )
 }
