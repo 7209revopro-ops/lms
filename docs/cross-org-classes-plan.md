@@ -13,12 +13,28 @@ under "Why classes are not in this plan", and the decision `docs/work-status.md`
 |---|---|---|
 | 0 — resolve the caller's academy | **done** | `18f8128` |
 | 1 — extract the entitlement predicate | **done** | `18f8128` |
-| 2 — schema and authoring, inert | **done** | `6e11c41` |
+| 2 — schema and authoring, inert | **PARTIAL — storage + service only** | `6e11c41` |
 | 3 — seats | **done** | |
 | 4 — roster, homework and attendance split | **done** | |
 | 5 — mail clocks | **done** | |
 | 6a — narrow the browse feed, alone | **done** | |
 | 6b — open it | **done, behind CROSS_ORG_CLASSES** | |
+
+> **AUTHORING IS NOT REACHABLE FROM OUTSIDE THE PROCESS.** Phase 2 was recorded as
+> done on the strength of the storage and service layers. Its own description also
+> names "the DTO fields; and the admin form — pick the other academy, then its
+> course/module", and none of that was built:
+>
+> - `liveCreateSchema` / `liveUpdateSchema` (`backend/src/routes/admin.routes.ts:1362`)
+>   have no `guestCohorts` field, and `validate()` runs zod, which **strips unknown
+>   keys** — so a request carrying cohorts is silently reduced to a single-academy
+>   class. No error, no log.
+> - The New Session modal has no organisation or cohort control.
+>
+> `liveClass.service.ts:320` accepts `guestCohorts` and every layer below it works
+> and is covered by four suites, but the only way to reach it today is a direct
+> database write or a script. **A cross-academy class cannot be created from the
+> admin panel.**
 
 Guest cohorts are read only when `CROSS_ORG_CLASSES=true`, and it is off. A
 cohort can be authored today and no guest student can book, see or enter the
