@@ -1945,13 +1945,13 @@ export default function ClassBookingsPage() {
               classes={allClasses} bookingMap={bookingMap} search={search}
               courseId={hCourse} moduleId={hModule}
               onNavigate={navigate}
-              /* The hierarchy hands the group back rather than opening
-                 anything: SlotModal is the page's, and it is where the ten
-                 slot states and the seven booking error codes live. The
-                 dateKey is the group's own first slot so the key stays stable
-                 across re-renders; openGroup resolves it from the catalogue
-                 when the flat list does not hold it. */
-              onOpenGroup={g=>setOpenKey({id:g.id,dateKey:zonedKey(new Date(g.slots[0]!.scheduledStart))})}
+              /* The catalogue books on the card now — no modal, no "choose a
+                 date" step. What it does NOT own is what a refused booking
+                 means: handleBook keeps the seven error codes, and the
+                 hierarchy just calls it. SlotModal stays for the flat weekly
+                 list, which is still a list of slot groups. */
+              onBook={handleBook} onCancel={handleCancel}
+              bookPending={bookPending} cancelPending={cancelPend}
             />
           </>
         )}

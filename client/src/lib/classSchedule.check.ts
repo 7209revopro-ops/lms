@@ -10,7 +10,8 @@
    used neither.
    ───────────────────────────────────────────────────────────────────────── */
 import { buildCatalog, GENERAL_MODULE_ID, groupKeyOf, slotPattern,
-         moduleFacets, showFacet, filterGroups, buildGroups } from '@/lib/classSchedule'
+         moduleFacets, showFacet, filterGroups, buildGroups,
+         groupByDay } from '@/lib/classSchedule'
 import type { LiveClass } from '@/lib/api/liveClasses'
 import type { MyBooking } from '@/lib/api/bookings'
 
@@ -302,6 +303,50 @@ console.log('\nH. A filter offers what is THERE, and nothing else')
   check('H13 no slots, no facets', none.languages.length === 0 && none.instructors.length === 0)
   check('H14 and neither filter is drawn',
     showFacet(none.languages) === false && showFacet(none.instructors) === false)
+}
+
+console.log('\nI. Sessions bucket by the STUDENT\'S day, soonest first')
+{
+  /* Level 3 now lists dated sessions rather than weekly slots, headed
+     "Today", "Tomorrow", then the date. Two things are easy to get wrong and
+     both are silent: reading "today" off the device clock instead of the
+     server's, and naming the weekday by formatting a midnight instant, which
+     slips a day in zones far from UTC. */
+  const NOON = Date.parse('2026-10-07T12:00:00Z')        // a Wednesday
+  const at = (dayOffset: number, hour: number, id: string) => {
+    const d = new Date('2026-10-07T00:00:00Z')
+    d.setUTCDate(d.getUTCDate() + dayOffset)
+    d.setUTCHours(hour, 0, 0, 0)
+    return row({ ...HOST, id, scheduledStart: d.toISOString() })
+  }
+
+  /* Deliberately out of order going in. */
+  const days = groupByDay([
+    at(2, 14, 'c'), at(0, 18, 'a2'), at(1, 9, 'b'), at(0, 9, 'a1'),
+  ], NOON)
+
+  check('I1 three days', days.length === 3, JSON.stringify(days.map(d => d.label)))
+  check('I2 soonest day first, then the rest in order',
+    days[0]!.key < days[1]!.key && days[1]!.key < days[2]!.key,
+    JSON.stringify(days.map(d => d.key)))
+  check('I3 the first is Today', days[0]!.label === 'Today' && days[0]!.today === true, days[0]!.label)
+  check('I4 the second is Tomorrow', days[1]!.label === 'Tomorrow', days[1]!.label)
+  check('I5 the third is a date, not a word',
+    /\d/.test(days[2]!.label) && days[2]!.label !== 'Tomorrow', days[2]!.label)
+  check('I6 only the first is flagged today', days.filter(d => d.today).length === 1)
+  check('I7 sessions inside a day are in time order',
+    days[0]!.items.length === 2 && days[0]!.items[0]!.id === 'a1' && days[0]!.items[1]!.id === 'a2',
+    JSON.stringify(days[0]!.items.map(i => i.id)))
+  check('I8 every session survives the bucketing',
+    days.reduce((n, d) => n + d.items.length, 0) === 4)
+
+  /* The clock is the CALLER'S, so a server-anchored now decides what today
+     is. Move it forward a day and the same sessions relabel. */
+  const shifted = groupByDay([at(1, 9, 'b')], NOON + 86_400_000)
+  check('I9 "today" follows the clock it is given',
+    shifted[0]!.label === 'Today', shifted[0]!.label)
+
+  check('I10 nothing in, nothing out', groupByDay([], NOON).length === 0)
 }
 
 console.log(`\nclassSchedule.check — ${pass} passed, ${fail} failed\n`)

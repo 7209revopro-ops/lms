@@ -16,26 +16,37 @@
      come from the `eff*` readers in lib/classSchedule, which resolve the door
      the caller actually came through. A guest sees their own academy's course
      and their own module, never the host's.
-   · It does not book. Clicking a slot hands the group back to the page, which
-     opens the existing SlotModal — where the ten slot states, the seven error
-     codes and the join clock already live.
+   · It does not book ABOVE LEVEL 3. Levels 1 and 2 are navigation and hand
+     every decision downward. Level 3 does book: the session cards carry the
+     ten slot states and the join clock, because a student choosing a date
+     should not have to open a modal to take the seat attached to it. The
+     seven booking ERROR codes still live in the page's onBook, which is
+     passed in — one place that knows what the API can refuse.
    ───────────────────────────────────────────────────────────────────────── */
 
 import { useEffect, useMemo, useState } from 'react'
+import Link from 'next/link'
 import { motion, useReducedMotion } from 'framer-motion'
 import {
   BookOpen, ChevronRight, Globe, Layers, Lock, Users, Clock,
-  Share2, Calendar, ArrowLeft, Radio, MapPin, Check, Video, User,
+  Share2, Calendar, ArrowLeft, Radio, MapPin, Video, User,
+  CheckCircle2, AlertCircle, X,
 } from 'lucide-react'
 import type { LiveClass } from '@/lib/api/liveClasses'
 import type { MyBooking } from '@/lib/api/bookings'
 import { titleCase } from '@/lib/titleCase'
 import { AvatarImg } from '@/components/ui/AvatarImg'
+import Spinner from '@/components/ui/Spinner'
+import JoinMeetButton from '@/components/live-classes/JoinMeetButton'
+import { useJoinClock } from '@/hooks/useJoinClock'
+import { getJoinPhase, type JoinWindowSession } from '@/lib/joinWindow'
+import { useCurrentUser } from '@/lib/api/user'
 import {
-  getSlotStatus, SC, seatsLeft, slotPattern, nextSlot,
+  getSlotStatus, SC, seatsLeft, nextSlot,
   moduleFacets, showFacet, filterGroups,
   buildCatalog, GENERAL_MODULE_ID as GENERAL,
-  type ClassGroup, type SlotStatus, type CourseNode, type ModuleNode,
+  groupByDay, zonedKey, bookingClosedAt, offlineDayOffset,
+  type ClassGroup, type SlotStatus, type CourseNode, type ModuleNode, type DayBucket,
 } from '@/lib/classSchedule'
 
 /** "1 module" / "2 modules" — screen readers read the aria-label out loud. */
@@ -565,20 +576,21 @@ const fmtTime = (iso: string) =>
      full width, which is what makes this feel like the inside of that card
      rather than a different screen. It is the same pure moduleSkin() the grid
      calls, so nothing new is generated and the two can never drift.
-   · THE COUNTS STOP BEING DECORATION. Sessions, languages, slots and the
-     soonest session sit on the header as four tiles. That is what the dead
-     space is spent on, and all four were already computed.
-   · THE SLOTS ARE A GRID. A slot is a standing weekly commitment, not a diary
-     row, so the card leads with the WEEKDAY and the CLOCK — the two things a
-     student actually chooses between — and puts the run of dates, the seats,
-     the instructor and the room underneath it. The column count follows the
-     number of slots, because three columns holding one card is the same dead
-     space in a different shape.
+   · THE COUNTS STOP BEING DECORATION. Sessions, languages, weekly slots and
+     the soonest session sit on the header as four tiles. That is what the
+     dead space is spent on, and all four were already computed.
+   · THE LIST IS DATES, AND THE DATE BOOKS ITSELF. It used to be one card per
+     weekly cohort, with the actual dates — and the actual booking — hidden
+     behind a "Choose a time slot" modal. Now every session the module still
+     has ahead is its own card, soonest first, banded under Today, Tomorrow
+     and each following day, and the card carries the control: book, join,
+     cancel. The weekly series survives as the rule that stops a student
+     taking four seats in it; it is no longer a screen.
    · IT NEVER OVERSTATES A SEAT. On a shared class seatsLeft() is YOUR
      academy's remainder, not the room's, so the fill meter — which needs both
      numbers to be about the same pool — is dropped and the honest count is
-     kept. Same reason the blocked module downgrades a bookable slot: the
-     modal will refuse it.
+     kept. Same reason a blocked module downgrades a bookable session: the
+     API will refuse it.
    ────────────────────────────────────────────────────────────────────────── */
 
 /** "Mar 14" — no weekday. Used where the weekday is already the headline and
@@ -719,8 +731,12 @@ function ModuleHero({ node, position, course }: {
             value={String(node.sessionCount)} label={node.sessionCount === 1 ? 'Session' : 'Sessions'} />
           <StatTile icon={<Globe size={13} strokeWidth={2} />}
             value={String(node.languages.length)} label={node.languages.length === 1 ? 'Language' : 'Languages'} />
+          {/* "Weekly slots", not "Slots": the list below is dates now, and the
+              one place the weekly series is still worth naming is here, where
+              it says how many recurring cohorts this module runs. */}
           <StatTile icon={<Layers size={13} strokeWidth={2} />}
-            value={String(node.groups.length)} label={node.groups.length === 1 ? 'Slot' : 'Slots'} />
+            value={String(node.groups.length)}
+            label={node.groups.length === 1 ? 'Weekly slot' : 'Weekly slots'} />
           {/* "Mar 14", not "Tue, Mar 14": at 375px this tile is ~130px wide and
               the longer string truncated to "Tue, Mar…", which is the one form
               of the date that helps nobody. The weekday is on every card below. */}
@@ -745,122 +761,692 @@ function ModuleHero({ node, position, course }: {
   )
 }
 
-/* ── The slot card ──────────────────────────────────────────────────────── */
+/* ── The dated session card ─────────────────────────────────────────────────
 
-/* What the card's button says, and how loud it is.
+   ONE CARD IS ONE DATED SESSION, AND THE CARD IS WHERE IT IS BOOKED.
 
-   'primary' is the solid Delta blue every other screen uses for the one action
-   it wants — white on #0057b8, legible under either theme.
-   'soft' takes the status tint as its GROUND and --color-text-primary as its
-   ink, with the status colour left to the icon, the rail and the badge. A
-   status-coloured label would be the largest piece of type on the card in the
-   one colour that is not guaranteed to survive both themes (white on
-   --color-danger is 2.4:1 once dark lifts it to #F87171).
-   'muted' is the inset chip the module grid uses for a card you cannot act on. */
-type CtaTone = 'primary' | 'soft' | 'muted'
-function slotCta(status: SlotStatus, blocked: boolean, dates: number):
-  { label: string; tone: CtaTone; icon: React.ReactNode } {
-  if (blocked) return { label: 'View sessions', tone: 'muted', icon: <Lock size={12} strokeWidth={2.5} /> }
-  switch (status) {
-    case 'live':     return { label: 'Join now',      tone: 'soft',    icon: <Radio size={12} strokeWidth={2.5} /> }
-    case 'booked':   return { label: 'Your seat',     tone: 'soft',    icon: <Check size={12} strokeWidth={2.5} /> }
-    case 'bookable': return { label: dates > 1 ? 'Choose a date' : 'Book a seat',
-                                                      tone: 'primary', icon: <BookOpen size={12} strokeWidth={2.5} /> }
-    case 'full':     return { label: dates > 1 ? 'See other dates' : 'Slot is full',
-                                                      tone: 'muted',   icon: <Users size={12} strokeWidth={2.5} /> }
-    case 'closed':   return { label: dates > 1 ? 'See other dates' : 'Booking closed',
-                                                      tone: 'muted',   icon: <Clock size={12} strokeWidth={2.5} /> }
-    case 'locked':   return { label: 'View details',  tone: 'muted',   icon: <Lock size={12} strokeWidth={2.5} /> }
-    default:         return { label: 'View details',  tone: 'muted',   icon: <Calendar size={12} strokeWidth={2.5} /> }
+   This screen used to list SLOT GROUPS — "Thursdays · 9:00 PM", one card per
+   weekly cohort — and the booking happened one tap further in, inside a modal
+   titled "Choose a time slot". Two screens to take a seat, and the first of
+   them answered a question ("which weekly cohort?") that a student picking a
+   date does not actually ask.
+
+   So the middle step is gone. Sessions are listed as DATES, soonest first,
+   banded under Today / Tomorrow / the day, and every action the modal owned
+   now lives on the card: Book a seat, the join button, Cancel reservation,
+   and — for each state that offers neither — the sentence that says why.
+
+   THE SERIES DID NOT GO AWAY, ONLY ITS CARD. `hasOther` is still computed per
+   GROUP and handed to getSlotStatus, so a student holding Thursday the 4th
+   still sees Thursday the 11th LOCKED rather than bookable. Flattening the
+   groups into one dated list must not quietly turn one-seat-per-series into
+   four-seats-per-series: the API would refuse it, and the screen would have
+   promised it.
+
+   THE CARD IS NOT A BUTTON. Every other card on these three levels is one
+   focusable element, because every other card does exactly one thing. This
+   one can carry three controls at once — book, join, cancel — so it is a
+   plain container with real buttons inside it, and it does NOT lift on hover:
+   the lift is this app's signature for "the whole card is the action", and
+   here it is not.
+   ────────────────────────────────────────────────────────────────────────── */
+
+/* THE FOCUS RING HAS TO BE SHOUTED DOWN, NOT SET.
+
+   globals.css carries `:focus-visible:not(input):not(textarea):not(select) {
+   outline: 2px solid var(--color-primary) !important }`, and an !important
+   shorthand makes every longhand important — so a Tailwind
+   `focus-visible:outline-[color:…]` utility never applies and every ring on
+   this page renders #0057b8, which is 2.65:1 on the dark surface and fails
+   WCAG 1.4.11. The ring has to be re-declared at equal weight to win, exactly
+   as my-bookings/page.tsx already does with `.bk-focus`. The danger variant
+   carries two classes so it outranks the base rule. */
+const SHEET_CSS =
+  '.cs-focus:focus-visible{outline:2px solid var(--color-primary-on-surface)!important;outline-offset:2px;border-radius:12px}' +
+  '.cs-focus.cs-danger:focus-visible{outline-color:var(--color-danger)!important}'
+// eslint-disable-next-line react/no-danger
+const SheetStyle = () => <style dangerouslySetInnerHTML={{ __html: SHEET_CSS }} />
+
+/** Is this session still ahead of the student, read on the SERVER-anchored
+    clock rather than the device's?
+
+    `isStillAhead` in lib/classSchedule is the same rule read off `Date.now()`;
+    used here it would drop a card — and with it the join button — on a device
+    running three minutes fast, for a class the student holds a seat in and
+    could still join. The rule itself is unchanged: not cancelled, and not yet
+    past its end. (`isStillAhead` is `!isPastEnd || isWithinLiveWindow`, and
+    the live window ends at the same instant `isPastEnd` begins, so the two
+    clauses reduce to this one comparison.) */
+function isAheadAt(lc: LiveClass, now: number): boolean {
+  return lc.status !== 'cancelled'
+    && now < new Date(lc.scheduledStart).getTime() + (lc.durationMins || 60) * 60_000
+}
+
+/** "Sat 20 Sep" from a day bucket's own YYYY-MM-DD key. Built at noon UTC
+    from the key's parts and formatted in UTC, so the weekday named is the
+    key's weekday in every device zone — the same trick groupByDay uses for
+    the days it labels itself. */
+function keyDateLabel(key: string): string {
+  const [y, m, d] = key.split('-').map(Number)
+  return new Intl.DateTimeFormat('en-US', {
+    timeZone: 'UTC', weekday: 'short', day: 'numeric', month: 'short',
+  }).format(new Date(Date.UTC(y!, m! - 1, d!, 12)))
+}
+
+/** A FUTURE deadline, with its day attached: "8:00 PM today", "8:00 PM
+    tomorrow", "Sep 24, 8:00 PM". A bare clock time was safe in the modal,
+    which showed one slot at a time behind a tap; in a list three weeks long
+    it reads as tonight. Dated off the server clock, like everything else. */
+function fmtDeadline(ms: number, now: number): string {
+  const iso = new Date(ms).toISOString()
+  const key = zonedKey(new Date(ms))
+  if (key === zonedKey(new Date(now)))              return `${fmtTime(iso)} today`
+  if (key === zonedKey(new Date(now + 86_400_000))) return `${fmtTime(iso)} tomorrow`
+  return `${fmtMonthDay(iso)}, ${fmtTime(iso)}`
+}
+
+/** A PAST deadline: "today at 8:00 PM" / "yesterday at 8:00 PM" / "on Sep 19
+    at 8:00 PM". Missing a cut-off by ten minutes and missing it by a week are
+    different facts and must not read the same — only one of those students
+    should be emailing their admin. */
+function fmtPassed(ms: number, now: number): string {
+  const iso = new Date(ms).toISOString()
+  const key = zonedKey(new Date(ms))
+  if (key === zonedKey(new Date(now)))              return `today at ${fmtTime(iso)}`
+  if (key === zonedKey(new Date(now - 86_400_000))) return `yesterday at ${fmtTime(iso)}`
+  return `on ${fmtMonthDay(iso)} at ${fmtTime(iso)}`
+}
+
+/** One dated session with everything the card needs already decided: the
+    weekly series it belongs to (for the one-per-series rule), the student's
+    booking on it, and what they may do with it right now. */
+interface DatedSession {
+  lc:      LiveClass
+  group:   ClassGroup
+  booking: MyBooking | undefined
+  status:  SlotStatus
+}
+
+/* ── The day band's head ────────────────────────────────────────────────── */
+
+/** A REAL HEADING. The whole organising idea of this screen is that the day
+    is the heading, so it has to be in the document's heading outline — a
+    screen-reader user navigating by heading got nothing between the module
+    hero and the end of the sheet while this was a styled <span>. h3, because
+    ModuleHero's module title is the h2 above it. */
+function DayHead({ bucket, headingId, reduce }: {
+  bucket: DayBucket; headingId: string; reduce: boolean | null
+}) {
+  /* groupByDay labels every other day with its own date ("Wed, Sep 24"), so
+     only Today and Tomorrow need one attached. */
+  const needsDate = bucket.label === 'Today' || bucket.label === 'Tomorrow'
+  return (
+    <div className="mb-3 flex items-center gap-2.5">
+      <h3 id={headingId}
+        className="syne flex min-w-0 items-baseline gap-2 text-[15px] font-extrabold tracking-tight"
+        style={{ color: bucket.today ? 'var(--color-primary-on-surface, var(--color-primary))' : 'var(--color-text-primary)' }}>
+        {bucket.today && (
+          /* Emphasis by INK, not by tint. A tinted pill built from
+             rgba(0,87,184,0.08) composites DARKER than the surface over the
+             #0B0D14 page, so "today is the tinted one" reads backwards in the
+             dark. A colour and a dot survive both themes. */
+          <motion.span aria-hidden className="h-1.5 w-1.5 flex-shrink-0 self-center rounded-full"
+            style={{ background: 'var(--color-primary-on-surface, var(--color-primary))' }}
+            animate={reduce ? undefined : { opacity: [1, 0.35, 1] }}
+            transition={{ duration: 2, repeat: Infinity, ease: 'easeInOut' }} />
+        )}
+        <span className="truncate">{bucket.label}</span>
+        {needsDate && (
+          <span className="dm flex-shrink-0 text-[10.5px] font-semibold"
+            style={{ color: 'var(--color-text-muted)' }}>{keyDateLabel(bucket.key)}</span>
+        )}
+      </h3>
+
+      <span aria-hidden className="h-px min-w-[12px] flex-1" style={{ background: 'var(--color-border)' }} />
+
+      <span className="flex-shrink-0 text-[10px] font-bold uppercase tracking-[0.12em]"
+        style={{ color: 'var(--color-text-muted)' }}>
+        {plural(bucket.items.length, 'class', 'classes')}
+      </span>
+    </div>
+  )
+}
+
+/* ── The card's action area ─────────────────────────────────────────────── */
+
+/** Neutral ground for a state that is only a sentence. */
+const NEUTRAL = { color: 'var(--color-text-muted)', bg: 'var(--color-bg-inset)', border: 'var(--color-border)' }
+
+/** A state the card cannot act on, said in one line and explained in the
+    next. The TINT is the status colour; the TYPE is tokens. A status-coloured
+    sentence would be the largest piece of text on the card in the one colour
+    not guaranteed to survive both themes — the same rule the slot card's
+    'soft' CTA already followed. */
+function ActionNote({ tint = NEUTRAL, icon, title, body }: {
+  tint?: { color: string; bg: string; border: string }
+  icon: React.ReactNode; title: string; body?: React.ReactNode
+}) {
+  return (
+    <div className="flex items-start gap-2 rounded-xl px-3 py-2.5"
+      style={{ background: tint.bg, border: `1px solid ${tint.border}` }}>
+      <span className="mt-[1px] flex-shrink-0" style={{ color: ink(tint.color) }}>{icon}</span>
+      <span className="min-w-0">
+        <span className="block text-[11.5px] font-bold" style={{ color: 'var(--color-text-primary)' }}>{title}</span>
+        {body && (
+          <span className="mt-0.5 block break-words text-[10.5px] leading-relaxed"
+            style={{ color: 'var(--color-text-secondary)' }}>{body}</span>
+        )}
+      </span>
+    </div>
+  )
+}
+
+/** The solid Delta blue every other screen uses for the one action it wants.
+    White on #0057b8 — pinned in BOTH themes — so the ink is safe either way,
+    which is not true of white on --color-danger (2.8:1 once dark lifts it to
+    #F87171). The liveness is said by the badge and the rail instead. */
+const PRIMARY_BTN = 'cs-focus flex w-full items-center justify-center gap-1.5 rounded-xl py-2.5 text-[12px] font-bold text-white outline-none transition-opacity hover:opacity-95 disabled:opacity-60'
+const PRIMARY_STYLE: React.CSSProperties = {
+  background: 'var(--color-primary)', boxShadow: '0 2px 8px rgba(0,87,184,0.25)',
+}
+
+/**
+ * The way in, for a seat the student holds — and it NEVER renders nothing.
+ *
+ * JoinMeetButton returns null whenever the session is not join-eligible (in
+ * person, in-app, no window on the payload, or a row whose `isBooked` has not
+ * caught up with the bookings query yet), so a branch that is only the button
+ * can leave a completely blank action area under a pulsing "Live Now" badge.
+ * The modal never had that hole: it wrapped the button in a panel that stated
+ * the phase in words. Every path below returns something.
+ */
+function JoinArea({ lc, now, held, live }: {
+  lc: LiveClass; now: number; held: boolean; live: boolean
+}) {
+  const where = [lc.location, lc.room].filter(Boolean).join(' · ')
+
+  /* In person — there is nothing to join; the room is the answer. The titles
+     differ by context because the booked card has already said "Reserved" in
+     a chip above this, and saying it twice is not reassurance. */
+  if (lc.isOnline === false) {
+    return (
+      <ActionNote tint={SC.booked} icon={<MapPin size={12} strokeWidth={2} />}
+        title={live ? 'On now — in person' : 'In person'}
+        body={live
+          ? (where ? <>Your seat is reserved. Go to <strong>{where}</strong>.</> : 'Your seat is reserved. Go to your classroom.')
+          : (where ? <>This class is at <strong>{where}</strong>.</> : 'Your academy will tell you the room.')} />
+    )
+  }
+
+  /* In-app (Mux). NO join email is ever sent for one of these — the
+     scheduled-class mail carries the COURSE url, not a join link — so the
+     card must not point at an inbox. The room is on this site. */
+  if (lc.type === 'internal') {
+    if (live) {
+      return (
+        <Link href={`/live-classes/${lc.id}/watch`} className={PRIMARY_BTN} style={PRIMARY_STYLE}>
+          <Radio size={12} strokeWidth={2.5} />Join the class
+        </Link>
+      )
+    }
+    return (
+      <ActionNote tint={SC.booked} icon={<Video size={12} strokeWidth={2} />}
+        title="Plays in the app"
+        body={<>This class runs <strong>here on the site</strong>. The Join button appears on this card when it starts.</>} />
+    )
+  }
+
+  /* External (Google Meet). The link is released by the server between
+     joinOpensAt and joinClosesAt, so the button decides from those two
+     instants and never from the slot status — 'live' begins 15 minutes
+     before the start and the link does not. */
+  const session: JoinWindowSession = {
+    /* Either source saying "booked" is enough. `lc.isBooked` comes from the
+       live-classes query and `held` from the bookings query; useCreateBooking
+       invalidates them independently, so for a moment after booking they
+       disagree — and the one that says booked is the one this card is already
+       drawing. The endpoint enforces the seat either way. */
+    isBooked:     held || lc.isBooked === true,
+    joinOpensAt:  lc.joinOpensAt,
+    joinClosesAt: lc.joinClosesAt,
+    type:         lc.type,
+    isOnline:     lc.isOnline,
+    status:       lc.status,
+  }
+  const phase = getJoinPhase(session, now)
+
+  /* No window on the payload, or a row neither query has marked booked. The
+     button would render nothing at all — which is fine on the booked card,
+     where the chip and the email line above have already said where the
+     student stands, and is NOT fine on a live one, where it would leave a
+     pulsing "Live Now" badge over an empty action area. */
+  if (phase === 'hidden') {
+    if (!live) return null
+    return (
+      <ActionNote tint={SC.booked} icon={<Clock size={12} strokeWidth={2} />}
+        title="Class is on now"
+        body="Your seat is reserved. The join link is emailed shortly before class — if it has not arrived, contact your admin." />
+    )
+  }
+
+  return (
+    <div className="flex flex-col gap-1.5">
+      <JoinMeetButton
+        sessionId={lc.id} now={now} size="md" accent="var(--color-primary)"
+        {...session} className="w-full" />
+      {phase === 'closed' && (
+        <p className="text-[10.5px] leading-relaxed" style={{ color: 'var(--color-text-secondary)' }}>
+          Your seat was reserved, but the join link has closed. If you are still
+          expecting to attend, contact your admin.
+        </p>
+      )}
+    </div>
+  )
+}
+
+/** The recording, on a session that has finished. A working control the modal
+    offered and both flattened drafts dropped. Reachable here because an
+    instructor who ends a class early leaves `status: 'ended'` on a session
+    still inside its scheduled window — exactly when the recording is newest. */
+function RecordingLink({ url }: { url: string }) {
+  return (
+    <a href={url} target="_blank" rel="noreferrer"
+      className="cs-focus mt-1.5 flex w-full items-center justify-center gap-1.5 rounded-xl py-2 text-[11.5px] font-semibold outline-none transition-colors"
+      style={{ background: 'var(--color-bg-inset)', border: '1px solid var(--color-border)', color: 'var(--color-text-secondary)' }}>
+      <Video size={12} strokeWidth={2} />Watch recording
+    </a>
+  )
+}
+
+/**
+ * What the student may do with this session, right now. Ten states, each with
+ * its own answer, and three that are easiest to lose: the in-person class
+ * TODAY (no same-day booking, and no cancelling one you hold); the closed one
+ * (says WHEN it closed); and the class in a course they have not bought
+ * (offered an enrolment note, not a button the API would refuse).
+ */
+function SessionAction({
+  s, shown, barred, sameDay, pendingReg, whenLabel, now, reduce,
+  onBook, onCancel, bookPending, cancelPending,
+}: {
+  s:             DatedSession
+  shown:         SlotStatus
+  barred:        boolean
+  sameDay:       boolean
+  pendingReg:    boolean
+  whenLabel:     string
+  now:           number
+  reduce:        boolean | null
+  onBook:        (id: string) => Promise<void>
+  onCancel:      (bookingId: string, label: string) => Promise<void>
+  bookPending:   Set<string>
+  cancelPending: Set<string>
+}) {
+  const { lc, group, booking } = s
+  const offline = lc.isOnline === false
+  const held    = booking?.status === 'booked' || booking?.status === 'attended'
+
+  /* A MODULE THE ADMIN TURNED OFF still lists its sessions and still cannot
+     book them — but it must give ONE answer, not two. The reason that stops
+     the booking is the module; the fact the student also wants (when seats
+     closed, that today is too late) rides in the same sentence rather than
+     replacing it or being replaced by it.
+
+     ONLY OVER THE STATES THAT WOULD OTHERWISE OFFER SOMETHING. A seat already
+     held survives the module being turned off — the student keeps their join
+     link and their cancel button — and a live class, an attendance and a
+     recording are facts about what happened, not offers. `bookable` and
+     `full` have already been downgraded to `locked` by the card. */
+  if (barred && (shown === 'locked' || shown === 'closed')) {
+    const extra =
+        shown === 'closed' ? <> Seats for this date closed {fmtPassed(bookingClosedAt(lc), now)}.</>
+      : sameDay            ? <> In-person seats also close the day before class.</>
+      : null
+    return (
+      <ActionNote icon={<Lock size={12} strokeWidth={2} />}
+        title="Module access is off"
+        body={<>These sessions are listed so you can see what the module covers. Ask your admin to open it.{extra}</>} />
+    )
+  }
+
+  switch (shown) {
+    /* ── Live: the way in, never a booking button ── */
+    case 'live': {
+      if (!held) {
+        return (
+          <ActionNote tint={SC.live} icon={<Radio size={12} strokeWidth={2} />}
+            title="Class is live now"
+            body="Booking has closed. Only students who reserved beforehand receive a join link." />
+        )
+      }
+      return <JoinArea lc={lc} now={now} held live />
+    }
+
+    /* ── The seat they hold ── */
+    case 'booked': {
+      const mins   = Math.max(0, Math.ceil((new Date(lc.scheduledStart).getTime() - now) / 60_000))
+      const busy   = booking ? cancelPending.has(booking.id) : false
+      /* Only an external online class gets a join link by email. */
+      const mailed = !offline && lc.type === 'external'
+      return (
+        <div className="flex flex-col gap-1.5">
+          <div className="flex items-center gap-1.5 rounded-xl px-3 py-2"
+            style={{ background: SC.booked.bg, border: `1px solid ${SC.booked.border}` }}>
+            <CheckCircle2 size={13} strokeWidth={2.5} className="flex-shrink-0" style={{ color: SC.booked.color }} />
+            <span className="text-[11.5px] font-bold" style={{ color: 'var(--color-text-primary)' }}>
+              Reserved · {fmtTime(lc.scheduledStart)}
+            </span>
+          </div>
+
+          {mailed && (
+            <p className="flex items-start gap-1 text-[10.5px] leading-relaxed"
+              style={{ color: 'var(--color-text-secondary)' }}>
+              <Clock size={10} strokeWidth={2} className="mt-[2px] flex-shrink-0" />
+              {mins <= 5
+                ? <span>Join link sent — check your inbox.</span>
+                : <span>Your <strong>join link is emailed 5 min before</strong> class.</span>}
+            </p>
+          )}
+
+          <JoinArea lc={lc} now={now} held live={false} />
+
+          {/* An in-person class ON THE DAY cannot be given back — the room is
+              already counted — so the button is not offered, exactly as the
+              modal withheld it. */}
+          {booking && !sameDay && (
+            <button type="button"
+              onClick={() => { void onCancel(booking.id, whenLabel) }}
+              disabled={busy}
+              className="cs-focus cs-danger flex w-full items-center justify-center gap-1.5 rounded-xl py-2 text-[11.5px] font-semibold outline-none transition-colors hover:bg-[var(--color-hover-danger)] disabled:opacity-50"
+              /* The LABEL is a token colour and the danger sits in the icon,
+                 the hairline and the hover wash: --color-danger is #EF4444 on
+                 white, 3.8:1, under the 4.5:1 this size needs. The control
+                 still reads destructive; it also reads. */
+              style={{ color: 'var(--color-text-secondary)', border: '1px solid rgba(239,68,68,0.22)' }}>
+              {busy
+                ? <Spinner size={11} variant="gray" />
+                : <X size={11} strokeWidth={2.5} style={{ color: 'var(--color-danger)' }} />}
+              {busy ? 'Cancelling…' : 'Cancel reservation'}
+            </button>
+          )}
+        </div>
+      )
+    }
+
+    /* ── The seat they can take ── */
+    case 'bookable': {
+      /* Not bought yet. The seat is real and the button would be refused, so
+         the card says what is actually in the way. */
+      if (lc.isEnrolled === false) {
+        return (
+          <ActionNote icon={<Lock size={12} strokeWidth={2} />}
+            title="Enroll to reserve"
+            body="Purchase this course to reserve seats and get email join links before class." />
+        )
+      }
+      /* A student whose registration is still pending cannot hold a seat —
+         POST /bookings answers PENDING_APPROVAL. Send them to the page that
+         fixes it rather than to a button and a toast. */
+      if (pendingReg) {
+        return (
+          <Link href="/complete-registration" className={PRIMARY_BTN} style={PRIMARY_STYLE}>
+            <BookOpen size={12} strokeWidth={2.5} />Complete registration
+          </Link>
+        )
+      }
+
+      const busy = bookPending.has(lc.id)
+
+      /* THE DEADLINE, BEFORE THEY NEED IT. A student who learns about the
+         cut-off by being refused has already lost the seat.
+
+         AND IT IS A DIFFERENT DEADLINE FOR AN IN-PERSON CLASS. getSlotStatus
+         never consults bookingClosedAt on the offline path: an in-person
+         session is bookable while its day offset is > 0 and locked the
+         instant it reaches 0, i.e. at local midnight. Printing "Book by 8:00
+         AM" on a class that stops being bookable eight hours earlier is the
+         card contradicting the lock it is about to enforce. */
+      let deadline: React.ReactNode
+      let urgent = false
+      if (offline) {
+        deadline = offlineDayOffset(lc.scheduledStart) === 1
+          ? <span>Book <strong>today</strong> — in-person seats close at midnight</span>
+          : <span>In-person seats close at midnight the day before</span>
+      } else {
+        const closesAt = bookingClosedAt(lc)
+        const minsLeft = Math.round((closesAt - now) / 60_000)
+        if (minsLeft <= 0) {
+          /* getSlotStatus reads Date.now() and this line reads the server
+             clock, so the two can straddle the cut-off. Flooring a negative
+             remainder to "Closes in 1 min" turns that skew into a false
+             alarm; saying it is closing now does not. */
+          urgent = true
+          deadline = <span>Closing now — reserve immediately</span>
+        } else if (minsLeft <= 120) {
+          urgent = true
+          deadline = (
+            <span>Closes in <strong>{minsLeft < 60 ? `${minsLeft} min` : `${Math.floor(minsLeft / 60)}h ${minsLeft % 60}m`}</strong></span>
+          )
+        } else {
+          deadline = <span>Book by <strong>{fmtDeadline(closesAt, now)}</strong></span>
+        }
+      }
+
+      return (
+        <div>
+          <motion.button type="button"
+            onClick={() => { void onBook(lc.id) }}
+            disabled={busy}
+            whileHover={reduce || busy ? undefined : { scale: 1.015 }}
+            whileTap={reduce || busy ? undefined : { scale: 0.985 }}
+            transition={{ type: 'spring', stiffness: 380, damping: 26 }}
+            className={PRIMARY_BTN} style={PRIMARY_STYLE}>
+            {busy
+              ? <><Spinner size={12} variant="white" />Reserving…</>
+              : <><BookOpen size={12} strokeWidth={2.5} />Book a seat</>}
+          </motion.button>
+
+          {/* AMBER IS THE ICON, NOT THE WORDS. --color-warning is #F59E0B, a
+              FILL value: as 10px ink on white it is ~2.1:1, and this is the
+              one line whose entire purpose is to be read in the last two
+              hours. The tint carries the urgency, the tokens carry the text. */}
+          <p className="mt-1.5 flex items-center justify-center gap-1 text-center text-[10px] font-semibold"
+            style={{ color: urgent ? 'var(--color-text-primary)' : 'var(--color-text-muted)' }}>
+            <Clock size={9} strokeWidth={2.25} className="flex-shrink-0"
+              style={{ color: urgent ? 'var(--color-warning)' : undefined }} />
+            {deadline}
+          </p>
+        </div>
+      )
+    }
+
+    /* ── The states that only explain themselves ── */
+    case 'closed':
+      return (
+        <ActionNote icon={<Clock size={12} strokeWidth={2} />}
+          title="Booking closed"
+          body={<>Seats closed <strong>{fmtPassed(bookingClosedAt(lc), now)}</strong>. Ask your admin if you still need a place.</>} />
+      )
+
+    case 'full':
+      return (
+        <ActionNote tint={SC.full} icon={<Users size={12} strokeWidth={2} />}
+          title="Fully booked"
+          body={lc.seatsLeftForYou != null
+            ? 'Your academy has no seats left on this date.'
+            : 'Every seat on this date is taken.'} />
+      )
+
+    case 'locked': {
+      if (sameDay) {
+        return (
+          <ActionNote icon={<Lock size={12} strokeWidth={2} />}
+            title="Same-day registration closed"
+            body={<>In-person seats must be booked <strong>at least a day ahead</strong>. Pick a later date.</>} />
+        )
+      }
+      /* NAME THE SEAT THEY ALREADY HOLD. The modal answered this structurally
+         — it opened on the student's own reservation with the cancel button
+         under it — and "cancel your other seat" is useless advice in a list
+         interleaving every cohort of the module across three weeks. */
+      const other = group.bookedSlot
+      return (
+        <ActionNote icon={<AlertCircle size={12} strokeWidth={2} />}
+          title="One seat per weekly slot"
+          body={other
+            ? <>You are booked on <strong>{fmtDate(other.scheduledStart)} · {fmtTime(other.scheduledStart)}</strong>. Cancel that one to move to this date.</>
+            : 'You already hold a seat in this weekly series. Cancel it to move to this date.'} />
+      )
+    }
+
+    case 'attended':
+      return (
+        <div>
+          <ActionNote tint={SC.attended} icon={<CheckCircle2 size={12} strokeWidth={2.5} />}
+            title="Attended" body="You were marked present for this session." />
+          {lc.recordingUrl && <RecordingLink url={lc.recordingUrl} />}
+        </div>
+      )
+
+    case 'missed':
+      return (
+        <div>
+          <ActionNote tint={SC.missed} icon={<AlertCircle size={12} strokeWidth={2} />}
+            title="Missed" body="This session ran and you were not marked present." />
+          {lc.recordingUrl && <RecordingLink url={lc.recordingUrl} />}
+        </div>
+      )
+
+    /* 'cancelled' cannot reach this component — buildCatalog filters through
+       isStillAhead, whose first clause drops it — and 'ended' arrives only
+       when an instructor ends a class early, inside its scheduled window.
+       Both are answered here rather than left to fall through to nothing. */
+    default:
+      return (
+        <div>
+          <ActionNote tint={SC[shown]} icon={<Calendar size={12} strokeWidth={2} />}
+            title={shown === 'cancelled' ? 'Cancelled' : 'Session ended'}
+            body={shown === 'cancelled'
+              ? 'The academy cancelled this session.'
+              : 'This one has finished.'} />
+          {shown !== 'cancelled' && lc.recordingUrl && <RecordingLink url={lc.recordingUrl} />}
+        </div>
+      )
   }
 }
 
-function SlotCard({ group, bookingMap, blocked, index, onOpen }: {
-  group: ClassGroup; bookingMap: Map<string, MyBooking>; blocked: boolean
-  index: number; onOpen: () => void
-}) {
-  const still    = nextSlot(group.slots)
-  const next     = still ?? group.slots[0]!
-  const pattern  = slotPattern(group.slots)
-  const booking  = bookingMap.get(next.id)
-  const hasOther = !!group.bookedSlot && group.bookedSlot.id !== next.id
-  const status: SlotStatus = getSlotStatus(next, booking, hasOther)
-  const reduce   = useReducedMotion()
+/* ── The session card ───────────────────────────────────────────────────── */
 
-  /* A blocked module's sessions are listed but cannot be booked, so the badge
-     must not say "Open" over a slot the modal will refuse. Only the two
-     states that promise a seat are downgraded; a booking you already hold, a
-     live class and every past state still say exactly what they are. */
-  const shown: SlotStatus = blocked && (status === 'bookable' || status === 'full') ? 'locked' : status
+function SessionCard({
+  s, dayLabel, blocked, pendingReg, index, now,
+  onBook, onCancel, bookPending, cancelPending,
+}: {
+  s:           DatedSession
+  /** "Today" / "Tomorrow" / "Wed, Sep 24" — the band this card sits under,
+      reused in the cancel toast so the confirmation names the date the
+      student actually read. */
+  dayLabel:    string
+  blocked:     boolean
+  pendingReg:  boolean
+  index:       number
+  now:         number
+  onBook:      (id: string) => Promise<void>
+  onCancel:    (bookingId: string, label: string) => Promise<void>
+  bookPending: Set<string>
+  cancelPending: Set<string>
+}) {
+  const { lc, group, status } = s
+  const reduce = useReducedMotion()
+
+  const offline = lc.isOnline === false
+  /* The in-person day rule, read once and used for both halves of it.
+     Deliberately computed with offlineDayOffset — the same device-zone reader
+     getSlotStatus uses — so the card's copy can never contradict the status
+     it is explaining. */
+  const sameDay = offline && offlineDayOffset(lc.scheduledStart) === 0
+
+  /* A module the admin turned off still LISTS its sessions and cannot book
+     them. Read per SESSION as well as per module: buildCatalog marks a module
+     blocked only when EVERY session in it is barred, so a mixed module would
+     otherwise offer a Book button the API answers MODULE_BLOCKED to. */
+  const barred = blocked || (lc.isEnrolled === true && lc.isEntitled === false)
+
+  /* The badge must not say "Open" over a seat that cannot be taken. Only the
+     two states that promise one are downgraded; a seat already held, a live
+     class and every past state still say exactly what they are. */
+  const shown: SlotStatus = barred && (status === 'bookable' || status === 'full') ? 'locked' : status
   const c = SC[shown]
 
-  const cap    = next.sessionCapacity
-  const left   = Math.max(0, seatsLeft(next))
+  const cap   = lc.sessionCapacity
+  const left  = Math.max(0, seatsLeft(lc))
   /* CROSS-ACADEMY: on a shared class seatsLeft() is the caller's own
      allocation, not the room's remainder, so `cap - left` is not "seats
-     taken" — a guest with a floor of 5 and 4 left would read 87% full on a
-     half-empty class. The count stays; only the ratio is dropped. */
-  const yours  = next.seatsLeftForYou != null
-  const showSeats = !blocked && cap > 0
+     taken" and the ratio would lie. The count stays; only the meter goes. */
+  const yours = lc.seatsLeftForYou != null
+  /* Only on the states a seat count can still act on. "4 of 12 seats left"
+     directly under "Booking closed" tells a student seats remain immediately
+     below the sentence explaining they cannot have one. */
+  const showSeats = !barred && cap > 0 && (shown === 'bookable' || shown === 'full' || shown === 'booked')
   const taken  = Math.min(100, Math.max(0, Math.round(((cap - left) / cap) * 100)))
   const scarce = left > 0 && left <= 3
 
-  const offline  = next.isOnline === false
-  const where    = [next.location, next.room].filter(Boolean).join(' · ')
-  const language = (next as { language?: string }).language
-
-  const cta = slotCta(shown, blocked, group.slots.length)
-
-  /* The DAY is the headline. slotPattern returns null the moment the sessions
-     in a group disagree on weekday or time, and then the date is shown
-     instead — a weekday that is only true for some of a series would send a
-     student to the wrong one. */
-  const day  = pattern ? `${pattern.weekday}s` : fmtDate(next.scheduledStart)
-  const time = pattern ? pattern.time          : fmtTime(next.scheduledStart)
+  const where    = [lc.location, lc.room].filter(Boolean).join(' · ')
+  const language = lc.language
+  const time     = fmtTime(lc.scheduledStart)
+  /* The same shape the flat list's toast uses — "Tomorrow, 9:00 PM". */
+  const whenLabel = `${dayLabel}, ${time}`
 
   return (
-    /* ONE focusable element, as every other card on these three levels is.
-       The button below is a span that looks like one — a real nested button
-       would make the card unreachable by keyboard and invalid HTML. The focus
-       ring is an OUTLINE rather than a Tailwind `ring`, because a ring is a
-       box-shadow and cardHover animates boxShadow out from under it. */
-    <motion.button type="button" onClick={onOpen}
-      {...cardHover}
-      initial={{ opacity: 0, y: 12 }}
-      /* Inside the animate target, never as a sibling `transition` prop: that
-         is framer's default for whileHover too, and after the spread it would
-         also replace cardHover's own spring. */
-      animate={{ opacity: 1, y: 0, transition: { ...spring, delay: Math.min(index, 8) * 0.04 } }}
-      style={{ ...CARD, opacity: blocked ? 0.72 : 1 }}
-      aria-label={`${day} at ${time}${language ? `, ${language}` : ''}${group.instructor ? `, ${group.instructor.name}` : ''}, ${c.label}`}
-      className="dm group relative flex h-full w-full min-w-0 flex-col overflow-hidden rounded-2xl bg-[var(--color-bg-surface)] text-left outline-none focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[color:var(--color-primary-on-surface,var(--color-primary))]">
+    /* A PLAIN CONTAINER, not a button — see the note at the top of the level.
+       <article> rather than <div> so the aria-label actually names something:
+       a bare div carrying a label is not exposed, and without it a screen
+       reader gets the clock, the title and the chips as loose text with no
+       boundary between one session and the next.
 
-      {/* The status rail. Four pixels of the one colour that answers "can I
-          have this?", so a grid can be read down its left edge before a
-          single word is. */}
+       The entry delay lives INSIDE the animate target. As a sibling
+       `transition` prop framer applies it to every gesture animation too, and
+       written after a spread it also replaces the spring. The barred dim is
+       in the target for the same reason it cannot be in `style`: framer
+       writes its own latestValues over the style prop, so `opacity: 0.85`
+       there is silently discarded by the entry animation landing on 1. */
+    <motion.article
+      aria-label={`${dayLabel} at ${time}, ${titleCase(lc.title)}${group.instructor ? `, ${group.instructor.name}` : ''} — ${c.label}`}
+      initial={reduce ? false : { opacity: 0, y: 12 }}
+      animate={{
+        opacity: barred ? 0.85 : 1, y: 0,
+        transition: reduce ? { duration: 0 } : { ...spring, delay: Math.min(index, 10) * 0.035 },
+      }}
+      style={CARD}
+      className="dm relative flex h-full min-w-0 flex-col overflow-hidden rounded-2xl bg-[var(--color-bg-surface)]">
+
+      {/* Four pixels of the one colour that answers "can I have this?", so a
+          day's grid can be read down its left edge before a word is. */}
       <span aria-hidden className="absolute inset-y-0 left-0 w-1"
         style={{ background: c.color, opacity: shown === 'bookable' || shown === 'live' || shown === 'booked' ? 1 : 0.45 }} />
 
-      <div className="flex flex-1 flex-col gap-2.5 p-3.5 pl-4">
+      <div className="flex flex-1 flex-col gap-2 p-3.5 pl-4">
 
-        {/* ── the day, and what state it is in ── */}
+        {/* ── the clock, and what state it is in ── */}
         <div className="flex items-start justify-between gap-2">
           <div className="min-w-0">
-            <p className="syne truncate text-[18px] font-extrabold leading-tight"
-              style={{ color: 'var(--color-text-primary)' }}>{day}</p>
-            <p className="mt-1 flex items-center gap-1.5 text-[12px] font-semibold"
-              style={{ color: 'var(--color-text-secondary)' }}>
-              <Clock size={11} strokeWidth={2.25} className="flex-shrink-0" />
+            <p className="syne truncate text-[20px] font-extrabold leading-none tracking-tight"
+              style={{ color: 'var(--color-text-primary)' }}>
               {time}
-              <span aria-hidden style={{ color: 'var(--color-text-muted)' }}>·</span>
-              <span style={{ color: 'var(--color-text-muted)' }}>{next.durationMins || 60} min</span>
+            </p>
+            {/* No date here: the heading above the grid already carries it,
+                and "Sep 20" under a band reading "Today · Sat 20 Sep" is the
+                same fact twice, on every card on the screen. */}
+            <p className="mt-1.5 flex items-center gap-1 text-[11px] font-semibold"
+              style={{ color: 'var(--color-text-muted)' }}>
+              <Clock size={10} strokeWidth={2.25} className="flex-shrink-0" />
+              {lc.durationMins || 60} min
             </p>
           </div>
 
           <span className="flex flex-shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-bold"
             style={{ background: c.bg, color: ink(c.color), border: `1px solid ${c.border}` }}>
             {shown === 'live' && (
-              <motion.span className="h-1.5 w-1.5 rounded-full" style={{ background: c.color }}
+              <motion.span aria-hidden className="h-1.5 w-1.5 rounded-full" style={{ background: c.color }}
                 animate={reduce ? undefined : { opacity: [1, 0.25, 1] }}
                 transition={{ duration: 1.4, repeat: Infinity, ease: 'easeInOut' }} />
             )}
@@ -868,24 +1454,34 @@ function SlotCard({ group, bookingMap, blocked, index, onOpen }: {
           </span>
         </div>
 
-        {/* ── language, and where it happens ── */}
+        {/* ── which class this is ── */}
+        <p className="line-clamp-2 text-[12.5px] font-bold leading-snug"
+          style={{ color: 'var(--color-text-secondary)' }}>
+          {titleCase(lc.title)}
+        </p>
+
+        {/* ── language, and where it happens ──
+            Pill is the file's own chip; the delivery one is hand-rolled only
+            because a room code has to be able to truncate, which needs the
+            min-w-0 flex child Pill does not take. */}
         <div className="flex flex-wrap items-center gap-1.5">
           {language && (
-            <span className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold"
-              style={{ background: 'rgba(14,204,142,0.08)', color: 'var(--color-success)', border: '1px solid rgba(14,204,142,0.20)' }}>
-              <Globe size={9} strokeWidth={2.5} />{language}
-            </span>
+            <Pill rgb="14,204,142" solid="var(--color-success)" icon={<Globe size={9} strokeWidth={2.5} />}>
+              {language}
+            </Pill>
           )}
-          <span className="inline-flex min-w-0 items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold"
+          <span className="inline-flex min-w-0 max-w-full items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold"
             style={offline
               ? { background: 'rgba(0,87,184,0.08)', color: 'var(--color-primary-on-surface, var(--color-primary))', border: '1px solid rgba(0,87,184,0.20)' }
               : { background: 'rgba(99,102,241,0.08)', color: '#6366F1', border: '1px solid rgba(99,102,241,0.20)' }}>
-            {offline ? <MapPin size={9} strokeWidth={2.5} /> : <Video size={9} strokeWidth={2.5} />}
+            {offline
+              ? <MapPin size={9} strokeWidth={2.5} className="flex-shrink-0" />
+              : <Video size={9} strokeWidth={2.5} className="flex-shrink-0" />}
             <span className="truncate">{offline ? (where || 'In person') : 'Online'}</span>
           </span>
         </div>
 
-        {/* ── the instructor ── */}
+        {/* ── who is teaching ── */}
         <div className="flex items-center gap-2">
           {group.instructor ? (
             <>
@@ -903,12 +1499,13 @@ function SlotCard({ group, bookingMap, blocked, index, onOpen }: {
           )}
         </div>
 
-        {/* ── the seats ── */}
+        {/* ── what is left of it ── */}
         {showSeats && (
           <div>
             <div className="flex items-center justify-between gap-2">
-              <span className="truncate text-[10.5px] font-bold"
-                style={{ color: scarce ? 'var(--color-warning)' : 'var(--color-text-secondary)' }}>
+              <span className="flex min-w-0 items-center gap-1 truncate text-[10.5px] font-bold"
+                style={{ color: scarce ? 'var(--color-text-primary)' : 'var(--color-text-secondary)' }}>
+                {scarce && <Users size={10} strokeWidth={2.5} className="flex-shrink-0" style={{ color: 'var(--color-warning)' }} />}
                 {left === 0
                   ? 'No seats left'
                   : yours
@@ -927,28 +1524,23 @@ function SlotCard({ group, bookingMap, blocked, index, onOpen }: {
                 style={{ background: 'var(--color-bg-inset)', border: '1px solid var(--color-border)' }}>
                 <motion.span className="block h-full rounded-full"
                   initial={reduce ? false : { width: 0 }} animate={{ width: `${taken}%` }}
-                  transition={{ ...spring, delay: 0.1 + Math.min(index, 8) * 0.04 }}
+                  transition={reduce ? { duration: 0 } : { ...spring, delay: 0.1 + Math.min(index, 10) * 0.035 }}
                   style={{ background: left === 0 ? 'var(--color-text-muted)' : scarce ? 'var(--color-warning)' : 'var(--color-primary)' }} />
               </div>
             )}
           </div>
         )}
 
-        {/* ── the one thing this card does ── */}
-        <span aria-hidden
-          className="mt-auto flex w-full items-center justify-center gap-1.5 rounded-xl py-2.5 text-[12px] font-bold transition-opacity group-hover:opacity-90"
-          style={cta.tone === 'primary'
-            ? { background: 'var(--color-primary)', color: '#fff', boxShadow: '0 2px 8px rgba(0,87,184,0.25)' }
-            : cta.tone === 'soft'
-              ? { background: c.bg, color: 'var(--color-text-primary)', border: `1px solid ${c.border}` }
-              : { background: 'var(--color-bg-inset)', color: 'var(--color-text-muted)', border: '1px solid var(--color-border)' }}>
-          <span className="flex items-center" style={{ color: cta.tone === 'soft' ? ink(c.color) : undefined }}>
-            {cta.icon}
-          </span>
-          {cta.label}
-        </span>
+        {/* ── THE PART THE MODAL USED TO OWN ── */}
+        <div className="mt-auto pt-1">
+          <SessionAction
+            s={s} shown={shown} barred={barred} sameDay={sameDay}
+            pendingReg={pendingReg} whenLabel={whenLabel} now={now} reduce={reduce}
+            onBook={onBook} onCancel={onCancel}
+            bookPending={bookPending} cancelPending={cancelPending} />
+        </div>
       </div>
-    </motion.button>
+    </motion.article>
   )
 }
 
@@ -1018,17 +1610,35 @@ function FilterRow({ icon, label, options, value, onChange }: {
 }
 
 export function ModuleSheet({
-  course, node, position, bookingMap, search, onNavigate, onOpenGroup,
+  course, node, position, bookingMap, search, now,
+  onBook, onCancel, bookPending, cancelPending, onNavigate,
 }: {
-  course:      CourseNode
-  node:        ModuleNode
-  position:    number | null
-  bookingMap:  Map<string, MyBooking>
-  search:      string
-  onNavigate:  (courseId: string | null, moduleId: string | null) => void
-  onOpenGroup: (group: ClassGroup) => void
+  course:        CourseNode
+  node:          ModuleNode
+  position:      number | null
+  bookingMap:    Map<string, MyBooking>
+  search:        string
+  /** The server-anchored clock from useJoinClock — it ticks every second
+      while a booked session is near a join boundary and every 30 s
+      otherwise, so the join button appears on the start second without a
+      reload and the countdowns move on their own. */
+  now:           number
+  onBook:        (id: string) => Promise<void>
+  onCancel:      (bookingId: string, label: string) => Promise<void>
+  bookPending:   Set<string>
+  cancelPending: Set<string>
+  onNavigate:    (courseId: string | null, moduleId: string | null) => void
 }) {
   const q = search.trim().toLowerCase()
+  const reduce = useReducedMotion()
+
+  /* A student whose registration is still pending cannot hold a seat — the
+     booking endpoint answers PENDING_APPROVAL — so the card sends them to
+     finish registering rather than to a button that will be refused. This is
+     the one fetch on this level, and it is the query the whole app already
+     shares: one cache entry, no second request. */
+  const { data: me } = useCurrentUser()
+  const pendingReg = me?.enrollmentStatus === 'pending'
 
   const [language, setLanguage] = useState<string | null>(null)
   const [tutorId,  setTutorId]  = useState<string | null>(null)
@@ -1038,20 +1648,39 @@ export function ModuleSheet({
      across and show an empty screen for a module that has sessions. */
   useEffect(() => { setLanguage(null); setTutorId(null) }, [node.id])
 
-  /* The search box stays on screen at every level, so it has to mean something
-     at every level. Here it matches the class title, the instructor and the
-     language — the three things that tell one slot of a module from another. */
-  const searched = q
-    ? node.groups.filter(g =>
-        g.title.toLowerCase().includes(q) ||
-        (g.instructor?.name ?? '').toLowerCase().includes(q) ||
-        ((g.slots[0] as { language?: string } | undefined)?.language ?? '').toLowerCase().includes(q))
-    : node.groups
+  /* THE LIST IS DERIVED ON A MINUTE, NOT ON A SECOND. `now` ticks once a
+     second while any booked session is within two minutes of a join
+     boundary; nothing in this derivation changes faster than a minute, and
+     re-flattening four dozen sessions at 1 Hz to get the same array back is
+     work nobody sees. The join buttons still read the raw `now`. */
+  const nowMin = Math.floor(now / 60_000)
 
-  /* THE OPTIONS ARE THIS MODULE'S, NOT THE SYSTEM'S — and they are computed
-     from what SEARCH left, so a chip can never offer a value that would come
-     back empty. */
-  const facets = useMemo(() => moduleFacets(searched), [searched])
+  /* The search box stays on screen at every level, so it has to mean
+     something at every level. Here it matches the class title, the instructor
+     and the language — the three things that tell one session of a module
+     from another once the date is on the card. */
+  const searched = useMemo(
+    () => q
+      ? node.groups.filter(g =>
+          g.title.toLowerCase().includes(q) ||
+          (g.instructor?.name ?? '').toLowerCase().includes(q) ||
+          ((g.slots[0] as { language?: string } | undefined)?.language ?? '').toLowerCase().includes(q))
+      : node.groups,
+    [node.groups, q],
+  )
+
+  /* THE TIME CUT RUNS BEFORE THE FACETS, NOT AFTER.
+     A filter must never offer a value that comes back empty — and once the
+     rendered unit is a SESSION rather than a group, a group whose last
+     session ended while the sheet was open is exactly such a value. So the
+     options are computed from the groups that still have something ahead. */
+  const live = useMemo(
+    () => searched.filter(g => g.slots.some(lc => isAheadAt(lc, now))),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [searched, nowMin],
+  )
+
+  const facets = useMemo(() => moduleFacets(live), [live])
   const showLang  = showFacet(facets.languages)
   const showTutor = showFacet(facets.instructors)
 
@@ -1062,22 +1691,69 @@ export function ModuleSheet({
   }, [facets, language, tutorId])
 
   const groups = useMemo(
-    () => filterGroups(searched, showLang ? language : null, showTutor ? tutorId : null),
-    [searched, language, tutorId, showLang, showTutor],
+    () => filterGroups(live, showLang ? language : null, showTutor ? tutorId : null),
+    [live, language, tutorId, showLang, showTutor],
   )
 
-  const filtered = groups.length !== node.groups.length
+  /* ── FROM WEEKLY SLOTS TO A RUN OF DATES ──
 
-  /* SMALL BOXES. Each card is one slot's facts and nothing else — day, time,
-     language, where, who, seats — so several fit across a desktop where the
-     old strip took the full width for one. A lone slot is capped rather than
-     stretched: three empty columns beside one card is the dead space the
-     strip had, wearing a different shape. */
-  const cols =
-      groups.length === 1 ? 'grid-cols-1 max-w-[340px]'
-    : groups.length === 2 ? 'grid-cols-1 sm:grid-cols-2 max-w-[700px]'
-    : groups.length === 3 ? 'grid-cols-1 sm:grid-cols-2 lg:grid-cols-3'
-    :                       'grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4'
+     The grouping survives as a computation and disappears as a screen: every
+     session of every surviving group is flattened into one list and banded by
+     the student's own calendar day.
+
+     `hasOther` is read off the GROUP on the way past, which is the whole
+     reason the groups are still built. It is the one-seat-per-weekly-series
+     rule, and flattening it would silently have let a student book all four
+     Thursdays.
+
+     groupByDay does the banding: it is already in lib/classSchedule, already
+     unit-tested, and it takes the SERVER clock, so "Today" cannot be
+     relabelled by a device that is a day out. It also names every other day
+     with its own date — a twelve-week Thursday cohort gets twelve distinct
+     headings rather than the word "Thursday" twelve times. */
+  const { buckets, rows } = useMemo(() => {
+    const byId = new Map<string, DatedSession>()
+    const ahead: LiveClass[] = []
+    for (const g of groups) {
+      const heldId = g.bookedSlot?.id
+      for (const lc of g.slots) {
+        /* The catalogue is not a diary. buildCatalog already dropped what is
+           behind us, but this re-runs as the clock moves, so a session that
+           finishes while the sheet is open leaves the list instead of sitting
+           at the top of Today offering a seat in the past. */
+        if (!isAheadAt(lc, now)) continue
+        const booking = bookingMap.get(lc.id)
+        byId.set(lc.id, {
+          lc, group: g, booking,
+          status: getSlotStatus(lc, booking, !!heldId && heldId !== lc.id),
+        })
+        ahead.push(lc)
+      }
+    }
+    return { buckets: groupByDay(ahead, now), rows: byId }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [groups, bookingMap, nowMin])
+
+  /* BOTH NUMBERS OFF THE SAME CLOCK. node.sessionCount is frozen at the last
+     refetch, so pairing it with a live count made a session ending while the
+     sheet was open read "5 of 12" and then "4 of 12". */
+  const shownCount = rows.size
+  const totalCount = useMemo(
+    () => node.groups.reduce((n, g) => n + g.slots.filter(lc => isAheadAt(lc, now)).length, 0),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [node.groups, nowMin],
+  )
+  const narrowed = shownCount !== totalCount
+
+  /* SMALL BOXES, in a grid that does not change shape between days — a card
+     one day wide and a card three days narrow would make the column of days
+     read as three different screens. Each card carries its own controls now,
+     so three across is the widest that keeps a button a comfortable target. */
+  const cols = 'grid-cols-1 sm:grid-cols-2 xl:grid-cols-3'
+
+  /* The stagger runs across the WHOLE sheet, not per day, so the cascade
+     reads top to bottom instead of restarting at every heading. */
+  let seq = -1
 
   return (
     <motion.div {...enter} transition={spring} key={`m:${course.id}:${node.id}`}>
@@ -1087,6 +1763,8 @@ export function ModuleSheet({
         fast path, but the mark does not survive the round trip. A Fragment
         collapses them to one child and adds no DOM node. */}
     <>
+      <SheetStyle />
+
       <BackLink label={titleCase(course.title)} onClick={() => onNavigate(course.id, null)} />
       <Crumbs trail={[
         { label: 'Courses', onClick: () => onNavigate(null, null) },
@@ -1098,8 +1776,8 @@ export function ModuleSheet({
 
       <SectionHead
         icon={<Calendar size={12} strokeWidth={2.25} style={{ color: 'var(--color-primary-on-surface, var(--color-primary))' }} />}
-        label="Available sessions"
-        note={filtered ? `${groups.length} of ${node.groups.length}` : plural(node.groups.length, 'slot')}
+        label="Upcoming sessions"
+        note={narrowed ? `${shownCount} of ${totalCount}` : plural(totalCount, 'session')}
       />
 
       {/* ── FILTERS ──
@@ -1108,13 +1786,7 @@ export function ModuleSheet({
           module taught by one instructor does not get an instructor filter:
           a control whose every option returns the same list is furniture,
           and on a screen this small it is furniture in the way. The same
-          rule drops the language row on a single-language module.
-
-          Language used to be a section HEADING with the slots banded under
-          it. Now that each card carries its own language chip, a heading
-          saying the same word above it was the same fact twice — so the
-          bands are gone and one grid sits under the filters, which is both
-          cleaner and the pattern the Catalog already uses. */}
+          rule drops the language row on a single-language module. */}
       {(showLang || showTutor) && (
         <div className="mb-4 flex flex-col gap-2 rounded-2xl px-3 py-2.5"
           style={{ background: 'var(--color-bg-inset)', border: '1px solid var(--color-border)' }}>
@@ -1133,18 +1805,36 @@ export function ModuleSheet({
         </div>
       )}
 
-      {groups.length === 0 ? (
+      {buckets.length === 0 ? (
         <Empty icon={<Calendar size={26} style={{ color: 'var(--color-primary)' }} />}
           title={q || language || tutorId ? 'No sessions match' : 'Nothing scheduled yet'}
           body={q || language || tutorId
-            ? 'Try a different filter, or clear them to see every slot.'
+            ? 'Try a different filter, or clear them to see every date.'
             : 'This module has no upcoming sessions. Check back soon.'} />
       ) : (
-        <div className={`grid gap-3.5 ${cols}`}>
-          {groups.map((g, i) => (
-            <SlotCard key={g.id} group={g} bookingMap={bookingMap} blocked={node.blocked}
-              index={i} onOpen={() => onOpenGroup(g)} />
-          ))}
+        <div className="flex flex-col gap-7">
+          {buckets.map(bucket => {
+            const headingId = `day-${node.id || 'general'}-${bucket.key}`
+            return (
+              <section key={bucket.key} aria-labelledby={headingId}>
+                <DayHead bucket={bucket} headingId={headingId} reduce={reduce} />
+                <div className={`grid gap-3.5 ${cols}`}>
+                  {bucket.items.map(lc => {
+                    const s = rows.get(lc.id)
+                    if (!s) return null
+                    seq += 1
+                    return (
+                      <SessionCard key={lc.id} s={s} dayLabel={bucket.label}
+                        blocked={node.blocked} pendingReg={pendingReg}
+                        index={seq} now={now}
+                        onBook={onBook} onCancel={onCancel}
+                        bookPending={bookPending} cancelPending={cancelPending} />
+                    )
+                  })}
+                </div>
+              </section>
+            )
+          })}
         </div>
       )}
     </>
@@ -1155,7 +1845,8 @@ export function ModuleSheet({
 /* ── The view ───────────────────────────────────────────────────────────── */
 
 export function Hierarchy({
-  classes, bookingMap, search, courseId, moduleId, onNavigate, onOpenGroup,
+  classes, bookingMap, search, courseId, moduleId, onNavigate,
+  onBook, onCancel, bookPending, cancelPending,
 }: {
   classes:     LiveClass[]
   bookingMap:  Map<string, MyBooking>
@@ -1163,7 +1854,13 @@ export function Hierarchy({
   courseId:    string | null
   moduleId:    string | null
   onNavigate:  (courseId: string | null, moduleId: string | null) => void
-  onOpenGroup: (group: ClassGroup) => void
+  /* The page's own booking handlers, unchanged: it owns the mutations and the
+     seven error codes they can come back with, and the cards below call
+     straight into them. Level 3 gained the controls, not the error handling. */
+  onBook:        (id: string) => Promise<void>
+  onCancel:      (bookingId: string, label: string) => Promise<void>
+  bookPending:   Set<string>
+  cancelPending: Set<string>
 }) {
   const catalog = useMemo(() => buildCatalog(classes, bookingMap), [classes, bookingMap])
 
@@ -1182,6 +1879,20 @@ export function Hierarchy({
   const course = courseId !== null ? catalog.find(c => c.id === courseId) : undefined
   const mod    = course && moduleId !== null ? course.modules.find(m => m.id === moduleId) : undefined
 
+  /* THE CLOCK LIVES HERE, NOT ON THE PAGE.
+
+     Level 3 books, so it needs the server-anchored clock the join button
+     reads — and it needs it to tick to the second inside a join window. Held
+     at this level rather than in page.tsx, that 1 Hz tick re-renders the
+     module sheet instead of the whole 2000-line schedule page, and it is
+     scoped to the OPEN MODULE's sessions, so levels 1 and 2 never leave the
+     30 s tick at all. `undefined` outside level 3 means exactly that. */
+  const clockSessions = useMemo(
+    () => (mod ? mod.groups.flatMap(g => g.slots) : undefined),
+    [mod],
+  )
+  const now = useJoinClock(clockSessions)
+
   /* ── Level 3 ── */
   if (course && mod) {
     const position = mod.id === GENERAL
@@ -1191,7 +1902,9 @@ export function Hierarchy({
        be dropped anywhere without a caller remembering to trim it. */
     return (
       <ModuleSheet course={course} node={mod} position={position} bookingMap={bookingMap}
-        search={search} onNavigate={onNavigate} onOpenGroup={onOpenGroup} />
+        search={search} now={now} onNavigate={onNavigate}
+        onBook={onBook} onCancel={onCancel}
+        bookPending={bookPending} cancelPending={cancelPending} />
     )
   }
 

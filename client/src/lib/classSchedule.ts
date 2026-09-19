@@ -381,6 +381,64 @@ export function slotPattern(slots: LiveClass[]): { weekday: string; time: string
 export const nextSlot = (slots: LiveClass[]): LiveClass | undefined =>
   slots.find(s => !isPastEnd(s) && s.status !== 'cancelled')
 
+/* ── Sessions, by the day they fall on ──────────────────────────── */
+
+export interface DayBucket {
+  /** YYYY-MM-DD in the student's own zone — a stable React key. */
+  key:   string
+  /** "Today", "Tomorrow", else "Wed 24 Sep". */
+  label: string
+  today: boolean
+  items: LiveClass[]
+}
+
+/**
+ * Bucket sessions by the calendar day they fall on FOR THIS STUDENT, soonest
+ * first, with the sessions inside each day in time order.
+ *
+ * The day is the student's own, not the server's: a 23:00 Dubai class is
+ * tomorrow for a student in Sydney, and the header has to agree with the
+ * clock time printed on the card beneath it. `zonedKey` is the same function
+ * the flat list has always dated its sections with, so the two screens can
+ * never disagree about which day a session belongs to.
+ *
+ * `now` is passed in rather than read, so the caller's server-anchored clock
+ * decides what "today" means and a device clock that is a day out cannot
+ * relabel the page.
+ */
+export function groupByDay(sessions: LiveClass[], now: number): DayBucket[] {
+  const todayKey    = zonedKey(new Date(now))
+  const tomorrowKey = zonedKey(new Date(now + 86_400_000))
+
+  const by = new Map<string, LiveClass[]>()
+  for (const lc of sessions) {
+    const k = zonedKey(new Date(lc.scheduledStart))
+    if (!by.has(k)) by.set(k, [])
+    by.get(k)!.push(lc)
+  }
+
+  return [...by.keys()].sort().map(key => {
+    const items = by.get(key)!
+      .slice()
+      .sort((a, b) => new Date(a.scheduledStart).getTime() - new Date(b.scheduledStart).getTime())
+
+    let label: string
+    if (key === todayKey)         label = 'Today'
+    else if (key === tomorrowKey) label = 'Tomorrow'
+    else {
+      /* Built at noon UTC from the key's own parts and formatted in UTC, so
+         the weekday named here is the key's weekday in every device zone —
+         formatting a midnight instant in a UTC+13 zone slips a day. */
+      const [y, m, d] = key.split('-').map(Number)
+      label = new Intl.DateTimeFormat('en-US', {
+        timeZone: 'UTC', weekday: 'short', day: 'numeric', month: 'short',
+      }).format(new Date(Date.UTC(y!, m! - 1, d!, 12)))
+    }
+
+    return { key, label, today: key === todayKey, items }
+  })
+}
+
 /* ── The catalogue's time policy ────────────────────────────────────────── */
 
 /**
