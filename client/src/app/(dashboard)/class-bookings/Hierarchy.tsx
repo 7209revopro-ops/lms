@@ -463,8 +463,19 @@ export function Hierarchy({
 
   /* ── Level 3 ── */
   if (course && mod) {
+    /* The search box stays on screen at every level, so it has to mean
+       something at every level. Here it matches the class title, the
+       instructor and the language — the three things that distinguish one
+       slot of a module from another. */
+    const groups = q
+      ? mod.groups.filter(g =>
+          g.title.toLowerCase().includes(q) ||
+          (g.instructor?.name ?? '').toLowerCase().includes(q) ||
+          ((g.slots[0] as { language?: string }).language ?? '').toLowerCase().includes(q))
+      : mod.groups
+
     const byLanguage = new Map<string, ClassGroup[]>()
-    for (const g of mod.groups) {
+    for (const g of groups) {
       const lang = (g.slots[0] as { language?: string }).language || 'Unspecified'
       if (!byLanguage.has(lang)) byLanguage.set(lang, [])
       byLanguage.get(lang)!.push(g)
@@ -516,10 +527,11 @@ export function Hierarchy({
         <h3 className="mb-2.5 text-[11px] font-bold uppercase tracking-widest"
           style={{ color: 'var(--color-text-muted)' }}>Available sessions</h3>
 
-        {mod.groups.length === 0 ? (
+        {groups.length === 0 ? (
           <Empty icon={<Calendar size={26} style={{ color: 'var(--color-primary)' }} />}
-            title="Nothing scheduled yet"
-            body="This module has no upcoming sessions. Check back soon." />
+            title={q ? 'No sessions match' : 'Nothing scheduled yet'}
+            body={q ? 'Try a different search term, or clear the search to see them all.'
+                    : 'This module has no upcoming sessions. Check back soon.'} />
         ) : (
           <div className="space-y-5">
             {languages.map(lang => (
@@ -548,7 +560,21 @@ export function Hierarchy({
 
   /* ── Level 2 ── */
   if (course) {
+    /* Matching a module by its own name OR by a class inside it, so typing an
+       instructor's name narrows to the modules they actually teach. `ordered`
+       stays over the UNFILTERED list so "Module 3" keeps saying 3 while a
+       search is running — a module's number is its place in the course, not
+       its place in your search results. */
     const ordered = course.modules.filter(m => m.id !== GENERAL)
+    const modules = q
+      ? course.modules.filter(m =>
+          m.title.toLowerCase().includes(q) ||
+          (m.description ?? '').toLowerCase().includes(q) ||
+          m.groups.some(g =>
+            g.title.toLowerCase().includes(q) ||
+            (g.instructor?.name ?? '').toLowerCase().includes(q)))
+      : course.modules
+
     return (
       <motion.div {...enter} transition={spring} key={`c:${course.id}`}>
       {/* ONE child, deliberately. framer re-creates this element with its
@@ -573,16 +599,19 @@ export function Hierarchy({
             )}
           </div>
           <p className="mt-1 text-xs" style={{ color: 'var(--color-text-muted)' }}>
-            {course.modules.length} {course.modules.length === 1 ? 'module' : 'modules'} · {course.sessionCount} upcoming {course.sessionCount === 1 ? 'session' : 'sessions'}
+            {plural(course.modules.length, 'module')} · {plural(course.sessionCount, 'upcoming session')}
+            {q && modules.length !== course.modules.length && ` · ${modules.length} matching`}
           </p>
         </div>
 
-        {course.modules.length === 0 ? (
+        {modules.length === 0 ? (
           <Empty icon={<Layers size={26} style={{ color: 'var(--color-primary)' }} />}
-            title="No modules yet" body="This course has no upcoming sessions." />
+            title={q ? 'No modules match' : 'No modules yet'}
+            body={q ? 'Try a different search term, or clear the search to see them all.'
+                    : 'This course has no upcoming sessions.'} />
         ) : (
           <div className="space-y-2.5">
-            {course.modules.map((m, i) => (
+            {modules.map((m, i) => (
               <ModuleCard key={m.id || 'general'} node={m} index={i}
                 position={m.id === GENERAL ? null : ordered.indexOf(m) + 1}
                 onOpen={() => onNavigate(course.id, m.id)} />

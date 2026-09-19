@@ -861,7 +861,7 @@ Each phase ships on its own and is verifiable alone.
       and `moduleTitle` are door-aware via `effSectionId`/`effSectionTitle`,
       and the search haystack matches the guest's own course and module names.
 
-- [ ] **Phase 2 - Put the three missing fields on the wire.** No new endpoint
+- [x] **Phase 2 - Put the three missing fields on the wire.** DONE. No new endpoint
       (9.4b #3). Widen the section populate to `'id title order description'`
       on both list paths and emit `order`/`description` from `toDTO`; emit
       `isEntitled` alongside `isEnrolled` so a blocked module can be drawn
@@ -872,7 +872,7 @@ Each phase ships on its own and is verifiable alone.
       a blocked row arrives `isEnrolled:true, isEntitled:false`; every
       language a class can hold is reachable from the filter.
 
-- [ ] **Phase 3 - The tree, from the rows already cached.** Build from
+- [x] **Phase 3 - The tree, from the rows already cached.** DONE. Build from
       `useAllLiveClasses()`: course (door-aware) -> module (`effSectionId`,
       ordered by `section.order`, **General sessions** bucket for null) ->
       language -> slot-group. Every count computed from the same filtered
@@ -881,7 +881,7 @@ Each phase ships on its own and is verifiable alone.
       *Verify:* counts equal the cards beneath them; an un-moduled class
       appears under General; a blocked module appears **locked**, not hidden.
 
-- [ ] **Phase 4 - The three screens, plus URL state.** Level 1 course cards,
+- [x] **Phase 4 - The three screens, plus URL state.** DONE. Level 1 course cards,
       Level 2 module cards with "N Sessions / N Languages", Level 3 the slot
       sheet grouped by language showing the module description. Reuse
       `SlotModal`'s action block wholesale - it is where the ten states, the
@@ -892,7 +892,7 @@ Each phase ships on its own and is verifiable alone.
       *Verify:* every state in `getSlotStatus` still reachable; book, cancel,
       full, locked, cutoff-passed and live-now behave as on the flat page.
 
-- [ ] **Phase 5 - Default to the hierarchy, keep the flat view, keep the
+- [x] **Phase 5 - DONE. Default to the hierarchy, keep the flat view, keep the
       ~15 deep links working.** Ship the hierarchy as the landing view with
       the chronological list behind a toggle. Roughly fifteen emails, cron
       reminders, the digest and the booking routes link to `/class-bookings`
@@ -908,10 +908,46 @@ Each phase ships on its own and is verifiable alone.
       both views agree on the same class; a reminder link still lands on a
       list containing its session.
 
-- [ ] **Phase 6 - Slot labels.** Render a group as `Tuesdays 2:00 PM / next
+- [x] **Phase 6 - Slot labels.** DONE. Render a group as `Tuesdays 2:00 PM / next
       Mon 22 Sep`. Where a group's members disagree on weekday or time - a
       rescheduled member - show the dates rather than a false pattern.
       *Verify:* a deliberately drifted series does not claim a weekday.
+
+### 9.5b What shipped, and what it was verified against
+
+All six phases are in. Two commits: the wire fields (`fd1e7a2`) and the tree
+itself (`b2a759b`), plus search at every level.
+
+Departures from 9.5 as written, each forced by 9.4b:
+
+· **No new endpoint and no new index.** The tree is built from the rows
+  `useAllLiveClasses()` already holds.
+· **A blocked module is drawn locked, not hidden.** It was never hidden.
+· **`yourCohort` grew `sectionOrder` and `sectionDescription`.** Not budgeted,
+  but without them a guest's modules could only be ordered by the HOST's
+  `section.order`, which ranks one course's module by a position in another.
+· **`lib/classSchedule.ts` is new.** The door readers, the clock rules and
+  `getSlotStatus` had to be reachable from both views, and a second copy of
+  them is a second set of answers.
+· **Search works at all three levels**, per the reference, rather than Level 1
+  only.
+
+Measured against the running app, signed in as a student:
+
+| Check | Result |
+|---|---|
+| `isEntitled` on the wire | 95/95 rows |
+| module `order` populated | 24/24 rows that have a module |
+| blocked module distinguishable | deliberately blocked one -> `isEnrolled:true, isEntitled:false`, stream fields stripped; reverted after |
+| three levels render | yes, light and dark |
+| drill-down + back button | Level 3 -> 2 -> 1, URL and headings follow |
+| cold deep link | `?course=&module=` lands straight on Level 3 |
+| SlotModal from the tree | opens, and correctly refuses a course she is not enrolled in |
+| weekly label | "Saturdays . 10:32 AM", derived from the sessions |
+| flat view | tiles, tabs, filters and range all unchanged |
+| phone width | no horizontal overflow at 375px |
+| React console | 0 warnings at every level |
+| backend suites | remindermails 21, bookingsapi 71, bookingfixes 14, digest 26, crossorgclass 23, upcomingfeed 8 — all pass; `check:seats` clean |
 
 ### 9.6 What I would not do
 
