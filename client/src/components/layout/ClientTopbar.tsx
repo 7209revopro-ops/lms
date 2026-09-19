@@ -8,6 +8,7 @@ import {
   Search, Bell, X, MessageSquare, BookOpen,
   GraduationCap, Heart, Sparkles, Trophy,
   Settings, Clock, Star, Users, Video, Flame, Menu, ShoppingCart, Map, CalendarDays, LifeBuoy,
+  Ticket,
   ClipboardList, LogOut, Sun, Moon, Monitor,
 } from 'lucide-react'
 import { useQuery } from '@tanstack/react-query'
@@ -29,6 +30,7 @@ import { AvatarImg } from '@/components/ui/AvatarImg'
 const SIDEBAR_TABS = [
   { label: 'My Learning', href: '/my-learning',    icon: GraduationCap },
   { label: 'Schedule',    href: '/class-bookings', icon: CalendarDays },
+  { label: 'My Bookings', href: '/my-bookings',    icon: Ticket },
   { label: 'Assignments', href: '/assignments',     icon: ClipboardList },
   { label: 'Catalog',     href: '/courses',         icon: BookOpen },
   { label: 'Learning Paths', href: '/learning-paths', icon: Map },
@@ -40,6 +42,11 @@ const SIDEBAR_TABS = [
 const TOPBAR_TABS = [
   { label: 'My Learning',    href: '/my-learning',    icon: GraduationCap },
   { label: 'Class Schedule', href: '/class-bookings', icon: CalendarDays },
+  /* The seats you hold, next to the place you take them. This row is the ONLY
+     navigation a desktop window gets - the hamburger that opens the drawer is
+     `lg:hidden` - so a page missing from here is a page reachable only by
+     typing its URL, which is what /my-bookings was. */
+  { label: 'My Bookings',    href: '/my-bookings',     icon: Ticket },
   { label: 'Assignments',    href: '/assignments',     icon: ClipboardList },
   { label: 'Catalog',        href: '/courses',         icon: BookOpen },
   { label: 'Learning Paths', href: '/learning-paths',  icon: Map },
