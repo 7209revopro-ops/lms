@@ -154,7 +154,7 @@ function CategoryCard({ category, index, editing, setEditingId }: {
           {err && <p className="flex items-center gap-1 text-[11px]" style={{ color: '#F87171' }}><AlertCircle size={10} />{err}</p>}
           <div className="flex items-center justify-end gap-2 pt-1">
             <button onClick={() => { setEditingId(null); setName(category.name); setDesc(category.description ?? '') }}
-              className="rounded-lg px-2.5 py-1 text-xs font-semibold transition-colors hover:bg-white/08"
+              className="rounded-lg px-2.5 py-1 text-xs font-semibold transition-colors hover:bg-white/[0.08]"
               style={{ color: 'rgba(255,255,255,0.5)' }}>
               Cancel
             </button>

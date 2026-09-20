@@ -67,7 +67,7 @@ export default function ReviewsPage() {
           return (
             <motion.div key={r.id}
               initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.025 }}
-              className="rounded-2xl p-4 transition-colors hover:bg-white/02"
+              className="rounded-2xl p-4 transition-colors hover:bg-white/[0.02]"
               style={{ background: 'rgba(255,255,255,0.025)', border: '1px solid rgba(255,255,255,0.07)' }}>
               <div className="flex items-start justify-between gap-3">
                 <div className="flex items-center gap-2.5 min-w-0">
@@ -123,7 +123,7 @@ export default function ReviewsPage() {
       {data && data.meta.total_pages > 1 && (
         <div className="mt-6 flex items-center justify-center gap-2">
           <button onClick={() => setPage(p => Math.max(1, p - 1))} disabled={!data.meta.has_prev}
-            className="flex h-8 items-center gap-1 rounded-xl px-3 text-xs font-semibold transition-colors hover:bg-white/08 disabled:opacity-30"
+            className="flex h-8 items-center gap-1 rounded-xl px-3 text-xs font-semibold transition-colors hover:bg-white/[0.08] disabled:opacity-30"
             style={{ color: 'rgba(255,255,255,0.6)', background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)' }}>
             <ChevronLeft size={12} />Previous
           </button>
@@ -131,7 +131,7 @@ export default function ReviewsPage() {
             Page {page} of {data.meta.total_pages}
           </span>
           <button onClick={() => setPage(p => p + 1)} disabled={!data.meta.has_next}
-            className="flex h-8 items-center gap-1 rounded-xl px-3 text-xs font-semibold transition-colors hover:bg-white/08 disabled:opacity-30"
+            className="flex h-8 items-center gap-1 rounded-xl px-3 text-xs font-semibold transition-colors hover:bg-white/[0.08] disabled:opacity-30"
             style={{ color: 'rgba(255,255,255,0.6)', background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)' }}>
             Next<ChevronRight size={12} />
           </button>

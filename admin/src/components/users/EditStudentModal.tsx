@@ -76,7 +76,7 @@ function CourseSelect({
                 key={c.id}
                 type="button"
                 onClick={() => { onChange(c.id); setOpen(false) }}
-                className="w-full px-3 py-2 text-left text-xs transition-colors hover:bg-white/08"
+                className="w-full px-3 py-2 text-left text-xs transition-colors hover:bg-white/[0.08]"
                 style={{ color: c.id === value ? '#0057b8' : 'rgba(255,255,255,0.8)' }}
               >
                 {c.title}
@@ -550,7 +550,7 @@ export function EditStudentModal({ user, onClose, onSuccess }: Props) {
                 <button
                   type="button"
                   onClick={() => setAppOpen(v => !v)}
-                  className="flex w-full items-center justify-between rounded-xl px-3 py-2.5 transition-colors hover:bg-white/04"
+                  className="flex w-full items-center justify-between rounded-xl px-3 py-2.5 transition-colors hover:bg-white/[0.04]"
                   style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.07)' }}
                 >
                   <div className="flex items-center gap-2">

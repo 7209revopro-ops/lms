@@ -136,7 +136,12 @@ export function AdminTopbar() {
           <AnimatePresence>
             {orgOpen && (
               <>
-                <div className="fixed inset-0 z-[60]" onClick={() => setOrgOpen(false)} />
+                {/* h-screen, not inset-0. The header is a containing block for
+                    its descendants because of backdropFilter, so `inset-0`
+                    resolved to the HEADER's 60px band - the catcher covered
+                    only the bar itself and a click anywhere in the page below
+                    never closed the menu. */}
+                <div className="fixed inset-x-0 top-0 z-[60] h-screen" onClick={() => setOrgOpen(false)} />
                 <motion.div
                   initial={{ opacity: 0, y: -6, scale: 0.97 }} animate={{ opacity: 1, y: 0, scale: 1 }}
                   exit={{ opacity: 0, y: -6, scale: 0.97 }} transition={{ duration: 0.12 }}
@@ -349,7 +354,7 @@ export function AdminTopbar() {
 
       {/* Backdrop for dropdowns */}
       {(notifOpen || quickOpen || avatarOpen) && (
-        <div className="fixed inset-0 z-40" onClick={() => { setNotifOpen(false); setQuickOpen(false); setAvatarOpen(false); setOrgOpen(false) }} />
+        <div className="fixed inset-x-0 top-0 z-40 h-screen" onClick={() => { setNotifOpen(false); setQuickOpen(false); setAvatarOpen(false); setOrgOpen(false) }} />
       )}
 
     </header>

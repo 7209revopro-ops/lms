@@ -136,7 +136,7 @@ function Select({ value, onChange, options, placeholder }: {
             style={{ background: '#13141C', border: '1px solid rgba(255,255,255,0.12)', boxShadow: '0 16px 40px rgba(0,0,0,0.5)' }}>
             {placeholder && (
               <button type="button" onClick={() => { onChange(''); setOpen(false) }}
-                className="w-full px-3 py-2 text-left text-sm transition-colors hover:bg-white/05"
+                className="w-full px-3 py-2 text-left text-sm transition-colors hover:bg-white/[0.05]"
                 style={{ color: 'rgba(255,255,255,0.3)' }}>
                 {placeholder}
               </button>
@@ -144,7 +144,7 @@ function Select({ value, onChange, options, placeholder }: {
             {options.map(o => (
               <button key={o.value} type="button"
                 onClick={() => { onChange(o.value); setOpen(false) }}
-                className="flex w-full items-center justify-between px-3 py-2 text-left text-sm transition-colors hover:bg-white/05"
+                className="flex w-full items-center justify-between px-3 py-2 text-left text-sm transition-colors hover:bg-white/[0.05]"
                 style={{ color: o.value === value ? '#0057b8' : 'rgba(255,255,255,0.8)' }}>
                 {o.label}
                 {o.value === value && <Check size={12} style={{ color: '#0057b8' }} />}
@@ -588,7 +588,7 @@ export function CourseForm({ course }: CourseFormProps) {
       {/* ── Footer actions ───────────────────────────── */}
       <div className="mt-5 flex items-center justify-between">
         <button type="button" onClick={() => router.push('/courses')}
-          className="flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm font-semibold transition-colors hover:bg-white/06"
+          className="flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm font-semibold transition-colors hover:bg-white/[0.06]"
           style={{ color: 'rgba(255,255,255,0.5)', border: '1px solid rgba(255,255,255,0.09)' }}>
           <ArrowLeft size={14} />Discard
         </button>

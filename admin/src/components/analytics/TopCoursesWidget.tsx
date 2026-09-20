@@ -45,7 +45,7 @@ export function TopCoursesWidget() {
             const pct = (c.enrolledCount / max) * 100
             return (
               <Link key={c.id} href={`/courses/${c.id}/edit`}
-                className="group block rounded-xl p-2.5 transition-colors hover:bg-white/03"
+                className="group block rounded-xl p-2.5 transition-colors hover:bg-white/[0.03]"
                 style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.06)' }}>
                 <div className="flex items-center gap-3">
                   <span className="flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-lg text-xs font-bold"

@@ -100,7 +100,7 @@ function InstructorDropdown({ value, onChange, instructors }: {
             <button
               type="button"
               onClick={() => { onChange(''); setOpen(false) }}
-              className="flex w-full items-center gap-2.5 px-3 py-2 text-xs font-semibold transition-colors hover:bg-white/08"
+              className="flex w-full items-center gap-2.5 px-3 py-2 text-xs font-semibold transition-colors hover:bg-white/[0.08]"
               style={{ color: !value ? '#60a5fa' : 'rgba(255,255,255,0.7)' }}
             >
               <div className="h-6 w-6 rounded-full flex-shrink-0 flex items-center justify-center" style={{ background: 'rgba(255,255,255,0.08)' }}>
@@ -113,7 +113,7 @@ function InstructorDropdown({ value, onChange, instructors }: {
                 key={i.id}
                 type="button"
                 onClick={() => { onChange(i.id); setOpen(false) }}
-                className="flex w-full items-center gap-2.5 px-3 py-2 text-xs font-semibold transition-colors hover:bg-white/08"
+                className="flex w-full items-center gap-2.5 px-3 py-2 text-xs font-semibold transition-colors hover:bg-white/[0.08]"
                 style={{ color: value === i.id ? '#60a5fa' : 'rgba(255,255,255,0.7)' }}
               >
                 <AvatarImg src={i.avatarUrl}

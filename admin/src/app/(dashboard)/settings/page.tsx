@@ -325,7 +325,7 @@ export default function AdminSettingsPage() {
           { label: 'Reviews',         href: '/reviews',      desc: 'Moderate student course reviews'       },
         ].map(link => (
           <a key={link.href} href={link.href}
-            className="flex items-center justify-between gap-4 rounded-xl px-3 py-2.5 transition-colors hover:bg-white/05">
+            className="flex items-center justify-between gap-4 rounded-xl px-3 py-2.5 transition-colors hover:bg-white/[0.05]">
             <div>
               <p className="text-xs font-semibold text-white">{link.label}</p>
               <p className="text-[10px]" style={{ color: 'rgba(255,255,255,0.3)' }}>{link.desc}</p>

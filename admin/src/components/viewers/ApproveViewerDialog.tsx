@@ -53,7 +53,7 @@ export function ApproveViewerDialog({ user, scopeCategory, loading, onClose, onC
             <h2 className="mt-0.5 text-base font-bold text-white">{user.name}</h2>
             <p className="text-xs" style={{ color: 'rgba(255,255,255,0.4)' }}>{user.email}</p>
           </div>
-          <button onClick={onClose} className="flex h-7 w-7 items-center justify-center rounded-lg transition-colors hover:bg-white/08" style={{ color: 'rgba(255,255,255,0.4)' }}>
+          <button onClick={onClose} className="flex h-7 w-7 items-center justify-center rounded-lg transition-colors hover:bg-white/[0.08]" style={{ color: 'rgba(255,255,255,0.4)' }}>
             <X size={14} />
           </button>
         </div>
@@ -108,7 +108,7 @@ export function ApproveViewerDialog({ user, scopeCategory, loading, onClose, onC
                         const selected = cats.includes(cat)
                         return (
                           <button key={cat} type="button" onClick={() => toggle(cat)}
-                            className="flex w-full items-center gap-2.5 px-3 py-2.5 text-left text-sm transition-colors hover:bg-white/06">
+                            className="flex w-full items-center gap-2.5 px-3 py-2.5 text-left text-sm transition-colors hover:bg-white/[0.06]">
                             <div className="flex h-4 w-4 flex-shrink-0 items-center justify-center rounded"
                               style={{ background: selected ? m.bg : 'rgba(255,255,255,0.06)', border: `1px solid ${selected ? m.color : 'rgba(255,255,255,0.15)'}` }}>
                               {selected && <Check size={10} style={{ color: m.color }} />}
@@ -126,7 +126,7 @@ export function ApproveViewerDialog({ user, scopeCategory, loading, onClose, onC
 
           <div className="flex justify-end gap-2 pt-1">
             <button onClick={onClose}
-              className="rounded-xl px-4 py-2 text-sm font-medium transition-colors hover:bg-white/07"
+              className="rounded-xl px-4 py-2 text-sm font-medium transition-colors hover:bg-white/[0.07]"
               style={{ color: 'rgba(255,255,255,0.5)' }}>
               Cancel
             </button>

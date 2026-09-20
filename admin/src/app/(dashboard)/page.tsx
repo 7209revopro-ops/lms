@@ -51,7 +51,8 @@ function useGreeting(): string {
 
 export default function DashboardPage() {
   const cur = useOrgCurrency()
-  const { data: coursesData } = useCourses({ per_page: 5, status: 'published', sort: 'createdAt:desc' })
+  const { data: coursesData, isError: coursesError, refetch: refetchCourses } =
+    useCourses({ per_page: 5, status: 'published', sort: 'createdAt:desc' })
   const { data: stats, isLoading: statsLoading } = useAdminStats()
   const { data: currentUser } = useCurrentUser()
   const firstName = currentUser?.name?.split(' ')[0] ?? 'Admin'
@@ -127,7 +128,20 @@ export default function DashboardPage() {
             </Link>
           </div>
           <div className="">
-            {!coursesData && (
+            {/* `!coursesData` is true both while loading AND after the query
+                has given up, so a failed fetch left this panel spinning for
+                ever on a query React Query had already stopped retrying. */}
+            {!coursesData && coursesError && (
+              <div className="flex flex-col items-center gap-2 px-5 py-8 text-sm">
+                <p className="font-semibold text-white">Could not load recent courses</p>
+                <button type="button" onClick={() => void refetchCourses()}
+                  className="mt-1 inline-flex min-h-[44px] items-center rounded-xl px-4 text-xs font-semibold sm:min-h-0 sm:py-2"
+                  style={{ background: 'rgba(0,87,184,0.14)', border: '1px solid rgba(0,87,184,0.35)', color: '#60A5FA' }}>
+                  Try again
+                </button>
+              </div>
+            )}
+            {!coursesData && !coursesError && (
               <div className="flex items-center justify-center gap-2 px-5 py-10 text-sm" style={{ color: 'rgba(255,255,255,0.4)' }}>
                 <Spinner size={14} />Loading…
               </div>
@@ -141,7 +155,7 @@ export default function DashboardPage() {
               <motion.div key={c.id}
                 initial={{ opacity: 0, x: -12 }} animate={{ opacity: 1, x: 0 }}
                 transition={{ delay: 0.25 + i * 0.04 }}
-                className="flex border-b border-[#e5e7eb17] items-center gap-3 px-5 py-3.5 transition-colors hover:bg-white/03">
+                className="flex border-b border-[#e5e7eb17] items-center gap-3 px-5 py-3.5 transition-colors hover:bg-white/[0.03]">
                 <div className="relative h-10 w-16 flex-shrink-0 overflow-hidden rounded-xl"
                   style={{ background: 'rgba(255,255,255,0.06)' }}>
                   {c.thumbnailUrl && <img src={c.thumbnailUrl} alt="" className="h-full w-full object-cover" />}
@@ -223,8 +237,13 @@ export default function DashboardPage() {
           return (
             <Link key={a.href} href={a.href}>
               <motion.div
-                initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: 0.4 + i * 0.04 }}
+                /* The delay belongs INSIDE animate. As a sibling `transition`
+                   prop it becomes the default for whileHover and whileTap too,
+                   so the fourth tile waited 520ms before showing any press
+                   feedback - by which time the Link had already navigated and
+                   the tap read as dead. */
+                initial={{ opacity: 0, y: 8 }}
+                animate={{ opacity: 1, y: 0, transition: { delay: 0.4 + i * 0.04 } }}
                 whileHover={{ y: -3, boxShadow: `0 12px 32px rgba(0,0,0,0.3)` }}
                 whileTap={{ scale: 0.97 }}
                 className="flex cursor-pointer items-center gap-3 rounded-2xl p-4 transition-colors"

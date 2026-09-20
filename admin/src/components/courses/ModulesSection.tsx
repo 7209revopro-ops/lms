@@ -146,7 +146,7 @@ function ModuleModal({
                 </h3>
               </div>
               <button onClick={handleClose}
-                className="flex h-7 w-7 items-center justify-center rounded-lg transition-colors hover:bg-white/08"
+                className="flex h-7 w-7 items-center justify-center rounded-lg transition-colors hover:bg-white/[0.08]"
                 style={{ color: 'rgba(255,255,255,0.4)' }}>
                 <X size={14} />
               </button>
@@ -184,7 +184,7 @@ function ModuleModal({
             <div className="flex items-center justify-end gap-2 px-5 py-4"
               style={{ borderTop: '1px solid rgba(255,255,255,0.07)' }}>
               <button onClick={handleClose}
-                className="rounded-xl px-4 py-2 text-xs font-semibold transition-colors hover:bg-white/06"
+                className="rounded-xl px-4 py-2 text-xs font-semibold transition-colors hover:bg-white/[0.06]"
                 style={{ color: 'rgba(255,255,255,0.5)' }}>
                 Cancel
               </button>
@@ -241,7 +241,7 @@ function AddLessonForm({ courseId, sectionId, onClose }: { courseId: string; sec
         style={{ borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
         <span className="text-xs font-bold" style={{ color: '#0057b8' }}>New lesson</span>
         <button type="button" onClick={onClose}
-          className="flex h-6 w-6 items-center justify-center rounded-lg transition-colors hover:bg-white/08"
+          className="flex h-6 w-6 items-center justify-center rounded-lg transition-colors hover:bg-white/[0.08]"
           style={{ color: 'rgba(255,255,255,0.4)' }}>
           <X size={13} />
         </button>
@@ -285,7 +285,7 @@ function AddLessonForm({ courseId, sectionId, onClose }: { courseId: string; sec
         </div>
         <div className="flex items-center justify-end gap-2 pt-1">
           <button type="button" onClick={onClose}
-            className="rounded-xl px-4 py-2 text-xs font-semibold transition-colors hover:bg-white/06"
+            className="rounded-xl px-4 py-2 text-xs font-semibold transition-colors hover:bg-white/[0.06]"
             style={{ color: 'rgba(255,255,255,0.5)' }}>Cancel</button>
           <button type="submit" disabled={!title.trim() || createLesson.isPending}
             className="flex items-center gap-1.5 rounded-xl px-4 py-2 text-xs font-bold text-white disabled:opacity-50"
@@ -329,7 +329,7 @@ function LessonEditForm({
         style={{ borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
         <span className="text-xs font-bold" style={{ color: '#60A5FA' }}>Edit lesson</span>
         <button type="button" onClick={onCancel}
-          className="flex h-6 w-6 items-center justify-center rounded-lg transition-colors hover:bg-white/08"
+          className="flex h-6 w-6 items-center justify-center rounded-lg transition-colors hover:bg-white/[0.08]"
           style={{ color: 'rgba(255,255,255,0.4)' }}>
           <X size={13} />
         </button>
@@ -375,7 +375,7 @@ function LessonEditForm({
         </div>
         <div className="flex items-center justify-end gap-2 pt-1">
           <button type="button" onClick={onCancel}
-            className="rounded-xl px-4 py-2 text-xs font-semibold transition-colors hover:bg-white/06"
+            className="rounded-xl px-4 py-2 text-xs font-semibold transition-colors hover:bg-white/[0.06]"
             style={{ color: 'rgba(255,255,255,0.5)' }}>Cancel</button>
           <button type="submit" disabled={pending}
             className="flex items-center gap-1.5 rounded-xl px-4 py-2 text-xs font-bold text-white disabled:opacity-50"
@@ -496,7 +496,7 @@ function LessonRow({
           </button>
         )}
         <button onClick={() => setEditing(true)}
-          className="flex h-7 w-7 items-center justify-center rounded-lg transition-colors hover:bg-white/08"
+          className="flex h-7 w-7 items-center justify-center rounded-lg transition-colors hover:bg-white/[0.08]"
           style={{ color: 'rgba(255,255,255,0.4)' }} title="Edit lesson">
           <Edit2 size={12} />
         </button>
@@ -593,7 +593,7 @@ function ModuleCard({
         {/* Reorder column */}
         <div className="flex shrink-0 flex-col items-center gap-1 pt-0.5">
           <button onClick={onMoveUp} disabled={index === 0}
-            className="flex h-6 w-6 items-center justify-center rounded-lg transition-all hover:bg-white/08 disabled:opacity-20"
+            className="flex h-6 w-6 items-center justify-center rounded-lg transition-all hover:bg-white/[0.08] disabled:opacity-20"
             style={{ color: 'rgba(255,255,255,0.4)' }}>
             <ChevronUp size={13} />
           </button>
@@ -602,7 +602,7 @@ function ModuleCard({
             {numBadge}
           </span>
           <button onClick={onMoveDown} disabled={index >= total - 1}
-            className="flex h-6 w-6 items-center justify-center rounded-lg transition-all hover:bg-white/08 disabled:opacity-20"
+            className="flex h-6 w-6 items-center justify-center rounded-lg transition-all hover:bg-white/[0.08] disabled:opacity-20"
             style={{ color: 'rgba(255,255,255,0.4)' }}>
             <ChevronDown size={13} />
           </button>
@@ -654,7 +654,7 @@ function ModuleCard({
         {/* Action buttons */}
         <div className="flex shrink-0 items-center gap-1">
           <button onClick={onEdit}
-            className="flex h-8 w-8 items-center justify-center rounded-xl transition-colors hover:bg-white/08"
+            className="flex h-8 w-8 items-center justify-center rounded-xl transition-colors hover:bg-white/[0.08]"
             style={{ color: 'rgba(255,255,255,0.4)' }} title="Edit module">
             <Edit2 size={13} />
           </button>

@@ -61,7 +61,7 @@ export function AssignmentEditor({ lessonId, onClose }: Props) {
         <h3 className="text-sm font-bold text-white">Assignment Editor</h3>
         <div className="flex items-center gap-2">
           <button onClick={onClose}
-            className="rounded-lg px-2.5 py-1.5 text-xs font-semibold transition-colors hover:bg-white/08"
+            className="rounded-lg px-2.5 py-1.5 text-xs font-semibold transition-colors hover:bg-white/[0.08]"
             style={{ color: 'rgba(255,255,255,0.5)', border: '1px solid rgba(255,255,255,0.08)' }}>
             Cancel
           </button>

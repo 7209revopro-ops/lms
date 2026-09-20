@@ -15,8 +15,12 @@ export function Toaster() {
   const toasts   = useUIStore(s => s.toasts)
   const popToast = useUIStore(s => s.popToast)
 
+  /* `w-full` on a FIXED element resolves against the viewport, not against the
+     space left of right-6, so at 375px this was a 375px box pushed 24px right
+     and every toast hung 24px off the LEFT edge with its status icon sliced.
+     max-w-sm (384px) never clamped it. Same bug the client app had. */
   return (
-    <div className="pointer-events-none fixed bottom-6 right-6 z-[100] flex w-full max-w-sm flex-col gap-2">
+    <div className="pointer-events-none fixed bottom-6 left-4 right-4 z-[100] flex flex-col gap-2 sm:left-auto sm:right-6 sm:w-full sm:max-w-sm">
       <AnimatePresence initial={false}>
         {toasts.map(t => (
           <ToastCard key={t.id} {...t} onDismiss={() => popToast(t.id)} />
@@ -71,7 +75,7 @@ function ToastCard({
         )}
       </div>
       <button onClick={onDismiss}
-        className="flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-lg transition-colors hover:bg-white/05"
+        className="flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-lg transition-colors hover:bg-white/[0.05]"
         style={{ color: 'rgba(255,255,255,0.4)' }}>
         <X size={11} />
       </button>

@@ -42,7 +42,7 @@ export default function AdminOrdersPage() {
   const [refunding, setRefunding] = useState<string | null>(null)
   const qc = useQueryClient()
 
-  const { data, isLoading } = useAdminOrders(page, status, gateway)
+  const { data, isLoading, isError, refetch } = useAdminOrders(page, status, gateway)
   const breakdown = useGatewayBreakdown()
 
   const handleRefund = async (orderId: string) => {
@@ -155,6 +155,24 @@ export default function AdminOrdersPage() {
                     <Spinner size={18} variant="muted" />
                   </td>
                 </tr>
+              ) : isError ? (
+                /* An empty ledger and a ledger that would not load looked
+                   identical, to the person whose job is reconciling payments.
+                   The gateway cards above read zero at the same time, so the
+                   whole screen agreed on a number nobody had counted. */
+                <tr>
+                  <td colSpan={8} className="py-16 text-center text-sm">
+                    <p className="font-semibold text-white">Could not load orders</p>
+                    <p className="mt-1 text-xs" style={{ color: 'rgba(255,255,255,0.4)' }}>
+                      This is not an empty ledger - the request failed.
+                    </p>
+                    <button type="button" onClick={() => void refetch()}
+                      className="mt-3 inline-flex min-h-[44px] items-center rounded-xl px-4 text-xs font-semibold sm:min-h-0 sm:py-2"
+                      style={{ background: 'rgba(0,87,184,0.14)', border: '1px solid rgba(0,87,184,0.35)', color: '#60A5FA' }}>
+                      Try again
+                    </button>
+                  </td>
+                </tr>
               ) : !data?.orders.length ? (
                 <tr>
                   <td colSpan={8} className="py-16 text-center text-sm" style={{ color: 'rgba(255,255,255,0.3)' }}>
@@ -211,7 +229,7 @@ export default function AdminOrdersPage() {
                       <div className="flex items-center gap-2">
                         {order.stripeInvoiceUrl && (
                           <a href={order.stripeInvoiceUrl} target="_blank" rel="noopener noreferrer"
-                            className="rounded-lg p-1.5 transition-colors hover:bg-white/05"
+                            className="rounded-lg p-1.5 transition-colors hover:bg-white/[0.05]"
                             title="View invoice">
                             <ExternalLink size={12} style={{ color: 'rgba(255,255,255,0.5)' }} />
                           </a>
@@ -228,7 +246,7 @@ export default function AdminOrdersPage() {
                             <button
                               onClick={() => handleRefund(order.id)}
                               disabled={refunding === order.id}
-                              className="flex items-center gap-1 rounded-lg px-2.5 py-1 text-[11px] font-semibold transition-colors hover:bg-white/05 disabled:opacity-40"
+                              className="flex items-center gap-1 rounded-lg px-2.5 py-1 text-[11px] font-semibold transition-colors hover:bg-white/[0.05] disabled:opacity-40"
                               style={{ color: '#F87171' }}>
                               {refunding === order.id
                                 ? <Spinner size={11} />
@@ -255,11 +273,11 @@ export default function AdminOrdersPage() {
             </p>
             <div className="flex gap-1">
               <button disabled={!data.meta.has_prev} onClick={() => setPage(p => p - 1)}
-                className="rounded-lg p-1.5 transition-colors disabled:opacity-30 hover:bg-white/05">
+                className="rounded-lg p-1.5 transition-colors disabled:opacity-30 hover:bg-white/[0.05]">
                 <ChevronLeft size={14} style={{ color: 'white' }} />
               </button>
               <button disabled={!data.meta.has_next} onClick={() => setPage(p => p + 1)}
-                className="rounded-lg p-1.5 transition-colors disabled:opacity-30 hover:bg-white/05">
+                className="rounded-lg p-1.5 transition-colors disabled:opacity-30 hover:bg-white/[0.05]">
                 <ChevronRight size={14} style={{ color: 'white' }} />
               </button>
             </div>

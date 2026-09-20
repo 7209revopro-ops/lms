@@ -70,7 +70,20 @@ export function useEnrollmentRequests(
   return useQuery({
     queryKey: KEYS.list(status, category),
     queryFn: async () => {
-      const params: Record<string, string> = { status }
+      /* per_page 100 - the backend's maximum (admin.routes.ts:694) - because
+         this table has no pagination control. It was sending nothing, so the
+         backend's default of 20 applied: the Pending card read the real
+         total from meta.total_count while the table under it listed twenty
+         rows and there was no next page to reach the rest. Worse, the search
+         box filters those rows CLIENT-side, so typing the name of the 21st
+         pending student rendered "No pending requests" and the admin
+         concluded they had never signed up.
+
+         100 covers any realistic single-status backlog here, and the page
+         now says so out loud when there are more rather than quietly
+         trimming - see the notice above the table. A real pager is still the
+         right answer if these ever run past 100. */
+      const params: Record<string, string> = { status, per_page: '100' }
       if (category) params['category'] = category
       const res = await api.get<{ success: true; data: EnrollmentRequest[]; meta: { total_count: number; total_pages: number; page: number; has_next: boolean; has_prev: boolean } }>(
         '/admin/enrollment-requests',

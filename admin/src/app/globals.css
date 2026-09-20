@@ -30,6 +30,25 @@ body {
 :focus-visible { outline: 2px solid #0057b8; outline-offset: 2px; border-radius: 4px; }
 ::selection { background: rgba(0,87,184,0.15); color: #003d80; }
 
+/* ── NATIVE PICKERS MUST KNOW THIS APP IS DARK ──────────────────────
+   Without `color-scheme`, Chrome and Edge draw a date or time input's own
+   calendar glyph and its drop-down panel for a LIGHT page - so on these
+   surfaces the glyph is near-black on a near-black field and effectively
+   invisible, and the panel opens as a white rectangle in the middle of a
+   dark app.
+
+   Two files already set `colorScheme: 'dark'` inline on a shared style
+   object; nine other date and datetime-local controls did not, and any added
+   later would have had to remember. This app has exactly one theme, so the
+   rule belongs here rather than on each input. */
+input[type='date'],
+input[type='datetime-local'],
+input[type='time'],
+input[type='month'],
+input[type='week'] {
+  color-scheme: dark;
+}
+
 /* ── 16px MINIMUM ON EVERY PHONE-SIZED FORM CONTROL ──────────────────
    iOS Safari zooms the whole page in whenever a focused input's font-size is
    under 16px, and it does not zoom back out on blur. Measured on the admin

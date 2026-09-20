@@ -142,12 +142,12 @@ export function UserTable({ role, label }: Props) {
             </p>
             <div className="flex items-center gap-1.5">
               <button onClick={() => setPage(p => Math.max(1, p - 1))} disabled={!data.meta.has_prev}
-                className="flex h-7 w-7 items-center justify-center rounded-lg transition-colors hover:bg-white/08 disabled:opacity-30"
+                className="flex h-7 w-7 items-center justify-center rounded-lg transition-colors hover:bg-white/[0.08] disabled:opacity-30"
                 style={{ color: 'rgba(255,255,255,0.6)' }}>
                 <ChevronLeft size={13} />
               </button>
               <button onClick={() => setPage(p => p + 1)} disabled={!data.meta.has_next}
-                className="flex h-7 w-7 items-center justify-center rounded-lg transition-colors hover:bg-white/08 disabled:opacity-30"
+                className="flex h-7 w-7 items-center justify-center rounded-lg transition-colors hover:bg-white/[0.08] disabled:opacity-30"
                 style={{ color: 'rgba(255,255,255,0.6)' }}>
                 <ChevronRight size={13} />
               </button>
@@ -267,7 +267,7 @@ function UserRow({ user, index, onEdit, onViewHistory }: {
           <button
             onClick={() => onViewHistory(user)}
             title="View student history"
-            className="flex items-center gap-3 rounded-lg text-left transition-colors hover:bg-white/05"
+            className="flex items-center gap-3 rounded-lg text-left transition-colors hover:bg-white/[0.05]"
             style={{ margin: '-4px', padding: '4px' }}>
             {/* A lent instructor wears the cross-academy accent on the ring
                 itself, so a list of forty can be scanned without reading a
@@ -372,13 +372,13 @@ function UserRow({ user, index, onEdit, onViewHistory }: {
       <td className="px-4 py-3.5 relative">
         <div className="flex items-center gap-1">
           <button onClick={() => onEdit(user)}
-            className="flex h-7 w-7 items-center justify-center rounded-lg transition-colors hover:bg-white/05"
+            className="flex h-7 w-7 items-center justify-center rounded-lg transition-colors hover:bg-white/[0.05]"
             style={{ color: 'rgba(255,255,255,0.45)' }}
             title="Edit profile">
             <Pencil size={12} />
           </button>
           <button onClick={() => setMenuOpen(v => !v)} disabled={update.isPending}
-            className="flex h-7 w-7 items-center justify-center rounded-lg transition-colors hover:bg-white/05 disabled:opacity-40"
+            className="flex h-7 w-7 items-center justify-center rounded-lg transition-colors hover:bg-white/[0.05] disabled:opacity-40"
             style={{ color: 'rgba(255,255,255,0.45)' }}>
             {update.isPending ? <Spinner size={12} /> : <MoreHorizontal size={13} />}
           </button>
@@ -393,27 +393,27 @@ function UserRow({ user, index, onEdit, onViewHistory }: {
                 style={{ background: '#13141C', border: '1px solid rgba(255,255,255,0.07)', boxShadow: '0 16px 40px rgba(0,0,0,0.45)' }}>
                 {canViewAsStudent && (
                   <button onClick={viewAsStudent} disabled={viewAs.isPending}
-                    className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-xs font-semibold transition-colors hover:bg-white/05 disabled:opacity-40"
+                    className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-xs font-semibold transition-colors hover:bg-white/[0.05] disabled:opacity-40"
                     style={{ color: '#60A5FA' }}>
                     {viewAs.isPending ? <Spinner size={12} /> : <Eye size={12} />}
                     View as student
                   </button>
                 )}
                 <button onClick={() => setActive(!user.isActive)}
-                  className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-xs font-semibold transition-colors hover:bg-white/05"
+                  className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-xs font-semibold transition-colors hover:bg-white/[0.05]"
                   style={{ color: user.isActive ? '#F87171' : '#4ADE80' }}>
                   {user.isActive ? <><ShieldOff size={12} />Deactivate</> : <><ShieldCheck size={12} />Activate</>}
                 </button>
                 {user.role !== 'instructor' && (
                   <button onClick={() => setRole('instructor')}
-                    className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-xs font-semibold transition-colors hover:bg-white/05"
+                    className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-xs font-semibold transition-colors hover:bg-white/[0.05]"
                     style={{ color: 'rgba(255,255,255,0.75)' }}>
                     <ArrowUp size={12} />Make instructor
                   </button>
                 )}
                 {user.role !== 'student' && (
                   <button onClick={() => setRole('student')}
-                    className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-xs font-semibold transition-colors hover:bg-white/05"
+                    className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-xs font-semibold transition-colors hover:bg-white/[0.05]"
                     style={{ color: 'rgba(255,255,255,0.75)' }}>
                     <ArrowDown size={12} />Demote to student
                   </button>

@@ -13,6 +13,7 @@ import {
 } from '@/lib/api/liveClasses'
 import { useLiveClassById } from '@/lib/api/liveClasses'
 import Spinner from '@/components/ui/Spinner'
+import { useToast } from '@/store/ui.store'
 
 const STATUS_OPTIONS: { value: 'attended' | 'missed'; label: string; color: string; bg: string; border: string }[] = [
   { value: 'attended', label: 'Present', color: '#10B981', bg: 'rgba(16,185,129,0.15)',  border: 'rgba(16,185,129,0.35)' },
@@ -62,11 +63,22 @@ const dim   = 'rgba(255,255,255,0.25)'
 export default function AttendancePage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params)
   const { data: session, isLoading: sessionLoading } = useLiveClassById(id)
-  const { data: bookings, isLoading: bookingsLoading } = useAdminBookings({ liveClassId: id, per_page: 100 })
+  const { data: bookings, isLoading: bookingsLoading, isError: bookingsError, refetch } =
+    useAdminBookings({ liveClassId: id, per_page: 100 })
   const attendanceMutation = useUpdateAttendance()
+  const toast = useToast()
 
   const isLoading = sessionLoading || bookingsLoading
   const rows = bookings?.docs ?? []
+
+  /* WHAT THE SERVER HOLDS, AGAINST WHAT IT SENT. per_page is 100, so a cohort
+     larger than that - the bulk DM import lands in exactly this shape - is
+     silently cut, and every count below would then describe the first hundred
+     while reading like the whole class. A register that is quietly missing
+     students is worse than one that admits it. */
+  const loaded    = rows.length
+  const roster    = bookings?.meta?.total_count ?? loaded
+  const truncated = roster > loaded
 
   const attended   = rows.filter((b: any) => b.status === 'attended').length
   const missed     = rows.filter((b: any) => b.status === 'missed').length
@@ -191,6 +203,23 @@ export default function AttendancePage({ params }: { params: Promise<{ id: strin
         <div className="flex h-48 items-center justify-center gap-2 text-sm" style={{ color: dim }}>
           <Spinner size={16} />Loading attendance…
         </div>
+      ) : bookingsError ? (
+        /* "No bookings yet" on a FAILED fetch told an instructor the room was
+           empty. On a register that is not a blank state, it is a wrong
+           answer - and the register is the one thing this page is for. */
+        <div className="flex flex-col items-center gap-3 py-16">
+          <div className="flex h-14 w-14 items-center justify-center rounded-3xl"
+            style={{ background: 'rgba(239,68,68,0.10)', border: '1px solid rgba(239,68,68,0.25)' }}>
+            <Users size={22} style={{ color: '#EF4444' }} />
+          </div>
+          <p className="text-sm font-semibold text-white">Could not load the register</p>
+          <p className="text-xs" style={{ color: dim }}>Nobody has been marked absent - the list just did not arrive.</p>
+          <button type="button" onClick={() => void refetch()}
+            className="mt-1 flex min-h-[44px] items-center rounded-xl px-4 text-xs font-semibold sm:min-h-0 sm:py-2"
+            style={{ background: 'rgba(0,87,184,0.14)', border: '1px solid rgba(0,87,184,0.35)', color: '#60A5FA' }}>
+            Try again
+          </button>
+        </div>
       ) : rows.length === 0 ? (
         <div className="flex flex-col items-center gap-3 py-16">
           <div className="flex h-14 w-14 items-center justify-center rounded-3xl"
@@ -202,7 +231,22 @@ export default function AttendancePage({ params }: { params: Promise<{ id: strin
         </div>
       ) : (
         <div className="overflow-hidden rounded-2xl" style={card}>
-          <table className="w-full text-sm">
+          {truncated && (
+            <p className="px-5 py-2.5 text-xs font-semibold"
+              style={{ color: '#FBBF24', background: 'rgba(250,204,21,0.06)', borderBottom: '1px solid rgba(250,204,21,0.15)' }}>
+              Showing {loaded} of {roster} students. The counts above describe these {loaded} only.
+            </p>
+          )}
+          {/* THE ONE THING THIS PAGE IS FOR MUST BE REACHABLE.
+
+              At 375px the third column - Present / Absent - sat off the edge
+              of a card that did not scroll, so an instructor taking a register
+              from the back of a room could not mark anybody. Every other table
+              in the app already wraps in a scroller; this one did not.
+              min-w keeps the three columns from crushing into each other
+              before the scroller takes over. */}
+          <div className="overflow-x-auto">
+          <table className="w-full min-w-[560px] text-sm">
             <thead>
               <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
                 <th className="px-5 py-3 text-left text-[11px] font-bold uppercase tracking-wide" style={{ color: dim }}>Student</th>
@@ -262,7 +306,14 @@ export default function AttendancePage({ params }: { params: Promise<{ id: strin
                             const isActive = booking.status === opt.value
                             return (
                               <button key={opt.value}
-                                onClick={() => attendanceMutation.mutate({ id: booking.id, status: opt.value })}
+                                /* Marking was fire-and-forget: a 403, a 401 or a
+                                   dropped connection looked exactly like a save,
+                                   so an instructor walked away believing the
+                                   register was taken. */
+                                onClick={() => attendanceMutation.mutate(
+                                  { id: booking.id, status: opt.value },
+                                  { onError: () => toast.error('Could not mark attendance', 'Nothing was saved - try again.') },
+                                )}
                                 disabled={isPending || isActive}
                                 className="flex items-center gap-1 rounded-lg px-2.5 py-1 text-xs font-semibold transition-all disabled:opacity-40"
                                 style={{
@@ -285,6 +336,7 @@ export default function AttendancePage({ params }: { params: Promise<{ id: strin
               })}
             </tbody>
           </table>
+          </div>
         </div>
       )}
     </div>

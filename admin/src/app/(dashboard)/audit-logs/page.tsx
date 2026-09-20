@@ -278,11 +278,11 @@ export default function AuditLogsPage() {
             </p>
             <div className="flex gap-1">
               <button disabled={!data.meta.has_prev} onClick={() => setPage(p => p - 1)}
-                className="rounded-lg p-1.5 disabled:opacity-30 transition-colors hover:bg-white/05">
+                className="rounded-lg p-1.5 disabled:opacity-30 transition-colors hover:bg-white/[0.05]">
                 <ChevronLeft size={14} style={{ color: 'white' }} />
               </button>
               <button disabled={!data.meta.has_next} onClick={() => setPage(p => p + 1)}
-                className="rounded-lg p-1.5 disabled:opacity-30 transition-colors hover:bg-white/05">
+                className="rounded-lg p-1.5 disabled:opacity-30 transition-colors hover:bg-white/[0.05]">
                 <ChevronRight size={14} style={{ color: 'white' }} />
               </button>
             </div>

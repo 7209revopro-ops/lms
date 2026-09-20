@@ -107,7 +107,7 @@ function CoursePicker({
                   setQuery('')
                   setOpen(false)
                 }}
-                className="flex w-full items-center gap-3 px-3 py-2.5 text-left transition-colors hover:bg-white/06">
+                className="flex w-full items-center gap-3 px-3 py-2.5 text-left transition-colors hover:bg-white/[0.06]">
                 <div className="h-7 w-10 flex-shrink-0 overflow-hidden rounded-lg"
                   style={{ background: 'rgba(255,255,255,0.06)' }}>
                   {c.thumbnailUrl && <img src={c.thumbnailUrl} alt="" className="h-full w-full object-cover" />}
@@ -197,7 +197,7 @@ function CourseRow({
 
       {/* Remove */}
       <button onClick={onRemove}
-        className="rounded-lg p-1 transition-colors hover:bg-white/08">
+        className="rounded-lg p-1 transition-colors hover:bg-white/[0.08]">
         <X size={12} style={{ color: '#F87171' }} />
       </button>
     </motion.div>
@@ -416,7 +416,7 @@ function PathFormModal({ initial, onClose }: { initial?: AdminLearningPath; onCl
           </p>
           <div className="flex gap-2">
             <button onClick={onClose}
-              className="rounded-xl px-4 py-2 text-sm font-semibold transition-colors hover:bg-white/08"
+              className="rounded-xl px-4 py-2 text-sm font-semibold transition-colors hover:bg-white/[0.08]"
               style={{ color: 'rgba(255,255,255,0.5)' }}>
               Cancel
             </button>
@@ -559,11 +559,11 @@ export default function AdminLearningPathsPage() {
                   <td className="px-4 py-3">
                     <div className="flex items-center gap-1">
                       <button onClick={() => setModal(p)}
-                        className="rounded-lg p-1.5 transition-colors hover:bg-white/08">
+                        className="rounded-lg p-1.5 transition-colors hover:bg-white/[0.08]">
                         <Pencil size={12} style={{ color: 'rgba(255,255,255,0.5)' }} />
                       </button>
                       <button onClick={() => handleDelete(p)} disabled={deleting === p.id}
-                        className="rounded-lg p-1.5 transition-colors hover:bg-white/08 disabled:opacity-40">
+                        className="rounded-lg p-1.5 transition-colors hover:bg-white/[0.08] disabled:opacity-40">
                         {deleting === p.id
                           ? <Spinner size={12} />
                           : <Trash2 size={12} style={{ color: '#F87171' }} />}
@@ -584,11 +584,11 @@ export default function AdminLearningPathsPage() {
             </p>
             <div className="flex gap-1">
               <button disabled={!data.meta.has_prev} onClick={() => setPage(p => p - 1)}
-                className="rounded-lg p-1.5 disabled:opacity-30 hover:bg-white/05">
+                className="rounded-lg p-1.5 disabled:opacity-30 hover:bg-white/[0.05]">
                 <ChevronLeft size={14} style={{ color: 'white' }} />
               </button>
               <button disabled={!data.meta.has_next} onClick={() => setPage(p => p + 1)}
-                className="rounded-lg p-1.5 disabled:opacity-30 hover:bg-white/05">
+                className="rounded-lg p-1.5 disabled:opacity-30 hover:bg-white/[0.05]">
                 <ChevronRight size={14} style={{ color: 'white' }} />
               </button>
             </div>

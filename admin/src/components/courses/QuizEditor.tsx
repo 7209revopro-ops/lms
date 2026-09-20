@@ -138,7 +138,7 @@ export function QuizEditor({ lessonId, onClose }: Props) {
             </button>
           )}
           <button onClick={onClose}
-            className="rounded-lg px-2.5 py-1.5 text-xs font-semibold transition-colors hover:bg-white/08"
+            className="rounded-lg px-2.5 py-1.5 text-xs font-semibold transition-colors hover:bg-white/[0.08]"
             style={{ color: 'rgba(255,255,255,0.5)', border: '1px solid rgba(255,255,255,0.08)' }}>
             Cancel
           </button>
@@ -200,7 +200,7 @@ export function QuizEditor({ lessonId, onClose }: Props) {
         <span className="text-[11px]" style={{ color: 'rgba(255,255,255,0.3)' }}>Add:</span>
         {(['mcq', 'true_false', 'short'] as QuestionType[]).map(t => (
           <button key={t} onClick={() => addQuestion(t)}
-            className="flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-[11px] font-semibold transition-colors hover:bg-white/08"
+            className="flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-[11px] font-semibold transition-colors hover:bg-white/[0.08]"
             style={{ color: 'rgba(255,255,255,0.5)', border: '1px solid rgba(255,255,255,0.08)' }}>
             <Plus size={10} />
             {t === 'mcq' ? 'Multiple choice' : t === 'true_false' ? 'True/False' : 'Short answer'}
@@ -244,10 +244,10 @@ function QuestionCard({ index, total, question: q, expanded, onToggle, onUpdate,
         {isEmpty && <AlertTriangle size={11} style={{ color: '#EF4444' }} />}
         <div className="flex items-center gap-0.5" onClick={e => e.stopPropagation()}>
           <button onClick={onMoveUp} disabled={index === 0}
-            className="rounded p-0.5 transition-colors hover:bg-white/08 disabled:opacity-20"
+            className="rounded p-0.5 transition-colors hover:bg-white/[0.08] disabled:opacity-20"
             style={{ color: 'rgba(255,255,255,0.4)' }}><ChevronUp size={12} /></button>
           <button onClick={onMoveDown} disabled={index === total - 1}
-            className="rounded p-0.5 transition-colors hover:bg-white/08 disabled:opacity-20"
+            className="rounded p-0.5 transition-colors hover:bg-white/[0.08] disabled:opacity-20"
             style={{ color: 'rgba(255,255,255,0.4)' }}><ChevronDown size={12} /></button>
           <button onClick={onRemove} className="rounded p-0.5 transition-colors hover:bg-red-500/10"
             style={{ color: 'rgba(239,68,68,0.5)' }}><Trash2 size={12} /></button>

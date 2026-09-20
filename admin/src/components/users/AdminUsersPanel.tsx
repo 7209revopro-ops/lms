@@ -131,7 +131,7 @@ function FilterDropdown({ value, options, onChange }: {
               style={{ background: '#0F1020', border: '1px solid rgba(255,255,255,0.12)', boxShadow: '0 16px 40px rgba(0,0,0,0.6)' }}>
               {options.map(o => (
                 <button key={o.value} onClick={() => { onChange(o.value); setOpen(false) }}
-                  className="w-full px-3 py-2 text-left text-sm transition-colors hover:bg-white/05"
+                  className="w-full px-3 py-2 text-left text-sm transition-colors hover:bg-white/[0.05]"
                   style={{ color: o.value === value ? '#0057b8' : 'rgba(255,255,255,0.75)' }}>
                   {o.label}
                 </button>
@@ -430,7 +430,7 @@ function UserRow({ user, index, canManage, isSuperAdmin, onView, onEdit }: {
               className="flex items-center justify-end gap-0.5 opacity-0 transition-opacity group-hover:opacity-100">
 
               <button onClick={onView}
-                className="flex h-7 w-7 items-center justify-center rounded-lg transition-colors hover:bg-white/08"
+                className="flex h-7 w-7 items-center justify-center rounded-lg transition-colors hover:bg-white/[0.08]"
                 style={{ color: 'rgba(255,255,255,0.5)' }} title="View profile">
                 <Eye size={13} />
               </button>
@@ -438,7 +438,7 @@ function UserRow({ user, index, canManage, isSuperAdmin, onView, onEdit }: {
               {canManage && (
                 <>
                   <button onClick={onEdit}
-                    className="flex h-7 w-7 items-center justify-center rounded-lg transition-colors hover:bg-white/08"
+                    className="flex h-7 w-7 items-center justify-center rounded-lg transition-colors hover:bg-white/[0.08]"
                     style={{ color: 'rgba(255,255,255,0.5)' }} title="Edit user">
                     <Pencil size={13} />
                   </button>
@@ -475,7 +475,7 @@ function UserRow({ user, index, canManage, isSuperAdmin, onView, onEdit }: {
                 Yes, delete
               </button>
               <button onClick={() => setConfirmDelete(false)}
-                className="rounded-lg px-2.5 py-1 text-xs font-semibold transition-colors hover:bg-white/08"
+                className="rounded-lg px-2.5 py-1 text-xs font-semibold transition-colors hover:bg-white/[0.08]"
                 style={{ color: 'rgba(255,255,255,0.5)' }}>
                 Cancel
               </button>

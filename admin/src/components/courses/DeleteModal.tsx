@@ -66,7 +66,7 @@ export function DeleteModal() {
 
             <div className="flex gap-3">
               <button onClick={closeDeleteModal}
-                className="flex-1 rounded-xl py-2.5 text-sm font-semibold transition-colors hover:bg-white/08"
+                className="flex-1 rounded-xl py-2.5 text-sm font-semibold transition-colors hover:bg-white/[0.08]"
                 style={{ color: 'rgba(255,255,255,0.6)', border: '1px solid rgba(255,255,255,0.1)' }}>
                 Cancel
               </button>

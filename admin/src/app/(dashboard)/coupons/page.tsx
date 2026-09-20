@@ -7,6 +7,7 @@ import { useAdminCoupons, type AdminCoupon } from '@/lib/api/stats'
 import { api } from '@/lib/axios'
 import { useQueryClient } from '@tanstack/react-query'
 import Spinner from '@/components/ui/Spinner'
+import { useToast } from '@/store/ui.store'
 
 /* ─── Create / Edit form ──────────────────────────── */
 interface CouponFormState {
@@ -145,7 +146,7 @@ function CouponFormModal({
         {error && <p className="text-xs" style={{ color: '#F87171' }}>{error}</p>}
 
         <div className="flex justify-end gap-2 pt-2">
-          <button onClick={onClose} className="rounded-xl px-4 py-2 text-sm font-semibold transition-colors hover:bg-white/08"
+          <button onClick={onClose} className="rounded-xl px-4 py-2 text-sm font-semibold transition-colors hover:bg-white/[0.08]"
             style={{ color: 'rgba(255,255,255,0.5)' }}>Cancel</button>
           <button onClick={handleSave} disabled={saving}
             className="flex items-center gap-1.5 rounded-xl px-4 py-2 text-sm font-bold text-white transition-all disabled:opacity-60"
@@ -167,12 +168,21 @@ export default function AdminCouponsPage() {
   const qc = useQueryClient()
 
   const { data, isLoading } = useAdminCoupons(page)
+  const toast = useToast()
 
+  /* `catch {}` ate the failure. An admin killing a coupon that is being
+     abused clicked the Active badge, saw nothing change, and had no way to
+     know the code was still live - the one case where silence is expensive. */
   const handleToggle = async (coupon: AdminCoupon) => {
     try {
       await api.patch(`/admin/coupons/${coupon.id}`, { isActive: !coupon.isActive })
       qc.invalidateQueries({ queryKey: ['admin', 'coupons'] })
-    } catch {}
+    } catch {
+      toast.error(
+        coupon.isActive ? 'Could not deactivate the coupon' : 'Could not activate the coupon',
+        `${coupon.code} is unchanged and still ${coupon.isActive ? 'live' : 'inactive'}.`,
+      )
+    }
   }
 
   const handleDelete = async (coupon: AdminCoupon) => {
@@ -265,12 +275,12 @@ export default function AdminCouponsPage() {
                 <td className="px-4 py-3">
                   <div className="flex items-center gap-1">
                     <button onClick={() => setModal(c)}
-                      className="rounded-lg p-1.5 transition-colors hover:bg-white/08">
+                      className="rounded-lg p-1.5 transition-colors hover:bg-white/[0.08]">
                       <Pencil size={12} style={{ color: 'rgba(255,255,255,0.5)' }} />
                     </button>
                     <button onClick={() => handleDelete(c)}
                       disabled={deleting === c.id}
-                      className="rounded-lg p-1.5 transition-colors hover:bg-white/08 disabled:opacity-40">
+                      className="rounded-lg p-1.5 transition-colors hover:bg-white/[0.08] disabled:opacity-40">
                       {deleting === c.id
                         ? <Spinner size={12} />
                         : <Trash2 size={12} style={{ color: '#F87171' }} />}
@@ -290,11 +300,11 @@ export default function AdminCouponsPage() {
             </p>
             <div className="flex gap-1">
               <button disabled={!data.meta.has_prev} onClick={() => setPage(p => p - 1)}
-                className="rounded-lg p-1.5 disabled:opacity-30 hover:bg-white/05">
+                className="rounded-lg p-1.5 disabled:opacity-30 hover:bg-white/[0.05]">
                 <ChevronLeft size={14} style={{ color: 'white' }} />
               </button>
               <button disabled={!data.meta.has_next} onClick={() => setPage(p => p + 1)}
-                className="rounded-lg p-1.5 disabled:opacity-30 hover:bg-white/05">
+                className="rounded-lg p-1.5 disabled:opacity-30 hover:bg-white/[0.05]">
                 <ChevronRight size={14} style={{ color: 'white' }} />
               </button>
             </div>

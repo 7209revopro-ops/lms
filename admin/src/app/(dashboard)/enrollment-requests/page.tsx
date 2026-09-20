@@ -101,7 +101,7 @@ function AddCategoryDropdown({ existingCats, loading, onAdd }: {
         type="button"
         disabled={loading}
         onClick={() => setOpen(v => !v)}
-        className="flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-xs font-semibold transition-all hover:bg-white/08 disabled:opacity-40"
+        className="flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-xs font-semibold transition-all hover:bg-white/[0.08] disabled:opacity-40"
         style={{ color: 'rgba(255,255,255,0.55)', border: '1px solid rgba(255,255,255,0.12)' }}
         title="Add to another program"
       >
@@ -127,7 +127,7 @@ function AddCategoryDropdown({ existingCats, loading, onAdd }: {
                     key={cat}
                     type="button"
                     onClick={() => { onAdd(cat); setOpen(false) }}
-                    className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs transition-colors hover:bg-white/06"
+                    className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs transition-colors hover:bg-white/[0.06]"
                     style={{ color: m.color }}
                   >
                     <m.Icon size={10} /><span>{m.label}</span>
@@ -193,7 +193,7 @@ function CategorySelect({ value, onChange, disabled }: {
                     key={cat}
                     type="button"
                     onClick={() => toggle(cat)}
-                    className="flex w-full items-center gap-2.5 px-3 py-2.5 text-left text-sm transition-colors hover:bg-white/06"
+                    className="flex w-full items-center gap-2.5 px-3 py-2.5 text-left text-sm transition-colors hover:bg-white/[0.06]"
                   >
                     <div className="flex h-4 w-4 flex-shrink-0 items-center justify-center rounded"
                       style={{ background: selected ? m.bg : 'rgba(255,255,255,0.06)', border: `1px solid ${selected ? m.color : 'rgba(255,255,255,0.15)'}` }}>
@@ -261,7 +261,7 @@ function ApproveDialog({ user, scopeCategory, onClose, onConfirm, loading }: {
           </div>
           <div className="flex justify-end gap-2 pt-1">
             <button onClick={onClose}
-              className="rounded-xl px-4 py-2 text-sm font-medium transition-colors hover:bg-white/07"
+              className="rounded-xl px-4 py-2 text-sm font-medium transition-colors hover:bg-white/[0.07]"
               style={{ color: 'rgba(255,255,255,0.5)' }}>Cancel</button>
             <button
               onClick={() => cats.length > 0 && onConfirm(cats)}
@@ -335,7 +335,7 @@ function RejectDialog({ user, isRevoke, onClose, onConfirm, loading }: {
           <p className="mt-1 text-xs" style={{ color: 'rgba(255,255,255,0.25)' }}>{reason.length}/1000</p>
           <div className="mt-5 flex justify-end gap-2">
             <button onClick={onClose}
-              className="rounded-xl px-4 py-2 text-sm font-medium transition-colors hover:bg-white/07"
+              className="rounded-xl px-4 py-2 text-sm font-medium transition-colors hover:bg-white/[0.07]"
               style={{ color: 'rgba(255,255,255,0.5)' }}>Cancel</button>
             <button
               onClick={() => reason.trim().length >= 5 && onConfirm(reason.trim())}
@@ -683,7 +683,7 @@ function ApplicationDetailModal({ user, scopeCategory, onClose, onApprove, onRej
               <p className="text-xs" style={{ color: 'rgba(255,255,255,0.4)' }}>{user.email}</p>
             </div>
           </div>
-          <button onClick={onClose} className="rounded-lg p-1.5 transition-colors hover:bg-white/08" style={{ color: 'rgba(255,255,255,0.5)' }}>
+          <button onClick={onClose} className="rounded-lg p-1.5 transition-colors hover:bg-white/[0.08]" style={{ color: 'rgba(255,255,255,0.5)' }}>
             <X size={15} />
           </button>
         </div>
@@ -937,6 +937,14 @@ export default function EnrollmentRequestsPage() {
       toast.error('Delete failed', err?.response?.data?.error?.message)
     }
   }
+
+  /* What the server holds for this status, against what it actually sent.
+     The search below filters only what was sent, so if these ever differ the
+     admin must be told - otherwise a search for someone past the cut reads
+     as "this person never signed up". */
+  const loadedCount = (data?.data ?? []).length
+  const serverCount = data?.meta?.total_count ?? loadedCount
+  const truncated   = serverCount > loadedCount
 
   const requests = (data?.data ?? []).filter(r => {
     if (search) {
@@ -1406,14 +1414,32 @@ export default function EnrollmentRequestsPage() {
                   </div>
                 </td></tr>
               )}
+              {/* "None" must never be said on a partial list. The search filters
+                  only the rows that were sent, so on a truncated list an empty
+                  result means "not in the part we loaded", which is a different
+                  sentence entirely - and the dangerous one, because it reads as
+                  "this student never applied". */}
               {!isLoading && requests.length === 0 && (
                 <tr><td colSpan={6} className="px-4 py-16 text-center">
                   <div style={{ color: 'rgba(255,255,255,0.3)' }}>
                     <CheckCircle2 size={28} className="mx-auto mb-3 opacity-40" />
                     <p className="text-sm font-medium">
-                      {statusFilter === 'pending' ? 'No pending requests' : `No ${statusFilter} requests`}
+                      {truncated
+                        ? `Not in the first ${loadedCount} of ${serverCount} ${statusFilter} requests`
+                        : statusFilter === 'pending' ? 'No pending requests' : `No ${statusFilter} requests`}
                     </p>
+                    {truncated && (
+                      <p className="mt-1.5 text-xs" style={{ color: 'rgba(255,255,255,0.35)' }}>
+                        Narrow by programme to bring the rest into range.
+                      </p>
+                    )}
                   </div>
+                </td></tr>
+              )}
+              {!isLoading && truncated && requests.length > 0 && (
+                <tr><td colSpan={6} className="px-4 py-2.5 text-center text-xs"
+                  style={{ color: '#FBBF24', background: 'rgba(250,204,21,0.06)', borderBottom: '1px solid rgba(250,204,21,0.15)' }}>
+                    Showing {loadedCount} of {serverCount}. Search only looks at these {loadedCount} - narrow by programme to reach the rest.
                 </td></tr>
               )}
               {!isLoading && requests.map((r, i) => {

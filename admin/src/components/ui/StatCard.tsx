@@ -23,9 +23,11 @@ export function StatCard({ label, value, change, changeLabel, icon: Icon, color 
 
   return (
     <motion.div
+      /* Entry spring and delay inside `animate`, so they do not become the
+         default for whileHover as well - the fourth card was taking 150ms to
+         begin lifting. */
       initial={{ opacity: 0, y: 20 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ type: 'spring', stiffness: 260, damping: 24, delay }}
+      animate={{ opacity: 1, y: 0, transition: { type: 'spring', stiffness: 260, damping: 24, delay } }}
       whileHover={{ y: -3, boxShadow: `0 16px 48px rgba(0,0,0,0.35), 0 0 0 1px rgba(255,255,255,0.07)` }}
       className="relative overflow-hidden rounded-2xl p-5 cursor-default"
       style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.07)' }}

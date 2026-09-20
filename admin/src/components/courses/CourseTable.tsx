@@ -14,6 +14,7 @@ import { useAdminStats } from '@/lib/api/stats'
 import { useUIStore } from '@/store/ui.store'
 import type { Course, CourseStatus } from '@/types/index'
 import { useOrgCurrency, formatCoursePrice } from '@/lib/currency'
+import { useToast } from '@/store/ui.store'
 
 /* ── Config ────────────────────────────────────────────────────── */
 const STATUS_CONFIG: Record<CourseStatus, {
@@ -107,7 +108,14 @@ function BulkBar({ selected, onPublish, onArchive, onDelete, onClear, isPending 
         <motion.div
           initial={{ y: 72, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: 72, opacity: 0 }}
           transition={{ type: 'spring', stiffness: 420, damping: 34 }}
-          className="fixed bottom-6 left-1/2 z-50 -translate-x-1/2 flex items-center gap-2 rounded-2xl px-4 py-3 shadow-2xl"
+          /* Centred with auto margins, not with -translate-x-1/2: framer
+             owns this element's transform for the slide-up, so the Tailwind
+             translate never applied. The bar is 442px wide, so at 375px it
+             ran from 187 to 629 - Archive, Delete and the clear-selection X
+             were all past the right edge of a FIXED element, unreachable and
+             undismissable, leaving an admin stuck with a bar they could
+             neither use nor close. On desktop it was merely off-centre. */
+          className="fixed inset-x-4 bottom-6 z-50 mx-auto flex w-fit flex-wrap items-center justify-center gap-2 rounded-2xl px-4 py-3 shadow-2xl"
           style={{ background: '#1A1B26', border: '1px solid rgba(255,255,255,0.12)', boxShadow: '0 8px 32px rgba(0,0,0,0.5)' }}>
           <span className="mr-1 text-xs font-semibold" style={{ color: 'rgba(255,255,255,0.5)' }}>{selected} selected</span>
           <div className="mx-2 h-4 w-px" style={{ background: 'rgba(255,255,255,0.1)' }} />
@@ -444,8 +452,14 @@ export function CourseTable() {
   const [page,     setPage]     = useState(1)
   const [sortKey,  setSortKey]  = useState<SortKey>('createdAt')
   const [sortDir,  setSortDir]  = useState<'asc' | 'desc'>('desc')
+  /* Cleared whenever the visible set changes - page, search, status or
+     programme. It used to survive all four, so ticking five courses on page
+     one, paging to two and ticking two more produced "Delete 7 course(s)?"
+     and deleted five rows the admin could no longer see. A selection you
+     cannot see is not a selection you can confirm. */
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [view,     setView]     = useState<ViewMode>('table')
+  const toast = useToast()
 
   const { openDeleteModal } = useUIStore()
   const bulk  = useBulkCourses()
@@ -488,8 +502,17 @@ export function CourseTable() {
   }
   const runBulk = async (action: 'publish' | 'archive' | 'delete') => {
     if (action === 'delete' && !confirm(`Delete ${selected.size} course(s)? This cannot be undone.`)) return
-    await bulk.mutateAsync({ ids: Array.from(selected), action })
-    setSelected(new Set())
+    try {
+      await bulk.mutateAsync({ ids: Array.from(selected), action })
+      setSelected(new Set())
+    } catch {
+      /* mutateAsync rejects on a permission error, a course with enrolments,
+         or a dropped connection. The selection was being cleared regardless
+         and nothing was said, so a bulk delete that deleted nothing looked
+         exactly like one that worked. Keep the selection so it can be
+         retried, and say what happened. */
+      toast.error(`Could not ${action} the selected courses`, 'Nothing was changed - the selection is still here.')
+    }
   }
 
   const perPage = view === 'grid' ? 12 : 8
@@ -511,7 +534,7 @@ export function CourseTable() {
           <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2" style={{ color: 'rgba(255,255,255,0.28)' }} />
           <input
             value={search}
-            onChange={e => { setSearch(e.target.value); setPage(1) }}
+            onChange={e => { setSearch(e.target.value); setPage(1); setSelected(new Set()) }}
             placeholder="Search courses…"
             className="w-full rounded-xl py-2 pl-9 pr-4 text-sm text-white outline-none transition-all placeholder:text-white/20"
             style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.08)' }}
@@ -524,7 +547,7 @@ export function CourseTable() {
           {/* Status filter pills */}
           <div className="flex rounded-xl p-0.5" style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.07)' }}>
             {statusFilters.map(f => (
-              <button key={f.value} onClick={() => { setStatus(f.value); setPage(1) }}
+              <button key={f.value} onClick={() => { setStatus(f.value); setPage(1); setSelected(new Set()) }}
                 className="rounded-lg px-3 py-1.5 text-xs font-semibold transition-all"
                 style={status === f.value
                   ? { background: 'rgba(0,87,184,0.18)', color: '#0057b8' }
@@ -537,7 +560,7 @@ export function CourseTable() {
           {/* Program filter */}
           <div className="flex items-center gap-1">
             {(['', '4x-trading', 'digital-marketing', 'ai', 'jura'] as const).map(p => (
-              <button key={p || 'all'} onClick={() => { setProgram(p); setPage(1) }}
+              <button key={p || 'all'} onClick={() => { setProgram(p); setPage(1); setSelected(new Set()) }}
                 className="rounded-xl px-3 py-1.5 text-xs font-semibold transition-all"
                 style={program === p
                   ? { background: 'rgba(0,87,184,0.18)', color: '#0057b8', border: '1px solid rgba(0,87,184,0.4)' }
@@ -632,8 +655,8 @@ export function CourseTable() {
               {data && data.meta.total_pages > 1 && (
                 <Pagination
                   page={page} meta={data.meta} perPage={perPage}
-                  onPrev={() => setPage(p => Math.max(1, p - 1))}
-                  onNext={() => setPage(p => p + 1)}
+                  onPrev={() => { setPage(p => Math.max(1, p - 1)); setSelected(new Set()) }}
+                  onNext={() => { setPage(p => p + 1); setSelected(new Set()) }}
                   onPage={setPage}
                 />
               )}
@@ -665,8 +688,8 @@ export function CourseTable() {
               <div className="mt-6">
                 <Pagination
                   page={page} meta={data.meta} perPage={perPage}
-                  onPrev={() => setPage(p => Math.max(1, p - 1))}
-                  onNext={() => setPage(p => p + 1)}
+                  onPrev={() => { setPage(p => Math.max(1, p - 1)); setSelected(new Set()) }}
+                  onNext={() => { setPage(p => p + 1); setSelected(new Set()) }}
                   onPage={setPage}
                 />
               </div>
