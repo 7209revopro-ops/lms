@@ -141,11 +141,33 @@ export function clearAuthCookies(res: Response): void {
    Completely separate from client cookies so both portals can maintain
    independent sessions on the same browser simultaneously.
 ──────────────────────────────────────────────────────────────────────── */
+/*
+ * The admin portal is opened inside the Root portal's frame, which makes it
+ * third-party to the page around it. A SameSite=Lax cookie is never stored in
+ * that position — by design, since that is the defence against cross-site
+ * request forgery — so signing in from the portal looked like a failure and
+ * was not: the handover worked, this cookie was set, the browser discarded it,
+ * and the admin app, seeing no session, showed the login page again.
+ *
+ * SameSite=None lifts that and requires Secure, which is why it only applies
+ * where the site is served over HTTPS. Over plain http a Secure cookie is
+ * dropped instead, trading one silent sign-in failure for another.
+ *
+ * Only the admin cookies. The client portal is not opened from the Root portal
+ * and keeps Lax, because weakening it would cost every student the same
+ * protection for no benefit at all.
+ *
+ * This is a real reduction for the admin portal: another site can now cause an
+ * authenticated request to be sent here. It is deliberate, and the alternative
+ * considered was opening these systems in their own tab.
+ */
+const adminSameSite = (): 'lax' | 'none' => (isProd() ? 'none' : 'lax')
+
 export function setAdminAuthCookies(res: Response, tokens: TokenPair): void {
   res.cookie(ADMIN_ACCESS_COOKIE, tokens.access_token, {
     httpOnly: true,
     secure:   isProd(),
-    sameSite: 'lax',
+    sameSite: adminSameSite(),
     domain:   cookieDomain(),
     path:     '/',
     maxAge:   parseDurationMs(env.JWT_ACCESS_EXPIRES_IN),
@@ -153,7 +175,7 @@ export function setAdminAuthCookies(res: Response, tokens: TokenPair): void {
   res.cookie(ADMIN_REFRESH_COOKIE, tokens.refresh_token, {
     httpOnly: true,
     secure:   isProd(),
-    sameSite: 'lax',
+    sameSite: adminSameSite(),
     domain:   cookieDomain(),
     path:     ADMIN_REFRESH_PATH,
     maxAge:   parseDurationMs(env.JWT_REFRESH_EXPIRES_IN),
