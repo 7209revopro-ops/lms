@@ -23,6 +23,13 @@ const envSchema = z.object({
   CLIENT_URL: z.string().url().default('http://localhost:3000'),
   ADMIN_URL:  z.string().url().default('http://localhost:3001'),
 
+  /* Where the Root portal lives.
+     Somebody arriving from it carries a single-use token this server cannot
+     validate alone, so it asks the portal to vouch for it. Unset means SSO is
+     simply unavailable — never a fall back to localhost, which in production
+     would mean this server asking itself to vouch for the token. */
+  ROOT_ERP_API_URL: opt(z.string().url()),
+
   /* Bcrypt */
   BCRYPT_ROUNDS: z.coerce.number().min(10).max(14).default(12),
 

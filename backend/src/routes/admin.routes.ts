@@ -57,6 +57,11 @@ const adminLoginSchema = z.object({
   password: z.string().min(1, 'Password is required'),
 })
 
+/* What the portal hands over: one opaque single-use token, nothing else. */
+const adminSsoLoginSchema = z.object({
+  token: z.string().min(16, 'Invalid sign-in token'),
+})
+
 /* Second login step for admin accounts with 2FA enabled — the challenge
    handed back by /auth/login plus the 6-digit authenticator code. */
 const adminLoginTwoFactorSchema = z.object({
@@ -79,6 +84,10 @@ const adminResetSchema = z.object({
 })
 
 router.post('/auth/login',   authRateLimit, validate(adminLoginSchema), authCtrl.adminLogin)
+/* Arriving from the Root portal. Rate limited like every other sign-in here:
+   the token is single-use and short-lived, but guessing at one should cost the
+   same as guessing at a password. */
+router.post('/auth/sso-login', authRateLimit, validate(adminSsoLoginSchema), authCtrl.adminSsoLogin)
 router.post('/auth/login/2fa', authRateLimit, validate(adminLoginTwoFactorSchema), authCtrl.adminLoginTwoFactor)
 router.post('/auth/forgot-password', authRateLimit, validate(adminForgotSchema), authCtrl.adminForgotPassword)
 router.post('/auth/reset-password',  authRateLimit, validate(adminResetSchema),  authCtrl.resetPassword)
