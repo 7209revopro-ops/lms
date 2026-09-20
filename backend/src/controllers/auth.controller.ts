@@ -246,6 +246,29 @@ export class AuthController {
     }
   }
 
+  /* ── POST /admin/auth/sso-login ─────────────────────
+     Somebody arriving from the Root portal, which is where this estate signs
+     people in once and sends them on. It ends in the lms_admin_* cookies and
+     applies the same refusal as a password sign-in here: a student has an
+     account, but not one for this portal, and being vouched for elsewhere
+     does not change which portal they belong in. */
+  adminSsoLogin = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    try {
+      const result = await this.service.ssoLogin(String(req.body.token ?? ''), sessionMeta(req), 'admin')
+      if (result.user.role === 'student') {
+        res.status(403).json({
+          success: false,
+          error: { code: 'FORBIDDEN', message: 'This portal is for admins and instructors only.' },
+        })
+        return
+      }
+      setAdminAuthCookies(res, result.tokens)
+      sendSuccess(res, { user: result.user }, 'Signed in successfully')
+    } catch (err) {
+      next(err)
+    }
+  }
+
   /* ── POST /admin/auth/login/2fa ─────────────────────
      Second factor for the admin portal — same challenge,
      but it ends in the lms_admin_* cookies. */

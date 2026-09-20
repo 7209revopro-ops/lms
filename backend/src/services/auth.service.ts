@@ -994,6 +994,81 @@ export class AuthService {
     return { user: toSafeUser(user), tokens }
   }
 
+  /* ── Sign in somebody the Root portal vouches for ──
+       The portal is the identity provider for this estate: a person signs in
+       there once and opens each system from it. What arrives here is a
+       single-use token this server cannot validate alone, so it asks the
+       portal whether the token is good and who it belongs to.
+
+       No account is ever created. The portal says who somebody is, not that
+       they should exist here — and creating one on the strength of a token
+       would turn a spoofed or compromised portal into an instant account with
+       whatever address it named. An unknown email is refused, and somebody
+       has to be given an account here deliberately first.
+
+       Two-factor is not challenged, matching the login-link path above: the
+       portal has already authenticated the person, and this is the same kind
+       of handover. The account gates that do apply — deactivated, missing —
+       apply exactly as they do everywhere else, because disabling somebody
+       has to close every door and not merely the one with a password on it. */
+  async ssoLogin(
+    rawToken: string,
+    meta?: SessionMeta,
+    audience: TokenAudience = 'admin',
+  ): Promise<{ user: ReturnType<typeof toSafeUser>; tokens: TokenPair }> {
+    const rootApi = env.ROOT_ERP_API_URL
+    if (!rootApi) {
+      throw new AuthError('SSO_NOT_CONFIGURED', 'Signing in from the portal is not configured on this server.', 503)
+    }
+
+    /* The portal's own words are not passed through. It answers 401 for a
+       token that is spent, expired or never existed, and which of those it
+       was is not something a caller should be able to probe for. */
+    const invalid = () => new AuthError('INVALID_SSO_TOKEN', 'This sign-in link is invalid, used, or expired. Sign in with your email instead.', 401)
+
+    let email = ''
+    try {
+      const url = new URL('/api/auth/verify-sso-token', rootApi.replace(/\/+$/, ''))
+      url.searchParams.set('token', rawToken)
+
+      const controller = new AbortController()
+      const timer = setTimeout(() => controller.abort(), 8_000)
+      let res: Response
+      try {
+        res = await fetch(url, { signal: controller.signal })
+      } finally {
+        clearTimeout(timer)
+      }
+
+      if (res.status === 401) throw invalid()
+      if (!res.ok) {
+        throw new AuthError('SSO_UNAVAILABLE', 'The portal could not be reached to confirm this sign-in.', 502)
+      }
+      const body = await res.json() as { data?: { email?: string } }
+      email = String(body?.data?.email ?? '').toLowerCase().trim()
+    } catch (err) {
+      if (err instanceof AuthError) throw err
+      throw new AuthError('SSO_UNAVAILABLE', 'The portal could not be reached to confirm this sign-in.', 502)
+    }
+
+    if (!email) throw invalid()
+
+    const user = await this.userRepo.findByEmail(email)
+    if (!user) {
+      throw new AuthError(
+        'NO_SSO_ACCOUNT',
+        `There is no account here for ${email}. It has to be created before signing in from the portal.`,
+        403,
+      )
+    }
+    if (!user.isActive) throw invalid()
+
+    void this.userRepo.touchLastLogin(user.id)
+    const tokens = await this.#issueLoginTokens(user.id, user.email, user.role, meta, audience)
+    logger.info({ userId: user.id }, 'User logged in via the Root portal')
+    return { user: toSafeUser(user), tokens }
+  }
+
   /* ── Generate a one-time login-link token ──────────
        Random 32-byte token (unlike the 6-digit OTP), 7-day single-use. Prior
        unused links are invalidated so only the latest works. */
