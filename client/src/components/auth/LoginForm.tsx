@@ -570,7 +570,9 @@ export function LoginForm({ onSwitch }: LoginFormProps) {
             </label>
             <a
               href="/forgot-password"
-              className="text-xs font-medium transition-colors hover:opacity-70"
+              /* 100x16 next to a password field is a target a thumb cannot
+                 pick out from the label beside it. */
+              className="-mr-1 inline-flex min-h-[44px] items-center px-1 text-xs font-medium transition-colors hover:opacity-70 sm:-mr-0 sm:min-h-0 sm:px-0"
               style={{ color: 'var(--color-primary)' }}
             >
               Forgot password?
@@ -609,7 +611,10 @@ export function LoginForm({ onSwitch }: LoginFormProps) {
             <button
               type="button"
               onClick={() => setShowPassword(v => !v)}
-              className="absolute right-3.5 top-1/2 -translate-y-1/2 transition-opacity hover:opacity-70"
+              aria-label={showPassword ? 'Hide password' : 'Show password'}
+              /* The hit area was the 16px glyph. On the sign-in form, where a
+                 mistyped password is the whole reason to reach for it. */
+              className="absolute right-0 top-1/2 flex h-11 w-11 -translate-y-1/2 items-center justify-center rounded-lg transition-opacity hover:opacity-70"
               style={{ color: 'var(--color-text-muted)' }}
             >
               {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
@@ -646,7 +651,9 @@ export function LoginForm({ onSwitch }: LoginFormProps) {
             className="h-4 w-4 cursor-pointer rounded"
             style={{ accentColor: '#0057b8' }}
           />
-          <label htmlFor="remember" className="cursor-pointer text-sm" style={{ color: 'var(--color-text-muted)' }}>
+          {/* The label is the real target here - the box itself is 16px - so
+              it gets the height rather than the input. */}
+          <label htmlFor="remember" className="inline-flex min-h-[44px] cursor-pointer items-center text-sm sm:min-h-0" style={{ color: 'var(--color-text-muted)' }}>
             Remember me for 30 days
           </label>
         </motion.div>
@@ -755,7 +762,7 @@ export function LoginForm({ onSwitch }: LoginFormProps) {
         <button
           type="button"
           onClick={onSwitch}
-          className="font-semibold transition-opacity hover:opacity-70"
+          className="inline-flex min-h-[44px] items-center font-semibold transition-opacity hover:opacity-70 sm:min-h-0"
           style={{ color: 'var(--color-primary)' }}
         >
           Create one free →

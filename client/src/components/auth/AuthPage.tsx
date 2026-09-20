@@ -85,7 +85,7 @@ export function AuthPage({ initialMode }: AuthPageProps) {
               <button
                 key={m}
                 onClick={() => switchMode(m)}
-                className="rounded-lg px-5 py-2 text-sm font-semibold transition-all"
+                className="min-h-[44px] rounded-lg px-5 text-sm font-semibold transition-all sm:min-h-0 sm:py-2"
                 style={
                   mode === m
                     ? {
