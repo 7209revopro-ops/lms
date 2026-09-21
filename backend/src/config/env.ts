@@ -30,6 +30,13 @@ const envSchema = z.object({
      would mean this server asking itself to vouch for the token. */
   ROOT_ERP_API_URL: opt(z.string().url()),
 
+  /* The shared secret the Root portal presents when it asks this server about
+     its roles or its people. Distinct from ROOT_ERP_API_URL above, which is
+     how this server calls the portal to verify a sign-in — this is how the
+     portal calls here. Unset means those endpoints are off rather than open.
+     Must match the portal's LMS_SSO_SECRET. */
+  ROOT_ERP_SECRET: z.string().default(''),
+
   /* Bcrypt */
   BCRYPT_ROUNDS: z.coerce.number().min(10).max(14).default(12),
 

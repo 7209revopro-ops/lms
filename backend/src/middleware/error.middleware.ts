@@ -26,6 +26,7 @@ import { AIError } from '@/services/ai.service.ts'
 import { SupportError } from '@/services/support.service.ts'
 import { TotpError } from '@/services/totp.service.ts'
 import { TranscriptError } from '@/services/transcript.service.ts'
+import { PortalError } from '@/services/portal.service.ts'
 
 /* ─────────────────────────────────────────────────────
    Global error handler
@@ -75,6 +76,10 @@ export function errorMiddleware(
   }
 
   /* ── Domain errors (auth, business logic) ──────── */
+  if (err instanceof PortalError) {
+    sendError(res, err.code, err.message, err.statusCode)
+    return
+  }
   if (err instanceof AuthError) {
     sendError(res, err.code, err.message, err.statusCode)
     return

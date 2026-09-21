@@ -34,6 +34,7 @@ import supportRoutes       from './support.routes.ts'
 import instructorRoutes   from './instructors.routes.ts'
 import documentRoutes    from './documents.routes.ts'
 import classAssignmentRoutes from './classAssignments.routes.ts'
+import portalRoutes        from './portal.routes.ts'
 
 const router = Router()
 
@@ -71,6 +72,8 @@ router.get('/ready', async (_req: Request, res: Response) => {
 
 /* ─── Domain routers ─────────────────────────────── */
 router.use('/auth',        authRoutes)
+/* Server-to-server, from the Root portal. A shared secret, not a session. */
+router.use('/service',     portalRoutes)
 router.use('/courses',     courseRoutes)
 router.use('/categories',  categoryRoutes)
 router.use('/enrollments', enrollmentRoutes)
