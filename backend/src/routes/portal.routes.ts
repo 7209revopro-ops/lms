@@ -11,6 +11,7 @@ import {
   getMentorMeetingForPortal,
   updateMentorMeetingForPortal,
   cancelMentorMeetingForPortal,
+  getClassForPortal,
   setUserRoleFromPortal,
   provisionFromPortal,
 } from '@/services/portal.service.ts'
@@ -164,6 +165,16 @@ router.post('/mentor-meetings/:id/cancel', wrap(async (req, res) => {
     actorEmail: String(body.actorEmail ?? ''),
     actorIsRootAdmin: body.actorIsRootAdmin === true,
   }), 'Meeting cancelled')
+}))
+
+/* One live class in full, for the portal's calendar. This academy's own only:
+   the other one's classes appear there as taken time without a subject, and an
+   endpoint that opened them would undo that. */
+router.get('/classes/:id', wrap(async (req, res) => {
+  sendSuccess(res, await getClassForPortal({
+    remoteOrgId: orgOf(req),
+    classId: String(req.params['id'] ?? ''),
+  }), 'Class')
 }))
 
 export default router

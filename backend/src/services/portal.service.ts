@@ -1075,3 +1075,81 @@ export async function cancelMentorMeetingForPortal(input: {
 
   return { id: String(meeting._id), cancelled: true }
 }
+
+/**
+ * One live class in full, for the portal's calendar.
+ *
+ * Only this academy's own. A class belonging to the other one already appears
+ * on that calendar as an hour that is taken and nothing more — the time is
+ * shared so nobody books over it, the subject is not, and opening it would
+ * undo that in one click.
+ *
+ * The streaming credentials are not selected. They are `select: false` on the
+ * model and would not arrive anyway, but naming the fields wanted rather than
+ * taking the document whole means a field added tomorrow is private until
+ * somebody decides otherwise.
+ */
+export async function getClassForPortal(input: {
+  remoteOrgId?: string
+  classId?: string
+}): Promise<Record<string, unknown>> {
+  const org = await resolveOrg(input.remoteOrgId)
+  const { LiveClassModel, UserModel, CourseModel } = await import('@/models/schema.ts')
+
+  const id = String(input.classId ?? '')
+  if (!mongoose.isValidObjectId(id)) throw httpError('No such class', 404)
+
+  const live = await LiveClassModel.findById(id)
+    .select([
+      'title', 'description', 'scheduledStart', 'durationMins', 'status', 'language',
+      'type', 'provider', 'meetingUrl', 'googleMeetCode', 'recordingUrl',
+      'recordingDurationSecs', 'mentorNotes', 'sessionCapacity', 'bookedCount',
+      'startedAt', 'endedAt', 'viewerCount', 'isOnline', 'location', 'room',
+      'courseId', 'instructorId', 'organizationId',
+    ].join(' '))
+    .lean()
+
+  if (!live) throw httpError('No such class', 404)
+  if (String(live.organizationId ?? '') !== String(org._id)) {
+    /* The same answer as one that does not exist. Saying "another academy has
+       this" would confirm what the calendar deliberately withholds. */
+    throw httpError('No such class', 404)
+  }
+
+  const [instructor, course] = await Promise.all([
+    UserModel.findById(live.instructorId).select('name email').lean(),
+    live.courseId
+      ? CourseModel.findById(live.courseId).select('title slug').lean()
+      : Promise.resolve(null),
+  ])
+
+  return {
+    id: String(live._id),
+    title: live.title ?? '',
+    description: live.description ?? '',
+    startsAt: new Date(live.scheduledStart).toISOString(),
+    durationMins: live.durationMins ?? 0,
+    status: String(live.status ?? ''),
+    language: live.language ?? '',
+    /* Where it happens, in the words the screen needs rather than the model's:
+       `type` and `isOnline` answer different questions and reading both wrong
+       is how a room booking gets shown as a video call. */
+    inPerson: live.isOnline === false,
+    location: live.location ?? '',
+    room: live.room ?? '',
+    meetingUrl: live.meetingUrl ?? '',
+    googleMeetCode: live.googleMeetCode ?? '',
+    recordingUrl: live.recordingUrl ?? '',
+    recordingDurationSecs: live.recordingDurationSecs ?? 0,
+    mentorNotes: live.mentorNotes ?? '',
+    booked: live.bookedCount ?? 0,
+    capacity: live.sessionCapacity ?? 0,
+    viewerCount: live.viewerCount ?? 0,
+    startedAt: live.startedAt ? new Date(live.startedAt).toISOString() : '',
+    endedAt: live.endedAt ? new Date(live.endedAt).toISOString() : '',
+    instructorName: instructor?.name ?? '',
+    instructorEmail: instructor?.email ?? '',
+    courseTitle: (course as { title?: string } | null)?.title ?? '',
+    timezone: AVAILABILITY_TIMEZONE,
+  }
+}
