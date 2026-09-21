@@ -5,6 +5,7 @@ import { sendSuccess, sendError } from '@/utils/response.ts'
 import {
   listRolesForPortal,
   describeUserForPortal,
+  describeManyForPortal,
   setUserRoleFromPortal,
   provisionFromPortal,
 } from '@/services/portal.service.ts'
@@ -79,6 +80,20 @@ router.post('/provision-user', wrap(async (req, res) => {
   sendSuccess(res, await provisionFromPortal({
     email, name: name ?? '', role, remoteOrgId: remoteOrgId ?? orgOf(req),
   }), 'Account created')
+}))
+
+/**
+ * The same question as /user, asked about many people at once.
+ *
+ * POST rather than GET because a page of addresses does not belong in a query
+ * string, where it would be logged by every proxy in front of this. The
+ * organization may arrive either way, as it does for the other POSTs here.
+ */
+router.post('/accounts', wrap(async (req, res) => {
+  const { emails, remoteOrgId } = (req.body ?? {}) as { emails?: unknown; remoteOrgId?: string }
+  sendSuccess(res, await describeManyForPortal({
+    emails, remoteOrgId: remoteOrgId ?? orgOf(req),
+  }), 'Accounts')
 }))
 
 export default router
