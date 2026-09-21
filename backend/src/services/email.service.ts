@@ -1538,3 +1538,68 @@ export async function sendAssignmentReviewed(
     text: `Dear ${studentName},\n\nClass: ${sessionTitle}\nAssignment: ${assignmentTitle}\n\n${approved ? 'Your instructor has approved your work. Nothing further is needed.' : `Your instructor has sent your work back for a revision.\n\nReason: ${reason ?? ''}\n\nOpen the Assignments section to send a revision.`}\n\nDelta Academy`,
   })
 }
+
+/* Somebody has booked time with a mentor.
+
+   Sent to the mentor and, when there is one, to whoever they are meeting —
+   including outside clients, who have no account here and for whom this email
+   is the only thing they will ever receive about it. So it carries everything
+   needed to turn up: when, how long, who with, and the link if there is one.
+
+   The time is written in the academy's own zone and says so. A mentor in Dubai
+   and a client reading it elsewhere must not each resolve "14:00" against their
+   own assumption and arrive an hour apart. */
+export async function sendMentorMeetingInvite(
+  to: string,
+  name: string,
+  meeting: {
+    title: string
+    whenText: string
+    durationMins: number
+    withWhom: string
+    meetingUrl?: string
+    notes?: string
+    bookedByEmail: string
+  },
+): Promise<void> {
+  const subject = `${meeting.title} — ${meeting.whenText}`
+  const joinBlock = meeting.meetingUrl
+    ? `<p style="margin:24px 0">
+         <a href="${escapeHtml(sanitiseUrl(meeting.meetingUrl))}" style="display:inline-block;background:linear-gradient(135deg,#0057b8,#2F6BFF);color:#fff;font-weight:600;padding:12px 24px;border-radius:12px;text-decoration:none">
+           Join the meeting
+         </a>
+       </p>
+       <p style="font-size:12px;color:#6B7280">Or paste this into your browser:<br><span style="color:#0057b8">${escapeHtml(meeting.meetingUrl)}</span></p>`
+    : `<p style="font-size:13px;color:#6B7280">No joining link yet — whoever booked this will send one.</p>`
+
+  const html = wrap(subject, `
+    <h2 style="margin:0 0 16px;font-size:20px;font-weight:700;color:#0D0F1A">${escapeHtml(meeting.title)}</h2>
+    <p>Hi ${escapeHtml(name)},</p>
+    <p>A meeting has been scheduled.</p>
+    <table style="margin:16px 0;font-size:14px;color:#111">
+      <tr><td style="padding:4px 16px 4px 0;color:#6B7280">When</td><td><strong>${escapeHtml(meeting.whenText)}</strong></td></tr>
+      <tr><td style="padding:4px 16px 4px 0;color:#6B7280">Length</td><td>${meeting.durationMins} minutes</td></tr>
+      <tr><td style="padding:4px 16px 4px 0;color:#6B7280">With</td><td>${escapeHtml(meeting.withWhom)}</td></tr>
+    </table>
+    ${meeting.notes ? `<p style="font-size:14px;color:#374151">${escapeHtml(meeting.notes)}</p>` : ''}
+    ${joinBlock}
+    <p style="font-size:12px;color:#9CA3AF">Booked by ${escapeHtml(meeting.bookedByEmail)}. If this does not look right, reply to them directly.</p>
+  `)
+
+  await sender.send({
+    to,
+    subject,
+    html,
+    text: [
+      meeting.title,
+      ``,
+      `When:   ${meeting.whenText}`,
+      `Length: ${meeting.durationMins} minutes`,
+      `With:   ${meeting.withWhom}`,
+      meeting.notes ? `\n${meeting.notes}` : ``,
+      meeting.meetingUrl ? `\nJoin: ${meeting.meetingUrl}` : `\nNo joining link yet.`,
+      ``,
+      `Booked by ${meeting.bookedByEmail}.`,
+    ].join("\n"),
+  })
+}

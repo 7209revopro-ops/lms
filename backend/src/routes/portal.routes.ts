@@ -7,6 +7,7 @@ import {
   describeUserForPortal,
   describeManyForPortal,
   listMentorsForPortal,
+  createMentorMeetingForPortal,
   setUserRoleFromPortal,
   provisionFromPortal,
 } from '@/services/portal.service.ts'
@@ -107,6 +108,21 @@ router.get('/mentors', wrap(async (req, res) => {
   const from = typeof req.query.from === 'string' ? req.query.from : undefined
   const to = typeof req.query.to === 'string' ? req.query.to : undefined
   sendSuccess(res, await listMentorsForPortal({ remoteOrgId: orgOf(req), from, to }), 'Mentors')
+}))
+
+/**
+ * Book time with a mentor that is not a class.
+ *
+ * Separate from anything in the live-class routes on purpose: this creates no
+ * course content, enrols nobody, and tells no cohort. It puts an hour in one
+ * person's diary and mails the two people it concerns.
+ */
+router.post('/mentor-meetings', wrap(async (req, res) => {
+  const body = (req.body ?? {}) as Record<string, unknown>
+  sendSuccess(res, await createMentorMeetingForPortal({
+    ...body,
+    remoteOrgId: (body.remoteOrgId as string) ?? orgOf(req),
+  } as Parameters<typeof createMentorMeetingForPortal>[0]), 'Meeting booked')
 }))
 
 export default router

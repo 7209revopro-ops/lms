@@ -2276,6 +2276,75 @@ export const MentorAvailabilityModel = mongoose.model<IMentorAvailability>(
 )
 
 /* ─────────────────────────────────────────────────────
+   MENTOR MEETING — time booked with a mentor that is not a class
+
+   A live class is course-bound, capacity-limited and something students book
+   a seat in; creating one notifies the whole enrolled cohort. None of that
+   fits a staff catch-up, a one-to-one with a student, or an hour sold to an
+   outside client who has no account anywhere. Bending classes into that shape
+   would have put strangers on course rosters and mailed cohorts about meetings
+   that have nothing to do with them.
+
+   So it is its own thing, and deliberately thin: who, when, how long, what
+   kind, who is coming, and where to join.
+───────────────────────────────────────────────────── */
+export type MentorMeetingKind = 'staff' | 'student' | 'client'
+
+export interface IMentorMeeting extends Document {
+  id:             string
+  mentorId:       Types.ObjectId
+  organizationId?: Types.ObjectId
+  title:          string
+  kind:           MentorMeetingKind
+  scheduledStart: Date
+  durationMins:   number
+  /* Where to join. Pasted by whoever booked it, or minted as a Google Meet
+     when they left it blank — and absent when neither worked, because a
+     meeting with no link is still a meeting and losing the booking over it
+     would be worse. */
+  meetingUrl?:    string
+  /* Who the mentor is meeting. Free text on purpose: an outside client has no
+     account here, and requiring one would make the commonest reason for this
+     feature the one case it could not express. */
+  attendeeName:   string
+  attendeeEmail?: string
+  notes?:         string
+  /* Who booked it, in the portal. Kept as an address rather than a reference
+     because they are an account in another system entirely. */
+  bookedByEmail:  string
+  cancelledAt?:   Date
+  createdAt:      Date
+  updatedAt:      Date
+}
+
+const MentorMeetingSchema = new Schema<IMentorMeeting>(
+  {
+    mentorId:       { type: Schema.Types.ObjectId, ref: 'User', required: true, index: true },
+    organizationId: { type: Schema.Types.ObjectId, ref: 'Organization' },
+    title:          { type: String, required: true, trim: true, maxlength: 255 },
+    kind:           { type: String, enum: ['staff', 'student', 'client'], required: true },
+    scheduledStart: { type: Date, required: true, index: true },
+    durationMins:   { type: Number, required: true, min: 5, max: 600 },
+    meetingUrl:     { type: String, default: '' },
+    attendeeName:   { type: String, required: true, trim: true, maxlength: 255 },
+    attendeeEmail:  { type: String, default: '', lowercase: true, trim: true },
+    notes:          { type: String, default: '', maxlength: 2000 },
+    bookedByEmail:  { type: String, required: true, lowercase: true, trim: true },
+    cancelledAt:    { type: Date, default: null },
+  },
+  baseSchemaOptions,
+)
+
+/* The query this collection exists to answer: what is in front of this mentor
+   between two dates. */
+MentorMeetingSchema.index({ mentorId: 1, scheduledStart: 1 })
+
+export const MentorMeetingModel = mongoose.model<IMentorMeeting>(
+  'MentorMeeting',
+  MentorMeetingSchema,
+)
+
+/* ─────────────────────────────────────────────────────
    CLASS BOOKING — student books a specific session slot
 ───────────────────────────────────────────────────── */
 export type BookingStatus = 'booked' | 'attended' | 'missed' | 'cancelled'

@@ -446,6 +446,19 @@ export interface PortalMentor {
   shared: boolean
   slots: { dayOfWeek: number; startTime: string; endTime: string }[]
   classes: PortalMentorClass[]
+  /* Time booked with this mentor that is not a class. Carried beside the
+     classes rather than merged into them: they are different things, and a
+     screen that wants to show them differently should not have to guess
+     which is which. Leaving them out entirely would be worse — the calendar
+     would show somebody free during a meeting. */
+  meetings: {
+    id: string
+    title: string
+    kind: string
+    startsAt: string
+    durationMins: number
+    attendeeName: string
+  }[]
 }
 
 /**
@@ -484,7 +497,7 @@ export async function listMentorsForPortal(input: {
   }
 
   const { UserModel, MentorAvailabilityModel } = await import('@/models/schema.ts')
-  const { LiveClassModel } = await import('@/models/schema.ts')
+  const { LiveClassModel, MentorMeetingModel } = await import('@/models/schema.ts')
 
   const mentors = await UserModel.find({
     role: 'instructor',
@@ -500,7 +513,7 @@ export async function listMentorsForPortal(input: {
   const ids = mentors.map((m) => m._id)
 
   // Both sides fetched once for the whole list rather than per mentor.
-  const [availability, classes] = await Promise.all([
+  const [availability, classes, meetings] = await Promise.all([
     MentorAvailabilityModel.find({ mentorId: { $in: ids } }).lean(),
     LiveClassModel.find({
       instructorId: { $in: ids },
@@ -508,11 +521,33 @@ export async function listMentorsForPortal(input: {
     })
       .select('title instructorId scheduledStart durationMins status bookedCount sessionCapacity organizationId')
       .lean(),
+    MentorMeetingModel.find({
+      mentorId: { $in: ids },
+      scheduledStart: { $gte: from, $lte: to },
+      cancelledAt: null,
+    })
+      .select('title kind mentorId scheduledStart durationMins attendeeName')
+      .lean(),
   ])
 
   const slotsByMentor = new Map(
     availability.map((a) => [String(a.mentorId), a.slots ?? []]),
   )
+
+  const meetingsByMentor = new Map<string, PortalMentor['meetings']>()
+  for (const m of meetings) {
+    const key = String(m.mentorId)
+    const list = meetingsByMentor.get(key) ?? []
+    list.push({
+      id: String(m._id),
+      title: m.title ?? '',
+      kind: String(m.kind ?? ''),
+      startsAt: new Date(m.scheduledStart).toISOString(),
+      durationMins: m.durationMins ?? 0,
+      attendeeName: m.attendeeName ?? '',
+    })
+    meetingsByMentor.set(key, list)
+  }
 
   const classesByMentor = new Map<string, PortalMentorClass[]>()
   for (const c of classes) {
@@ -550,7 +585,205 @@ export async function listMentorsForPortal(input: {
         classes: (classesByMentor.get(String(m._id)) ?? []).sort((a, b) =>
           a.startsAt.localeCompare(b.startsAt),
         ),
+        meetings: (meetingsByMentor.get(String(m._id)) ?? []).sort((a, b) =>
+          a.startsAt.localeCompare(b.startsAt),
+        ),
       }))
       .sort((a, b) => a.name.localeCompare(b.name)),
+  }
+}
+
+export interface PortalMentorMeeting {
+  id: string
+  title: string
+  kind: 'staff' | 'student' | 'client'
+  startsAt: string
+  durationMins: number
+  attendeeName: string
+  meetingUrl: string
+  bookedByEmail: string
+}
+
+/** Two spans on one calendar, overlapping. */
+const overlaps = (aStart: Date, aMins: number, bStart: Date, bMins: number): boolean =>
+  aStart.getTime() < bStart.getTime() + bMins * 60_000 &&
+  bStart.getTime() < aStart.getTime() + aMins * 60_000
+
+/**
+ * Book time with a mentor that is not a class.
+ *
+ * A staff catch-up, an hour with one student, or an hour sold to an outside
+ * client. None of those is a live class: a class is course-bound, students book
+ * seats in it, and creating one mails the entire enrolled cohort. Doing this
+ * through classes would have put strangers on rosters and told a course full of
+ * people about a meeting that has nothing to do with them.
+ *
+ * Refuses a clash rather than recording one. The portal checks before asking,
+ * but between its check and this write somebody else may have booked the same
+ * hour — and the only place that can answer honestly is here, immediately
+ * before the insert. Classes and other meetings both count: an hour teaching is
+ * as taken as an hour meeting.
+ *
+ * Availability is deliberately NOT enforced. Those weekly slots are a pattern
+ * somebody set, not a contract, and a mentor who agreed to a Saturday should
+ * not be unbookable because nobody updated a form. The portal warns; this
+ * records what was decided.
+ */
+export async function createMentorMeetingForPortal(input: {
+  remoteOrgId?: string
+  mentorEmail?: string
+  title?: string
+  kind?: string
+  scheduledStart?: string
+  durationMins?: number
+  meetingUrl?: string
+  attendeeName?: string
+  attendeeEmail?: string
+  notes?: string
+  bookedByEmail?: string
+}): Promise<{ meeting: PortalMentorMeeting; mentorEmail: string; linkNote: string | null }> {
+  const org = await resolveOrg(input.remoteOrgId)
+
+  const title = String(input.title ?? '').trim()
+  if (title.length < 3) throw httpError('A title of at least three characters is required', 400)
+
+  const kind = String(input.kind ?? '')
+  if (!['staff', 'student', 'client'].includes(kind)) {
+    throw httpError('kind must be staff, student or client', 400)
+  }
+
+  const attendeeName = String(input.attendeeName ?? '').trim()
+  if (!attendeeName) throw httpError('Say who the mentor is meeting', 400)
+
+  const bookedByEmail = String(input.bookedByEmail ?? '').toLowerCase().trim()
+  if (!bookedByEmail) throw httpError('bookedByEmail is required', 400)
+
+  const start = new Date(String(input.scheduledStart ?? ''))
+  if (Number.isNaN(start.getTime())) throw httpError('scheduledStart is not a date', 400)
+
+  const durationMins = Number(input.durationMins ?? 0)
+  if (!Number.isInteger(durationMins) || durationMins < 5 || durationMins > 600) {
+    throw httpError('durationMins must be a whole number between 5 and 600', 400)
+  }
+
+  const { UserModel, LiveClassModel, MentorMeetingModel } = await import('@/models/schema.ts')
+
+  const wanted = String(input.mentorEmail ?? '').toLowerCase().trim()
+  if (!wanted) throw httpError('mentorEmail is required', 400)
+
+  /* The same reach rule the listing uses: this academy's own instructors, plus
+     the ones lent to it. Booking somebody another academy cannot even see would
+     put an hour in a stranger's diary. */
+  const mentor = await UserModel.findOne({
+    email: wanted,
+    role: 'instructor',
+    $or: [{ organizationId: org._id }, { sharedAcrossOrgs: true }],
+  }).select('name email').lean()
+  if (!mentor) throw httpError('No mentor here with that address', 404)
+
+  const windowStart = new Date(start.getTime() - 12 * 3600e3)
+  const windowEnd = new Date(start.getTime() + 12 * 3600e3)
+
+  const [classes, meetings] = await Promise.all([
+    LiveClassModel.find({
+      instructorId: mentor._id,
+      scheduledStart: { $gte: windowStart, $lte: windowEnd },
+      status: { $ne: 'cancelled' },
+    }).select('title scheduledStart durationMins').lean(),
+    MentorMeetingModel.find({
+      mentorId: mentor._id,
+      scheduledStart: { $gte: windowStart, $lte: windowEnd },
+      cancelledAt: null,
+    }).select('title scheduledStart durationMins').lean(),
+  ])
+
+  for (const c of classes) {
+    if (overlaps(start, durationMins, new Date(c.scheduledStart), c.durationMins ?? 0)) {
+      throw httpError(`That overlaps a class already booked: ${c.title}`, 409)
+    }
+  }
+  for (const m of meetings) {
+    if (overlaps(start, durationMins, new Date(m.scheduledStart), m.durationMins ?? 0)) {
+      throw httpError(`That overlaps a meeting already booked: ${m.title}`, 409)
+    }
+  }
+
+  /* A pasted link is used as given. An empty one is an invitation to make a
+     Google Meet — which also puts the event on the mentor's own calendar when
+     they are internal, so it shows up where they already look.
+
+     A failure there does not fail the booking. The time is the thing being
+     agreed; a link can follow, and losing an agreed hour because a calendar API
+     was unhappy would be the wrong trade. */
+  let meetingUrl = String(input.meetingUrl ?? '').trim()
+  let linkNote: string | null = null
+  if (!meetingUrl) {
+    try {
+      const { createGoogleMeetLink } = await import('@/services/googleMeet.service.ts')
+      const made = await createGoogleMeetLink({
+        title,
+        startISO: start.toISOString(),
+        durationMins,
+        instructorEmail: mentor.email,
+      })
+      meetingUrl = made.meetingUrl
+    } catch {
+      linkNote = 'The meeting is booked, but a joining link could not be created — send one yourself.'
+    }
+  }
+
+  const created = await MentorMeetingModel.create({
+    mentorId: mentor._id,
+    organizationId: org._id,
+    title,
+    kind,
+    scheduledStart: start,
+    durationMins,
+    meetingUrl,
+    attendeeName,
+    attendeeEmail: String(input.attendeeEmail ?? '').toLowerCase().trim(),
+    notes: String(input.notes ?? '').trim(),
+    bookedByEmail,
+  })
+
+  /* Told, not just recorded. A booking the mentor has to go looking for is a
+     booking they will miss, and for an outside client this mail is the only
+     thing they will ever get about it.
+
+     Not awaited into the response: the meeting exists either way, and a slow
+     mail server should not turn a successful booking into an error that has
+     somebody book it a second time. */
+  const whenText = `${start.toLocaleString('en-GB', {
+    weekday: 'long', day: 'numeric', month: 'long',
+    hour: '2-digit', minute: '2-digit', timeZone: AVAILABILITY_TIMEZONE, hour12: false,
+  })} (${AVAILABILITY_TIMEZONE.replace('_', ' ')})`
+
+  void (async () => {
+    const { sendMentorMeetingInvite } = await import('@/services/email.service.ts')
+    const common = { title, whenText, durationMins, meetingUrl, notes: String(input.notes ?? '').trim(), bookedByEmail }
+    await sendMentorMeetingInvite(mentor.email, mentor.name ?? '', {
+      ...common, withWhom: attendeeName,
+    }).catch(() => {})
+    const attendee = String(input.attendeeEmail ?? '').trim()
+    if (attendee) {
+      await sendMentorMeetingInvite(attendee, attendeeName, {
+        ...common, withWhom: mentor.name ?? mentor.email,
+      }).catch(() => {})
+    }
+  })()
+
+  return {
+    mentorEmail: mentor.email,
+    linkNote,
+    meeting: {
+      id: String(created._id),
+      title,
+      kind: kind as 'staff' | 'student' | 'client',
+      startsAt: start.toISOString(),
+      durationMins,
+      attendeeName,
+      meetingUrl,
+      bookedByEmail,
+    },
   }
 }

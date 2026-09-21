@@ -1973,6 +1973,55 @@ router.get('/mentors/:id/availability', requireInstructor, async (req: Request, 
   } catch (err) { next(err) }
 })
 
+/* GET /admin/mentors/:id/meetings — what has been booked with this mentor.
+
+   Guarded exactly like the availability routes beside it: an instructor sees
+   their own and nobody else's, and any other staff role is held to whichever
+   academies they may reach. A meeting names an outside client by name and
+   email, which is somebody's contact detail and not a thing to leave open to
+   whoever guesses an id.
+
+   These are booked from the Root portal, so without this an instructor would
+   learn about their own week only from the email they were sent. */
+router.get('/mentors/:id/meetings', requireInstructor, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { MentorMeetingModel } = await import('@/models/schema.ts')
+    const mentorId = String(req.params['id'] ?? '')
+    if (req.user!.role === 'instructor' && req.user!.id !== mentorId) {
+      res.status(403).json({ success: false, error: { code: 'FORBIDDEN', message: 'Cannot view another mentor\'s meetings' } }); return
+    }
+    if (req.user!.id !== mentorId && !(await callerMayAccessUser(req, mentorId))) {
+      res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Mentor not found' } }); return
+    }
+
+    /* Defaults to what is still to come. A mentor opening this wants to know
+       what is in front of them; the past is a different question. */
+    const from = typeof req.query['from'] === 'string' ? new Date(req.query['from']) : new Date()
+    const to = typeof req.query['to'] === 'string'
+      ? new Date(req.query['to'])
+      : new Date(Date.now() + 60 * 864e5)
+
+    const meetings = await MentorMeetingModel.find({
+      mentorId,
+      scheduledStart: { $gte: from, $lte: to },
+      cancelledAt: null,
+    }).sort({ scheduledStart: 1 }).lean()
+
+    sendSuccess(res, meetings.map(m => ({
+      id: String(m._id),
+      title: m.title,
+      kind: m.kind,
+      startsAt: new Date(m.scheduledStart).toISOString(),
+      durationMins: m.durationMins,
+      attendeeName: m.attendeeName,
+      attendeeEmail: m.attendeeEmail ?? '',
+      meetingUrl: m.meetingUrl ?? '',
+      notes: m.notes ?? '',
+      bookedByEmail: m.bookedByEmail,
+    })))
+  } catch (err) { next(err) }
+})
+
 router.put('/mentors/:id/availability', requireInstructor, validate(availabilityUpdateSchema), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { MentorAvailabilityModel } = await import('@/models/schema.ts')
