@@ -1603,3 +1603,65 @@ export async function sendMentorMeetingInvite(
     ].join("\n"),
   })
 }
+
+/* A meeting has moved, or is off.
+
+   Sent to everyone who was told about it in the first place. A time that
+   changes without reaching the people holding the old one is worse than a time
+   that never changed — they turn up to an empty room, or miss it entirely, and
+   for an outside client that is the whole relationship. */
+export async function sendMentorMeetingUpdate(
+  to: string,
+  name: string,
+  meeting: {
+    title: string
+    whenText: string
+    durationMins: number
+    withWhom: string
+    meetingUrl?: string
+    cancelled: boolean
+    byEmail: string
+  },
+): Promise<void> {
+  const subject = meeting.cancelled
+    ? `Cancelled — ${meeting.title}`
+    : `Moved — ${meeting.title} is now ${meeting.whenText}`
+
+  const body = meeting.cancelled
+    ? `<p>This meeting is no longer happening. Nothing is expected of you.</p>`
+    : `<table style="margin:16px 0;font-size:14px;color:#111">
+         <tr><td style="padding:4px 16px 4px 0;color:#6B7280">Now</td><td><strong>${escapeHtml(meeting.whenText)}</strong></td></tr>
+         <tr><td style="padding:4px 16px 4px 0;color:#6B7280">Length</td><td>${meeting.durationMins} minutes</td></tr>
+         <tr><td style="padding:4px 16px 4px 0;color:#6B7280">With</td><td>${escapeHtml(meeting.withWhom)}</td></tr>
+       </table>
+       ${meeting.meetingUrl
+         ? `<p style="margin:24px 0">
+              <a href="${escapeHtml(sanitiseUrl(meeting.meetingUrl))}" style="display:inline-block;background:linear-gradient(135deg,#0057b8,#2F6BFF);color:#fff;font-weight:600;padding:12px 24px;border-radius:12px;text-decoration:none">Join the meeting</a>
+            </p>`
+         : ''}`
+
+  const html = wrap(subject, `
+    <h2 style="margin:0 0 16px;font-size:20px;font-weight:700;color:#0D0F1A">${escapeHtml(meeting.title)}</h2>
+    <p>Hi ${escapeHtml(name)},</p>
+    ${body}
+    <p style="font-size:12px;color:#9CA3AF">Changed by ${escapeHtml(meeting.byEmail)}. If this does not look right, reply to them directly.</p>
+  `)
+
+  await sender.send({
+    to,
+    subject,
+    html,
+    text: meeting.cancelled
+      ? `${meeting.title} is cancelled. Nothing is expected of you.\n\nCancelled by ${meeting.byEmail}.`
+      : [
+          `${meeting.title} has moved.`,
+          ``,
+          `Now:    ${meeting.whenText}`,
+          `Length: ${meeting.durationMins} minutes`,
+          `With:   ${meeting.withWhom}`,
+          meeting.meetingUrl ? `\nJoin: ${meeting.meetingUrl}` : ``,
+          ``,
+          `Changed by ${meeting.byEmail}.`,
+        ].join("\n"),
+  })
+}

@@ -461,6 +461,9 @@ export interface PortalMentor {
        reach them, and addresses on a screen anybody in the academy can open is
        more than that question asks for. */
     attendeeNames: string[]
+    /* Who arranged it. The portal decides from this whether the person looking
+       may change it — they made it, or they administer the portal. */
+    bookedByEmail: string
   }[]
 }
 
@@ -529,7 +532,7 @@ export async function listMentorsForPortal(input: {
       scheduledStart: { $gte: from, $lte: to },
       cancelledAt: null,
     })
-      .select('title kind mentorId scheduledStart durationMins attendees')
+      .select('title kind mentorId scheduledStart durationMins attendees bookedByEmail')
       .lean(),
   ])
 
@@ -548,6 +551,7 @@ export async function listMentorsForPortal(input: {
       startsAt: new Date(m.scheduledStart).toISOString(),
       durationMins: m.durationMins ?? 0,
       attendeeNames: (m.attendees ?? []).map((a) => a.name).filter(Boolean),
+      bookedByEmail: m.bookedByEmail ?? '',
     })
     meetingsByMentor.set(key, list)
   }
@@ -605,6 +609,20 @@ export interface PortalMentorMeeting {
   attendees: { name: string; email?: string }[]
   meetingUrl: string
   bookedByEmail: string
+}
+
+/**
+ * The one way this application writes a meeting time to a person.
+ *
+ * Always in the academy's zone and always saying so. A mentor in Dubai and a
+ * client reading the same sentence somewhere else must not each resolve
+ * "14:00" against their own assumption and arrive an hour apart.
+ */
+function whenTextFor(start: Date): string {
+  return `${start.toLocaleString('en-GB', {
+    weekday: 'long', day: 'numeric', month: 'long',
+    hour: '2-digit', minute: '2-digit', timeZone: AVAILABILITY_TIMEZONE, hour12: false,
+  })} (${AVAILABILITY_TIMEZONE.replace('_', ' ')})`
 }
 
 /** Two spans on one calendar, overlapping. */
@@ -767,10 +785,7 @@ export async function createMentorMeetingForPortal(input: {
      Not awaited into the response: the meeting exists either way, and a slow
      mail server should not turn a successful booking into an error that has
      somebody book it a second time. */
-  const whenText = `${start.toLocaleString('en-GB', {
-    weekday: 'long', day: 'numeric', month: 'long',
-    hour: '2-digit', minute: '2-digit', timeZone: AVAILABILITY_TIMEZONE, hour12: false,
-  })} (${AVAILABILITY_TIMEZONE.replace('_', ' ')})`
+  const whenText = whenTextFor(start)
 
   const everyone = attendees.map((a) => a.name).join(', ')
 
@@ -811,4 +826,252 @@ export async function createMentorMeetingForPortal(input: {
       bookedByEmail,
     },
   }
+}
+
+/**
+ * Who is allowed to change a meeting once it exists.
+ *
+ * The person who arranged it, or somebody who administers the portal. Anybody
+ * may book an hour — that was a deliberate widening — but quietly moving a
+ * colleague's client call is a different act from making your own, and the
+ * people affected were told by name who arranged it.
+ */
+function mayManage(meeting: { bookedByEmail?: string }, actorEmail: string, actorIsRootAdmin: boolean): boolean {
+  if (actorIsRootAdmin) return true
+  return String(meeting.bookedByEmail ?? '').toLowerCase() === actorEmail.toLowerCase()
+}
+
+/** Everything about one meeting, for whoever is allowed to change it. */
+export async function getMentorMeetingForPortal(input: {
+  remoteOrgId?: string
+  meetingId?: string
+  actorEmail?: string
+  actorIsRootAdmin?: boolean
+}) {
+  const org = await resolveOrg(input.remoteOrgId)
+  const { MentorMeetingModel, UserModel } = await import('@/models/schema.ts')
+
+  const meeting = await MentorMeetingModel.findOne({
+    _id: String(input.meetingId ?? ''),
+    organizationId: org._id,
+    cancelledAt: null,
+  }).lean()
+  if (!meeting) throw httpError('No such meeting', 404)
+
+  const actorEmail = String(input.actorEmail ?? '').toLowerCase().trim()
+  if (!mayManage(meeting, actorEmail, Boolean(input.actorIsRootAdmin))) {
+    /* The same answer as a meeting that is not there. Somebody who may not
+       change this one has no business learning whose it is or who is on it. */
+    throw httpError('No such meeting', 404)
+  }
+
+  const mentor = await UserModel.findById(meeting.mentorId).select('name email').lean()
+
+  return {
+    id: String(meeting._id),
+    title: meeting.title,
+    kind: meeting.kind,
+    startsAt: new Date(meeting.scheduledStart).toISOString(),
+    durationMins: meeting.durationMins,
+    meetingUrl: meeting.meetingUrl ?? '',
+    notes: meeting.notes ?? '',
+    bookedByEmail: meeting.bookedByEmail,
+    mentorEmail: mentor?.email ?? '',
+    mentorName: mentor?.name ?? '',
+    attendees: (meeting.attendees ?? []).map((a) => ({ name: a.name, email: a.email ?? '' })),
+    timezone: AVAILABILITY_TIMEZONE,
+  }
+}
+
+/**
+ * Move a meeting, or change who is on it.
+ *
+ * The clash check excludes the meeting being edited. Without that a meeting
+ * always collides with itself and nothing is ever editable — which is the
+ * obvious bug in this feature and the reason the exclusion is written first.
+ *
+ * Everybody is told afterwards, not just the mentor. A client holding the old
+ * time is the entire problem a reschedule exists to solve.
+ */
+export async function updateMentorMeetingForPortal(input: {
+  remoteOrgId?: string
+  meetingId?: string
+  actorEmail?: string
+  actorIsRootAdmin?: boolean
+  title?: string
+  kind?: string
+  scheduledStart?: string
+  durationMins?: number
+  meetingUrl?: string
+  attendees?: unknown
+  notes?: string
+}) {
+  const org = await resolveOrg(input.remoteOrgId)
+  const { MentorMeetingModel, LiveClassModel, UserModel } = await import('@/models/schema.ts')
+
+  const meeting = await MentorMeetingModel.findOne({
+    _id: String(input.meetingId ?? ''),
+    organizationId: org._id,
+    cancelledAt: null,
+  })
+  if (!meeting) throw httpError('No such meeting', 404)
+
+  const actorEmail = String(input.actorEmail ?? '').toLowerCase().trim()
+  if (!mayManage(meeting, actorEmail, Boolean(input.actorIsRootAdmin))) {
+    throw httpError('Only the person who booked this, or a portal administrator, can change it', 403)
+  }
+
+  const title = input.title === undefined ? meeting.title : String(input.title).trim()
+  if (title.length < 3) throw httpError('A title of at least three characters is required', 400)
+
+  const kind = input.kind === undefined ? meeting.kind : String(input.kind)
+  if (!['staff', 'student', 'client'].includes(kind)) {
+    throw httpError('kind must be staff, student or client', 400)
+  }
+
+  const start = input.scheduledStart === undefined
+    ? new Date(meeting.scheduledStart)
+    : new Date(String(input.scheduledStart))
+  if (Number.isNaN(start.getTime())) throw httpError('scheduledStart is not a date', 400)
+
+  const durationMins = input.durationMins === undefined ? meeting.durationMins : Number(input.durationMins)
+  if (!Number.isInteger(durationMins) || durationMins < 5 || durationMins > 600) {
+    throw httpError('durationMins must be a whole number between 5 and 600', 400)
+  }
+
+  let attendees = (meeting.attendees ?? []).map((a) => ({ name: a.name, email: a.email ?? '' }))
+  if (input.attendees !== undefined) {
+    attendees = (Array.isArray(input.attendees) ? input.attendees : [])
+      .map((a) => {
+        const row = (a ?? {}) as { name?: unknown; email?: unknown }
+        return { name: String(row.name ?? '').trim(), email: String(row.email ?? '').toLowerCase().trim() }
+      })
+      .filter((a) => a.name.length > 0)
+      .slice(0, 25)
+    if (attendees.length === 0) throw httpError('Say who the mentor is meeting', 400)
+  }
+
+  const windowStart = new Date(start.getTime() - 12 * 3600e3)
+  const windowEnd = new Date(start.getTime() + 12 * 3600e3)
+
+  const [classes, meetings] = await Promise.all([
+    LiveClassModel.find({
+      instructorId: meeting.mentorId,
+      scheduledStart: { $gte: windowStart, $lte: windowEnd },
+      status: { $ne: 'cancelled' },
+    }).select('title scheduledStart durationMins').lean(),
+    MentorMeetingModel.find({
+      _id: { $ne: meeting._id },   // itself, excluded
+      mentorId: meeting.mentorId,
+      scheduledStart: { $gte: windowStart, $lte: windowEnd },
+      cancelledAt: null,
+    }).select('title scheduledStart durationMins').lean(),
+  ])
+
+  for (const c of classes) {
+    if (overlaps(start, durationMins, new Date(c.scheduledStart), c.durationMins ?? 0)) {
+      throw httpError(`That overlaps a class already booked: ${c.title}`, 409)
+    }
+  }
+  for (const m of meetings) {
+    if (overlaps(start, durationMins, new Date(m.scheduledStart), m.durationMins ?? 0)) {
+      throw httpError(`That overlaps a meeting already booked: ${m.title}`, 409)
+    }
+  }
+
+  const movedOrChanged =
+    +new Date(meeting.scheduledStart) !== +start ||
+    meeting.durationMins !== durationMins ||
+    meeting.title !== title
+
+  meeting.title = title
+  meeting.kind = kind as typeof meeting.kind
+  meeting.scheduledStart = start
+  meeting.durationMins = durationMins
+  meeting.attendees = attendees
+  if (input.meetingUrl !== undefined) meeting.meetingUrl = String(input.meetingUrl).trim()
+  if (input.notes !== undefined) meeting.notes = String(input.notes).trim()
+  await meeting.save()
+
+  const mentor = await UserModel.findById(meeting.mentorId).select('name email').lean()
+  const whenText = whenTextFor(start)
+  const everyone = attendees.map((a) => a.name).join(', ')
+
+  /* Only when something they would act on has changed. A corrected spelling in
+     the notes is not worth a second email to an outside client. */
+  if (movedOrChanged) {
+    void (async () => {
+      const { sendMentorMeetingUpdate } = await import('@/services/email.service.ts')
+      const common = {
+        title, whenText, durationMins,
+        meetingUrl: meeting.meetingUrl ?? '', cancelled: false, byEmail: actorEmail,
+      }
+      if (mentor?.email) {
+        await sendMentorMeetingUpdate(mentor.email, mentor.name ?? '', { ...common, withWhom: everyone }).catch(() => {})
+      }
+      for (const a of attendees) {
+        if (!a.email) continue
+        await sendMentorMeetingUpdate(a.email, a.name, { ...common, withWhom: mentor?.name ?? mentor?.email ?? '' }).catch(() => {})
+      }
+    })()
+  }
+
+  return { id: String(meeting._id), title, startsAt: start.toISOString(), durationMins, notified: movedOrChanged }
+}
+
+/**
+ * Call a meeting off.
+ *
+ * Marked rather than deleted. People were emailed about this hour; a row that
+ * simply vanishes leaves nothing to explain why somebody turned up for it. The
+ * calendar already ignores cancelled meetings, so it disappears from view
+ * either way — the difference is only whether the record survives the question
+ * "what happened to Tuesday".
+ */
+export async function cancelMentorMeetingForPortal(input: {
+  remoteOrgId?: string
+  meetingId?: string
+  actorEmail?: string
+  actorIsRootAdmin?: boolean
+}) {
+  const org = await resolveOrg(input.remoteOrgId)
+  const { MentorMeetingModel, UserModel } = await import('@/models/schema.ts')
+
+  const meeting = await MentorMeetingModel.findOne({
+    _id: String(input.meetingId ?? ''),
+    organizationId: org._id,
+    cancelledAt: null,
+  })
+  if (!meeting) throw httpError('No such meeting', 404)
+
+  const actorEmail = String(input.actorEmail ?? '').toLowerCase().trim()
+  if (!mayManage(meeting, actorEmail, Boolean(input.actorIsRootAdmin))) {
+    throw httpError('Only the person who booked this, or a portal administrator, can cancel it', 403)
+  }
+
+  meeting.cancelledAt = new Date()
+  await meeting.save()
+
+  const mentor = await UserModel.findById(meeting.mentorId).select('name email').lean()
+  const attendees = (meeting.attendees ?? []).map((a) => ({ name: a.name, email: a.email ?? '' }))
+
+  void (async () => {
+    const { sendMentorMeetingUpdate } = await import('@/services/email.service.ts')
+    const common = {
+      title: meeting.title,
+      whenText: whenTextFor(new Date(meeting.scheduledStart)),
+      durationMins: meeting.durationMins,
+      cancelled: true,
+      byEmail: actorEmail,
+    }
+    if (mentor?.email) {
+      await sendMentorMeetingUpdate(mentor.email, mentor.name ?? '', { ...common, withWhom: attendees.map(a => a.name).join(', ') }).catch(() => {})
+    }
+    for (const a of attendees) {
+      if (!a.email) continue
+      await sendMentorMeetingUpdate(a.email, a.name, { ...common, withWhom: mentor?.name ?? '' }).catch(() => {})
+    }
+  })()
+
+  return { id: String(meeting._id), cancelled: true }
 }

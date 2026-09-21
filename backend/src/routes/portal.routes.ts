@@ -8,6 +8,9 @@ import {
   describeManyForPortal,
   listMentorsForPortal,
   createMentorMeetingForPortal,
+  getMentorMeetingForPortal,
+  updateMentorMeetingForPortal,
+  cancelMentorMeetingForPortal,
   setUserRoleFromPortal,
   provisionFromPortal,
 } from '@/services/portal.service.ts'
@@ -123,6 +126,44 @@ router.post('/mentor-meetings', wrap(async (req, res) => {
     ...body,
     remoteOrgId: (body.remoteOrgId as string) ?? orgOf(req),
   } as Parameters<typeof createMentorMeetingForPortal>[0]), 'Meeting booked')
+}))
+
+/* One meeting in full, for whoever may change it.
+
+   Who is asking travels in the query string: this server has no idea who is
+   signed in to the portal, and the answer differs depending on whether they
+   arranged this hour. A caller who may not change it is told the meeting does
+   not exist — no business learning whose it is or who is on it. */
+router.get('/mentor-meetings/:id', wrap(async (req, res) => {
+  sendSuccess(res, await getMentorMeetingForPortal({
+    remoteOrgId: orgOf(req),
+    meetingId: String(req.params['id'] ?? ''),
+    actorEmail: typeof req.query['actorEmail'] === 'string' ? req.query['actorEmail'] : '',
+    actorIsRootAdmin: req.query['actorIsRootAdmin'] === 'true',
+  }), 'Meeting')
+}))
+
+/* Move it, or change who is on it. */
+router.patch('/mentor-meetings/:id', wrap(async (req, res) => {
+  const body = (req.body ?? {}) as Record<string, unknown>
+  sendSuccess(res, await updateMentorMeetingForPortal({
+    ...body,
+    remoteOrgId: (body.remoteOrgId as string) ?? orgOf(req),
+    meetingId: String(req.params['id'] ?? ''),
+  } as Parameters<typeof updateMentorMeetingForPortal>[0]), 'Meeting updated')
+}))
+
+/* Call it off. A POST rather than a DELETE because nothing is deleted: the row
+   is marked and kept, so there is still an answer to "what happened to
+   Tuesday" after it has vanished from the calendar. */
+router.post('/mentor-meetings/:id/cancel', wrap(async (req, res) => {
+  const body = (req.body ?? {}) as Record<string, unknown>
+  sendSuccess(res, await cancelMentorMeetingForPortal({
+    remoteOrgId: (body.remoteOrgId as string) ?? orgOf(req),
+    meetingId: String(req.params['id'] ?? ''),
+    actorEmail: String(body.actorEmail ?? ''),
+    actorIsRootAdmin: body.actorIsRootAdmin === true,
+  }), 'Meeting cancelled')
 }))
 
 export default router
