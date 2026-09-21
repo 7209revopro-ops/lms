@@ -12,7 +12,7 @@ import {
   UserCheck, LayoutGrid, Building2, MapPin, UserPlus,
   ChevronDown, User, Globe,
 } from 'lucide-react'
-import { useAllLiveClasses, useCreateLiveClass, type LiveClass, type LiveClassType } from '@/lib/api/liveClasses'
+import { useAllLiveClasses, useCreateLiveClass, useMyMeetings, type LiveClass, type LiveClassType, type MentorMeeting } from '@/lib/api/liveClasses'
 import { CLASS_LANGUAGES } from '@/lib/languages'
 import { datetimeLocalToISO, zoneOf, foreignZoneTag } from '@/lib/timezone'
 import { useCourses } from '@/lib/api/courses'
@@ -726,7 +726,15 @@ function TableRow({ live, index, showInstructor }: { live: LiveClass; index: num
 }
 
 /* ── Calendar view ───────────────────────────────────── */
-function CalendarView({ items, onSlotClick }: { items: LiveClass[]; onSlotClick: (date: Date) => void }) {
+function CalendarView({ items, meetings = [], onSlotClick }: {
+  items: LiveClass[]
+  /* Booked from the Root portal and not classes: nobody enrols and no cohort is
+     told. Carried separately rather than folded into `items` because they are
+     genuinely a different thing — pretending otherwise would mean inventing
+     LiveClass fields nothing would fill honestly. */
+  meetings?: MentorMeeting[]
+  onSlotClick: (date: Date) => void
+}) {
   const todayRef = useMemo(() => { const d = new Date(); d.setHours(0, 0, 0, 0); return d }, [])
 
   const [monthDate, setMonthDate] = useState<Date>(() => {
@@ -791,6 +799,11 @@ function CalendarView({ items, onSlotClick }: { items: LiveClass[]; onSlotClick:
     items
       .filter(l => new Date(l.scheduledStart).toDateString() === day.toDateString())
       .sort((a, b) => +new Date(a.scheduledStart) - +new Date(b.scheduledStart))
+
+  const getMeetingsForDay = (day: Date) =>
+    meetings
+      .filter(m => new Date(m.startsAt).toDateString() === day.toDateString())
+      .sort((a, b) => +new Date(a.startsAt) - +new Date(b.startsAt))
 
   const chipColor = (live: LiveClass) => {
     const isOffline = (live as any).isOnline === false
@@ -864,6 +877,7 @@ function CalendarView({ items, onSlotClick }: { items: LiveClass[]; onSlotClick:
               const isCurrentMonth = day.getMonth() === month
               const isToday        = day.toDateString() === todayRef.toDateString()
               const sessions       = getSessionsForDay(day)
+              const dayMeetings    = getMeetingsForDay(day)
               const overflow       = sessions.length - MAX_CHIPS
 
               return (
@@ -919,6 +933,24 @@ function CalendarView({ items, onSlotClick }: { items: LiveClass[]; onSlotClick:
                         </Button>
                       )
                     })}
+                    {/* Meetings booked from the Root portal. Violet, the same
+                        colour that calendar uses, so somebody looking at both
+                        screens is not asked to learn two vocabularies for one
+                        hour. Labelled by who rather than by what: on a month
+                        cell "Rahul Menon" says whether it can move and "Intro
+                        call" does not. */}
+                    {dayMeetings.map(mt => (
+                      <div
+                        key={mt.id}
+                        title={`${mt.title} · with ${mt.attendeeName} · ${mt.durationMins} min · booked by ${mt.bookedByEmail}`}
+                        className="w-full rounded-md px-2 py-1"
+                        style={{ background: 'rgba(167,139,250,0.15)', border: '1px solid rgba(167,139,250,0.30)' }}>
+                        <p className="truncate text-[10px] font-semibold leading-tight" style={{ color: '#A78BFA' }}>
+                          {fmtTime(mt.startsAt, undefined)} · {mt.attendeeName || mt.title}
+                        </p>
+                      </div>
+                    ))}
+
                     {overflow > 0 && (
                       <button
                         type="button"
@@ -1650,6 +1682,11 @@ export default function LiveClassesPage() {
   const { data: me } = useCurrentUser()
   const isInstructor = me?.role === 'instructor'
 
+  /* Time booked with this person from the Root portal — a staff catch-up, one
+     student, an outside client. Not classes, but the same hours: a calendar
+     showing only classes would say they were free when they are not. */
+  const { data: myMeetings = [] } = useMyMeetings(me?.id)
+
   const { data: rawItems = [], isLoading, isError } = useAllLiveClasses(activeFilter)
   const { data: coursesData } = useCourses({ per_page: 200 })
   const courses = coursesData?.docs ?? []
@@ -1964,7 +2001,7 @@ export default function LiveClassesPage() {
 
       {/* Monthly calendar view */}
       {view === 'month' && (
-        <CalendarView items={items} onSlotClick={handleCalendarSlotClick} />
+        <CalendarView items={items} meetings={myMeetings} onSlotClick={handleCalendarSlotClick} />
       )}
 
       {/* Grid calendar view */}

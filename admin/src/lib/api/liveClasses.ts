@@ -586,3 +586,38 @@ export function isInteractiveRoom(
   if (!l) return false
   return l.provider === 'livekit' || !!l.cltRoomName
 }
+
+/* ── Mentor meetings ──────────────────────────────────────
+   Time booked with a mentor from the Root portal: a staff catch-up, one
+   student, or an outside client. Not classes — nobody enrols, no cohort is
+   told — but they occupy the same hours, so the calendar that shows one has to
+   show the other or it is quietly lying about who is free. */
+export interface MentorMeeting {
+  id:            string
+  title:         string
+  kind:          'staff' | 'student' | 'client'
+  startsAt:      string
+  durationMins:  number
+  attendeeName:  string
+  attendeeEmail: string
+  meetingUrl:    string
+  notes:         string
+  bookedByEmail: string
+}
+
+export const meetingKeys = {
+  mine: (id: string | undefined) => ['mentor-meetings', id] as const,
+}
+
+export function useMyMeetings(mentorId: string | undefined) {
+  return useQuery({
+    queryKey: meetingKeys.mine(mentorId),
+    enabled:  Boolean(mentorId),
+    queryFn:  () => apiGet<MentorMeeting[]>(`/admin/mentors/${mentorId}/meetings`),
+    staleTime: 60_000,
+    /* One failure should not colour the whole page red. A deployment where the
+       endpoint is not there yet must cost the meeting chips and nothing else —
+       the classes beside them are the reason most people opened this. */
+    retry: false,
+  })
+}

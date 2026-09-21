@@ -30,18 +30,27 @@ function DayRow({
   onAdd:    () => void
   onRemove: (idx: number) => void
 }) {
-  const inputBase = 'rounded-lg border bg-white px-2 py-1.5 text-sm outline-none focus:border-[#0057b8] focus:ring-2 focus:ring-blue-100 transition-all'
-  const inputStyle = { borderColor: '#E4E7ED', color: '#0D0F1A' }
+  /* The panel and control colours the rest of this app uses. There are no
+     theme tokens here — every surface is an inline hex — so this page had a
+     white card and near-black text sitting in a dark dashboard, which is how
+     it came to look like somebody else's screen. */
+  const PANEL   = '#1a1d2e'
+  const SURFACE = '#1e2035'
+  const BORDER  = 'rgba(255,255,255,0.12)'
+  const TEXT    = '#E8EAF2'
+
+  const inputBase = 'rounded-lg border px-2 py-1.5 text-sm outline-none focus:border-[#0057b8] focus:ring-2 focus:ring-[rgba(0,87,184,0.35)] transition-all [color-scheme:dark]'
+  const inputStyle = { background: SURFACE, borderColor: BORDER, color: TEXT }
 
   return (
-    <div className="rounded-2xl border bg-white p-4" style={{ borderColor: '#E4E7ED' }}>
+    <div className="rounded-2xl border p-4" style={{ background: PANEL, borderColor: BORDER }}>
       <div className="flex items-center justify-between mb-3">
         <div className="flex items-center gap-2">
           <div className="flex h-7 w-7 items-center justify-center rounded-lg text-xs font-bold text-white"
-            style={{ background: slots.length > 0 ? 'linear-gradient(135deg,#0057b8,#003d80)' : '#D1D5DB' }}>
+            style={{ background: slots.length > 0 ? 'linear-gradient(135deg,#0057b8,#003d80)' : 'rgba(255,255,255,0.14)' }}>
             {SHORT_DAYS[day]}
           </div>
-          <p className="text-sm font-semibold" style={{ color: '#0D0F1A' }}>{DAYS[day]}</p>
+          <p className="text-sm font-semibold" style={{ color: TEXT }}>{DAYS[day]}</p>
           {slots.length > 0 && (
             <span className="rounded-full px-2 py-0.5 text-[10px] font-bold"
               style={{ background: 'rgba(0,87,184,0.10)', color: '#0057b8' }}>
@@ -51,7 +60,7 @@ function DayRow({
         </div>
         {slots.length < 3 && (
           <button onClick={onAdd}
-            className="flex items-center gap-1 rounded-lg px-2.5 py-1 text-xs font-semibold transition-colors hover:bg-orange-50"
+            className="flex items-center gap-1 rounded-lg px-2.5 py-1 text-xs font-semibold transition-colors hover:bg-[rgba(0,87,184,0.15)]"
             style={{ color: '#0057b8', border: '1px solid rgba(0,87,184,0.25)' }}>
             <Plus size={11} />Add slot
           </button>
@@ -74,12 +83,12 @@ function DayRow({
                 <input type="time" value={slot.endTime}
                   onChange={e => onChange(idx, 'endTime', e.target.value)}
                   className={`${inputBase} ${invalid ? 'ring-2 ring-red-300 border-red-300' : ''}`}
-                  style={invalid ? { borderColor: '#EF4444', color: '#0D0F1A' } : inputStyle} />
+                  style={invalid ? { ...inputStyle, borderColor: '#EF4444' } : inputStyle} />
                 {invalid && (
                   <span className="text-[10px] font-medium" style={{ color: '#EF4444' }}>End must be after start</span>
                 )}
                 <button onClick={() => onRemove(idx)}
-                  className="ml-auto flex h-7 w-7 items-center justify-center rounded-lg transition-colors hover:bg-red-50"
+                  className="ml-auto flex h-7 w-7 items-center justify-center rounded-lg transition-colors hover:bg-[rgba(239,68,68,0.15)]"
                   style={{ color: '#EF4444' }}>
                   <Trash2 size={12} />
                 </button>
@@ -186,7 +195,7 @@ export default function AvailabilityPage() {
         style={{ background: 'rgba(0,87,184,0.06)', border: '1px solid rgba(0,87,184,0.15)' }}>
         <CalendarDays size={15} style={{ color: '#0057b8', marginTop: 1, flexShrink: 0 }} />
         <div>
-          <p className="text-sm font-semibold" style={{ color: '#0D0F1A' }}>Weekly recurring schedule</p>
+          <p className="text-sm font-semibold" style={{ color: '#E8EAF2' }}>Weekly recurring schedule</p>
           <p className="text-xs mt-0.5" style={{ color: '#6B7280' }}>
             These slots repeat every week. Admins use them to schedule sessions that match your availability.
             Maximum 3 slots per day.
