@@ -511,6 +511,33 @@ export class AuthService {
     logger.info({ userId }, 'All sessions revoked')
   }
 
+  /* ── End whatever session this browser was already holding ──
+       Arriving from the portal replaces who this browser is, so the session it
+       replaces should stop being a session rather than merely stop being
+       reachable. Clearing the cookie only takes it out of reach of the person
+       at the keyboard; anyone holding a copy of that refresh token keeps a
+       working session until it expires on its own.
+
+       Only the tokens this request actually arrived with, never every session
+       the account has. Signing in through the portal on an office machine is
+       not a reason to end somebody's session on their phone — the thing being
+       displaced is this browser, and that is all that should be. */
+  async displacePriorSessions(rawRefreshTokens: (string | undefined)[]): Promise<number> {
+    let revoked = 0
+    for (const raw of rawRefreshTokens) {
+      if (!raw) continue
+      try {
+        await this.tokenRepo.revokeToken(this.#hashToken(raw), 'logout')
+        revoked += 1
+      } catch {
+        /* A stale, forged or already-revoked cookie is not a session, and
+           failing to end one that was never live must not stop the sign-in
+           that is replacing it. */
+      }
+    }
+    return revoked
+  }
+
   /* ── List active sessions for the current user ─────
        Marks the session matching the supplied refresh token
        as `isCurrent: true` so the UI can label it. */

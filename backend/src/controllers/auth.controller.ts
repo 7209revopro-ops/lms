@@ -262,6 +262,34 @@ export class AuthController {
         })
         return
       }
+
+      /* ARRIVING FROM THE PORTAL REPLACES WHO THIS BROWSER IS.
+
+         Writing the admin cookies was not enough, and in one case was not even
+         effective. Identity here resolves impersonation cookie first, then
+         bearer, then admin, then client — so a browser still carrying a stale
+         `lms_imp_at` kept being the impersonated account no matter whose
+         session had just been handed to it. The sign-in reported success, the
+         cookies were written, and every request afterwards was somebody else.
+         That is the worst shape a bug can take: silent, and about identity.
+
+         So everything the previous occupant left is taken down first, and the
+         sessions behind those cookies are revoked rather than merely dropped —
+         a cookie cleared is out of reach, but a refresh token somebody copied
+         still works until it expires. Only the tokens this request arrived
+         with are revoked; other devices are none of this arrival's business.
+
+         Order matters: clear, then set. The client cookies go too, because an
+         SSO arrival means this browser is now this person, and leaving a
+         student session underneath is the same trap one layer down. */
+      await this.service.displacePriorSessions([
+        req.cookies?.[ADMIN_REFRESH_COOKIE],
+        req.cookies?.[REFRESH_COOKIE],
+      ])
+      clearImpersonationCookie(res)
+      clearAuthCookies(res)
+      clearAdminAuthCookies(res)
+
       setAdminAuthCookies(res, result.tokens)
       sendSuccess(res, { user: result.user }, 'Signed in successfully')
     } catch (err) {
