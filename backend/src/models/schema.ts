@@ -2303,11 +2303,13 @@ export interface IMentorMeeting extends Document {
      meeting with no link is still a meeting and losing the booking over it
      would be worse. */
   meetingUrl?:    string
-  /* Who the mentor is meeting. Free text on purpose: an outside client has no
-     account here, and requiring one would make the commonest reason for this
-     feature the one case it could not express. */
-  attendeeName:   string
-  attendeeEmail?: string
+  /* Who the mentor is meeting — one or many.
+     Free text on purpose: an outside client has no account here, and requiring
+     one would make the commonest reason for this feature the one case it could
+     not express. A list rather than a single name because a staff meeting is
+     rarely two people, and everybody with an address on it gets the invitation
+     and the joining link. */
+  attendees:      { name: string; email?: string }[]
   notes?:         string
   /* Who booked it, in the portal. Kept as an address rather than a reference
      because they are an account in another system entirely. */
@@ -2326,8 +2328,17 @@ const MentorMeetingSchema = new Schema<IMentorMeeting>(
     scheduledStart: { type: Date, required: true, index: true },
     durationMins:   { type: Number, required: true, min: 5, max: 600 },
     meetingUrl:     { type: String, default: '' },
-    attendeeName:   { type: String, required: true, trim: true, maxlength: 255 },
-    attendeeEmail:  { type: String, default: '', lowercase: true, trim: true },
+    attendees:      {
+      type: [new Schema<{ name: string; email?: string }>({
+        name:  { type: String, required: true, trim: true, maxlength: 255 },
+        email: { type: String, default: '', lowercase: true, trim: true },
+      }, { _id: false })],
+      required: true,
+      validate: {
+        validator: (v: unknown[]) => Array.isArray(v) && v.length > 0,
+        message: 'A meeting needs at least one attendee',
+      },
+    },
     notes:          { type: String, default: '', maxlength: 2000 },
     bookedByEmail:  { type: String, required: true, lowercase: true, trim: true },
     cancelledAt:    { type: Date, default: null },

@@ -457,7 +457,10 @@ export interface PortalMentor {
     kind: string
     startsAt: string
     durationMins: number
-    attendeeName: string
+    /* Names only in the listing. The calendar needs to say who, not how to
+       reach them, and addresses on a screen anybody in the academy can open is
+       more than that question asks for. */
+    attendeeNames: string[]
   }[]
 }
 
@@ -526,7 +529,7 @@ export async function listMentorsForPortal(input: {
       scheduledStart: { $gte: from, $lte: to },
       cancelledAt: null,
     })
-      .select('title kind mentorId scheduledStart durationMins attendeeName')
+      .select('title kind mentorId scheduledStart durationMins attendees')
       .lean(),
   ])
 
@@ -544,7 +547,7 @@ export async function listMentorsForPortal(input: {
       kind: String(m.kind ?? ''),
       startsAt: new Date(m.scheduledStart).toISOString(),
       durationMins: m.durationMins ?? 0,
-      attendeeName: m.attendeeName ?? '',
+      attendeeNames: (m.attendees ?? []).map((a) => a.name).filter(Boolean),
     })
     meetingsByMentor.set(key, list)
   }
@@ -599,7 +602,7 @@ export interface PortalMentorMeeting {
   kind: 'staff' | 'student' | 'client'
   startsAt: string
   durationMins: number
-  attendeeName: string
+  attendees: { name: string; email?: string }[]
   meetingUrl: string
   bookedByEmail: string
 }
@@ -637,8 +640,7 @@ export async function createMentorMeetingForPortal(input: {
   scheduledStart?: string
   durationMins?: number
   meetingUrl?: string
-  attendeeName?: string
-  attendeeEmail?: string
+  attendees?: unknown
   notes?: string
   bookedByEmail?: string
 }): Promise<{ meeting: PortalMentorMeeting; mentorEmail: string; linkNote: string | null }> {
@@ -652,8 +654,21 @@ export async function createMentorMeetingForPortal(input: {
     throw httpError('kind must be staff, student or client', 400)
   }
 
-  const attendeeName = String(input.attendeeName ?? '').trim()
-  if (!attendeeName) throw httpError('Say who the mentor is meeting', 400)
+  /* At least one person, and only the ones actually named. A row somebody
+     started and abandoned in the form should not become an attendee with an
+     empty name, and an address without a name is nobody. */
+  const attendees = (Array.isArray(input.attendees) ? input.attendees : [])
+    .map((a) => {
+      const row = (a ?? {}) as { name?: unknown; email?: unknown }
+      return {
+        name: String(row.name ?? '').trim(),
+        email: String(row.email ?? '').toLowerCase().trim(),
+      }
+    })
+    .filter((a) => a.name.length > 0)
+    .slice(0, 25)
+
+  if (attendees.length === 0) throw httpError('Say who the mentor is meeting', 400)
 
   const bookedByEmail = String(input.bookedByEmail ?? '').toLowerCase().trim()
   if (!bookedByEmail) throw httpError('bookedByEmail is required', 400)
@@ -740,8 +755,7 @@ export async function createMentorMeetingForPortal(input: {
     scheduledStart: start,
     durationMins,
     meetingUrl,
-    attendeeName,
-    attendeeEmail: String(input.attendeeEmail ?? '').toLowerCase().trim(),
+    attendees,
     notes: String(input.notes ?? '').trim(),
     bookedByEmail,
   })
@@ -758,15 +772,26 @@ export async function createMentorMeetingForPortal(input: {
     hour: '2-digit', minute: '2-digit', timeZone: AVAILABILITY_TIMEZONE, hour12: false,
   })} (${AVAILABILITY_TIMEZONE.replace('_', ' ')})`
 
+  const everyone = attendees.map((a) => a.name).join(', ')
+
   void (async () => {
     const { sendMentorMeetingInvite } = await import('@/services/email.service.ts')
     const common = { title, whenText, durationMins, meetingUrl, notes: String(input.notes ?? '').trim(), bookedByEmail }
+
+    /* The mentor is told who is coming, as one list. */
     await sendMentorMeetingInvite(mentor.email, mentor.name ?? '', {
-      ...common, withWhom: attendeeName,
+      ...common, withWhom: everyone,
     }).catch(() => {})
-    const attendee = String(input.attendeeEmail ?? '').trim()
-    if (attendee) {
-      await sendMentorMeetingInvite(attendee, attendeeName, {
+
+    /* And everybody with an address gets the same invitation and the same
+       link. Each is told they are meeting the mentor rather than being handed
+       the guest list — an outside client has no business knowing who else was
+       invited, and one of these goes to people outside the company. Sent one
+       at a time for the same reason: a single message with everybody in `to`
+       would publish their addresses to each other. */
+    for (const a of attendees) {
+      if (!a.email) continue
+      await sendMentorMeetingInvite(a.email, a.name, {
         ...common, withWhom: mentor.name ?? mentor.email,
       }).catch(() => {})
     }
@@ -781,7 +806,7 @@ export async function createMentorMeetingForPortal(input: {
       kind: kind as 'staff' | 'student' | 'client',
       startsAt: start.toISOString(),
       durationMins,
-      attendeeName,
+      attendees,
       meetingUrl,
       bookedByEmail,
     },

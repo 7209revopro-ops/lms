@@ -598,8 +598,7 @@ export interface MentorMeeting {
   kind:          'staff' | 'student' | 'client'
   startsAt:      string
   durationMins:  number
-  attendeeName:  string
-  attendeeEmail: string
+  attendees:     { name: string; email: string }[]
   meetingUrl:    string
   notes:         string
   bookedByEmail: string

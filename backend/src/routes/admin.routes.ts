@@ -2013,8 +2013,9 @@ router.get('/mentors/:id/meetings', requireInstructor, async (req: Request, res:
       kind: m.kind,
       startsAt: new Date(m.scheduledStart).toISOString(),
       durationMins: m.durationMins,
-      attendeeName: m.attendeeName,
-      attendeeEmail: m.attendeeEmail ?? '',
+      /* The mentor's own view, so the full list with addresses: they are the
+         one person who may need to reach the people they are meeting. */
+      attendees: (m.attendees ?? []).map(a => ({ name: a.name, email: a.email ?? '' })),
       meetingUrl: m.meetingUrl ?? '',
       notes: m.notes ?? '',
       bookedByEmail: m.bookedByEmail,

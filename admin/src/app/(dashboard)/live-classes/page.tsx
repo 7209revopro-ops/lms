@@ -942,11 +942,11 @@ function CalendarView({ items, meetings = [], onSlotClick }: {
                     {dayMeetings.map(mt => (
                       <div
                         key={mt.id}
-                        title={`${mt.title} · with ${mt.attendeeName} · ${mt.durationMins} min · booked by ${mt.bookedByEmail}`}
+                        title={`${mt.title} · with ${mt.attendees.map(a => a.name).join(', ')} · ${mt.durationMins} min · booked by ${mt.bookedByEmail}`}
                         className="w-full rounded-md px-2 py-1"
                         style={{ background: 'rgba(167,139,250,0.15)', border: '1px solid rgba(167,139,250,0.30)' }}>
                         <p className="truncate text-[10px] font-semibold leading-tight" style={{ color: '#A78BFA' }}>
-                          {fmtTime(mt.startsAt, undefined)} · {mt.attendeeName || mt.title}
+                          {fmtTime(mt.startsAt, undefined)} · {mt.attendees.map(a => a.name).join(', ') || mt.title}
                         </p>
                       </div>
                     ))}
