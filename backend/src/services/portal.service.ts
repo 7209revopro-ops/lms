@@ -406,3 +406,151 @@ export async function describeManyForPortal(input: {
     }),
   }
 }
+
+/**
+ * The zone those "HH:MM" slots have always meant.
+ *
+ * `IAvailabilitySlot` stores start and end as bare strings with nothing
+ * recording a zone, so they have only ever been readable as local time in the
+ * academy's own — which is this. Said out loud here because the portal shows
+ * systems across several zones, and a slot rendered in the wrong one is off by
+ * ninety minutes while looking perfectly reasonable.
+ *
+ * The classes alongside them are real timestamps and carry no such ambiguity,
+ * which is exactly why this has to be stated rather than assumed: the two
+ * halves of one calendar would otherwise disagree with each other quietly.
+ */
+const AVAILABILITY_TIMEZONE = 'Asia/Dubai'
+
+/** The widest window this will answer for in one question. */
+const MAX_WINDOW_DAYS = 62
+
+export interface PortalMentorClass {
+  id: string
+  /** Null when the class belongs to another academy — see below. */
+  title: string | null
+  startsAt: string
+  durationMins: number
+  status: string
+  booked: number
+  capacity: number
+  /** Whether this class belongs to the academy that asked. */
+  mine: boolean
+}
+
+export interface PortalMentor {
+  id: string
+  name: string
+  email: string
+  /** Lent to this academy rather than belonging to it. */
+  shared: boolean
+  slots: { dayOfWeek: number; startTime: string; endTime: string }[]
+  classes: PortalMentorClass[]
+}
+
+/**
+ * Who teaches here, when they are free, and what is already in the diary.
+ *
+ * Two different things, deliberately both: the recurring slots are the pattern
+ * somebody set — "Tuesdays, nine to twelve" — and the classes are what has
+ * actually been booked into it. Either alone answers half of "who is free on
+ * Thursday", and the half it leaves out is the half that matters.
+ *
+ * Mentors are the instructors this academy may see: its own, plus the ones
+ * lent to it. That is the same rule the LMS applies everywhere else for shared
+ * instructors, rather than a second definition invented here.
+ *
+ * Every class in the window comes back, including ones belonging to the other
+ * academy — but those arrive without a title. An hour a mentor is teaching is
+ * an hour they are not free, and hiding the class entirely would show them as
+ * available and have somebody book over it. Naming it would hand one academy
+ * the other's timetable. So the time is shared and the subject is not.
+ */
+export async function listMentorsForPortal(input: {
+  remoteOrgId?: string
+  from?: string
+  to?: string
+}): Promise<{ timezone: string; from: string; to: string; mentors: PortalMentor[] }> {
+  const org = await resolveOrg(input.remoteOrgId)
+
+  const from = input.from ? new Date(input.from) : new Date()
+  if (Number.isNaN(from.getTime())) throw httpError('from is not a date', 400)
+
+  const to = input.to ? new Date(input.to) : new Date(from.getTime() + 7 * 864e5)
+  if (Number.isNaN(to.getTime())) throw httpError('to is not a date', 400)
+  if (to <= from) throw httpError('to must be after from', 400)
+  if (to.getTime() - from.getTime() > MAX_WINDOW_DAYS * 864e5) {
+    throw httpError(`At most ${MAX_WINDOW_DAYS} days at a time`, 400)
+  }
+
+  const { UserModel, MentorAvailabilityModel } = await import('@/models/schema.ts')
+  const { LiveClassModel } = await import('@/models/schema.ts')
+
+  const mentors = await UserModel.find({
+    role: 'instructor',
+    $or: [{ organizationId: org._id }, { sharedAcrossOrgs: true }],
+  })
+    .select('name email organizationId sharedAcrossOrgs')
+    .lean()
+
+  if (mentors.length === 0) {
+    return { timezone: AVAILABILITY_TIMEZONE, from: from.toISOString(), to: to.toISOString(), mentors: [] }
+  }
+
+  const ids = mentors.map((m) => m._id)
+
+  // Both sides fetched once for the whole list rather than per mentor.
+  const [availability, classes] = await Promise.all([
+    MentorAvailabilityModel.find({ mentorId: { $in: ids } }).lean(),
+    LiveClassModel.find({
+      instructorId: { $in: ids },
+      scheduledStart: { $gte: from, $lte: to },
+    })
+      .select('title instructorId scheduledStart durationMins status bookedCount sessionCapacity organizationId')
+      .lean(),
+  ])
+
+  const slotsByMentor = new Map(
+    availability.map((a) => [String(a.mentorId), a.slots ?? []]),
+  )
+
+  const classesByMentor = new Map<string, PortalMentorClass[]>()
+  for (const c of classes) {
+    const key = String(c.instructorId)
+    const mine = String(c.organizationId ?? '') === String(org._id)
+    const list = classesByMentor.get(key) ?? []
+    list.push({
+      id: String(c._id),
+      title: mine ? (c.title ?? '') : null,
+      startsAt: new Date(c.scheduledStart).toISOString(),
+      durationMins: c.durationMins ?? 0,
+      status: String(c.status ?? ''),
+      booked: c.bookedCount ?? 0,
+      capacity: c.sessionCapacity ?? 0,
+      mine,
+    })
+    classesByMentor.set(key, list)
+  }
+
+  return {
+    timezone: AVAILABILITY_TIMEZONE,
+    from: from.toISOString(),
+    to: to.toISOString(),
+    mentors: mentors
+      .map((m) => ({
+        id: String(m._id),
+        name: m.name ?? '',
+        email: m.email ?? '',
+        shared: String(m.organizationId ?? '') !== String(org._id),
+        slots: (slotsByMentor.get(String(m._id)) ?? []).map((s) => ({
+          dayOfWeek: s.dayOfWeek,
+          startTime: s.startTime,
+          endTime: s.endTime,
+        })),
+        classes: (classesByMentor.get(String(m._id)) ?? []).sort((a, b) =>
+          a.startsAt.localeCompare(b.startsAt),
+        ),
+      }))
+      .sort((a, b) => a.name.localeCompare(b.name)),
+  }
+}

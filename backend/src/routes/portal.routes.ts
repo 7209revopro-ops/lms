@@ -6,6 +6,7 @@ import {
   listRolesForPortal,
   describeUserForPortal,
   describeManyForPortal,
+  listMentorsForPortal,
   setUserRoleFromPortal,
   provisionFromPortal,
 } from '@/services/portal.service.ts'
@@ -94,6 +95,18 @@ router.post('/accounts', wrap(async (req, res) => {
   sendSuccess(res, await describeManyForPortal({
     emails, remoteOrgId: remoteOrgId ?? orgOf(req),
   }), 'Accounts')
+}))
+
+/**
+ * Who teaches here, when they say they are free, and what is already booked.
+ *
+ * A GET, unlike /accounts: this carries a date window and an organization,
+ * both of which are perfectly at home in a query string.
+ */
+router.get('/mentors', wrap(async (req, res) => {
+  const from = typeof req.query.from === 'string' ? req.query.from : undefined
+  const to = typeof req.query.to === 'string' ? req.query.to : undefined
+  sendSuccess(res, await listMentorsForPortal({ remoteOrgId: orgOf(req), from, to }), 'Mentors')
 }))
 
 export default router
