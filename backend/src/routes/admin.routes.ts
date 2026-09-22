@@ -14,6 +14,7 @@ import { validate } from '@/middleware/validate.middleware.ts'
 import { env } from '@/config/env.ts'
 import { authRateLimit, refreshRateLimit } from '@/middleware/rateLimit.middleware.ts'
 import { QuizService } from '@/services/quiz.service.ts'
+import { AdminExamService } from '@/services/admin-exam.service.ts'
 import { AssignmentService } from '@/services/assignment.service.ts'
 import { SectionService } from '@/services/section.service.ts'
 import { OrderService } from '@/services/order.service.ts'
@@ -42,6 +43,7 @@ const live       = new LiveClassController()
 const authCtrl   = new AuthController()
 const roleCtrl   = new RolesController()
 const quizSvc    = new QuizService()
+const examSvc    = new AdminExamService()
 const assignSvc  = new AssignmentService()
 const sectionSvc = new SectionService()
 const orderSvc   = new OrderService()
@@ -1744,6 +1746,80 @@ router.get('/courses/:courseId/quiz-analytics', requireAdmin, async (req: Reques
     const courseId = String(req.params['courseId'] ?? '')
     const data = await quizSvc.analyticsForCourse(courseId)
     sendSuccess(res, data)
+  } catch (err) { next(err) }
+})
+
+/* ─── Exam management (admin + own-course instructor) ───
+   One proctored, timed exam per course. Authorization reuses the same
+   course-editable check as quizzes/sections, so it inherits org + ownership
+   scoping. Answer keys are visible here (unlike the student routes). */
+const examQuestionSchema = z.object({
+  id:            z.string().optional(),
+  text:          z.string().min(1).max(4000).trim(),
+  type:          z.enum(['mcq', 'true_false', 'short', 'essay']),
+  choices:       z.array(z.string().max(1000)).optional(),
+  correctAnswer: z.string().max(1000).optional(),
+  order:         z.coerce.number().int().min(0),
+  maxMarks:      z.coerce.number().min(0).max(1000),
+  explanation:   z.string().max(2000).optional(),
+})
+
+const examUpsertSchema = z.object({
+  title:           z.string().min(1).max(200).trim(),
+  instructions:    z.string().max(4000).optional(),
+  durationMinutes: z.coerce.number().int().min(1).max(1440),
+  passPercent:     z.coerce.number().int().min(0).max(100),
+  availableFrom:   z.string().datetime().nullable().optional(),
+  availableTo:     z.string().datetime().nullable().optional(),
+  maxViolations:   z.coerce.number().int().min(1).max(100),
+  antiCheat: z.object({
+    blockCopyPaste:    z.boolean(),
+    blockRightClick:   z.boolean(),
+    screenshotSuspend: z.boolean(),
+    tabSwitchSuspend:  z.boolean(),
+  }),
+  isPublished:     z.boolean(),
+  questions:       z.array(examQuestionSchema).min(1),
+})
+
+/* GET the exam for a course (admin view — with answer keys). null if none. */
+router.get('/courses/:courseId/exam', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const courseId = String(req.params['courseId'] ?? '')
+    await sectionSvc.assertCourseEditable(courseId, req.user!.id, req.user!.role, req.user!.categoryScope)
+    const exam = await examSvc.getForCourse(courseId)
+    sendSuccess(res, exam ?? null)
+  } catch (err) { next(err) }
+})
+
+/* PUT (create or replace) the exam for a course. */
+router.put('/courses/:courseId/exam', validate(examUpsertSchema), audit('exam.upsert', 'Exam'), async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const courseId = String(req.params['courseId'] ?? '')
+    await sectionSvc.assertCourseEditable(courseId, req.user!.id, req.user!.role, req.user!.categoryScope)
+    const exam = await examSvc.upsertForCourse(courseId, req.body)
+    sendSuccess(res, exam, 'Exam saved', 200)
+  } catch (err) { next(err) }
+})
+
+/* DELETE the exam for a course (and its attempts + proctor logs). */
+router.delete('/courses/:courseId/exam', audit('exam.delete', 'Exam'), async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const courseId = String(req.params['courseId'] ?? '')
+    await sectionSvc.assertCourseEditable(courseId, req.user!.id, req.user!.role, req.user!.categoryScope)
+    await examSvc.deleteForCourse(courseId)
+    sendSuccess(res, null, 'Exam deleted')
+  } catch (err) { next(err) }
+})
+
+/* GET every student's attempt on an exam (attempts table / grading queue). */
+router.get('/exams/:examId/attempts', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const examId = String(req.params['examId'] ?? '')
+    const exam = await examSvc.getRaw(examId)
+    await sectionSvc.assertCourseEditable(String(exam.courseId), req.user!.id, req.user!.role, req.user!.categoryScope)
+    const attempts = await examSvc.listAttempts(examId)
+    sendSuccess(res, attempts)
   } catch (err) { next(err) }
 })
 

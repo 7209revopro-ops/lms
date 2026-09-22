@@ -8,7 +8,7 @@ import {
   LayoutDashboard, BookOpen, Users, GraduationCap,
   Tag, Star, Settings, ChevronLeft, ChevronRight, LogOut, X,
   ShoppingBag, Ticket, Map, ClipboardList, Video, CalendarDays, BarChart3, ShieldCheck, UserCog, LifeBuoy,
-  ClipboardCheck, Film, MonitorSmartphone,
+  ClipboardCheck, Film, MonitorSmartphone, FileCheck2,
 } from 'lucide-react'
 import { useUIStore } from '@/store/ui.store'
 import { mayReachClassroom } from '@/lib/classroomAccess'
@@ -29,6 +29,7 @@ const adminNavItems = [
   { label: 'Recordings',     href: '/recordings',        icon: Film },
   { label: 'Bookings',       href: '/bookings',          icon: CalendarDays },
   { label: 'Assignments',    href: '/assignments',       icon: ClipboardCheck },
+  { label: 'Exams',          href: '/exams',             icon: FileCheck2 },
   { label: 'Students',       href: '/students',          icon: Users },
   { label: 'Devices',        href: '/devices',           icon: MonitorSmartphone },
   { label: 'Instructors',    href: '/instructors',       icon: GraduationCap },
@@ -52,6 +53,7 @@ const scopedAdminNavItems = [
   { label: 'Recordings',       href: '/recordings',             icon: Film },
   { label: 'Bookings',         href: '/bookings',               icon: CalendarDays },
   { label: 'Assignments',      href: '/assignments',            icon: ClipboardCheck },
+  { label: 'Exams',            href: '/exams',                  icon: FileCheck2 },
   { label: 'Support',          href: '/support',                icon: LifeBuoy },
 ]
 
@@ -62,6 +64,7 @@ const instructorNavItems = [
   { label: 'Bookings',      href: '/bookings',           icon: CalendarDays },
   { label: 'Availability',  href: '/availability',       icon: CalendarDays },
   { label: 'Assignments',   href: '/assignments',        icon: ClipboardCheck },
+  { label: 'Exams',         href: '/exams',              icon: FileCheck2 },
   { label: 'Students',      href: '/students',            icon: Users },
   { label: 'Instructors',   href: '/instructors',        icon: GraduationCap },
   { label: 'Reviews',       href: '/reviews',             icon: Star },

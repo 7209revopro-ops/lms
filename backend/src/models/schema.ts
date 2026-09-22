@@ -2113,6 +2113,7 @@ export type AuditAction =
   | 'bulk.publish'    | 'bulk.archive'    | 'bulk.delete'
   | 'course.import'   | 'course.export'
   | 'liveclass.create' | 'liveclass.update' | 'liveclass.delete' | 'liveclass.repeat'
+  | 'exam.upsert'      | 'exam.delete'      | 'exam.grade'       | 'exam.reset'
   /* Operator switches. `settings.device-limit` disables a security control
      for every academy at once, so it is audited like an impersonation. */
   | 'settings.device-limit'
