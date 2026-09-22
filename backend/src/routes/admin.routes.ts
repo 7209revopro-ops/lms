@@ -1834,6 +1834,36 @@ router.get('/exams/:examId/attempts/:attemptId', async (req: Request, res: Respo
   } catch (err) { next(err) }
 })
 
+const examGradeSchema = z.object({
+  grades: z.array(z.object({
+    questionId:   z.string().min(1),
+    marksAwarded: z.coerce.number().min(0).max(1000),
+    feedback:     z.string().max(2000).optional(),
+  })).min(1),
+})
+
+/* POST per-question marks + feedback; recomputes total + pass. */
+router.post('/exams/:examId/attempts/:attemptId/grade', validate(examGradeSchema), audit('exam.grade', 'ExamAttempt'), async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const examId = String(req.params['examId'] ?? '')
+    const exam = await examSvc.getRaw(examId)
+    await sectionSvc.assertCourseEditable(String(exam.courseId), req.user!.id, req.user!.role, req.user!.categoryScope)
+    const result = await examSvc.gradeAttempt(examId, String(req.params['attemptId'] ?? ''), req.body.grades, req.user!.id)
+    sendSuccess(res, result, 'Grades saved')
+  } catch (err) { next(err) }
+})
+
+/* POST reset — deletes the attempt + its logs so the student can retake. */
+router.post('/exams/:examId/attempts/:attemptId/reset', audit('exam.reset', 'ExamAttempt'), async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const examId = String(req.params['examId'] ?? '')
+    const exam = await examSvc.getRaw(examId)
+    await sectionSvc.assertCourseEditable(String(exam.courseId), req.user!.id, req.user!.role, req.user!.categoryScope)
+    await examSvc.resetAttempt(examId, String(req.params['attemptId'] ?? ''))
+    sendSuccess(res, null, 'Attempt reset')
+  } catch (err) { next(err) }
+})
+
 /* ─── Assignment management ────────────────────────── */
 router.get('/lessons/:lessonId/assignment', async (req: Request, res: Response, next: NextFunction) => {
   try {

@@ -156,6 +156,74 @@ export class AdminExamService {
     })
   }
 
+  /* ── Apply per-question marks + feedback; recompute the total and pass. ──
+     Grades can touch any question (including overriding an auto-graded one).
+     A manual question the student left blank still gets an answer row so the
+     mark is recorded. */
+  async gradeAttempt(
+    examId: string,
+    attemptId: string,
+    grades: Array<{ questionId: string; marksAwarded: number; feedback?: string }>,
+    graderId: string,
+  ): Promise<{ totalMarks: number; maxMarks: number; passed: boolean }> {
+    if (!Types.ObjectId.isValid(examId) || !Types.ObjectId.isValid(attemptId)) {
+      throw new ExamError('NOT_FOUND', 'Attempt not found.', 404)
+    }
+    const exam = await ExamModel.findById(examId)
+    if (!exam) throw new ExamError('NOT_FOUND', 'Exam not found.', 404)
+
+    const attempt = await ExamAttemptModel.findOne({ _id: attemptId, examId })
+    if (!attempt) throw new ExamError('NOT_FOUND', 'Attempt not found.', 404)
+    if (attempt.status === 'in_progress') {
+      throw new ExamError('NOT_SUBMITTED', 'This attempt is still in progress.', 409)
+    }
+
+    const maxByQ = new Map(exam.questions.map(q => [String(q._id), q.maxMarks]))
+
+    for (const g of grades) {
+      const max = maxByQ.get(g.questionId)
+      if (max === undefined) throw new ExamError('BAD_QUESTION', 'Unknown question in this exam.', 400)
+      const marks = Math.max(0, Math.min(g.marksAwarded, max))
+      const existing = attempt.answers.find(a => a.questionId === g.questionId)
+      if (existing) {
+        existing.marksAwarded = marks
+        if (g.feedback !== undefined) existing.feedback = g.feedback
+      } else {
+        attempt.answers.push({ questionId: g.questionId, answer: '', marksAwarded: marks, ...(g.feedback ? { feedback: g.feedback } : {}) })
+      }
+    }
+
+    /* Recompute over the full paper so the total always reflects every mark. */
+    const awardedByQ = new Map(attempt.answers.map(a => [a.questionId, a.marksAwarded]))
+    let total = 0
+    let maxMarks = 0
+    for (const q of exam.questions) {
+      maxMarks += q.maxMarks
+      total += awardedByQ.get(String(q._id)) ?? 0
+    }
+
+    attempt.totalMarks = total
+    attempt.maxMarks = maxMarks
+    attempt.passed = maxMarks > 0 ? (total / maxMarks) * 100 >= exam.passPercent : true
+    attempt.gradedAt = new Date()
+    attempt.gradedBy = Types.ObjectId.isValid(graderId) ? new Types.ObjectId(graderId) : undefined
+    attempt.markModified('answers')
+    await attempt.save()
+
+    return { totalMarks: total, maxMarks, passed: attempt.passed }
+  }
+
+  /* ── Reset an attempt so the student can retake (also lifts a suspension). ── */
+  async resetAttempt(examId: string, attemptId: string): Promise<void> {
+    if (!Types.ObjectId.isValid(examId) || !Types.ObjectId.isValid(attemptId)) {
+      throw new ExamError('NOT_FOUND', 'Attempt not found.', 404)
+    }
+    const attempt = await ExamAttemptModel.findOne({ _id: attemptId, examId }).select('_id')
+    if (!attempt) throw new ExamError('NOT_FOUND', 'Attempt not found.', 404)
+    await ExamLogModel.deleteMany({ attemptId: attempt._id })
+    await ExamAttemptModel.deleteOne({ _id: attempt._id })
+  }
+
   /* ── One attempt in full: student, answers vs. the key, and the proctor log. ── */
   async getAttemptDetail(examId: string, attemptId: string): Promise<{
     attempt: {

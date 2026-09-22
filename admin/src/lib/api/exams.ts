@@ -171,3 +171,34 @@ export function useAttemptDetail(examId: string | undefined, attemptId: string |
     retry: false,
   })
 }
+
+export interface GradeInput { questionId: string; marksAwarded: number; feedback?: string }
+
+/* ─── Save per-question grades ── */
+export function useGradeAttempt(examId: string, attemptId: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async (grades: GradeInput[]) => {
+      const res = await api.post<{ success: true; data: { totalMarks: number; maxMarks: number; passed: boolean } }>(
+        `/admin/exams/${examId}/attempts/${attemptId}/grade`, { grades })
+      return res.data.data
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: examKeys.attempt(examId, attemptId) })
+      qc.invalidateQueries({ queryKey: examKeys.attempts(examId) })
+    },
+  })
+}
+
+/* ─── Reset an attempt (retake / lift suspension) ── */
+export function useResetAttempt(examId: string, attemptId: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async () => {
+      await api.post(`/admin/exams/${examId}/attempts/${attemptId}/reset`)
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: examKeys.attempts(examId) })
+    },
+  })
+}
