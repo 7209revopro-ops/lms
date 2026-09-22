@@ -1315,7 +1315,13 @@ router.get('/recordings', requireAnyAdmin, requireClassroomAccess, async (req: R
     const filter: Record<string, unknown> = { cltRecordingId: { $exists: true } }
     const orgId = req.user!.organizationId
     if (req.user!.role !== 'super_admin' && orgId && Types.ObjectId.isValid(orgId)) {
-      filter['organizationId'] = new Types.ObjectId(orgId)
+      /* CLASSES THIS ACADEMY IS SERVED BY, not only the ones it owns — the
+         same widening the console list, the calendar and the bookings roster
+         already carry. Strict ownership meant a guest academy could send its
+         students into a shared class, mark their attendance, and then not be
+         able to review the recording of the hour they sat in. The recording is
+         the class; whoever may see the class may see it. */
+      andFilter(filter, servedClassFilter(orgId))
     }
     const search = String((req.query as Record<string, string>)['search'] ?? '').trim()
     if (search) filter['title'] = { $regex: search, $options: 'i' }
@@ -1328,7 +1334,16 @@ router.get('/recordings', requireAnyAdmin, requireClassroomAccess, async (req: R
     if (scope) {
       const { CourseModel } = await import('@/models/schema.ts')
       const scoped = await CourseModel.find({ program: scope }).select('_id').lean()
-      filter['courseId'] = { $in: scoped.map(c => c._id) }
+      const ids = scoped.map(c => c._id)
+      /* The guest door's course counts as "this programme" here too, for the
+         reason set out on the same narrowing in liveClass.repository.ts: a
+         guest academy's programme-scoped admin holds their OWN course and never
+         the host's, so asking only about `courseId` hid every shared class from
+         them. Composed under $and, because `title` search and the status terms
+         are assigned above and an assignment to $or would drop them. */
+      andFilter(filter, CROSS_ORG_CLASSES_ENABLED
+        ? { $or: [{ courseId: { $in: ids } }, { 'guestCohorts.courseId': { $in: ids } }] }
+        : { courseId: { $in: ids } })
     }
 
     const [docs, totalCount] = await Promise.all([

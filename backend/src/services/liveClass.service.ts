@@ -341,6 +341,30 @@ export class LiveClassService {
         ? new Types.ObjectId(input.organizationId)
         : ((course as { organizationId?: Types.ObjectId }).organizationId ?? null)
 
+    /* A CLASS AND ITS COURSE MUST BELONG TO THE SAME ACADEMY.
+       classOrgId takes the CALLER's academy when it is present and the course's
+       otherwise, and never asked whether the two agree. They cannot disagree
+       through the admin panel — the course list is scoped by the same
+       X-Organization-Id that sets the caller's academy, so a super admin
+       switched to Bangalore is only offered Bangalore courses (measured, not
+       assumed). A direct API call with a mismatched header is another matter,
+       and what it produces is the worst kind of wrong: hostDoorFrom pairs the
+       class's academy with the class's course, so the host door becomes
+       {Bangalore, a Dubai course}. No Bangalore student can be enrolled through
+       it, every student feed filters the class out by academy, and adding
+       Bangalore as a guest is then refused because a class cannot be a guest of
+       its own academy. A class nobody can see, created with a 201.
+
+       Refused here rather than corrected, because either value could be the
+       intended one and guessing would move somebody's class between academies
+       silently. */
+    const courseOrgId = (course as { organizationId?: Types.ObjectId }).organizationId
+    if (classOrgId && courseOrgId && String(classOrgId) !== String(courseOrgId)) {
+      throw new LiveClassError('COURSE_WRONG_ACADEMY',
+        'That course belongs to another academy. Switch to that academy, or pick one of this one\'s courses.',
+        400)
+    }
+
     /* Runs before the Mux stream is opened and before the caller's Meet link
        is spent, so a refused instructor leaves no third-party room behind. */
     await this.#assertInstructorUsable(input.instructorId, classOrgId)
@@ -994,11 +1018,32 @@ export class LiveClassService {
       /* Allocated class: the difference lands in the overflow. */
       if (typeof cur?.hostSeatsLeft === 'number') {
         const delta = input.sessionCapacity - (cur.sessionCapacity ?? 0)
+
+        /* WHY THIS DOES NOT COUNT A FLOOR LOWERED IN THE SAME SAVE.
+           It is tempting: cutting the capacity and dropping a guest floor by
+           the same number is one intent, and refusing it with "lower a floor
+           first" reads as nonsense to somebody who just did. I tried exactly
+           that, and the request then failed further down with 409 SEATS_MOVED
+           having ALREADY written the new capacity — a class stored at 30 seats
+           whose pools still summed to 40. Worse than the refusal, because the
+           refusal is at least consistent.
+
+           The cause is the apply order below, which is load-bearing in the
+           other direction: the capacity move goes FIRST so a capacity RAISE is
+           in the pool before an added cohort or a raised floor draws on it. A
+           cut funded by a floor drop needs the opposite order, so making both
+           work means splitting the capacity move into raise-first and cut-last
+           — a change to the seat engine rather than to this guard, and one
+           this file's own history says to make deliberately rather than in
+           passing.
+
+           So the rule stands, and the MESSAGE now describes it truthfully
+           instead of implying a one-save fix that does not exist. */
         const nextOverflow = (cur.overflowSeatsLeft ?? 0) + delta
         if (nextOverflow < 0) {
           throw new LiveClassError('CAPACITY_BELOW_FLOORS',
             'That capacity is smaller than the seats already promised to each academy. '
-            + 'Lower a floor first.',
+            + 'Lower an academy\'s seats and save, then reduce the capacity.',
             400)
         }
         /* PLANNED, NOT WRITTEN — and that is the whole point of this line.

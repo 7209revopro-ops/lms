@@ -172,6 +172,26 @@ function doorAdmitsAcademy(door: Door, callerOrg: string | null): boolean {
 /* ─────────────────────────────────────────────────────
    Single-class form — the seven non-list call sites
 ───────────────────────────────────────────────────── */
+/* The door a caller would come through when no enrolment picked one for them.
+   ───────────────────────────────────────────────────────────────────────────
+   A refusal still has to be LABELLED. The student lists render every class
+   that serves the caller's academy, entitled or not — a guest student who has
+   not bought their course yet sees the class with an Enroll call to action —
+   and both the label and the seat count are read off `door`. With no door the
+   row falls back to the host document, so a Bangalore student browsing a
+   shared class was shown the Dubai course's name, and an Enroll button
+   pointing at the Dubai course.
+
+   Never the host door: a host door needs no labels, the DTO already carries
+   them, and yourCohortFrom returns undefined for it anyway. Never a door of
+   an academy that is not the caller's, which is what makes this a label rather
+   than a widening — nothing about entitlement changes, `ok` stays false, and
+   every seat-writing caller returns before reading `door`. */
+function labelDoorFor(candidates: Door[], callerOrg: string | null): Door | undefined {
+  if (!callerOrg) return undefined
+  return candidates.find(d => d.organizationId && String(d.organizationId) === String(callerOrg))
+}
+
 export async function resolveClassEntitlement(
   live:      ClassDoors,
   userId:    string,
@@ -214,7 +234,9 @@ export async function resolveClassEntitlement(
     return { ok: true, ...(candidates[0] ? { door: candidates[0] } : {}) }
   }
 
-  return { ok: false, code: 'NOT_ENROLLED' }
+  /* Refused, but still labelled — see labelDoorFor. */
+  const label = labelDoorFor(candidates, callerOrg)
+  return { ok: false, code: 'NOT_ENROLLED', ...(label ? { door: label } : {}) }
 }
 
 function verdictFor(door: Door, enrolment: EnrolmentFacts): Entitlement {
@@ -278,5 +300,10 @@ export function entitlementFrom(
   if (candidates.every(d => !d.courseId)) {
     return { ok: true, ...(candidates[0] ? { door: candidates[0] } : {}) }
   }
-  return { ok: false, code: 'NOT_ENROLLED' }
+  /* The same label on the batch path, and this is the one that matters most:
+     the three student LISTS are built from it, and a not-yet-enrolled guest
+     browsing the catalogue is exactly who was being shown the host academy's
+     course. */
+  const label = labelDoorFor(candidates, callerOrg)
+  return { ok: false, code: 'NOT_ENROLLED', ...(label ? { door: label } : {}) }
 }

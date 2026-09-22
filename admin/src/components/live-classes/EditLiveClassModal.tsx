@@ -16,7 +16,7 @@ import { useCourseOutline } from '@/lib/api/outline'
 import { useUsers } from '@/lib/api/users'
 import { isoToDatetimeLocal, datetimeLocalToISO, zoneOf, foreignZoneTag } from '@/lib/timezone'
 import Spinner from '@/components/ui/Spinner'
-import { GuestCohortsField } from '@/components/live-classes/GuestCohortsField'
+import { GuestCohortsField, cohortsProblem } from '@/components/live-classes/GuestCohortsField'
 import type { GuestCohortInput } from '@/lib/api/liveClasses'
 import { useCurrentUser } from '@/lib/api/user'
 import { CLASS_LANGUAGES, withFlagAndNative } from '@/lib/languages'
@@ -149,6 +149,13 @@ export function EditLiveClassModal({ live, onClose, onSuccess }: Props) {
     if (!isOnline && !location.trim()) {
       setError('Please enter a venue/location for in-person classes.')
       return
+    }
+    /* Caught here so the admin reads a sentence about academies rather than
+       zod's "String must contain at least 1 character(s)" with the field path
+       stripped off on the way back. */
+    if (isSuper) {
+      const problem = cohortsProblem(cohorts, !!sectionId)
+      if (problem) { setError(problem); return }
     }
 
     try {
@@ -677,6 +684,9 @@ export function EditLiveClassModal({ live, onClose, onSuccess }: Props) {
                 : undefined}
               hostGated={!!sectionId}
               sessionCapacity={sessionCapacity === '' ? 0 : Number(sessionCapacity)}
+              /* Seats already taken, so the preview and the server agree about
+                 what is left to promise on a first-time sharing. */
+              bookedSeats={Number((live as any).bookedCount ?? 0)}
               overflowSeats={overflow}
               /* Editable only in the window where the server will accept it. */
               {...(isSuper && !alreadyAllocated ? { onOverflowChange: setOverflow } : {})}

@@ -173,7 +173,15 @@ export interface CreateLiveClassInput {
   scheduledStart:   string       // ISO
   durationMins:     number
   type:             LiveClassType
-  meetingUrl?:      string       // required when type=external and isOnline=true
+  /* NOT ACCEPTED ON CREATE, and this type said otherwise for a long time.
+     liveCreateSchema does not name meetingUrl — the server mints the Google
+     Meet link itself for an external session — and validate() strips what a
+     schema does not name, so a caller supplying a link had it silently dropped
+     and got a different one back. Kept here, documented, rather than deleted:
+     the field IS accepted on UPDATE, so somebody reading the two types side by
+     side needs to see why they differ.
+     @deprecated on create — omit it; the server generates the link. */
+  meetingUrl?:      never
   sectionId?:       string       // optional course module/section link
   instructorId?:    string       // optional override; defaults to current user
   sessionCapacity?: number       // max bookings

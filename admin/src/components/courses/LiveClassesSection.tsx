@@ -470,7 +470,6 @@ function CreateForm({
     durationMins:     number
     sessionCapacity?: number
     type:             LiveClassType
-    meetingUrl?:      string
     sectionId?:       string
     instructorId?:    string
   }) => Promise<void>
@@ -486,7 +485,6 @@ function CreateForm({
   const [start,           setStart]           = useState('')
   const [durationMins,    setDurationMins]    = useState(60)
   const [sessionCapacity, setSessionCapacity] = useState<number | ''>(500)
-  const [meetingUrl,      setMeetingUrl]      = useState('')
   const [sectionId,       setSectionId]       = useState('')
   const [instructorId,    setInstructorId]    = useState('')
 
@@ -499,7 +497,6 @@ function CreateForm({
   const handle = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!title || !start) return
-    if (type === 'external' && !meetingUrl) return
     const iso = datetimeLocalToISO(start)
     await onSubmit({
       courseId,
@@ -509,11 +506,10 @@ function CreateForm({
       durationMins,
       sessionCapacity: sessionCapacity !== '' ? sessionCapacity : undefined,
       type,
-      meetingUrl:      type === 'external' ? meetingUrl : undefined,
       sectionId:       sectionId || undefined,
       instructorId:    instructorId || undefined,
     })
-    setTitle(''); setDescription(''); setStart(''); setMeetingUrl('')
+    setTitle(''); setDescription(''); setStart('')
     setDurationMins(60); setSessionCapacity(500); setSectionId(''); setInstructorId('')
   }
 
@@ -595,15 +591,22 @@ function CreateForm({
           </div>
         )}
 
-        {/* Meeting URL — only for external */}
+        {/* THE LINK IS THE SERVER'S TO MINT.
+            This was a REQUIRED url field, and liveCreateSchema does not name
+            meetingUrl — validate() strips what a schema does not name — so
+            whatever was typed here was dropped on the way in and the session
+            came back with a Google Meet link the admin had never seen. The
+            field could not be left blank and could not be honoured: the one
+            combination that is purely an obstacle.
+            Changing it on an existing session still works; that is the Edit
+            modal, where the update schema does name it. */}
         {type === 'external' && (
-          <div className="relative">
-            <LinkIcon size={13} className="absolute left-3 top-1/2 -translate-y-1/2"
-              style={{ color: 'rgba(255,255,255,0.4)' }} />
-            <input value={meetingUrl} onChange={e => setMeetingUrl(e.target.value)} type="url" required maxLength={2048}
-              placeholder="https://zoom.us/j/123456789"
-              className={`${base} pl-9`} style={inputStyle} />
-          </div>
+          <p className="flex items-center gap-1.5 rounded-xl px-3 py-2 text-[11px]"
+            style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)',
+                     color: 'rgba(255,255,255,0.5)' }}>
+            <LinkIcon size={11} />
+            A Google Meet link is created for this session automatically.
+          </p>
         )}
 
         {/* Instructor */}

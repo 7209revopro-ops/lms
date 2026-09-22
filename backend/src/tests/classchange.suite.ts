@@ -367,6 +367,12 @@ try {
       (await notesFor(booked._id, /cancelled/i)).length === 1)
     check('...and is NOT also told the instructor changed — that is noise now',
       (await notesFor(booked._id, /Instructor changed/i)).length === 0)
+    /* WAIT FOR THE MAIL, not just for the notification. The `until` above
+       waits on the notification document; the mail is a file the outbox writes
+       on a different async path, so reading the directory straight afterwards
+       is a race — and one that only loses under the load of a long chain. Still
+       `=== 1`, so a second mail fails this exactly as before. */
+    await until(async () => (await mailFor('booked@t.local', /Cancel/i)).length > 0)
     check('...and gets exactly one email',
       (await mailFor('booked@t.local', /Cancel/i)).length === 1,
       `${(await mailbox()).length} total`)

@@ -141,6 +141,22 @@ function CohortRow({
         />
       </div>
 
+      {/* SAY IT HERE, NOT IN A 422.
+          "Add an academy" starts an empty row, and an empty row submitted
+          reaches zod as `organizationId: ''` — which answers "String must
+          contain at least 1 character(s)" with the path stripped on the way
+          back, so the admin was told a string was too short and not which of
+          the three boxes it was. */}
+      {!cohort.organizationId && (
+        <p className="text-[11px] text-amber-300/80">
+          Choose the academy this row is for, or remove the row.
+        </p>
+      )}
+      {cohort.organizationId && !cohort.courseId && (
+        <p className="text-[11px] text-amber-300/80">
+          Choose which of their courses this class belongs to — that is how their students reach it.
+        </p>
+      )}
       {hostGated && !cohort.sectionId && (
         <p className="text-[11px] text-amber-300/80">
           This class is gated to a module, so this academy must name one of theirs too.
@@ -155,9 +171,23 @@ function CohortRow({
   )
 }
 
+/** The first thing wrong with a cohort list, in words an admin can act on —
+ *  or null when it is ready to send. Both the create page and the edit modal
+ *  ask this before submitting, because the server's own refusal arrives as a
+ *  zod message with the field path stripped. */
+export function cohortsProblem(rows: GuestCohortInput[], hostGated: boolean): string | null {
+  for (const c of rows) {
+    if (!c.organizationId) return 'One of the shared-academy rows has no academy chosen. Pick one, or remove the row.'
+    if (!c.courseId)       return 'One of the shared academies has no course chosen — that is how their students reach the class.'
+    if (hostGated && !c.sectionId) return 'This class is gated to a module, so every shared academy must name one of theirs too.'
+  }
+  return null
+}
+
 export function GuestCohortsField({
   value, onChange, hostOrgId, hostGated, overflowSeats, onOverflowChange,
-  sessionCapacity, readOnly, heldByOrg, storedFloors, storedCapacity, readOnlySummary,
+  sessionCapacity, bookedSeats = 0, readOnly, heldByOrg, storedFloors, storedCapacity,
+  readOnlySummary,
 }: {
   value:            GuestCohortInput[]
   onChange:         (next: GuestCohortInput[]) => void
@@ -166,6 +196,13 @@ export function GuestCohortsField({
   overflowSeats?:   number
   onOverflowChange?: (n: number) => void
   sessionCapacity:  number
+  /** Seats already taken on this class. Zero at creation, and the reason the
+      preview and the server can disagree on an EDIT: create()'s split assumes
+      an empty room, so when a class that already has bookings is shared for
+      the first time the server takes those seats off the host's share before
+      anything is promised — and a preview that did not was showing a host
+      floor the save would refuse with SEATS_OVERALLOCATED. */
+  bookedSeats?:     number
   readOnly?:        boolean
   /** organizationId → seats that academy already holds. Edit path only. */
   heldByOrg?:       Record<string, number>
@@ -209,7 +246,9 @@ export function GuestCohortsField({
   const budget = allocated
     ? overflow + (sessionCapacity - (storedCapacity ?? sessionCapacity))
     : 0
-  const hostSeats = sessionCapacity - floors - overflow
+  /* The seats already spent are nobody's to promise — the same subtraction
+     the service makes on a first-time allocation. */
+  const hostSeats = sessionCapacity - bookedSeats - floors - overflow
   const over      = allocated ? drawn > budget : hostSeats < 0
   /* Every academy is either already on the class or is the host. */
   const noneLeft  = allOrgs.filter(o =>

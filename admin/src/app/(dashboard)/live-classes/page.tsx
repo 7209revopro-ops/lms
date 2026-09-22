@@ -17,7 +17,7 @@ import { CLASS_LANGUAGES, withFlagAndNative } from '@/lib/languages'
 import { datetimeLocalToISO, zoneOf, foreignZoneTag } from '@/lib/timezone'
 import { useCourses } from '@/lib/api/courses'
 import { useCourseOutline } from '@/lib/api/outline'
-import { GuestCohortsField } from '@/components/live-classes/GuestCohortsField'
+import { GuestCohortsField, cohortsProblem } from '@/components/live-classes/GuestCohortsField'
 import type { GuestCohortInput } from '@/lib/api/liveClasses'
 import { useOrgStore } from '@/store/org.store'
 import { useUsers } from '@/lib/api/users'
@@ -1129,7 +1129,7 @@ function QuickCreateModal({ onClose, onSuccess, categoryProgram }: { onClose: ()
   const { data: coursesData,     isLoading: loadingCourses }     = useCourses({ per_page: 200, ...(categoryProgram ? { program: categoryProgram } : {}) })
   const { data: instructorsData, isLoading: loadingInstructors } = useUsers('instructor', { per_page: 200 })
   const courses     = coursesData?.docs     ?? []
-  const instructors = instructorsData?.docs ?? []
+  const allInstructors = instructorsData?.docs ?? []
 
   const [courseId,        setCourseId]        = useState(courses[0]?.id ?? '')
   const [title,           setTitle]           = useState('')
@@ -1185,6 +1185,30 @@ function QuickCreateModal({ onClose, onSuccess, categoryProgram }: { onClose: ()
   const hostOrgId = activeOrgId
     ?? (courses.find(c => c.id === courseId) as { organizationId?: string } | undefined)?.organizationId
 
+  /* ONLY INSTRUCTORS THIS CLASS'S ACADEMY CAN ACTUALLY USE.
+     A super admin's instructor list is unscoped — the Users endpoint returns
+     both academies' staff when the caller has no academy of their own — while
+     the class is stamped with whichever academy the org switcher is pointing
+     at. So the dropdown offered every instructor in the organisation and the
+     save answered 404 INSTRUCTOR_NOT_FOUND for half of them, naming nothing
+     the admin could act on.
+
+     This is #assertInstructorUsable's rule, client-side and in the same order:
+     compare academies only when BOTH are known (a legacy account with no
+     organizationId stays usable — tenancy rule 3b), and a LENT instructor is
+     always usable, because being schedulable by the other academy is the whole
+     point of lending them.
+
+     It must sit AFTER hostOrgId is fully resolved, including the fallback to
+     the selected course's academy above — that fallback is what makes the
+     filter mean anything while the switcher is on "All Orgs", which is the
+     persisted default. */
+  const instructors = allInstructors.filter(i => {
+    if (!hostOrgId || !i.organizationId) return true
+    if (String(i.organizationId) === String(hostOrgId)) return true
+    return i.sharedAcrossOrgs === true
+  })
+
   const handleCourseChange = (id: string) => { setCourseId(id); setSectionId('') }
 
   const base   = 'w-full rounded-xl px-3 py-2 text-sm text-white outline-none placeholder:text-white/30'
@@ -1193,6 +1217,13 @@ function QuickCreateModal({ onClose, onSuccess, categoryProgram }: { onClose: ()
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setError(null)
+    /* An empty "Add an academy" row reaches zod as organizationId: '' and comes
+       back as "String must contain at least 1 character(s)" with the field path
+       stripped — a sentence about a string, for a problem about an academy. */
+    if (isSuper) {
+      const problem = cohortsProblem(cohorts, !!sectionId)
+      if (problem) { setError(problem); return }
+    }
     try {
       await createMutation.mutateAsync({
         courseId,

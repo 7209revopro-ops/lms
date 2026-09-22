@@ -100,8 +100,13 @@ await new Promise<void>(r => server.once('listening', () => r()))
 const BASE = `http://127.0.0.1:${(server.address() as { port: number }).port}/api/v1`
 
 type Jar = Map<string, string>
-async function call(method: string, p: string, opts: { jar?: Jar; body?: unknown } = {}) {
+async function call(method: string, p: string, opts: { jar?: Jar; body?: unknown; org?: string } = {}) {
   const headers: Record<string, string> = {}
+  /* The org switcher. A super admin carries no academy of their own and picks
+     one per request with this header (auth.middleware.ts), which is what sets
+     req.user.organizationId for them — and therefore which academy a class
+     they create is stamped with. */
+  if (opts.org) headers['x-organization-id'] = opts.org
   if (opts.body !== undefined) headers['content-type'] = 'application/json'
   if (opts.jar?.size) headers['cookie'] = [...opts.jar].map(([k, v]) => `${k}=${v}`).join('; ')
   const res = await fetch(`${BASE}${p}`, {
@@ -539,6 +544,179 @@ const unmoved = await LiveClassModel.findById(unshared._id).select('overflowSeat
 check('…leaving the pools exactly where they were',
   unmoved?.overflowSeatsLeft === 5, String(unmoved?.overflowSeatsLeft))
 
+/* ── P ── shrinking a shared class ─────────────────────────────────────── */
+section('P. a capacity cut on a shared class is refused unless the overflow can fund it')
+/* This section pins a LIMIT, not a repair, and it is here because the repair
+   was attempted and withdrawn. Counting a floor lowered in the same save made
+   the guard pass and the request then failed at the apply step with 409
+   SEATS_MOVED, having already written the new capacity — 30 seats stored on a
+   class whose pools summed to 40. The refusal is the consistent outcome; the
+   one-save version needs the capacity move split into raise-first and cut-last
+   in the seat engine, which is its own change. Pinned so that whoever makes it
+   sees both halves. */
+const shrinkable = await LiveClassModel.create({
+  courseId: dxbCourse._id, instructorId: teacher._id,
+  title: 'Shrinkable', scheduledStart: new Date(Date.now() + 700 * MIN),
+  durationMins: 60, type: 'external', status: 'scheduled',
+  organizationId: dubai._id, sessionCapacity: 40, language: 'English',
+  meetingUrl: 'https://meet.google.com/ppp-qqqq-rrr',
+  hostSeatsLeft: 20, overflowSeatsLeft: 0,
+  guestCohorts: [{ organizationId: blr._id, courseId: blrCourse._id, seatFloor: 20, seatsLeft: 20 }],
+})
+const shrinkAlone = await call('PATCH', `/admin/live-classes/${shrinkable._id}`, {
+  jar: superJar, body: { sessionCapacity: 30 },
+})
+check('with an empty overflow there is nowhere for the seats to come from, and it is refused',
+  shrinkAlone.status === 400 && errOf(shrinkAlone) === 'CAPACITY_BELOW_FLOORS',
+  `${shrinkAlone.status} ${errOf(shrinkAlone)}`)
+check('…and the refusal names a two-step that actually works',
+  /save, then reduce/i.test(String(shrinkAlone.body?.error?.message ?? '')),
+  String(shrinkAlone.body?.error?.message))
+const untouchedA = await LiveClassModel.findById(shrinkable._id)
+  .select('sessionCapacity hostSeatsLeft overflowSeatsLeft guestCohorts').lean() as any
+check('…leaving the class exactly as it was',
+  untouchedA?.sessionCapacity === 40 && untouchedA?.hostSeatsLeft === 20,
+  `capacity ${untouchedA?.sessionCapacity} host ${untouchedA?.hostSeatsLeft}`)
+
+/* STEP ONE of the two-step: lower the floor on its own. */
+const lowerFirst = await call('PATCH', `/admin/live-classes/${shrinkable._id}`, {
+  jar: superJar,
+  body: { guestCohorts: [{ organizationId: String(blr._id), courseId: String(blrCourse._id), seatFloor: 10 }] },
+})
+check('lowering the academy’s seats on its own is accepted',
+  lowerFirst.status === 200, `${lowerFirst.status} ${errOf(lowerFirst)}`)
+/* STEP TWO: now the ten seats are in the overflow and the cut has a donor. */
+const thenShrink = await call('PATCH', `/admin/live-classes/${shrinkable._id}`, {
+  jar: superJar, body: { sessionCapacity: 30 },
+})
+check('…and the capacity cut then goes through, which is what the message tells you to do',
+  thenShrink.status === 200, `${thenShrink.status} ${errOf(thenShrink)}`)
+const after2 = await LiveClassModel.findById(shrinkable._id)
+  .select('sessionCapacity hostSeatsLeft overflowSeatsLeft guestCohorts').lean() as any
+check('…and the room adds up at the end of it',
+  (after2?.hostSeatsLeft ?? 0)
+    + (after2?.guestCohorts ?? []).reduce((n: number, c: any) => n + Number(c.seatFloor ?? 0), 0)
+    + (after2?.overflowSeatsLeft ?? 0) === after2?.sessionCapacity,
+  `host ${after2?.hostSeatsLeft} + floors ${(after2?.guestCohorts ?? []).map((c: any) => c.seatFloor).join('+')} `
+  + `+ overflow ${after2?.overflowSeatsLeft} vs capacity ${after2?.sessionCapacity}`)
+
+/* ── M ── the narrowing composes with the status buckets ───────────────── */
+section('M. the programme narrowing survives a status filter')
+/* The course clause goes in through andFilter, under $and, because the status
+   buckets below it ASSIGN query.$or — a second assignment deletes the first
+   silently and the endpoint quietly stops filtering. Asserted rather than
+   asserted-in-a-comment: a review of this fix read it as a flat $or and called
+   it a clobber, and the difference is one function call that nothing else
+   checks. */
+const withStatus = await call('GET', '/admin/live-classes?limit=200&status=scheduled', { jar: subJar })
+const rowsSched  = (withStatus.body?.data ?? []) as any[]
+check('a programme-scoped guest admin still sees the shared class under ?status=scheduled',
+  withStatus.status === 200 && rowsSched.some(c => String(c.id ?? c._id) === String(shared._id)),
+  `${withStatus.status}, ${rowsSched.length} rows`)
+check('…and the status filter still filters — nothing ended is in the scheduled tab',
+  rowsSched.every(c => c.status !== 'ended'),
+  rowsSched.map(c => c.status).join(','))
+check('…and the unshared host class is still absent under a status filter',
+  !rowsSched.some(c => String(c.id ?? c._id) === String(dubaiOnly._id)),
+  'the $and composition must not widen what the academy clause excludes')
+
+/* THE BUCKET THAT ACTUALLY ASSIGNS $or. 'scheduled' sets `status` and
+   `scheduledStart`; only 'live' and 'ended' assign query.$or, so they are the
+   only two that can delete a course clause that was assigned there instead of
+   composed under $and. Checking 'scheduled' alone proves nothing — it passed
+   with the clobber in place, which is how this check came to be written.
+
+   The subject has to be a class in the sub_admin's OWN academy on a course of
+   a DIFFERENT programme: the academy clause would exclude a foreign class by
+   itself, so it could not tell the two failures apart. */
+const blrOther = await CourseModel.create({
+  title: 'Bangalore Forex', slug: 'blr-forex', description: 'd', instructorId: blrTeacher._id,
+  price: 0, isFree: true, status: 'published', language: 'English',
+  organizationId: blr._id, program: 'forex',
+})
+const offProgramme = await LiveClassModel.create({
+  courseId: blrOther._id, instructorId: blrTeacher._id,
+  title: 'Bangalore forex session', scheduledStart: new Date(Date.now() - 600 * MIN),
+  durationMins: 60, type: 'external', status: 'ended',
+  organizationId: blr._id, sessionCapacity: 30, language: 'English',
+  meetingUrl: 'https://meet.google.com/mmm-nnnn-ooo',
+})
+const endedList = await call('GET', '/admin/live-classes?limit=200&status=ended', { jar: subJar })
+const endedRows = (endedList.body?.data ?? []) as any[]
+check('under ?status=ended the programme narrowing is still applied',
+  endedList.status === 200 && !endedRows.some(c => String(c.id ?? c._id) === String(offProgramme._id)),
+  `${endedList.status}, ${endedRows.length} rows — an AI sub_admin reading a forex class means the `
+  + `status bucket's $or deleted the course clause`)
+
+/* ── N ── the recording of a class you sat in ──────────────────────────── */
+section('N. a guest academy can review the recording of a shared class')
+await LiveClassModel.updateOne({ _id: shared._id },
+  { $set: { cltRecordingId: 90001, status: 'ended' } })
+await LiveClassModel.updateOne({ _id: dubaiOnly._id },
+  { $set: { cltRecordingId: 90002, status: 'ended' } })
+const recGuest = await call('GET', '/admin/recordings?per_page=50', { jar: blrJar })
+const recIds   = ((recGuest.body?.data ?? []) as any[]).map(r => String(r.id ?? r._id))
+check('the guest academy sees the shared class’s recording',
+  recGuest.status === 200 && recIds.includes(String(shared._id)),
+  `${recGuest.status}, ids ${recIds.join(',')}`)
+check('…and NOT the recording of a class it was never part of',
+  !recIds.includes(String(dubaiOnly._id)),
+  'ownership widened to "served by", not to "everything"')
+const recHost = await call('GET', '/admin/recordings?per_page=50', { jar: dxbJar })
+const hostIds = ((recHost.body?.data ?? []) as any[]).map(r => String(r.id ?? r._id))
+check('the host academy still sees both of its own',
+  hostIds.includes(String(shared._id)) && hostIds.includes(String(dubaiOnly._id)),
+  hostIds.join(','))
+await LiveClassModel.updateOne({ _id: shared._id }, { $set: { status: 'scheduled' } })
+
+/* ── O ── a class and its course belong to one academy ─────────────────── */
+section('O. a class cannot be stamped with an academy that does not own its course')
+/* THE HEADER, NOT THE BODY. `organizationId` is not in liveCreateSchema and
+   validate() strips what a schema does not name, so a body field cannot move a
+   class between academies at all — the only lever is the org switcher's
+   X-Organization-Id, which is exactly what a super admin is using when this
+   goes wrong. */
+const mismatched = await call('POST', '/admin/live-classes', {
+  jar: superJar,
+  org: String(blr._id),
+  body: {
+    courseId:       String(dxbCourse._id),
+    title:          'Stamped to the wrong academy',
+    scheduledStart: new Date(Date.now() + 500 * MIN).toISOString(),
+    durationMins:   60,
+    /* IN-PERSON on purpose. An `internal` class opens a Mux stream and an
+       online `external` one mints a Google Meet link, and neither third party
+       is configured here — both answer 503 before the guard under test is
+       reached. An in-person class needs neither, and the academy rule this
+       section is about does not care which kind it is. */
+    type:           'external',
+    isOnline:       false,
+    location:       'Room 1',
+    sessionCapacity: 30,
+    language:       'English',
+  },
+})
+check('the mismatch is refused rather than creating a class nobody can see',
+  mismatched.status === 400 && errOf(mismatched) === 'COURSE_WRONG_ACADEMY',
+  `${mismatched.status} ${errOf(mismatched)}`)
+const matched = await call('POST', '/admin/live-classes', {
+  jar: superJar,
+  org: String(blr._id),
+  body: {
+    courseId:       String(blrCourse._id),
+    title:          'Stamped correctly',
+    scheduledStart: new Date(Date.now() + 560 * MIN).toISOString(),
+    durationMins:   60,
+    type:           'external',
+    isOnline:       false,
+    location:       'Room 1',
+    sessionCapacity: 30,
+    language:       'English',
+  },
+})
+check('…while an academy that DOES own the course is created as before',
+  matched.status === 201, `${matched.status} ${errOf(matched)}`)
+
 /* ── L ── what the notification calls the course ───────────────────────── */
 section('L. a guest student is told the name of THEIR course, not the host’s')
 /* Driven through the SERVICE's create, because the notifier is a private method
@@ -547,6 +725,18 @@ section('L. a guest student is told the name of THEIR course, not the host’s')
    than awaited. */
 const { NotificationModel } = await import('@/models/schema.ts')
 await NotificationModel.deleteMany({})
+/* Diagnostic, kept: this section failed intermittently with COURSE_NOT_FOUND on
+   a course created in setup and used by every section above it. If the fixture
+   can vanish mid-run the suite has to say so out loud rather than fail inside
+   the service with a message about somebody else's course. */
+{
+  const [courses, users, classes] = await Promise.all([
+    CourseModel.countDocuments({}), UserModel.countDocuments({}), LiveClassModel.countDocuments({}),
+  ])
+  const stillThere = await CourseModel.exists({ _id: dxbCourse._id })
+  check('the fixtures are still present when section L starts',
+    !!stillThere, `courses=${courses} users=${users} classes=${classes} — the host course is GONE`)
+}
 const { LiveClassService } = await import('@/services/liveClass.service.ts')
 const svc = new LiveClassService()
 await svc.create({
