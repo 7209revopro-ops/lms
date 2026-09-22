@@ -13,7 +13,7 @@ import { cn } from '@/lib/utils'
 import { TermsModal } from './TermsModal'
 import Spinner from '@/components/ui/Spinner'
 import { PROGRAMS, PROGRAM_GROUPS, programLabel } from '@/lib/programs'
-import { describeTransportError } from '@/lib/apiResponse'
+import { describeTransportError, describeStatus } from '@/lib/apiResponse'
 import { uploadSignupDoc } from '@/lib/signupUpload'
 
 /* ── Types ─────────────────────────────────────────── */
@@ -269,6 +269,59 @@ const ID_TYPES = [
 
 const MAX_FILE_BYTES = 3 * 1024 * 1024 // 3 MB — enforced on all document uploads
 
+/* The server's upload allow-lists (backend/src/middleware/upload.middleware.ts),
+   applied here FIRST so a wrong file is refused where it was picked and the
+   document is named. Without this a HEIC photo or a .docx "scan" sailed
+   through two screens and was refused at Submit by a sentence that named
+   neither the file nor the step. */
+const DOC_TYPES   = ['image/jpeg', 'image/png', 'image/webp', 'application/pdf']
+const PHOTO_TYPES = ['image/jpeg', 'image/png', 'image/webp']
+function fileTypeProblem(f: File, allowed: string[], what: string): string | null {
+  if (allowed.includes(f.type)) return null
+  if (/hei[cf]/i.test(f.type) || /\.hei[cf]$/i.test(f.name)) {
+    return `${what} is a HEIC photo, which we cannot accept. Please choose a JPEG or PNG (on iPhone: Settings → Camera → Formats → Most Compatible).`
+  }
+  return `${what} must be a ${allowed.includes('application/pdf') ? 'JPEG, PNG or WebP image, or a PDF' : 'JPEG, PNG or WebP image'}.`
+}
+
+/* The SAME rule the server applies (zod's .email(), copied from its source),
+   so an address this form accepts is never refused at Submit — after three
+   uploads — as "Request validation failed". The old check was looser and
+   let "ahmed.@gmail.com" and "ahmed@gmail.com." through. */
+const EMAIL_RE = /^(?!\.)(?!.*\.\.)([A-Z0-9_'+\-\.]*)[A-Z0-9_+-]@([A-Z0-9][A-Z0-9\-]*\.)+[A-Z]{2,}$/i
+
+/* Where each field the API can refuse lives, in the form's own words. A 422
+   names fields by their payload key; the student needs the label and the
+   screen, because they are standing on step 4 and the box is on step 1. */
+const REGISTER_FIELD_META: Record<string, { label: string; step: number }> = {
+  name:               { label: 'Full Name',                 step: 0 },
+  email:              { label: 'Email Address',             step: 0 },
+  phone:              { label: 'Phone / WhatsApp',          step: 0 },
+  emergencyContact:   { label: 'Emergency Contact',         step: 0 },
+  gender:             { label: 'Gender',                    step: 0 },
+  dateOfBirth:        { label: 'Date of Birth',             step: 0 },
+  nationality:        { label: 'Nationality',               step: 0 },
+  homeCountry:        { label: 'Home Country',              step: 0 },
+  occupation:         { label: 'Occupation',                step: 0 },
+  idType:             { label: 'ID Type',                   step: 0 },
+  idNumber:           { label: 'ID Number',                 step: 0 },
+  photoUrl:           { label: 'Profile photo',             step: 0 },
+  countryAttendance:  { label: 'Country of Attendance',     step: 1 },
+  villa:              { label: 'Villa / Apartment',         step: 1 },
+  city:               { label: 'City / Town',               step: 1 },
+  addressCountry:     { label: 'Country',                   step: 1 },
+  passportUrl:        { label: 'Passport Copy',             step: 1 },
+  idDocUrl:           { label: 'ID Document Copy',          step: 1 },
+  experienceLevel:    { label: 'Experience Level',          step: 2 },
+  preferredStartDate: { label: 'Preferred Start Date',      step: 2 },
+  hearAboutUs:        { label: 'How did you hear about us?', step: 2 },
+  referralName:       { label: 'Who referred you?',         step: 2 },
+  programs:           { label: 'Programs & Courses',        step: 2 },
+  organizationSlug:   { label: 'Preferred Learning Center', step: 3 },
+  paymentMethod:      { label: 'Payment Method',            step: 3 },
+  password:           { label: 'Password',                  step: 3 },
+}
+
 /* Stored signup documents, keyed by the File the user picked (M-05). A
    WeakMap so a discarded file is collectable; see uploadDoc() in submit(). */
 const ID_DOC_META: Record<string, { label: string; hint: string }> = {
@@ -327,7 +380,7 @@ function Field({ label, error, children }: { label: string; error?: string; chil
       {children}
       <AnimatePresence>
         {error && (
-          <motion.p
+          <motion.p data-field-error
             initial={{ opacity: 0, y: -4, height: 0 }}
             animate={{ opacity: 1, y: 0, height: 'auto' }}
             exit={{ opacity: 0, y: -4, height: 0 }}
@@ -939,8 +992,11 @@ function FileDropzone({ label, accept, file, onFile, onClear, hint }: {
           </div>
         </button>
       )}
+      {/* value reset: after Clear, or after a refused file, choosing the SAME
+          file again fires no change event unless the input forgets it — the
+          student saw an empty box, no message, and Continue said "required". */}
       <input ref={ref} type="file" accept={accept} className="hidden"
-        onChange={e => { const f = e.target.files?.[0]; if (f) onFile(f) }} />
+        onChange={e => { const f = e.target.files?.[0]; e.target.value = ''; if (f) onFile(f) }} />
     </div>
   )
 }
@@ -952,12 +1008,31 @@ export function RegisterForm({ onSwitch, lockFull = false }: { onSwitch: () => v
   const [errors,        setErrors]        = useState<Partial<Record<keyof FormData, string>>>({})
   const [loading,       setLoading]       = useState(false)
   const [apiErr,        setApiErr]        = useState<string | null>(null)
+  /* The code behind apiErr. EMAIL_TAKEN is the one whose remedy is not on
+     this form at all — it is the Sign in screen — so the banner offers it. */
+  const [apiErrCode,    setApiErrCode]    = useState<string | null>(null)
   const [showPw,        setShowPw]        = useState(false)
   const [showCpw,       setShowCpw]       = useState(false)
   const [avatarFile,    setAvatarFile]    = useState<File | null>(null)
   const [avatarPreview, setAvatarPreview] = useState<string | null>(null)
   const [avatarError,   setAvatarError]   = useState<string | null>(null)
   const [showTerms,     setShowTerms]     = useState(false)
+
+  /* Set by next()/submit() when validation refuses. The refused field can be a
+     screen-height above the button on a phone — the profile photo on step 1
+     most of all — and with nothing scrolling it into view the button simply
+     looked dead. The effect covers a refusal on the current step; the step
+     panel's onAnimationComplete covers a guard that also changed the step,
+     because the new step's fields do not exist until it has animated in. */
+  const scrollToErrorRef = useRef(false)
+  const scrollToFirstError = () => {
+    if (!scrollToErrorRef.current) return
+    const el = document.querySelector<HTMLElement>('[data-field-error]')
+    if (!el) return
+    scrollToErrorRef.current = false
+    ;(el.parentElement ?? el).scrollIntoView({ block: 'center', behavior: 'smooth' })
+  }
+  useEffect(scrollToFirstError, [errors, avatarError])
 
   // ── Registration mode ────────────────────────────────
   const [mode, setMode] = useState<'express' | 'full'>(lockFull ? 'full' : 'express')
@@ -1004,7 +1079,7 @@ export function RegisterForm({ onSwitch, lockFull = false }: { onSwitch: () => v
 
       if (!data.email.trim()) {
         errs.email = 'Email is required'
-      } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(data.email)) {
+      } else if (!EMAIL_RE.test(data.email.trim())) {
         errs.email = 'Enter a valid email address'
       }
 
@@ -1067,8 +1142,8 @@ export function RegisterForm({ onSwitch, lockFull = false }: { onSwitch: () => v
         } else if (data.idType === 'Aadhaar Card') {
           const digits = num.replace(/\D/g, '')
           if (digits.length !== 12) errs.idNumber = 'Aadhaar Card must be exactly 12 digits'
-        } else if (num.length < 4) {
-          errs.idNumber = 'ID number must be at least 4 characters'
+        } else if (num.length < 4 || num.length > 40) {
+          errs.idNumber = 'ID number must be 4–40 characters'
         }
       }
     }
@@ -1118,43 +1193,46 @@ export function RegisterForm({ onSwitch, lockFull = false }: { onSwitch: () => v
     return Object.keys(errs).length === 0 && !avatarErr
   }
 
-  function next() { if (validateStep(step)) setStep(s => s + 1) }
+  function next() {
+    if (validateStep(step)) setStep(s => s + 1)
+    else scrollToErrorRef.current = true
+  }
   function back() { setErrors({}); setStep(s => s - 1) }
 
   /* ── Submit (unchanged) ─────────────────────────────── */
   async function submit() {
-    if (!validateStep(3)) return
+    if (!validateStep(3)) { scrollToErrorRef.current = true; return }
 
     // Hard guard — reject missing or oversized files before creating the account
     if (!avatarFile) {
       setAvatarError('Profile photo is required')
-      setStep(0); return
+      scrollToErrorRef.current = true; setStep(0); return
     }
     if (avatarFile.size > MAX_FILE_BYTES) {
       setAvatarError('Profile photo must not exceed 3 MB')
-      setStep(0); return
+      scrollToErrorRef.current = true; setStep(0); return
     }
     if (!data.passportFile) {
       setErrors(e => ({ ...e, passportFile: 'Passport copy is required' }))
-      setStep(1); return
+      scrollToErrorRef.current = true; setStep(1); return
     }
     if (data.passportFile.size > MAX_FILE_BYTES) {
       setErrors(e => ({ ...e, passportFile: 'Passport copy must not exceed 3 MB' }))
-      setStep(1); return
+      scrollToErrorRef.current = true; setStep(1); return
     }
     /* Same exemption as the step check. Without it this guard bounced the
        student back to step 1 for a document the form had (correctly) stopped
        asking them for -- and the box it pointed at was no longer on screen. */
     if (data.idType !== 'Passport' && !data.idDocFile) {
       setErrors(e => ({ ...e, idDocFile: `${ID_DOC_META[data.idType]?.label ?? 'ID document'} is required` }))
-      setStep(1); return
+      scrollToErrorRef.current = true; setStep(1); return
     }
     if (data.idDocFile && data.idDocFile.size > MAX_FILE_BYTES) {
       setErrors(e => ({ ...e, idDocFile: `${ID_DOC_META[data.idType]?.label ?? 'ID document'} must not exceed 3 MB` }))
-      setStep(1); return
+      scrollToErrorRef.current = true; setStep(1); return
     }
 
-    setLoading(true); setApiErr(null)
+    setLoading(true); setApiErr(null); setApiErrCode(null)
     try {
       /* Documents go up BEFORE the account is created (M-05).
 
@@ -1220,23 +1298,49 @@ export function RegisterForm({ onSwitch, lockFull = false }: { onSwitch: () => v
 
       window.location.href = '/my-learning'
     } catch (err: unknown) {
-      const resp = (err as { response?: { data?: { error?: { message?: string; code?: string } } } })?.response?.data?.error
+      const response = (err as { response?: { status?: number; data?: { error?: { message?: string; code?: string; details?: unknown } } } })?.response
+      const resp = response?.data?.error
       const code = resp?.code
+      /* A 422 puts the refused fields in details[] and the generic
+         "Request validation failed" in message. Say which box, on which
+         screen: the student is on step 4 and the box is usually on step 1,
+         and with back() wiping field errors on every step change there is no
+         other way to tell them. */
+      const named = [...new Set((Array.isArray(resp?.details) ? (resp.details as unknown[]) : [])
+        .map(d => {
+          const key  = String((d as { field?: unknown })?.field ?? '').replace(/^enrollmentApplication\./, '')
+          const meta = REGISTER_FIELD_META[key]
+          const why  = String((d as { message?: unknown })?.message ?? '').replace(/\.$/, '')
+          return meta ? `${meta.label} (step ${meta.step + 1})${why ? ` — ${why}` : ''}` : ''
+        })
+        .filter(Boolean))]
       /* An error the API SENT wins: it knows what was wrong. Only when there
          is no response at all do we describe the transport, so the student
          never reads "Failed to fetch" or "Network Error" — neither of which
          is a sentence about them or their form. The uploader above already
-         returns prose, so its message passes through untouched. */
-      const msg  = resp?.message
-        ?? describeTransportError(err)
-        ?? (err instanceof Error ? err.message : undefined)
-        ?? 'Registration failed. Please try again.'
-      if (code === 'EMAIL_TAKEN') {
-        setStep(3)
-        setErrors(e => ({ ...e, email: msg }))
-      } else {
-        setApiErr(msg)
-      }
+         returns prose, so its message passes through untouched. A status with
+         no envelope — nginx's 502 page, a proxy's text error — gets the
+         sentence describeStatus already has, not axios's own "Request failed
+         with status code 502". */
+      const msg  = named.length
+        ? `Please check ${named.join('; ')} — then submit again.`
+        : resp?.message
+          ?? describeTransportError(err)
+          ?? (response?.status ? describeStatus(response.status) : undefined)
+          ?? (err instanceof Error ? err.message : undefined)
+          ?? 'Registration failed. Please try again.'
+      /* EMAIL_TAKEN used to be the one code that did NOT set apiErr: it
+         jumped to step 3 and wrote the message under the email field. But
+         the email field is on step 0 and this button is on step 3, so the
+         message was written to a screen the student was not looking at —
+         and back() wipes errors on every step change, so it could never be
+         seen later either. What the student got was a short spinner and
+         then nothing, which is exactly what they reported. A student who
+         already has an account (an express one, typically) hit it on every
+         attempt. The banner below is the one surface that sits beside the
+         button on every step, so every API error goes there. */
+      setApiErr(msg)
+      setApiErrCode(code ?? null)
       setLoading(false)
     }
   }
@@ -1252,7 +1356,7 @@ export function RegisterForm({ onSwitch, lockFull = false }: { onSwitch: () => v
 
     /* Email */
     if (!expressData.email.trim()) errs.email = 'Email is required'
-    else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(expressData.email)) errs.email = 'Enter a valid email address'
+    else if (!EMAIL_RE.test(expressData.email.trim())) errs.email = 'Enter a valid email address'
 
     /* Preferred learning center */
     if (!expressData.organizationSlug) errs.organizationSlug = 'Please select your preferred learning center'
@@ -1293,10 +1397,12 @@ export function RegisterForm({ onSwitch, lockFull = false }: { onSwitch: () => v
 
       window.location.href = '/my-learning'
     } catch (err: unknown) {
-      const resp = (err as { response?: { data?: { error?: { message?: string; code?: string } } } })?.response?.data?.error
+      const response = (err as { response?: { status?: number; data?: { error?: { message?: string; code?: string } } } })?.response
+      const resp = response?.data?.error
       const code = resp?.code
       const msg  = resp?.message
         ?? describeTransportError(err)
+        ?? (response?.status ? describeStatus(response.status) : undefined)
         ?? (err instanceof Error ? err.message : undefined)
         ?? 'Registration failed. Please try again.'
       if (code === 'EMAIL_TAKEN') {
@@ -1333,10 +1439,12 @@ export function RegisterForm({ onSwitch, lockFull = false }: { onSwitch: () => v
           <input id="avatar-upload" type="file" accept="image/*" className="hidden"
             onChange={e => {
               const f = e.target.files?.[0]
+              e.target.value = ''
               if (!f) return
+              const problem = fileTypeProblem(f, PHOTO_TYPES, 'Profile photo')
+              if (problem) { setAvatarError(problem); return }
               if (f.size > MAX_FILE_BYTES) {
                 setAvatarError('Profile photo must not exceed 3 MB')
-                e.target.value = ''
                 return
               }
               setAvatarFile(f)
@@ -1346,7 +1454,7 @@ export function RegisterForm({ onSwitch, lockFull = false }: { onSwitch: () => v
           />
           <p className="text-[11px] text-[var(--color-text-muted)]">Profile photo <span className="text-red-400">*</span> <span className="text-[var(--color-text-muted)]">(max 3 MB)</span></p>
           {avatarError && (
-            <p className="flex items-center gap-1 text-[11px] font-medium text-red-500">
+            <p data-field-error className="flex items-center gap-1 text-[11px] font-medium text-red-500">
               <AlertCircle size={10} strokeWidth={2.5} />{avatarError}
             </p>
           )}
@@ -1355,7 +1463,7 @@ export function RegisterForm({ onSwitch, lockFull = false }: { onSwitch: () => v
         <Field label="Full Name *" error={errors.name}>
           <div className="relative">
             <User size={14} className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-[var(--color-text-muted)]" />
-            <Input error={errors.name} value={data.name} placeholder="e.g. Ahmed Al Mansouri"
+            <Input error={errors.name} value={data.name} placeholder="e.g. Ahmed Al Mansouri" maxLength={120}
               className="pl-9" onChange={e => set('name', e.target.value)} />
           </div>
         </Field>
@@ -1400,7 +1508,7 @@ export function RegisterForm({ onSwitch, lockFull = false }: { onSwitch: () => v
         <Field label="Nationality *" error={errors.nationality}>
           <div className="relative">
             <Globe size={14} className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-[var(--color-text-muted)]" />
-            <Input error={errors.nationality} value={data.nationality} placeholder="e.g. Emirati"
+            <Input error={errors.nationality} value={data.nationality} placeholder="e.g. Emirati" maxLength={80}
               className="pl-9"
               onChange={e => set('nationality', e.target.value.replace(/[^a-zA-Z\s\-]/g, ''))} />
           </div>
@@ -1414,7 +1522,7 @@ export function RegisterForm({ onSwitch, lockFull = false }: { onSwitch: () => v
         <Field label="Occupation *" error={errors.occupation}>
           <div className="relative">
             <Briefcase size={14} className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-[var(--color-text-muted)]" />
-            <Input error={errors.occupation} value={data.occupation} placeholder="e.g. Business Owner"
+            <Input error={errors.occupation} value={data.occupation} placeholder="e.g. Business Owner" maxLength={120}
               className="pl-9" onChange={e => set('occupation', e.target.value)} />
           </div>
         </Field>
@@ -1461,7 +1569,7 @@ export function RegisterForm({ onSwitch, lockFull = false }: { onSwitch: () => v
         <Field label="Villa / Apartment *" error={errors.villa}>
           <div className="relative">
             <MapPin size={14} className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-[var(--color-text-muted)]" />
-            <Input error={errors.villa} value={data.villa} placeholder="Villa 12, Al Barsha"
+            <Input error={errors.villa} value={data.villa} placeholder="Villa 12, Al Barsha" maxLength={120}
               className="pl-9" onChange={e => set('villa', e.target.value)} />
           </div>
         </Field>
@@ -1469,7 +1577,7 @@ export function RegisterForm({ onSwitch, lockFull = false }: { onSwitch: () => v
         <Field label="City / Town *" error={errors.city}>
           <div className="relative">
             <MapPin size={14} className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-[var(--color-text-muted)]" />
-            <Input error={errors.city} value={data.city} placeholder="Dubai"
+            <Input error={errors.city} value={data.city} placeholder="Dubai" maxLength={80}
               className="pl-9" onChange={e => set('city', e.target.value)} />
           </div>
         </Field>
@@ -1489,6 +1597,8 @@ export function RegisterForm({ onSwitch, lockFull = false }: { onSwitch: () => v
               accept=".pdf,.jpg,.jpeg,.png,.webp"
               file={data.passportFile}
               onFile={f => {
+                const problem = fileTypeProblem(f, DOC_TYPES, 'Passport copy')
+                if (problem) { setErrors(e => ({ ...e, passportFile: problem })); return }
                 if (f.size > MAX_FILE_BYTES) {
                   setErrors(e => ({ ...e, passportFile: 'Passport copy must not exceed 3 MB' }))
                   return
@@ -1499,7 +1609,7 @@ export function RegisterForm({ onSwitch, lockFull = false }: { onSwitch: () => v
               hint="Clear scan or photo of your passport identity page (max 3 MB)"
             />
             {errors.passportFile && (
-              <p className="flex items-center gap-1 text-[11px] font-medium text-red-500 mt-1">
+              <p data-field-error className="flex items-center gap-1 text-[11px] font-medium text-red-500 mt-1">
                 <AlertCircle size={10} strokeWidth={2.5} />{errors.passportFile}
               </p>
             )}
@@ -1521,6 +1631,8 @@ export function RegisterForm({ onSwitch, lockFull = false }: { onSwitch: () => v
                   accept=".pdf,.jpg,.jpeg,.png,.webp"
                   file={data.idDocFile}
                   onFile={f => {
+                    const problem = fileTypeProblem(f, DOC_TYPES, docMeta.label)
+                    if (problem) { setErrors(e => ({ ...e, idDocFile: problem })); return }
                     if (f.size > MAX_FILE_BYTES) {
                       setErrors(e => ({ ...e, idDocFile: `${docMeta.label} must not exceed 3 MB` }))
                       return
@@ -1531,7 +1643,7 @@ export function RegisterForm({ onSwitch, lockFull = false }: { onSwitch: () => v
                   hint={docMeta.hint}
                 />
                 {errors.idDocFile && (
-                  <p className="flex items-center gap-1 text-[11px] font-medium text-red-500 mt-1">
+                  <p data-field-error className="flex items-center gap-1 text-[11px] font-medium text-red-500 mt-1">
                     <AlertCircle size={10} strokeWidth={2.5} />{errors.idDocFile}
                   </p>
                 )}
@@ -1578,7 +1690,7 @@ export function RegisterForm({ onSwitch, lockFull = false }: { onSwitch: () => v
 
           {data.hearAboutUs === 'Friend / Referral' && (
             <Field label="Who referred you?">
-              <Input value={data.referralName} placeholder="Referral name"
+              <Input value={data.referralName} placeholder="Referral name" maxLength={120}
                 onChange={e => set('referralName', e.target.value)} />
             </Field>
           )}
@@ -1705,7 +1817,7 @@ export function RegisterForm({ onSwitch, lockFull = false }: { onSwitch: () => v
           </span>
         </label>
         {errors.termsAccepted && (
-          <p className="flex items-center gap-1 text-[11px] font-medium text-red-500">
+          <p data-field-error className="flex items-center gap-1 text-[11px] font-medium text-red-500">
             <AlertCircle size={10} strokeWidth={2.5} />{errors.termsAccepted}
           </p>
         )}
@@ -1794,7 +1906,7 @@ export function RegisterForm({ onSwitch, lockFull = false }: { onSwitch: () => v
               <div className="relative">
                 <User size={14} className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-[var(--color-text-muted)]" />
                 <Input error={expressErrors.name} value={expressData.name}
-                  placeholder="e.g. Ahmed Al Mansouri" className="pl-9"
+                  placeholder="e.g. Ahmed Al Mansouri" maxLength={120} className="pl-9"
                   onChange={e => setEx('name', e.target.value)} />
               </div>
             </Field>
@@ -1963,7 +2075,8 @@ export function RegisterForm({ onSwitch, lockFull = false }: { onSwitch: () => v
             <AnimatePresence mode="wait">
               <motion.div key={step}
                 initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }}
-                transition={{ duration: 0.18, ease: 'easeOut' }}>
+                transition={{ duration: 0.18, ease: 'easeOut' }}
+                onAnimationComplete={scrollToFirstError}>
                 {renderStep()}
               </motion.div>
             </AnimatePresence>
@@ -1975,7 +2088,16 @@ export function RegisterForm({ onSwitch, lockFull = false }: { onSwitch: () => v
                   initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }}
                   className="flex items-center gap-2.5 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-600">
                   <AlertCircle size={15} className="flex-shrink-0" />
-                  {apiErr}
+                  <span className="min-w-0 flex-1">{apiErr}</span>
+                  {/* "Please sign in" with nowhere to do it is a dead end on a
+                      four-screen form. onSwitch is the same Sign in the top bar
+                      and the footer link use. */}
+                  {apiErrCode === 'EMAIL_TAKEN' && (
+                    <button type="button" onClick={onSwitch}
+                      className="shrink-0 rounded-lg border border-red-300 bg-white px-3 py-1.5 text-xs font-semibold text-red-700 transition-colors hover:bg-red-100">
+                      Sign in
+                    </button>
+                  )}
                 </motion.div>
               )}
             </AnimatePresence>

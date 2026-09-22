@@ -108,9 +108,13 @@ export async function uploadSignupDoc(
        plumbing, not their problem. So the status speaks for the server and
        the API speaks for itself. */
     if (!res.ok) {
+      /* Three documents go up in a row, so a refusal must say WHICH: "Only
+         JPEG, PNG, WebP images or PDF documents are allowed" on its own sent
+         students back to the passport on step 2 when it was the profile
+         photo on step 1. */
       throw new Error(res.status >= 500
         ? describeStatus(res.status)
-        : read.body.error?.message ?? `Could not upload your ${label}.`)
+        : `Your ${label} was refused — ${(read.body.error?.message ?? 'please choose a different file').replace(/\.$/, '')}.`)
     }
 
     const url = read.body.data?.url

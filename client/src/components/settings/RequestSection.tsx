@@ -8,6 +8,7 @@ import {
   Clock, CheckCircle2, XCircle, RefreshCw, Eye, Zap, Shield,
 } from 'lucide-react'
 import { api } from '@/lib/axios'
+import { describeTransportError } from '@/lib/apiResponse'
 import { useCurrentUser, useCompleteRegistration } from '@/lib/api/user'
 import Spinner from '@/components/ui/Spinner'
 import { useDocumentUrl } from '@/lib/api/documents'
@@ -575,6 +576,10 @@ export function RequestSection() {
        'multipart/form-data; boundary=...' when it detects FormData */
     const res = await api.post(`/uploads/${kind}`, fd, {
       headers: { 'Content-Type': undefined },
+      /* The shared axios timeout is 15 s, sized for reads. This carries up to
+         5 MB from a phone; on a slow uplink it was aborted and then reported
+         as a file-type problem, and every retry re-sent the earlier files. */
+      timeout: 45_000,
     })
     return res.data?.data?.url ?? res.data?.url ?? ''
   }, [])
@@ -618,7 +623,7 @@ export function RequestSection() {
 
       /* Emergency contact — optional; if provided must be meaningful */
       if (form.emergencyContact.trim() && form.emergencyContact.trim().length < 5)
-        e['emergencyContact'] = 'Please provide a valid emergency contact (name & phone)'
+        e['emergencyContact'] = 'Please provide a valid emergency contact number'
 
       /* Gender */
       if (!form.gender)
@@ -741,6 +746,7 @@ export function RequestSection() {
       } catch (err: unknown) {
         const msg = (err as { response?: { data?: { error?: { message?: string } } } })
           ?.response?.data?.error?.message
+          ?? describeTransportError(err)
           ?? 'Upload failed — check file type (JPG/PNG/PDF) and size (max 5 MB), then try again.'
         setErrors(e => ({ ...e, upload: msg }))
         setUploading({ passport: false, idDoc: false, photo: false })
@@ -1041,8 +1047,8 @@ export function RequestSection() {
                 <Field label="Emergency Contact" error={errors['emergencyContact']}>
                   <StyledInput value={form.emergencyContact}
                     onChange={v => { set('emergencyContact', v); clearError('emergencyContact') }}
-                    placeholder="Name & phone, e.g. Sarah +971 50 000 0000"
-                    icon={<Phone size={14} />} maxLength={80} />
+                    placeholder="e.g. +971 50 000 0000"
+                    icon={<Phone size={14} />} maxLength={30} />
                 </Field>
               </div>
 
@@ -1328,7 +1334,11 @@ export function RequestSection() {
           {step < 3 ? (
             <motion.button whileHover={{ y: -1 }} whileTap={{ scale: 0.97 }}
               type="button" onClick={handleNext}
-              className="flex items-center gap-2 rounded-xl px-5 py-2 text-sm font-bold text-white"
+              /* A second tap while the files were still going up ran handleNext
+                 twice: six uploads, and two setStep(s => s + 1) that skipped the
+                 Program step entirely. */
+              disabled={uploading.passport || uploading.idDoc || uploading.photo}
+              className="flex items-center gap-2 rounded-xl px-5 py-2 text-sm font-bold text-white disabled:opacity-70"
               style={{ background: 'var(--color-primary)', boxShadow: '0 4px 14px rgba(0,87,184,0.28)' }}>
               Next<ChevronRight size={14} />
             </motion.button>
