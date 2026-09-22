@@ -946,7 +946,7 @@ function FileDropzone({ label, accept, file, onFile, onClear, hint }: {
 }
 
 /* ── Main component ─────────────────────────────────── */
-export function RegisterForm({ onSwitch }: { onSwitch: () => void }) {
+export function RegisterForm({ onSwitch, lockFull = false }: { onSwitch: () => void; lockFull?: boolean }) {
   const [step,          setStep]          = useState(0)
   const [data,          setData]          = useState<FormData>(INITIAL)
   const [errors,        setErrors]        = useState<Partial<Record<keyof FormData, string>>>({})
@@ -960,7 +960,7 @@ export function RegisterForm({ onSwitch }: { onSwitch: () => void }) {
   const [showTerms,     setShowTerms]     = useState(false)
 
   // ── Registration mode ────────────────────────────────
-  const [mode, setMode] = useState<'express' | 'full'>('express')
+  const [mode, setMode] = useState<'express' | 'full'>(lockFull ? 'full' : 'express')
 
   // ── Express account form state ───────────────────────
   const [expressData, setExpressData] = useState({
@@ -1720,6 +1720,18 @@ export function RegisterForm({ onSwitch }: { onSwitch: () => void }) {
     <div className="flex flex-col gap-5">
 
       {/* ── Mode tab switcher ─────────────────────────── */}
+      {lockFull ? (
+        /* Reached via /register?flow=full. The Express tab is not rendered, so
+           nothing on this page can select it: the setMode('express') below is
+           the only such control, and it is inside the branch that is skipped.
+           A static header keeps the form's identity where the switcher was. */
+        <div className="flex rounded-2xl border border-[var(--color-border)] bg-[var(--color-bg-muted)] p-1">
+          <div className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-[var(--color-bg-surface)] py-2.5 text-sm font-semibold text-[var(--color-text-primary)] shadow-sm">
+            <FileText size={14} className="shrink-0 text-blue-600" />
+            <span className="whitespace-nowrap">Full Registration</span>
+          </div>
+        </div>
+      ) : (
       <div className="flex gap-1.5 rounded-2xl border border-[var(--color-border)] bg-[var(--color-bg-muted)] p-1">
         <button
           type="button"
@@ -1761,6 +1773,7 @@ export function RegisterForm({ onSwitch }: { onSwitch: () => void }) {
           <span className="whitespace-nowrap">Full Registration</span>
         </button>
       </div>
+      )}
 
       <AnimatePresence mode="wait">
 

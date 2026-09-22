@@ -10,6 +10,9 @@ type AuthMode = 'login' | 'register'
 
 interface AuthPageProps {
   initialMode: AuthMode
+  /** Offer Full Registration only — derived from `?flow=full` by both
+      app/(auth)/register/page.tsx and app/(auth)/login/page.tsx. */
+  lockFull?: boolean
 }
 
 function StepDots({ mode }: { mode: AuthMode }) {
@@ -28,12 +31,18 @@ function StepDots({ mode }: { mode: AuthMode }) {
   )
 }
 
-export function AuthPage({ initialMode }: AuthPageProps) {
+export function AuthPage({ initialMode, lockFull = false }: AuthPageProps) {
   const [mode, setMode] = useState<AuthMode>(initialMode)
 
   const switchMode = (next: AuthMode) => {
     setMode(next)
-    window.history.replaceState(null, '', next === 'login' ? '/login' : '/register')
+    /* Carry the lock, and only the lock. `?flow=full` has to survive a hop
+       to Sign in and back, or a reload after it lands on a plain URL and the
+       Express tab this link exists to hide is back. Nothing else is carried:
+       `?from`, `?method=email` and `?session=expired` were always dropped
+       on a hop, and LoginForm / middleware read them from the live URL, so
+       carrying them would change what a hop does for everyone else. */
+    window.history.replaceState(null, '', (next === 'login' ? '/login' : '/register') + (lockFull ? '?flow=full' : ''))
   }
 
   return (
@@ -142,7 +151,7 @@ export function AuthPage({ initialMode }: AuthPageProps) {
                   exit={{ opacity: 0, y: -8 }}
                   transition={{ duration: 0.22 }}
                 >
-                  <RegisterForm onSwitch={() => switchMode('login')} />
+                  <RegisterForm onSwitch={() => switchMode('login')} lockFull={lockFull} />
                 </motion.div>
               )}
             </AnimatePresence>
