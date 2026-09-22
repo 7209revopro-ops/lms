@@ -26,8 +26,8 @@
    later, or never. Filing last Tuesday's class under "Upcoming" because the
    row still says `booked` would put a finished class at the top of the page.
    `classify()` is the single place that rule lives, and the clock it reads is
-   the SERVER's (`useServerNow`), so a device clock that is a day out cannot
-   move a class either.
+   the SERVER's (`useJoinClock`, which wraps `useServerNow`), so a device clock
+   that is a day out cannot move a class either.
 
    JOINING HAPPENS HERE, WITHOUT THE LINK LIVING HERE.
    `GET /bookings/me` still omits `meetingUrl` on purpose, because serving it
@@ -51,7 +51,8 @@ import {
 } from 'lucide-react'
 import { useMyBookings, useCancelBooking, type MyBooking } from '@/lib/api/bookings'
 import JoinMeetButton from '@/components/live-classes/JoinMeetButton'
-import { useServerNow } from '@/hooks/useServerNow'
+import { resolveJoin, type JoinSubject } from '@/lib/joinAffordance'
+import { useJoinClock } from '@/hooks/useJoinClock'
 import { APP_TIMEZONE } from '@/lib/timezone'
 import { titleCase } from '@/lib/titleCase'
 import { AvatarImg } from '@/components/ui/AvatarImg'
@@ -320,12 +321,33 @@ function canCancel(r: Row, v: Verdict, now: number): boolean {
    renders nothing for it anyway. It draws its own before/open/closed states
    off `now`, so it can say "opens in 12 min" as readily as "join now"; what
    it must never do is appear on a cancelled seat or a finished class. */
-function canJoin(r: Row, v: Verdict): boolean {
+function joinSubject(r: Row): JoinSubject {
   const lc = r.booking.liveClassId
-  return r.booking.status === 'booked'
-    && (v.kind === 'booked' || v.kind === 'live')
-    && lc.isOnline !== false
-    && !!lc.joinOpensAt
+  return {
+    id:             lc.id,
+    scheduledStart: lc.scheduledStart,
+    durationMins:   lc.durationMins,
+    type:           lc.type,
+    isOnline:       lc.isOnline,
+    status:         lc.status,
+    joinOpensAt:    lc.joinOpensAt,
+    joinClosesAt:   lc.joinClosesAt,
+    /* From the BOOKING, never off the class payload: MyBooking['liveClassId']
+       has no isBooked field, so reading it there would be silently false for
+       ever and this row would go quiet again. */
+    isBooked:       true,
+    /* Already titleCased by toRow for the row's own chip - passing the raw
+       fields would print the same place in a second casing. */
+    place:          r.place,
+  }
+}
+
+/* Whether this row may offer a way in at all. The resolver decides WHICH way;
+   this decides whether we are in a state to ask. Past, cancelled, called-off
+   and unmarked rows never get a control, which is what the verdict allow-list
+   is for. */
+function canAct(r: Row, v: Verdict): boolean {
+  return r.booking.status === 'booked' && (v.kind === 'booked' || v.kind === 'live')
 }
 
 /* ── Small parts ────────────────────────────────────────────────────────── */
@@ -600,20 +622,66 @@ function BookingRow({ row, now }: { row: Row; now: number }) {
           under the date. */}
       <div className="flex w-full flex-shrink-0 flex-wrap items-center gap-2 pl-[58px] sm:w-auto sm:flex-col sm:items-end sm:gap-1.5 sm:pl-0">
         <Badge v={v} />
-        {canJoin(row, v) && (
-          <JoinMeetButton
-            sessionId={b.liveClassId.id} now={now} size="sm"
-            isBooked
-            joinOpensAt={b.liveClassId.joinOpensAt}
-            joinClosesAt={b.liveClassId.joinClosesAt}
-            type={b.liveClassId.type}
-            isOnline={b.liveClassId.isOnline}
-            status={b.liveClassId.status}
-          />
-        )}
+        {canAct(row, v) && <JoinAction row={row} now={now} />}
         {canCancel(row, v, now) && <CancelSeat booking={b} />}
       </div>
     </li>
+  )
+}
+
+/* THE WAY IN, IN THIS ROW'S IDIOM.
+
+   resolveJoin decides WHICH way in; this decides what that looks like in a
+   compact list row. The Class Schedule renders the same three answers as
+   full-width cards with explanatory notes, which is right for a screen you
+   are browsing and wrong for a ledger you are scanning.
+
+   The in-app link can appear up to thirty seconds after it becomes valid, and
+   that is fine: its boundary is fifteen minutes BEFORE the start, not the
+   second the student is watching for. The Meet button is the one that has to
+   be punctual, and useJoinClock ticks every second near its window. Do not
+   "fix" the lag by loosening isJoinEligible - that would loosen the Meet
+   button with it, and the Meet link is not ours to release early. */
+function JoinAction({ row, now }: { row: Row; now: number }) {
+  const a = resolveJoin(joinSubject(row), now)
+
+  if (a.kind === 'none') return null
+
+  if (a.kind === 'inPerson') {
+    return (
+      <p className="dm flex items-center gap-1.5 text-[11.5px] sm:text-[10.5px]"
+        style={{ color: 'var(--color-text-secondary)' }}>
+        <MapPin size={12} strokeWidth={2} className="flex-shrink-0" />{a.text}
+      </p>
+    )
+  }
+
+  if (a.kind === 'watch') {
+    return (
+      <Link href={a.href}
+        className="bk-focus dm inline-flex h-11 items-center gap-1.5 rounded-xl px-3.5 text-xs font-bold text-white transition-opacity hover:opacity-90 sm:h-auto sm:py-1.5"
+        style={{ background: 'var(--color-primary)' }}>
+        <Radio size={12} strokeWidth={2.5} />{a.label}
+      </Link>
+    )
+  }
+
+  /* Meet. The height class goes on ONLY when the button is actually a button:
+     JoinMeetButton appends className to the muted <p> it renders in the
+     'before' and 'closed' phases too, so an unconditional h-11 would turn
+     "Join opens at 2:00 PM" into a 44px-tall line of text on a phone. */
+  const b = row.booking.liveClassId
+  return (
+    <JoinMeetButton
+      sessionId={b.id} now={now} size="sm"
+      isBooked
+      joinOpensAt={b.joinOpensAt}
+      joinClosesAt={b.joinClosesAt}
+      type={b.type}
+      isOnline={b.isOnline}
+      status={b.status}
+      className={a.phase === 'open' ? 'min-h-[44px] sm:min-h-0' : ''}
+    />
   )
 }
 
@@ -845,17 +913,40 @@ export default function MyBookingsPage() {
      array — no refetch on tab change, and therefore counts that can exist. */
   const { data, isLoading, isError, refetch, isFetching } = useMyBookings({ per_page: PAGE_SIZE })
 
-  /* Server-anchored and ticking every 30s: a class crossing from upcoming to
-     past while the page is open should move by itself, and a device clock
-     that is days out must not be able to move it. */
-  const now = useServerNow(30_000)
-
   /* Clock-independent work: once per fetch, not once per tick. */
   const docs = data?.docs
   const rows = useMemo(
     () => (docs ?? []).map(toRow).filter((r): r is Row => r !== null),
     [docs],
   )
+
+  /* THE CLOCK HAS TO BE FAST ENOUGH TO OPEN A DOOR ON TIME.
+
+     Server-anchored, so a class crossing from upcoming to past while the page
+     is open moves by itself and a device clock days out cannot move it. That
+     part was always right; the tick was not. At a flat 30s the join control
+     appeared up to thirty seconds after the class had started - on the one
+     screen a student watches while waiting for it to start.
+
+     useJoinClock is the hook written for exactly this: it ticks every second
+     while any session it is given sits within two minutes of a join-window
+     edge, and drops back to 30s otherwise, so the row opens on the second
+     without a page full of idle history re-rendering once a second. The
+     Class Schedule already uses it; this screen was the one that did not. */
+  const joinWatch = useMemo(
+    () => rows
+      .filter(r => r.booking.status === 'booked')
+      .map(r => ({
+        isBooked:     true,
+        joinOpensAt:  r.booking.liveClassId.joinOpensAt,
+        joinClosesAt: r.booking.liveClassId.joinClosesAt,
+        type:         r.booking.liveClassId.type,
+        isOnline:     r.booking.liveClassId.isOnline,
+        status:       r.booking.liveClassId.status,
+      })),
+    [rows],
+  )
+  const now = useJoinClock(joinWatch)
   /* Bookings whose class row is gone. Nothing truthful is left to draw, but
      silently dropping them would make the totals disagree with the student's
      own count, so the page owns up to it in a footnote. */
