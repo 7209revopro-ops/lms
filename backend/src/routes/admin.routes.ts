@@ -12,7 +12,7 @@ import { authenticateAdmin, requireRole, requireAdmin, requireAnyAdmin, requireI
 import { issueClassHandoff } from '@/controllers/classHandoff.controller.ts'
 import { validate } from '@/middleware/validate.middleware.ts'
 import { env } from '@/config/env.ts'
-import { authRateLimit, refreshRateLimit } from '@/middleware/rateLimit.middleware.ts'
+import { authRateLimit, refreshRateLimit, impersonationRateLimit } from '@/middleware/rateLimit.middleware.ts'
 import { QuizService } from '@/services/quiz.service.ts'
 import { AdminExamService } from '@/services/admin-exam.service.ts'
 import { AssignmentService } from '@/services/assignment.service.ts'
@@ -20,7 +20,7 @@ import { SectionService } from '@/services/section.service.ts'
 import { OrderService } from '@/services/order.service.ts'
 import { CouponService } from '@/services/coupon.service.ts'
 import {
-  requireSameOrgUser, callerMayAccess, instructorOwnsSession, callerOrgForRead,
+  requireSameOrgUser, requireImpersonableStudent, callerMayAccess, instructorOwnsSession, callerOrgForRead,
   servedClassFilter, classServesOrg, andFilter,
 } from '@/utils/tenancy.ts'
 import { CROSS_ORG_CLASSES_ENABLED } from '@/utils/featureFlags.ts'
@@ -288,6 +288,16 @@ const userUpdateSchema = z.object({
   email:      z.string().trim().email().optional(),
   category:   z.enum(['4x-trading', 'digital-marketing', 'ai', 'jura']).nullable().optional(),
   categories: z.array(z.enum(['4x-trading', 'digital-marketing', 'ai', 'jura'])).optional(),
+  /* A SUB-ADMIN'S PROGRAMME. userCreateSchema has always carried this; this
+     one did not, and validate() strips what a schema does not name — so the
+     Edit User modal, which requires a programme before it will let you save a
+     sub_admin, sent `program` and had it silently dropped. The user came back
+     with role sub_admin and no programme, and injectCategoryScope derives
+     categoryScope from exactly this field: no programme, no scope. Every
+     programme-scoped guard then reads undefined, including the impersonation
+     one, which now fails closed — so promoting someone to sub_admin through
+     the modal produced an account that could open nobody. */
+  program:    z.enum(['ai', 'digital_marketing', 'forex', 'jura']).optional(),
   avatarUrl:  z.string().url().or(z.literal('')).optional(),
   headline:   z.string().max(255).optional(),
   bio:        z.string().max(2000).optional(),
@@ -535,31 +545,72 @@ router.post('/users/:id/reset-2fa', requireAdmin, requireSameOrgUser('id'),
       sendSuccess(res, null, 'Two-factor authentication reset for this user.')
     } catch (err) { next(err) }
   })
-router.post  ('/users/:id/impersonate', requirePermission('users','impersonate'), requireRole('super_admin'), audit('user.impersonate', 'User', r => String(r.params['id'] ?? '')), ctrl.impersonateUser)
+router.post  ('/users/:id/impersonate', impersonationRateLimit, requirePermission('users','impersonate'), requireRole('super_admin'), audit('user.impersonate', 'User', r => String(r.params['id'] ?? '')), ctrl.impersonateUser)
 
-/* Client-portal impersonation — same guards as above, separate action so the
+/* Client-portal impersonation — separate action from the one above so the
    audit trail distinguishes "acted inside the admin panel as them" from
-   "browsed the student app as them". */
-router.post  ('/users/:id/impersonate-client', requirePermission('users','impersonate'), requireRole('super_admin'), audit('user.impersonate.client', 'User', r => String(r.params['id'] ?? '')), ctrl.impersonateClient)
+   "browsed the student app as them".
+
+   OPEN TO ADMINS AND SUB-ADMINS, unlike the admin-panel route. This is the
+   half of impersonation that is safe to widen, and the asymmetry is the
+   point:
+
+     · the session it creates is READ-ONLY — denyImpersonatedWrite refuses
+       every non-GET — so an admin sees what the student sees and cannot act
+       as them;
+     · it already refuses any target that is not an active student, so it
+       cannot be turned on staff;
+     · requireImpersonableStudent adds what was missing the moment a
+       per-academy role could reach it: the target must be in the caller's own
+       academy, and a sub_admin's must be inside its programme.
+
+   The admin-panel route above is not read-only and exists to impersonate
+   STAFF, which is why it stays super_admin only. */
+router.post  ('/users/:id/impersonate-client', impersonationRateLimit, requirePermission('users','impersonate'), requireRole('super_admin', 'admin', 'sub_admin'), requireImpersonableStudent('id'), audit('user.impersonate.client', 'User', r => String(r.params['id'] ?? '')), ctrl.impersonateClient)
 
 /* ── Impersonation sessions (M-04) ────────────────────────────────────
    Impersonation is a session record now, not a bare token, so it can be
-   listed and stopped. Reading the trail is deliberately broader than
-   creating one: any full admin should be able to see who has been in which
-   account, while only super_admin can start or stop a session.
+   listed and stopped.
+
+   Three different widths, on purpose:
+     · STARTING one — super_admin for the admin panel, plus admin and
+       sub_admin for the read-only client view (above).
+     · READING the trail — an academy's admins read their academy; everyone
+       else reads the rows they are the actor of. It is a supervisory view.
+     · STOPPING one — whoever may read it may stop it. A power you can begin
+       and not end is a bad shape, and revoking is the only thing that cuts
+       off every holder of a token at once.
 ──────────────────────────────────────────────────────────────────────── */
-router.get('/impersonation-sessions', requireAdmin, async (req: Request, res: Response, next: NextFunction) => {
+router.get('/impersonation-sessions', requireAnyAdmin, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { ImpersonationSessionModel } = await import('@/models/schema.ts')
     const { Types } = await import('mongoose')
     const { page, per_page } = parsePagination(req.query as Record<string, unknown>)
 
     /* Scoped like every other admin listing: an org admin sees their own
-       academy's sessions, super_admin sees all. */
+       academy's sessions, super_admin sees all.
+
+       A SUB-ADMIN SEES ONLY ITS OWN. It can start a session now, so it has to
+       be able to find and end one — a power you can begin and not stop is a
+       bad shape, and the whole point of the session row is that revoking it
+       cuts every holder off at once. But reading the trail is a supervisory
+       act: "who has been inside which account" is for the people who
+       supervise the academy, not for everyone who can open a support view. So
+       it gets exactly the rows it is answerable for. */
     const filter: Record<string, unknown> = {}
     const orgId = req.user!.organizationId
     if (req.user!.role !== 'super_admin' && orgId && Types.ObjectId.isValid(orgId)) {
       filter['organizationId'] = new Types.ObjectId(orgId)
+    }
+    /* Narrowed to your own rows for everyone below a full admin — and ALSO
+       for a full admin whose org filter did not apply, because an admin with
+       no organizationId would otherwise read every impersonation in both
+       academies, with actor and target emails, ip and user agent. An unscoped
+       reader is the one case a supervisory listing must not have. */
+    const belowFullAdmin = req.user!.role === 'sub_admin' || req.user!.role === 'support' || req.user!.role === 'instructor'
+    const unscoped       = filter['organizationId'] === undefined
+    if (req.user!.role !== 'super_admin' && (belowFullAdmin || unscoped)) {
+      filter['actorId'] = new Types.ObjectId(req.user!.id)
     }
     if (req.query['active'] === 'true') {
       filter['revokedAt'] = { $exists: false }
@@ -578,7 +629,7 @@ router.get('/impersonation-sessions', requireAdmin, async (req: Request, res: Re
 
 /* Ends ONE session. Idempotent — revoking an already-revoked session is not
    an error, because the useful outcome is "it is off", not "I was first". */
-router.delete('/impersonation-sessions/:id', requireRole('super_admin'),
+router.delete('/impersonation-sessions/:id', requireAnyAdmin,
   audit('user.impersonate.revoke', 'ImpersonationSession', r => String(r.params['id'] ?? '')),
   async (req: Request, res: Response, next: NextFunction) => {
     try {
@@ -588,9 +639,31 @@ router.delete('/impersonation-sessions/:id', requireRole('super_admin'),
       if (!Types.ObjectId.isValid(id)) {
         res.status(400).json({ success: false, error: { code: 'INVALID_ID', message: 'Invalid session id' } }); return
       }
-      const existing = await ImpersonationSessionModel.findById(id).select('_id').lean()
+      const existing = await ImpersonationSessionModel
+        .findById(id).select('_id actorId organizationId').lean() as
+          { _id: unknown; actorId?: unknown; organizationId?: unknown } | null
       if (!existing) {
         res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Session not found' } }); return
+      }
+
+      /* WHO MAY END ONE. super_admin ends anything, as before. An academy
+         admin ends anything in their own academy — the supervisory role they
+         already have over the listing. Anyone else ends only what they
+         themselves started, which is what makes starting one safe to grant.
+
+         The row carries no org for a cross-academy super_admin session (the
+         actor had no academy selected), so an undefined organizationId is
+         never treated as "matches mine". 404, not 403: a session outside your
+         reach should not be confirmed to exist. */
+      const role = req.user!.role
+      if (role !== 'super_admin') {
+        const mine    = String(existing.actorId ?? '') === String(req.user!.id)
+        const sameOrg = !!existing.organizationId && !!req.user!.organizationId
+          && String(existing.organizationId) === String(req.user!.organizationId)
+        const mayEnd  = mine || (role === 'admin' && sameOrg)
+        if (!mayEnd) {
+          res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Session not found' } }); return
+        }
       }
       await ImpersonationSessionModel.updateOne(
         { _id: id, revokedAt: { $exists: false } },

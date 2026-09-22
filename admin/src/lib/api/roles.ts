@@ -1,7 +1,6 @@
 'use client'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from '@/lib/axios'
-import { useRouter } from 'next/navigation'
 
 /* ── Types ──────────────────────────────────────────────── */
 
@@ -125,24 +124,5 @@ export function useAssignRole() {
       return res.data.data
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: ['admin', 'users'] }),
-  })
-}
-
-export function useImpersonate() {
-  const router = useRouter()
-  return useMutation({
-    mutationFn: async (userId: string) => {
-      const res = await api.post<{
-        success: true
-        data: { token: string; user: { id: string; name: string; email: string; role: string } }
-      }>(`/admin/users/${userId}/impersonate`)
-      return res.data.data
-    },
-    onSuccess: (data) => {
-      /* Open the client portal with the impersonation token as a query param.
-         The client portal should read `?impersonate=<token>` and set the session. */
-      const clientUrl = process.env.NEXT_PUBLIC_CLIENT_URL ?? 'http://localhost:3000'
-      window.open(`${clientUrl}?impersonate=${data.token}`, '_blank')
-    },
   })
 }

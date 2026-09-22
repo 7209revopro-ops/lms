@@ -645,7 +645,7 @@ export const ENDPOINTS = [
     "app": "admin",
     "verb": "POST",
     "path": "/admin/users/000000000000000000000000/impersonate",
-    "src": "admin/src/lib/api/roles.ts"
+    "src": "admin/src/lib/api/users.ts"
   },
   {
     "app": "admin",

@@ -227,7 +227,12 @@ export class UserRepository extends BaseRepository<IUser> {
      through their own category. Two small indexed reads — the programme's
      courses, then the distinct students enrolled on them — which is the same
      shape the scoped bookings and live-class queries already use. */
-  private async studentIdsOnProgramCourses(program: string): Promise<Types.ObjectId[]> {
+  /* Public because the impersonation guard needs the SAME answer this list
+     does. A sub_admin's Students table shows a student reached through this
+     arm, so a guard that only compared `category`/`categories` would 404 the
+     "View as student" button on exactly the rows the table had just drawn.
+     One definition, two callers, rather than the predicate written twice. */
+  async studentIdsOnProgramCourses(program: string): Promise<Types.ObjectId[]> {
     if (!program) return []
     const { CourseModel, EnrollmentModel } = await import('@/models/schema.ts')
     const courses = await CourseModel.find({ program }, { _id: 1 }).lean()

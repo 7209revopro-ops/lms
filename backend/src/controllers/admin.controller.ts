@@ -342,6 +342,22 @@ export class AdminController {
   /* ─── User actions ────────────────────────────── */
   impersonateUser = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     try {
+      /* NOT FROM INSIDE AN IMPERSONATION. The session row records
+         `actorId: req.user!.id`, and during an impersonation that id is the
+         account being impersonated, not the operator behind it — so a chained
+         impersonation would write the wrong person into the one record that
+         says who did this. (The audit log is fine: audit.middleware.ts
+         prefers impersonatorId. The session row does not.) The self-check
+         below compares against the same borrowed id, so without this an
+         operator could even impersonate their own real account and appear in
+         the trail as their target.
+
+         Refused rather than corrected: an operator who needs to look at a
+         second account can leave the first. */
+      if (req.user!.impersonationId) {
+        sendSuccess(res, null, 'Leave the current impersonation before starting another.', 409)
+        return
+      }
       const targetId = String(req.params['id'] ?? '')
       if (targetId === req.user!.id) {
         sendSuccess(res, null, 'Cannot impersonate yourself', 400)
@@ -369,6 +385,14 @@ export class AdminController {
         actorEmail:     req.user!.email,
         targetId:       String(target._id),
         targetEmail:    target.email,
+        /* THE ROW IS STAMPED WITH THE ACTOR'S ACADEMY, and the listing and
+           revoke screens filter on it — so a row with no organizationId
+           belongs to neither academy: no scoped listing shows it and no org
+           admin can end it. That is only ever right for a super_admin, whose
+           reach genuinely has no single owning academy. It cannot happen to
+           anyone else, because the only route an admin or sub_admin can take
+           here is guarded by requireImpersonableStudent, which 404s a caller
+           whose own academy is unset before the handler is reached. */
         organizationId: req.user!.organizationId,
         expiresAt:      new Date(Date.now() + toSeconds(ttl) * 1000),
         ip:             (req.ip ?? req.socket?.remoteAddress) || undefined,
@@ -414,6 +438,22 @@ export class AdminController {
   ───────────────────────────────────────────────────── */
   impersonateClient = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     try {
+      /* NOT FROM INSIDE AN IMPERSONATION. The session row records
+         `actorId: req.user!.id`, and during an impersonation that id is the
+         account being impersonated, not the operator behind it — so a chained
+         impersonation would write the wrong person into the one record that
+         says who did this. (The audit log is fine: audit.middleware.ts
+         prefers impersonatorId. The session row does not.) The self-check
+         below compares against the same borrowed id, so without this an
+         operator could even impersonate their own real account and appear in
+         the trail as their target.
+
+         Refused rather than corrected: an operator who needs to look at a
+         second account can leave the first. */
+      if (req.user!.impersonationId) {
+        sendSuccess(res, null, 'Leave the current impersonation before starting another.', 409)
+        return
+      }
       const targetId = String(req.params['id'] ?? '')
       if (targetId === req.user!.id) {
         sendSuccess(res, null, 'Cannot impersonate yourself', 400)
@@ -446,6 +486,14 @@ export class AdminController {
         actorEmail:     req.user!.email,
         targetId:       String(target._id),
         targetEmail:    target.email,
+        /* THE ROW IS STAMPED WITH THE ACTOR'S ACADEMY, and the listing and
+           revoke screens filter on it — so a row with no organizationId
+           belongs to neither academy: no scoped listing shows it and no org
+           admin can end it. That is only ever right for a super_admin, whose
+           reach genuinely has no single owning academy. It cannot happen to
+           anyone else, because the only route an admin or sub_admin can take
+           here is guarded by requireImpersonableStudent, which 404s a caller
+           whose own academy is unset before the handler is reached. */
         organizationId: req.user!.organizationId,
         expiresAt:      new Date(Date.now() + toSeconds(ttl) * 1000),
         ip:             (req.ip ?? req.socket?.remoteAddress) || undefined,

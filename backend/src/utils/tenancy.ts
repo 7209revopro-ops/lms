@@ -359,3 +359,151 @@ export function requireSameOrgUser(param: 'id' | 'userId' = 'id') {
     } catch (err) { next(err) }
   }
 }
+
+/* ─────────────────────────────────────────────────────
+   requireImpersonableStudent(param)
+   ─────────────────────────────────────────────────────
+   Who an admin or sub_admin may "view as".
+
+   Impersonation was super_admin only. Widening it is a real grant, so the
+   widening is deliberately the narrow half of the feature:
+
+     · The CLIENT-PORTAL flow only. That session is READ-ONLY - every non-GET
+       is refused by denyImpersonatedWrite (auth.middleware.ts:133) - so an
+       admin sees what a student sees and cannot act as them. The admin-panel
+       flow, which is not read-only and exists to impersonate STAFF, stays
+       super_admin only.
+     · STUDENTS only. Anything else is a privilege question rather than a
+       support one, and an admin impersonating another admin - or a
+       super_admin - would be escalation with a trail that names the wrong
+       person as the actor.
+     · The caller's OWN academy. Neither impersonation route ever compared
+       organisations, which was safe only because the one role that could
+       reach them is cross-org by design. The moment a per-academy role can
+       call it, that omission becomes a cross-tenant hole.
+     · A sub_admin is confined further, to its programme, using the same
+       clause the rest of the admin applies to students:
+       { $or: [{ category: scope }, { categories: scope }] }.
+
+   404 for a target outside the caller's reach, never 403 - the same rule
+   requireSameOrgUser follows, so the endpoint cannot be used to discover
+   which ids exist in the other academy.
+
+   super_admin passes through untouched: the existing behaviour, and the
+   suites that assert it, are unchanged.
+───────────────────────────────────────────────────── */
+export function requireImpersonableStudent(param: 'id' | 'userId' = 'id') {
+  return async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    try {
+      const role = req.user?.role
+      if (role === 'super_admin') { next(); return }
+
+      if (role !== 'admin' && role !== 'sub_admin') {
+        res.status(403).json({
+          success: false,
+          error: { code: 'FORBIDDEN', message: 'Your role cannot view accounts as their owner.' },
+        }); return
+      }
+
+      const id = String(req.params[param] ?? '')
+      if (!Types.ObjectId.isValid(id)) {
+        res.status(400).json({
+          success: false,
+          error: { code: 'INVALID_ID', message: 'Invalid user id' },
+        }); return
+      }
+
+      const { UserModel } = await import('@/models/schema.ts')
+      const target = await UserModel.findById(id)
+        .select('organizationId role isActive category categories').lean() as {
+          organizationId?: unknown; role?: string; isActive?: boolean
+          category?: string; categories?: string[]
+        } | null
+
+      const notFound = () => res.status(404).json({
+        success: false,
+        error: { code: 'NOT_FOUND', message: 'User not found' },
+      })
+
+      /* Absent, or in the other academy: the same answer, so neither can be
+         told apart from the outside.
+
+         NOT callerMayAccess. That helper is deliberately generous about
+         missing data — rule 2 lets a record with no academy be read by
+         anyone, and rule 3b (tenancy.ts:94) returns TRUE when the CALLER has
+         no academy. Those allowances exist so legacy rows stay readable, and
+         they are wrong for this question. `bun run seed` creates its admin
+         with no organizationId at all, and index.ts's boot backfill skips
+         super_admin, so an org-less staff account is ordinary rather than
+         exotic — and under rule 3b such an admin would have passed this wall
+         for students of BOTH academies.
+
+         "Whose identity may I borrow" is the strictest question this codebase
+         asks, so it gets the strictest comparison: both sides must name an
+         academy, and they must be the same one. */
+      if (!target) { notFound(); return }
+
+      const caller = await callerOrgForRead(req)
+      if (caller.gone || !caller.org) { notFound(); return }
+      if (!target.organizationId || String(target.organizationId) !== String(caller.org)) {
+        notFound(); return
+      }
+
+      if (target.role !== 'student') {
+        res.status(403).json({
+          success: false,
+          error: { code: 'NOT_A_STUDENT', message: 'Only student accounts can be viewed this way.' },
+        }); return
+      }
+
+      /* A sub_admin sees one programme, and "in this programme" is a
+         THREE-arm rule, not an equality test. The third arm is the one that
+         matters: nothing about enrolling on a course writes `categories`, so
+         a student categorised for one programme but sitting on another's
+         course appears in that sub_admin's Students table through
+         studentIdsOnProgramCourses. Comparing only the two fields would have
+         404'd the "View as student" button on exactly the rows the table had
+         just drawn — the button and the server disagreeing about the very
+         population this widening exists for. The predicate is imported rather
+         than restated so the two cannot drift.
+
+         404 rather than 403, consistent with the academy boundary above: a
+         403 here would let a sub_admin probe which students exist outside
+         their programme. The write-side precedents (rejectEnrollment) answer
+         403 because by then the record is already on the admin's screen; this
+         runs before anything is shown. */
+      /* A SUB-ADMIN WITH NO PROGRAMME GETS NOTHING.
+
+         This first read `if (role === 'sub_admin' && scope)`, so a missing
+         scope skipped the whole test and handed that account the academy.
+         I justified it against `if (scope)` at admin.controller.ts:236 and
+         :698 — but those COERCE a value (stamp my programme on what I
+         create), they do not AUTHORISE. Every place that authorises fails
+         closed: admin.routes.ts:938 `if (!scope || !(await
+         studentMatchesScope(...)))` -> 403, and :1128 `const ok = !!scope &&
+         ...`. I checked the wrong precedent.
+
+         It matters because the account is easy to produce by accident rather
+         than rare: userUpdateSchema (admin.routes.ts:283) carries no
+         `program`, so promoting somebody to sub_admin through Edit User
+         silently drops the programme the modal insisted on — leaving exactly
+         this scope-less sub_admin. Failing open meant that account could read
+         any student's portal while being refused a mere list of the same
+         student's enrolments. */
+      const scope = req.user?.categoryScope
+      if (role === 'sub_admin') {
+        if (!scope) { notFound(); return }
+        let inScope = target.category === scope
+          || (Array.isArray(target.categories) && target.categories.includes(scope))
+        if (!inScope) {
+          const { UserRepository } = await import('@/repositories/user.repository.ts')
+          const enrolled = await new UserRepository().studentIdsOnProgramCourses(scope)
+          inScope = enrolled.some(eid => String(eid) === id)
+        }
+        if (!inScope) { notFound(); return }
+      }
+
+      next()
+    } catch (err) { next(err) }
+  }
+}

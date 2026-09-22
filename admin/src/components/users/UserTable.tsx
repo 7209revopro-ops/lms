@@ -193,9 +193,15 @@ function UserRow({ user, index, onEdit, onViewHistory }: {
   const { data: me } = useCurrentUser()
   const [menuOpen, setMenuOpen] = useState(false)
 
-  /* super_admin only, students only — the same two rules the backend enforces.
-     Hiding it here is a courtesy; the endpoint is the actual control. */
-  const canViewAsStudent = me?.role === 'super_admin' && user.role === 'student'
+  /* Students only, and only for the three roles the endpoint now accepts.
+     Hiding it here is a courtesy; the endpoint is the actual control — and it
+     checks more than this can: the target must be in the caller's own academy,
+     and a sub_admin's must be inside its programme. Both are already true of
+     every row these roles can see, because the list itself is scoped, so the
+     button and the server agree without this component having to re-derive
+     the rule. The session it opens is read-only either way. */
+  const canViewAsStudent = user.role === 'student'
+    && (me?.role === 'super_admin' || me?.role === 'admin' || me?.role === 'sub_admin')
 
   /* Only an instructor can be lent: sharedInstructorFilter on the backend keys
      the widening on `role: 'instructor'` as part of the clause rather than
