@@ -12,6 +12,7 @@ import {
 } from 'lucide-react'
 import { useCourse } from '@/lib/api/courses'
 import { useCourseProgress, useEnroll } from '@/lib/api/enrollments'
+import { useCourseExam } from '@/lib/api/exam'
 import { useRazorpayCheckout, useTabbyCheckout, useAbzerCheckout, useTamaraCheckout, useGatewayConfig, useValidateCoupon, useTabbyPrescore, useTamaraPrescore } from '@/lib/api/checkout'
 import { TabbyProductPromo, TabbyCheckoutCard } from '@/components/payments/TabbyPromo'
 import { TamaraProductWidget, TamaraCheckoutWidget } from '@/components/payments/TamaraWidget'
@@ -59,6 +60,7 @@ function CourseDetailInner({ slug }: { slug: string }) {
 
   const { data, isLoading, isError } = useCourse(slug)
   const { data: progress } = useCourseProgress(slug)
+  const { data: courseExam } = useCourseExam(progress?.isEnrolled ? data?.course.id : undefined)
   const enroll          = useEnroll()
   const { data: gatewayConfig } = useGatewayConfig()
   const isUAE           = gatewayConfig?.currency === 'AED'
@@ -476,6 +478,22 @@ function CourseDetailInner({ slug }: { slug: string }) {
                   </span>
                 )}
               </div>
+
+              {/* Exam CTA — enrolled students, only when a published exam exists */}
+              {isEnrolled && courseExam && (
+                <Link href={`/exam/${course.id}?slug=${course.slug}`}>
+                  <motion.button
+                    whileHover={{ y: -2 }}
+                    whileTap={{ scale: 0.97 }}
+                    className="mb-2.5 flex w-full items-center justify-center gap-2 rounded-2xl py-3 text-sm font-bold transition-all"
+                    style={{ border: '1.5px solid var(--color-primary)', color: 'var(--color-primary)', background: 'rgba(0,87,184,0.04)' }}>
+                    <FileText size={15} />
+                    {courseExam.attempt.status === 'submitted' || courseExam.attempt.status === 'suspended'
+                      ? 'View exam result'
+                      : courseExam.attempt.status === 'in_progress' ? 'Resume exam' : 'Take exam'}
+                  </motion.button>
+                </Link>
+              )}
 
               {/* CTA */}
               {isEnrolled && continueLessonId ? (
