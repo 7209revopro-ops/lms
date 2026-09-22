@@ -1,9 +1,13 @@
 import type { NextConfig } from 'next'
 import { withSentryConfig } from '@sentry/nextjs'
 
-/* Backend origin — used only server-side for the rewrite proxy.
-   NOT a NEXT_PUBLIC var; never sent to the browser.              */
-const API_ORIGIN = process.env.API_URL ?? 'http://localhost:8000'
+/* Backend origin for the upload rewrite — server-side only, never sent to
+   the browser. The SAME three names, in the same order, as the route handler
+   and the client app, so whichever of them a deployment set keeps working. */
+const API_ORIGIN = process.env.API_URL
+  ?? process.env.NEXT_PUBLIC_API_URL
+  ?? process.env.NEXT_PUBLIC_API_BASE_URL
+  ?? 'http://localhost:8000'
 
 /* Parse the R2 public URL (set at build time via NEXT_PUBLIC_R2_PUBLIC_URL). */
 const r2PublicUrl = process.env.NEXT_PUBLIC_R2_PUBLIC_URL ?? ''
@@ -35,13 +39,23 @@ const nextConfig: NextConfig = {
   experimental: {
     optimizePackageImports: ['lucide-react', 'framer-motion'],
   },
-  /* Proxy /api/v1/* → backend so the browser never calls a different origin.
-     This means cookies work as same-origin (no CORS, no SameSite issues).  */
+  /* /api/v1 is served by src/app/api/v1/[...path]/route.ts, which relays the
+     admin's address to the backend for per-person rate limiting (M-11) and
+     keeps everything same-origin (cookies without CORS or SameSite trouble).
+     Next resolves afterFiles rewrites BEFORE dynamic routes, so the blanket
+     `/api/v1/:path*` rewrite that used to sit here silently replaced that
+     handler everywhere — production and dev alike — and the relay was never
+     sent.
+
+     Uploads stay on a rewrite: a serverless function caps the request body
+     at 4.5 MB, course images and documents go up to 10 MB, and every admin
+     upload is authenticated, so it rate-limits per user already and the
+     relay buys it nothing. The static /uploads files stay too. */
   async rewrites() {
     return [
       {
-        source:      '/api/v1/:path*',
-        destination: `${API_ORIGIN}/api/v1/:path*`,
+        source:      '/api/v1/uploads/:path*',
+        destination: `${API_ORIGIN}/api/v1/uploads/:path*`,
       },
       {
         source:      '/uploads/:path*',
