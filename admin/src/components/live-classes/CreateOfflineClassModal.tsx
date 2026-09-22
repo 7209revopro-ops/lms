@@ -14,6 +14,7 @@ import { useCourseOutline } from '@/lib/api/outline'
 import { useUsers } from '@/lib/api/users'
 import { Button } from '@/components/ui/button'
 import { DarkSelect, DarkDateTimePicker } from './FormWidgets'
+import { CLASS_LANGUAGES, withFlag } from '@/lib/languages'
 
 interface Props {
   onClose:          () => void
@@ -22,16 +23,11 @@ interface Props {
   prefillDate?:     string   // YYYY-MM-DDTHH:MM — from timetable slot click
 }
 
-const LANGUAGE_OPTIONS = [
-  { value: 'English',   label: '🇬🇧 English' },
-  { value: 'Arabic',    label: '🇦🇪 Arabic' },
-  { value: 'Hindi',     label: '🇮🇳 Hindi' },
-  { value: 'Malayalam', label: '🇮🇳 Malayalam' },
-  { value: 'Tamil',     label: '🇮🇳 Tamil' },
-  { value: 'Urdu',      label: '🇵🇰 Urdu' },
-  { value: 'French',    label: '🇫🇷 French' },
-  { value: 'Spanish',   label: '🇪🇸 Spanish' },
-]
+/* From lib/languages, which mirrors the backend's LIVE_LANGUAGES. This list
+   used to be hand-kept and had drifted furthest of the nine: it offered
+   French and Spanish, which the create validator rejects outright, so two of
+   its eight options could only ever produce a 400. */
+const LANGUAGE_OPTIONS = CLASS_LANGUAGES.map(l => ({ value: l.value, label: withFlag(l) }))
 
 export function CreateOfflineClassModal({ onClose, onSuccess, categoryProgram, prefillDate }: Props) {
   const createMutation = useCreateLiveClass()

@@ -1372,7 +1372,22 @@ router.post  ('/lessons/:id/move',                        validate(lessonMoveSch
 router.put   ('/sections/:sectionId/lessons/reorder',     validate(reorderSchema),        ctrl.reorderLessons)
 
 /* ─── Live classes ────────────────────────────────── */
-const LIVE_LANGUAGES = ['English', 'Arabic', 'Hindi', 'Malayalam', 'Urdu'] as const
+/* THE LANGUAGES A CLASS MAY BE TAUGHT IN — and the gate, not a suggestion:
+   both the create and update validators below are z.enum over this, so a
+   value missing from here cannot be saved however many pickers offer it.
+
+   Tamil is new here and was overdue: admin/src/lib/languages.ts and the
+   offline-class modal have both offered it for a while, so choosing Tamil
+   produced a 400 from a dropdown that showed it as a normal option.
+
+   "Hindi/English" is a bilingual class rather than a third language. It is
+   one stored value on purpose — a class is delivered one way and a student
+   filtering for it wants that one thing. The slash is safe: language is
+   never a path segment anywhere, and the one key it is joined into
+   (groupKeyOf in the client) separates on '|'. */
+const LIVE_LANGUAGES = [
+  'English', 'Hindi/English', 'Hindi', 'Malayalam', 'Tamil', 'Arabic', 'Urdu',
+] as const
 /* ── CROSS-ACADEMY COHORTS ──────────────────────────────────────────────
    One class, more than one academy. Each entry is a DOOR: the academy whose
    students may come in, the course of THEIRS they must be enrolled in, and

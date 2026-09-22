@@ -33,6 +33,7 @@ import {
   type SlotStatus, type ClassGroup,
 } from '@/lib/classSchedule'
 import { Hierarchy, allGroupsIn } from './Hierarchy'
+import { CLASS_LANGUAGES } from '@/lib/languages'
 
 /* ── Google Fonts ──────────────────────────────────────────── */
 const FONT_CSS = `@import url('https://fonts.googleapis.com/css2?family=Syne:wght@600;700;800&family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;1,9..40,400&display=swap');.syne{font-family:'Syne',sans-serif}.dm{font-family:'DM Sans',sans-serif}`
@@ -885,19 +886,12 @@ function CourseDropdown({ value, onChange, options }: {
 }
 
 /* ── Language dropdown ─────────────────────────────────────── */
-/* THE SAME FIVE THE BACKEND ACCEPTS - see LIVE_LANGUAGES in
-   backend/src/routes/admin.routes.ts:1363, which the create and update
-   validators enforce. This list had drifted in both directions at once:
-   it offered Tamil, which no class can be, so picking it could only ever
-   empty the page; and it omitted Arabic and Urdu, which a class CAN be,
-   so those sessions were unreachable from the filter entirely. */
-const LANG_OPTIONS = [
-  { value: 'English',   label: 'English',   flag: '🇬🇧' },
-  { value: 'Arabic',    label: 'Arabic',    flag: '🇦🇪' },
-  { value: 'Hindi',     label: 'Hindi',     flag: '🇮🇳' },
-  { value: 'Malayalam', label: 'Malayalam', flag: '🇮🇳' },
-  { value: 'Urdu',      label: 'Urdu',      flag: '🇵🇰' },
-]
+/* EXACTLY WHAT THE BACKEND ACCEPTS, from lib/languages, which mirrors
+   LIVE_LANGUAGES. The reason that matters is written up there: this list had
+   drifted in both directions at once, offering a language no class could be
+   saved as and omitting two that classes genuinely are. Keeping the copy
+   here is what let it drift, so there is no copy here any more. */
+const LANG_OPTIONS = CLASS_LANGUAGES
 
 function LanguageDropdown({ value, onChange }: {
   value: string; onChange: (v: string) => void

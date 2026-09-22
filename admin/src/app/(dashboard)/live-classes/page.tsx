@@ -13,7 +13,7 @@ import {
   ChevronDown, User, Globe,
 } from 'lucide-react'
 import { useAllLiveClasses, useCreateLiveClass, useMyMeetings, type LiveClass, type LiveClassType, type MentorMeeting } from '@/lib/api/liveClasses'
-import { CLASS_LANGUAGES } from '@/lib/languages'
+import { CLASS_LANGUAGES, withFlagAndNative } from '@/lib/languages'
 import { datetimeLocalToISO, zoneOf, foreignZoneTag } from '@/lib/timezone'
 import { useCourses } from '@/lib/api/courses'
 import { useCourseOutline } from '@/lib/api/outline'
@@ -1367,13 +1367,9 @@ function QuickCreateModal({ onClose, onSuccess, categoryProgram }: { onClose: ()
             <DarkSelect
               value={language}
               onChange={setLanguage}
-              options={[
-                { value: 'English',   label: '🇬🇧 English' },
-                { value: 'Arabic',    label: '🇦🇪 Arabic (عربي)' },
-                { value: 'Hindi',     label: '🇮🇳 Hindi (हिंदी)' },
-                { value: 'Malayalam', label: '🇮🇳 Malayalam (മലയാളം)' },
-                { value: 'Urdu',      label: '🇵🇰 Urdu (اردو)' },
-              ]}
+              /* One list, from lib/languages — this dropdown and the filter on
+                 the same page used to hold two different hardcoded sets. */
+              options={CLASS_LANGUAGES.map(l => ({ value: l.value, label: withFlagAndNative(l) }))}
             />
           </div>
 

@@ -17,6 +17,7 @@
     "test:tabby": "bun src/tests/tabby.suite.ts",
     "test:tamara": "bun src/tests/tamara.suite.ts",
     "check:seats": "bun src/scripts/check-seat-writes.ts",
+    "check:languages": "bun src/scripts/check-languages.ts",
     "test:crossorgclass:concurrency": "bun src/tests/crossorgclass.concurrency.suite.ts",
     "test:crossorgclass:roster": "bun src/tests/crossorgclass.roster.suite.ts",
     "test:upcomingfeed": "bun src/tests/upcomingfeed.suite.ts",

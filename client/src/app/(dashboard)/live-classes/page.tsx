@@ -17,6 +17,7 @@ import { AvatarImg } from '@/components/ui/AvatarImg'
 import JoinMeetButton from '@/components/live-classes/JoinMeetButton'
 import { useJoinClock } from '@/hooks/useJoinClock'
 import { getJoinPhase } from '@/lib/joinWindow'
+import { CLASS_LANGUAGES } from '@/lib/languages'
 
 /* ── Helpers ─────────────────────────────────────────── */
 function fmtTime(iso: string) {
@@ -669,8 +670,12 @@ export default function LiveClassesPage() {
                     border: languageFilter ? '1px solid var(--color-text-primary)' : '1px solid var(--color-border)',
                   }}>
                   <option value="">All Languages</option>
-                  {['English','Malayalam','Hindi','Tamil'].map(lang => (
-                    <option key={lang} value={lang}>{lang}</option>
+                  {/* From lib/languages. This filter offered Tamil while the
+                      API rejected it and omitted Arabic and Urdu, which
+                      classes are taught in - so it both promised what did not
+                      exist and hid what did. */}
+                  {CLASS_LANGUAGES.map(l => (
+                    <option key={l.value} value={l.value}>{l.label}</option>
                   ))}
                 </select>
               </div>

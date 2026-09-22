@@ -21,6 +21,7 @@ import { useCurrentUser } from '@/lib/api/user'
 import Spinner from '@/components/ui/Spinner'
 import { useToast } from '@/store/ui.store'
 import { datetimeLocalToISO } from '@/lib/timezone'
+import { CLASS_LANGUAGES } from '@/lib/languages'
 
 /* ─── Custom dark dropdown ───────────────────────────────── */
 interface SelectOption { value: string; label: string }
@@ -161,13 +162,11 @@ function addDays(d: Date, n: number): Date {
   const r = new Date(d); r.setDate(r.getDate() + n); return r
 }
 
-const LANG_FLAG: Record<string, string> = {
-  English:   '🇬🇧',
-  Arabic:    '🇦🇪',
-  Hindi:     '🇮🇳',
-  Malayalam: '🇮🇳',
-  Urdu:      '🇵🇰',
-}
+/* Built from lib/languages so a language added there shows its flag here
+   without a second edit — this map had no Tamil, so a Tamil class rendered
+   with whatever the lookup's fallback was. */
+const LANG_FLAG: Record<string, string> =
+  Object.fromEntries(CLASS_LANGUAGES.map(l => [l.value, l.flag]))
 
 /* The allowed sort values, shared by the control and the URL parser so the two
    can never disagree about what is valid. */
@@ -820,7 +819,7 @@ export default function BookingsPage() {
     { value: 'bookedAt',        label: 'Oldest booked'           },
   ]
 
-  const LANG_OPTS = ['English', 'Arabic', 'Hindi', 'Malayalam', 'Urdu']
+  const LANG_OPTS = CLASS_LANGUAGES.map(l => l.value)
 
   const TH_COLS = [
     { label: 'Student',    icon: <User size={10} />          },

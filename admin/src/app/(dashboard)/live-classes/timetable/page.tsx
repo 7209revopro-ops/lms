@@ -22,6 +22,7 @@ import { Button } from '@/components/ui/button'
 import Spinner from '@/components/ui/Spinner'
 import { IN_APP_RGB, MEET_RGB } from '@/lib/liveClassTheme'
 import { categoryScopeOf } from '@/lib/programScope'
+import { CLASS_LANGUAGES, withFlagAndNative } from '@/lib/languages'
 
 /* ── Helpers ─────────────────────────────────────────── */
 function sameDay(a: Date, b: Date): boolean {
@@ -391,11 +392,9 @@ function QuickCreateModal({
               style={{ color: 'rgba(255,255,255,0.35)' }}>Language</label>
             <select value={language} onChange={e => setLanguage(e.target.value)}
               className={base} style={selStyle}>
-              <option value="English">🇬🇧 English</option>
-              <option value="Arabic">🇦🇪 Arabic (عربي)</option>
-              <option value="Hindi">🇮🇳 Hindi (हिंदी)</option>
-              <option value="Malayalam">🇮🇳 Malayalam (മലയാളം)</option>
-              <option value="Urdu">🇵🇰 Urdu (اردو)</option>
+              {CLASS_LANGUAGES.map(l => (
+                <option key={l.value} value={l.value}>{withFlagAndNative(l)}</option>
+              ))}
             </select>
           </div>
 

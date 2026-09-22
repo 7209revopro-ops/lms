@@ -19,6 +19,7 @@ import Spinner from '@/components/ui/Spinner'
 import { GuestCohortsField } from '@/components/live-classes/GuestCohortsField'
 import type { GuestCohortInput } from '@/lib/api/liveClasses'
 import { useCurrentUser } from '@/lib/api/user'
+import { CLASS_LANGUAGES, withFlagAndNative } from '@/lib/languages'
 
 /* ── Helpers ──────────────────────────────────────────────
    No bare alias for isoToDatetimeLocal any more, on purpose. It and
@@ -571,11 +572,14 @@ export function EditLiveClassModal({ live, onClose, onSuccess }: Props) {
               style={{ color: 'rgba(255,255,255,0.35)' }}>Language</label>
             <select value={language} onChange={e => setLanguage(e.target.value)}
               className={base} style={{ ...selStyle }}>
-              <option value="English">🇬🇧 English</option>
-              <option value="Arabic">🇦🇪 Arabic (عربي)</option>
-              <option value="Hindi">🇮🇳 Hindi (हिंदी)</option>
-              <option value="Malayalam">🇮🇳 Malayalam (മലയാളം)</option>
-              <option value="Urdu">🇵🇰 Urdu (اردو)</option>
+              {/* A class saved before this list grew keeps its own value
+                  selectable, so opening and saving cannot silently relabel it. */}
+              {!CLASS_LANGUAGES.some(l => l.value === language) && language && (
+                <option value={language}>{language} (current)</option>
+              )}
+              {CLASS_LANGUAGES.map(l => (
+                <option key={l.value} value={l.value}>{withFlagAndNative(l)}</option>
+              ))}
             </select>
           </div>
 
