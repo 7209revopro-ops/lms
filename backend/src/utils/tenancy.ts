@@ -333,9 +333,14 @@ export function requireSameOrgUser(param: 'id' | 'userId' = 'id') {
 
          Narrow on purpose, in three independent ways, because this guard also
          protects DELETE /users/:id and reset-2fa:
-           · the record must be role `instructor` AND `sharedAcrossOrgs` — a
-             shared student cannot exist (schema validator), so this cannot
-             widen to students even if the flag were set by some future path;
+           · the record must be role `instructor` AND `sharedAcrossOrgs`. Both
+             halves are load-bearing and the role half is what actually holds:
+             the schema's validator is document middleware and does NOT run on
+             findByIdAndUpdate, so the flag really could be written onto a
+             student for a while (see the note on the hook in models/schema.ts
+             and the guard in UserService#adminUpdate). Because this clause
+             tests the role itself rather than trusting the flag, a mis-flagged
+             student was never reachable through it;
            · the caller's role is an explicit allow-list, not a negation;
            · everything else still routes through callerMayAccess untouched.
 
@@ -356,6 +361,83 @@ export function requireSameOrgUser(param: 'id' | 'userId' = 'id') {
       }
 
       next()
+    } catch (err) { next(err) }
+  }
+}
+
+/* ─────────────────────────────────────────────────────
+   requireBorrowedInstructorUnchanged(param)
+   ─────────────────────────────────────────────────────
+   The limit of the lent-instructor carve-out above.
+
+   That carve-out lets EITHER academy's admin administer a lent instructor —
+   reset their second factor, fix their name, deactivate them — because the
+   borrowing academy schedules them and needs to be able to act. It was never a
+   grant to RE-CLASSIFY them, and two fields on PATCH /users/:id do exactly
+   that:
+
+     · `role`. A lent instructor keeps their OWNER's organizationId, so a
+       borrowing-academy admin who sets role 'admin' on them does not create an
+       admin of their own academy — they create one inside the LENDING academy,
+       through the one record that is reachable across the wall. That is the
+       academy boundary handing out staff accounts on the other side of itself.
+       Neither academy's Users list would show what happened as anything but an
+       ordinary role change.
+
+     · `sharedAcrossOrgs`. The lending is the OWNER's decision. Letting the
+       borrower switch it off would also un-lend them from a third academy's
+       point of view, and — because a class's instructor is re-checked on every
+       save — silently make the owner's own classes unsaveable.
+
+   403 rather than 404: the caller can legitimately SEE this user, so there is
+   nothing to hide, and a refusal that says which field is the problem is the
+   difference between "fix this" and "the panel is broken".
+
+   Mounted only on the PATCH. DELETE and reset-2fa stay inside the carve-out,
+   which is the product decision recorded in docs/cross-org-instructor-plan.md.
+───────────────────────────────────────────────────── */
+export function requireBorrowedInstructorUnchanged(param: 'id' | 'userId' = 'id') {
+  return async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    try {
+      if (req.user?.role === 'super_admin') { next(); return }
+
+      const body = req.body as { role?: unknown; sharedAcrossOrgs?: unknown }
+      const wantsRole   = body.role !== undefined
+      const wantsShared = body.sharedAcrossOrgs !== undefined
+      if (!wantsRole && !wantsShared) { next(); return }
+
+      const id = String(req.params[param] ?? '')
+      if (!Types.ObjectId.isValid(id)) { next(); return }
+
+      const { UserModel } = await import('@/models/schema.ts')
+      const target = await UserModel.findById(id)
+        .select('organizationId role sharedAcrossOrgs').lean() as
+          { organizationId?: unknown; role?: string; sharedAcrossOrgs?: boolean } | null
+      /* A missing user, or one who is not lent, is not this guard's business —
+         requireSameOrgUser has already decided whether the caller may be here
+         at all, and ctrl.updateUser answers 404 for a missing id. */
+      if (!target) { next(); return }
+      if (!(target.role === 'instructor' && target.sharedAcrossOrgs === true)) { next(); return }
+
+      const callerOrg = req.user?.organizationId
+      const owns = !!callerOrg && !!target.organizationId
+        && String(target.organizationId) === String(callerOrg)
+      if (owns) { next(); return }
+
+      /* A role that is not actually changing is a no-op the Edit modal sends
+         on every save, so refusing on the key's mere presence would break
+         ordinary edits — the same trap the cohort gate on the live-class PATCH
+         documents. Compare values, not keys. */
+      const roleChanges   = wantsRole   && String(body.role) !== String(target.role)
+      const sharedChanges = wantsShared && Boolean(body.sharedAcrossOrgs) !== (target.sharedAcrossOrgs === true)
+      if (!roleChanges && !sharedChanges) { next(); return }
+
+      res.status(403).json({ success: false, error: {
+        code: 'BORROWED_INSTRUCTOR',
+        message: roleChanges
+          ? 'This instructor belongs to the other academy. Their role can only be changed by the academy that owns them.'
+          : 'This instructor belongs to the other academy. Only the academy that owns them can change whether they are shared.',
+      } })
     } catch (err) { next(err) }
   }
 }

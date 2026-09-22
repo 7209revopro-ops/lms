@@ -7,6 +7,7 @@ import {
   GraduationCap, TrendingUp, Cpu, BarChart2, ShieldCheck,
 } from 'lucide-react'
 import { useUpdateUser, type AdminUser } from '@/lib/api/users'
+import { useCurrentUser } from '@/lib/api/user'
 import Spinner from '@/components/ui/Spinner'
 import { api } from '@/lib/axios'
 import { useToast } from '@/store/ui.store'
@@ -39,6 +40,13 @@ export function EditInstructorModal({ user, onClose, onSuccess }: Props) {
     user.role === 'admin' ? 'admin' : 'instructor'
   )
   const [category,      setCategory]      = useState<string>(user.category ?? '')
+  /* LENDING THIS INSTRUCTOR TO THE OTHER ACADEMY.
+     The API has accepted `sharedAcrossOrgs` on this PATCH since the feature
+     shipped; no screen ever sent it. Add Instructor could tick the box at
+     creation and nothing could tick it afterwards — so lending an instructor
+     who already existed meant deleting and recreating the account, losing
+     their classes with it, and un-lending was impossible by any route. */
+  const [shared,        setShared]        = useState(user.sharedAcrossOrgs === true)
   const [error,         setError]         = useState<string | null>(null)
   const [categoryError, setCategoryError] = useState<string | null>(null)
 
@@ -47,6 +55,20 @@ export function EditInstructorModal({ user, onClose, onSuccess }: Props) {
   const [avatarPreview, setAvatarPreview] = useState<string | null>(user.avatarUrl ?? null)
   const [uploading,     setUploading]     = useState(false)
   const fileRef = useRef<HTMLInputElement>(null)
+
+  const { data: me } = useCurrentUser()
+  /* Two conditions, and they are different questions. WHO: only an admin or
+     super admin — the API answers 403 to anyone else, and a control that is
+     offered and then refused is worse than one that was never there. WHOSE:
+     the academy that OWNS the instructor. A lent instructor is administered by
+     both academies, but the lending itself is the owner's decision and the
+     server now refuses it from the borrower (BORROWED_INSTRUCTOR). A super
+     admin carries no organizationId and stands outside the comparison. */
+  const mayShare = me?.role === 'admin' || me?.role === 'super_admin'
+  const ownsThem = me?.role === 'super_admin'
+    || (!!me?.organizationId && !!user.organizationId
+        && String(me.organizationId) === String(user.organizationId))
+  const canLend  = mayShare && ownsThem
 
   const isPending = update.isPending || uploading
 
@@ -80,6 +102,10 @@ export function EditInstructorModal({ user, onClose, onSuccess }: Props) {
     if (headline.trim()    !== (user.headline ?? '')) dto.headline = headline.trim() || undefined
     if (bio.trim()         !== (user.bio ?? ''))      dto.bio      = bio.trim() || undefined
     if (newAvatarUrl)                                 dto.avatarUrl = newAvatarUrl
+    /* Sent only when it actually changed. The server compares values rather
+       than keys for exactly this reason, but an unchanged field on the wire is
+       still a field somebody has to reason about when a save is refused. */
+    if (canLend && shared !== (user.sharedAcrossOrgs === true)) dto.sharedAcrossOrgs = shared
 
     const hasChanges = Object.keys(dto).length > 1
     if (!hasChanges) { onClose(); return }
@@ -208,7 +234,17 @@ export function EditInstructorModal({ user, onClose, onSuccess }: Props) {
                 <div className="flex gap-1.5 rounded-xl p-1.5"
                   style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.07)' }}>
                   {(['instructor', 'admin'] as const).map(r => (
-                    <button key={r} type="button" onClick={() => setRole(r)}
+                    <button key={r} type="button"
+                      onClick={() => {
+                        setRole(r)
+                        /* A shared non-instructor is not a state the system
+                           has: the schema refuses it on save and the server
+                           refuses this very PATCH with INVALID_SHARED_ROLE.
+                           Clearing it here means switching to Admin saves in
+                           one go instead of failing on a checkbox that the
+                           next line removes from the screen. */
+                        if (r !== 'instructor') setShared(false)
+                      }}
                       className="flex flex-1 items-center justify-center gap-2 rounded-lg py-2 text-xs font-semibold transition-all"
                       style={role === r
                         ? {
@@ -228,6 +264,40 @@ export function EditInstructorModal({ user, onClose, onSuccess }: Props) {
                   ))}
                 </div>
               </div>
+
+              {/* Available to both academies.
+
+                  Only for the roles the API accepts it from, only on an
+                  instructor, and only for the academy that OWNS them — the
+                  borrowing academy administers a lent instructor but does not
+                  decide the lending, and the server answers BORROWED_INSTRUCTOR
+                  if it tries. Anyone else sees the state without the switch,
+                  because "shared" is worth knowing even where it cannot be
+                  changed: it is why this instructor appears in a list the
+                  reader did not expect. */}
+              {role === 'instructor' && (mayShare || shared) && (
+                <label
+                  className={`flex items-start gap-3 rounded-xl px-3 py-3 transition-colors ${canLend ? 'cursor-pointer' : 'cursor-default'}`}
+                  style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.08)' }}>
+                  <input
+                    type="checkbox"
+                    checked={shared}
+                    disabled={!canLend}
+                    onChange={e => setShared(e.target.checked)}
+                    className="mt-0.5 h-4 w-4 flex-shrink-0 accent-[var(--color-primary,#0057B8)] disabled:opacity-40"
+                  />
+                  <span className="min-w-0">
+                    <span className="block text-[13px] font-semibold" style={{ color: 'rgba(255,255,255,0.88)' }}>
+                      Available to both organizations
+                    </span>
+                    <span className="mt-0.5 block text-[11px] leading-relaxed" style={{ color: 'rgba(255,255,255,0.45)' }}>
+                      {canLend
+                        ? 'Both academies can see this instructor and schedule classes for them. This account still belongs to this academy.'
+                        : 'Shared by the academy that owns this account. Only they can change it.'}
+                    </span>
+                  </span>
+                </label>
+              )}
 
               {/* Category chips */}
               <div>

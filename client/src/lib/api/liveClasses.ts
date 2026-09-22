@@ -79,6 +79,9 @@ export interface LiveClass {
   yourCohort?: {
     courseId?:     string
     courseTitle?:  string
+    /* Your own course's slug — the Enroll link on a shared class must point at
+       YOUR academy's course page, never the host's. */
+    courseSlug?:   string
     program?:      string
     /* The guest COURSE's own blurb and level, for the same reason as
        sectionOrder below: the host's describe a course this student is

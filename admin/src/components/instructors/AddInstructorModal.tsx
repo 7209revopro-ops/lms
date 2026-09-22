@@ -301,7 +301,20 @@ export function AddInstructorModal({ open, onClose }: AddInstructorModalProps) {
                     style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.07)' }}>
                     {(['instructor', 'admin'] as const).map(r => (
                       <button key={r} type="button"
-                        onClick={() => setValue('role', r, { shouldValidate: true })}
+                        onClick={() => {
+                          setValue('role', r, { shouldValidate: true })
+                          /* The "Available to both organizations" box is only
+                             rendered for an instructor, but unmounting a
+                             checkbox does not clear the form value behind it —
+                             so ticking it, switching to Admin and saving sent
+                             sharedAcrossOrgs:true with role 'admin', which the
+                             API refuses with INVALID_SHARED_ROLE. The error
+                             named a control that was no longer on the screen.
+
+                             setValue, not a DOM write: React Hook Form does not
+                             see `input.value = x` (CLAUDE.md). */
+                          if (r !== 'instructor') setValue('sharedAcrossOrgs', false)
+                        }}
                         className="flex flex-1 items-center justify-center gap-2 rounded-lg py-2 text-xs font-semibold transition-all"
                         style={roleVal === r
                           ? {

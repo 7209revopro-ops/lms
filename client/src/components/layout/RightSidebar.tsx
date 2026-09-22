@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useMemo, useRef } from 'react'
+import { effCourseTitle } from '@/lib/classSchedule'
 import Link from 'next/link'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
@@ -417,7 +418,10 @@ function StatCell({ icon: Icon, value, label, tint, divider = false }: {
    targets never nest. Outside the window the row shows nothing extra. */
 function LiveRow({ live, now }: { live: LiveClass; index: number; now: number }) {
   const liveNow = isLive(live)
-  const course  = typeof live.course === 'object' ? live.course : null
+  /* CROSS-ACADEMY: `live.course` is the HOST academy's course on a shared
+     class, so this row named a course the reader is not enrolled on. Same
+     resolver the schedule and the class list use. */
+  const courseLabel = effCourseTitle(live)
   const when    = new Date(live.scheduledStart).toLocaleString('en-US', {
     month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit',
   })
@@ -442,7 +446,7 @@ function LiveRow({ live, now }: { live: LiveClass; index: number; now: number })
           <p className="mt-0.5 text-[10px] leading-tight" style={{ color: 'var(--color-text-muted)' }}>
             {liveNow
               ? <span style={{ color: 'var(--color-danger)', fontWeight: 700 }}>● LIVE NOW</span>
-              : <>{when}{course && ` · ${titleCase(course.title)}`}</>}
+              : <>{when}{courseLabel && ` · ${titleCase(courseLabel)}`}</>}
           </p>
         </div>
         <ArrowUpRight size={9} className="flex-shrink-0 opacity-0 transition-opacity group-hover:opacity-60"

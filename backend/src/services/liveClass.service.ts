@@ -164,8 +164,11 @@ export class LiveClassService {
      same SEE-and-USE question as sharedInstructorFilter() in utils/tenancy.ts,
      which is what puts the instructor in the borrowing academy's picker in the
      first place. Refusing them here would offer an instructor the admin then
-     could not schedule. The flag is unpersistable on a non-instructor (schema
-     validator), and the role is re-checked here rather than assumed. */
+     could not schedule. The role is re-checked here rather than assumed, and
+     that re-check is the one that actually holds: the schema's own validator is
+     document middleware and does not run on the admin PATCH path, so for a
+     while a non-instructor really could carry the flag (see the note on the
+     hook in models/schema.ts). */
   async #assertInstructorUsable(
     instructorId: string,
     classOrgId:   Types.ObjectId | null,
@@ -657,11 +660,34 @@ export class LiveClassService {
        with null can pick a DIFFERENT door, and then the page says yes while the
        door says no. Same rule everywhere, or the rule is not a rule. */
     const entitlement = await resolveClassEntitlement(live, userId, callerOrg, 'notDropped')
-    if (entitlement.code === 'NOT_ENROLLED') {
+    /* SWITCH ON ok, NOT ON A LIST OF CODES.
+       This enumerated NOT_ENROLLED and MODULE_BLOCKED and forgot the third.
+       WRONG_ACADEMY fell straight through to the returns below, which hand back
+       the Mux playback URL and the LiveKit token — so a student of an academy
+       this class does not serve, holding no enrolment of any kind, opened
+       /live-classes/<id>/watch and got a working stream. Measured against the
+       real database, not inferred: a Bangalore student received HTTP 200 and a
+       live stream.mux.com .m3u8 URL for a Dubai-only session.
+
+       The booking route had already been through this and says so at its own
+       call site — "checking two of the three codes left WRONG_ACADEMY falling
+       straight through into a SUCCESSFUL booking". Same shape here, on the read
+       path, leaking the thing that gate exists to protect. Switching on `ok` is
+       what makes a verdict added later impossible to forget.
+
+       404 FOR THE ACADEMY REFUSAL, not 403: this endpoint returns the class's
+       title and status, so "that one belongs to another academy" is the same
+       existence oracle the 404-not-403 rule closes everywhere else. The other
+       two stay 403 — they are about the caller's enrolment in a class they can
+       legitimately see. */
+    if (!entitlement.ok) {
+      if (entitlement.code === 'MODULE_BLOCKED') {
+        throw new LiveClassError('MODULE_BLOCKED', 'You don\'t have access to this module. Contact your admin.', 403)
+      }
+      if (entitlement.code === 'WRONG_ACADEMY') {
+        throw new LiveClassError('LIVE_CLASS_NOT_FOUND', 'Live class not found', 404)
+      }
       throw new LiveClassError('NOT_ENROLLED', 'You must be enrolled in this course to watch this session', 403)
-    }
-    if (entitlement.code === 'MODULE_BLOCKED') {
-      throw new LiveClassError('MODULE_BLOCKED', 'You don\'t have access to this module. Contact your admin.', 403)
     }
 
     if (live.status === 'cancelled') {
@@ -851,9 +877,12 @@ export class LiveClassService {
     // Snapshot current doc so we can detect status transitions for recording poll
     // and a change of start time (which invalidates every reminder already sent)
     const current = await LiveClassModel.findById(id)
+      /* instructorId is here so the block below can tell an ASSIGNMENT from a
+         re-send. Without it the comparison read undefined and every save
+         looked like a change, which is the whole freeze. */
       .select('type status googleMeetCode recordingUrl scheduledStart organizationId '
             + 'courseId sectionId isOnline provider sessionCapacity bookedCount '
-            + 'hostSeatsLeft overflowSeatsLeft guestCohorts')
+            + 'instructorId hostSeatsLeft overflowSeatsLeft guestCohorts')
       .lean()
 
     const patch: Partial<ILiveClass> = { ...(input as any) }
@@ -868,18 +897,52 @@ export class LiveClassService {
          away from being bypassed: schedule with a real instructor, then move
          the class onto a student's id. Compared against the academy the class
          is ALREADY stamped with — organizationId is not a patchable field, so
-         a class cannot be walked into another academy on the way past. */
-      await this.#assertInstructorUsable(
-        input.instructorId,
-        ((current as { organizationId?: Types.ObjectId } | null)?.organizationId) ?? null,
-      )
+         a class cannot be walked into another academy on the way past.
+
+         BUT ONLY WHEN THE INSTRUCTOR IS ACTUALLY CHANGING. The edit modal
+         re-sends its whole form on every save, so an unchanged instructorId
+         arrives on a title edit and a reschedule alike — and re-validating it
+         turned "is this a legal assignment" into "is this instructor still
+         reachable today", which is a different question with a much worse
+         failure. Un-lend an instructor and every class the borrowing academy
+         had scheduled for them answers INSTRUCTOR_NOT_FOUND on every save
+         after that: the class cannot be renamed, moved, cancelled or even
+         re-pointed at somebody else, because the stale id rides along with
+         the fix. The same freeze follows a deactivated or deleted account.
+
+         Comparing values rather than keys is the rule the cohort gate on this
+         same PATCH already uses, for the same reason. Re-sending what is
+         already stored is not an assignment and must not be validated as one;
+         naming a DIFFERENT instructor still is, and still is. */
+      const currentInstructor = String((current as { instructorId?: unknown } | null)?.instructorId ?? '')
+      if (String(input.instructorId) !== currentInstructor) {
+        await this.#assertInstructorUsable(
+          input.instructorId,
+          ((current as { organizationId?: Types.ObjectId } | null)?.organizationId) ?? null,
+        )
+      }
       patch.instructorId = new Types.ObjectId(input.instructorId) as any
     }
     if (input.courseId != null) {
       if (!Types.ObjectId.isValid(input.courseId)) throw new LiveClassError('INVALID_ID', 'Invalid courseId', 400)
       patch.courseId = new Types.ObjectId(input.courseId) as any
     }
-    if (input.sectionId != null) {
+    if (input.sectionId === '') {
+      /* UN-GATING A CLASS FROM ITS MODULE.
+         "No specific module" was unrepresentable on this path: the only two
+         things a PATCH could say were "this module" and nothing at all, and
+         nothing at all means "leave it alone". So once a class was gated it
+         stayed gated for ever — which on a SHARED class is worse than a
+         nuisance, because the gate is what forces every guest cohort to name a
+         module of their own, and there was no way back out of that shape.
+
+         null rather than $unset: the repository writes through $set, and the
+         field is read everywhere as a truthiness test, so null and absent are
+         the same answer with one fewer query shape to support. The cohort rule
+         below reads the value the class will HAVE, so un-gating correctly lifts
+         the requirement on the cohorts in the same request. */
+      patch.sectionId = null as any
+    } else if (input.sectionId != null) {
       if (!Types.ObjectId.isValid(input.sectionId)) throw new LiveClassError('INVALID_ID', 'Invalid sectionId', 400)
       /* Against the course the class will HAVE after this patch, not the one it
          had before — moving a class to another course and re-pointing its
@@ -1480,8 +1543,36 @@ export class LiveClassService {
       )
     }
 
+    /* THE COURSE NAME IS PER DOOR TOO, for the same reason the clock is.
+
+       `courseTitle` is the HOST's. Everything else in this method had already
+       been made door-aware — the enrolment query, the module-relevance test,
+       the per-cohort cap, the time zone — and the one string the student
+       actually reads had not: a guest academy's cohort was told "New session in
+       Dubai Forex", naming a course they are not enrolled on and cannot open,
+       while their own course is what the cohort's door names. The digest stores
+       this body and mails it verbatim, so nothing downstream can correct it.
+
+       One query for every guest door, not one per recipient. */
+    const titleByDoor = new Map<string, string>()
+    {
+      const guestCourseIds = doors
+        .filter(d => !d.isHost && d.courseId && Types.ObjectId.isValid(d.courseId))
+        .map(d => new Types.ObjectId(d.courseId as string))
+      if (guestCourseIds.length) {
+        const { CourseModel: CM } = await import('@/models/schema.ts')
+        const rows = await CM.find({ _id: { $in: guestCourseIds } }).select('title').lean() as any[]
+        for (const r of rows) titleByDoor.set(String(r._id), String(r.title ?? ''))
+      }
+    }
+
     for (const { door, rows } of perDoor) {
      const whenLabel = academyClock(live.scheduledStart, orgSlugFor(door.organizationId)).full
+     /* The host door keeps the title the method already resolved; a guest door
+        uses its own, falling back to the host's only if the course vanished. */
+     const doorCourseTitle = door.isHost
+       ? courseTitle
+       : (titleByDoor.get(String(door.courseId ?? '')) || courseTitle)
      for (const e of rows) {
       const u = e.userId as unknown as {
         _id: { toString: () => string }
@@ -1494,7 +1585,7 @@ export class LiveClassService {
       try {
         await notifications.create(u._id.toString(), {
           kind:  'live-class-scheduled',
-          title: `Live class scheduled in ${courseTitle}`,
+          title: `Live class scheduled in ${doorCourseTitle}`,
           body:  `"${live.title}" — ${whenLabel}`,
           link:  `/live-classes/${live.id}/watch`,
         })
@@ -1521,7 +1612,7 @@ export class LiveClassService {
         await queueDigestItem({
           userId: u._id.toString(),
           kind:   'new-session',
-          title:  `New session in ${courseTitle}`,
+          title:  `New session in ${doorCourseTitle}`,
           body:   `"${live.title}" — ${whenLabel}`,
           link:   `/live-classes/${live.id}/watch`,
         })

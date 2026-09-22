@@ -17,6 +17,14 @@ import { useUsers } from '@/lib/api/users'
 import { useCurrentUser } from '@/lib/api/user'
 import { datetimeLocalToISO, zoneOf, foreignZoneTag } from '@/lib/timezone'
 import { EditLiveClassModal } from '@/components/live-classes/EditLiveClassModal'
+/* CROSS-ACADEMY: this page offered Edit and Go Live on every row, including a
+   class the OTHER academy hosts and merely shares with this one. Both routes
+   answer 404 to a guest academy — ownership decides who may move, start or
+   cancel a session — so the buttons were two clicks to an error with no clue
+   why. The list and card views on the sibling page already gate on isHost and
+   show the guest a line naming the owner instead; this is the same rule and
+   the same components, so the three screens finally say one thing. */
+import { useAcademyView, SharedAcademiesChip, GuestReadOnlyNote } from '@/components/live-classes/CrossAcademy'
 import { CreateOfflineClassModal } from '@/components/live-classes/CreateOfflineClassModal'
 import { Button } from '@/components/ui/button'
 import Spinner from '@/components/ui/Spinner'
@@ -62,6 +70,9 @@ function EventPopover({
   const router = useRouter()
   const colors = statusColor(live.status)
   const start  = new Date(live.scheduledStart)
+  /* Ownership, not visibility: a guest academy SEES this class and cannot move
+     it. Resolved here so the buttons below and the chip above agree. */
+  const { isHost, hostLabel } = useAcademyView(live)
 
   return (
     <motion.div
@@ -140,8 +151,10 @@ function EventPopover({
           )}
         </div>
 
+        <SharedAcademiesChip live={live} />
+
         <div className="mt-4 flex flex-wrap gap-2">
-          {live.type === 'internal' && (live.status === 'scheduled' || live.status === 'live') && (
+          {isHost && live.type === 'internal' && (live.status === 'scheduled' || live.status === 'live') && (
             <Button
               variant={live.status === 'live' ? 'destructive' : 'default'}
               size="sm"
@@ -152,14 +165,18 @@ function EventPopover({
               {live.status === 'live' ? 'Monitor' : 'Go Live'}
             </Button>
           )}
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => { onEdit(live); onClose() }}
-            className="flex items-center gap-1.5 rounded-xl px-3 py-1.5 text-xs font-semibold !border-white/[0.12] !text-white/65 hover:!bg-white/10"
-          >
-            <Pencil size={11} />Edit
-          </Button>
+          {isHost ? (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => { onEdit(live); onClose() }}
+              className="flex items-center gap-1.5 rounded-xl px-3 py-1.5 text-xs font-semibold !border-white/[0.12] !text-white/65 hover:!bg-white/10"
+            >
+              <Pencil size={11} />Edit
+            </Button>
+          ) : (
+            <GuestReadOnlyNote hostLabel={hostLabel} />
+          )}
           {live.course?.id && (
             <Link
               href={`/courses/${live.course.id}/edit`}

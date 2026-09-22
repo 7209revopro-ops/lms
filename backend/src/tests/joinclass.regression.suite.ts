@@ -416,8 +416,23 @@ section('E. My Classes → Attended: the seat is listed with its class, and the 
     !!attRow?.liveClassId && attRow.liveClassId.type === 'external' && attRow.liveClassId.isOnline === true
       && typeof attRow.liveClassId.status === 'string' && !!attRow.liveClassId.scheduledStart && typeof attRow.liveClassId.durationMins === 'number',
     JSON.stringify(attRow?.liveClassId))
-  check('E2b and no Meet URL / window on the booking row (the page reads those from /live-classes)',
-    !JSON.stringify(attRow ?? {}).includes('meet.google.com') && !('joinOpensAt' in (attRow?.liveClassId ?? {})))
+  /* E2b ASSERTED THE OPPOSITE OF THE SHIPPED BEHAVIOUR and had been red ever
+     since. It demanded no join WINDOW on the booking row, on the reasoning that
+     "the page reads those from /live-classes" — which was true until Booking
+     History grew a Join button of its own and the route started deriving
+     joinOpensAt/joinClosesAt from the same studentJoinWindow the schedule uses.
+     The row must carry the window; that is the feature.
+
+     What has NOT changed, and is the half worth guarding, is that the row
+     never carries the MEET URL. The window is two instants; the link is the way
+     in, released only by POST /live-classes/:id/join, inside the window, to the
+     seat holder. Serialising it here would hand it to every row including
+     cancelled ones, at any hour. */
+  check('E2b the booking row carries the join WINDOW but never the Meet URL',
+    !JSON.stringify(attRow ?? {}).includes('meet.google.com')
+    && typeof attRow?.liveClassId?.joinOpensAt  === 'string'
+    && typeof attRow?.liveClassId?.joinClosesAt === 'string',
+    JSON.stringify({ opens: attRow?.liveClassId?.joinOpensAt, closes: attRow?.liveClassId?.joinClosesAt }))
 
   const booked = await call('GET', '/bookings/me?status=booked&per_page=50', jar)
   const inBooked = booked.body?.data?.some((x: any) => String(x.liveClassId?.id ?? x.liveClassId?._id) === String(live._id))

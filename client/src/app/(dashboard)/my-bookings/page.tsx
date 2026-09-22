@@ -184,8 +184,23 @@ function toRow(b: MyBooking): Row | null {
   const online = lc.isOnline !== false
   const place  = [lc.location, lc.room].filter(Boolean).map(s => titleCase(String(s))).join(' · ')
 
-  const course     = lc.courseId?.title  ? titleCase(lc.courseId.title)  : undefined
-  const module     = lc.sectionId?.title ? titleCase(lc.sectionId.title) : undefined
+  /* YOUR COURSE AND MODULE, NOT THE HOST ACADEMY'S.
+     On a cross-academy class the populated courseId/sectionId belong to the
+     academy that HOSTS the session; yours are named by the guest cohort your
+     academy came through, which the row carries as `yourCohort`. Preferring it
+     is the same rule lib/classSchedule.ts applies on the schedule
+     (effCourseTitle / effSectionTitle) — written again here rather than shared
+     because a booking row nests the class as `courseId`/`sectionId` refs while
+     a schedule row carries `course`/`section`, so no single accessor fits both
+     without a shape adapter that would be longer than the rule.
+     The module line matters most: the cohort's sectionId is what actually
+     gates a guest student's module access, so naming the host's module here
+     described the wrong thing in the one place a student checks it. */
+  const cohort     = lc.yourCohort
+  const course     = cohort?.courseTitle  ? titleCase(cohort.courseTitle)
+                   : lc.courseId?.title   ? titleCase(lc.courseId.title)  : undefined
+  const module     = cohort?.sectionTitle ? titleCase(cohort.sectionTitle)
+                   : lc.sectionId?.title  ? titleCase(lc.sectionId.title) : undefined
   const instructor = lc.instructorId?.name
     ? { name: titleCase(lc.instructorId.name), avatarUrl: lc.instructorId.avatarUrl }
     : undefined
@@ -206,7 +221,10 @@ function toRow(b: MyBooking): Row | null {
     duration:    fmtDuration(mins),
     course,
     module,
-    moduleNo:    lc.sectionId?.order,
+    /* Same precedence as the two labels above — a guest cohort's module number
+       is its own, and mixing "Module 1" from the host with the guest's title
+       would read as a third module that exists nowhere. */
+    moduleNo:    cohort?.sectionId ? cohort.sectionOrder : lc.sectionId?.order,
     instructor,
     language:    lc.language ? titleCase(lc.language) : undefined,
     online,

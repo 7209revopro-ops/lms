@@ -18,6 +18,16 @@ import JoinMeetButton from '@/components/live-classes/JoinMeetButton'
 import { useJoinClock } from '@/hooks/useJoinClock'
 import { getJoinPhase } from '@/lib/joinWindow'
 import { CLASS_LANGUAGES } from '@/lib/languages'
+/* CROSS-ACADEMY: a shared class carries the HOST academy's course, and the
+   caller's own is named by the guest cohort they came through. This page read
+   the host's in five places — two labels, the thumbnail's alt text, the search
+   predicate and the Enroll link — so a student in the guest academy saw the
+   other academy's course name on a class they hold a seat in, searching for
+   their own course name matched nothing, and the one call to action on the row
+   pointed at another academy's product page. The schedule already resolves all
+   of this; these are the same helpers it uses, so the two screens cannot
+   disagree about which course a class belongs to. */
+import { effCourseTitle, effCourseSlug } from '@/lib/classSchedule'
 
 /* ── Helpers ─────────────────────────────────────────── */
 function fmtTime(iso: string) {
@@ -216,10 +226,10 @@ function LiveHeroCard({ live, index, now }: { live: LiveClass; index: number; no
 
       {/* Bottom content */}
       <div className="absolute inset-x-0 bottom-0 p-5">
-        {live.course && (
+        {effCourseTitle(live) && (
           <p className="mb-1.5 flex items-center gap-1.5 text-xs font-semibold"
             style={{ color: 'rgba(255,255,255,0.65)' }}>
-            <GraduationCap size={11} />{live.course.title}
+            <GraduationCap size={11} />{effCourseTitle(live)}
           </p>
         )}
         <h2 className="text-xl font-bold text-white" style={{ fontFamily: 'Bricolage Grotesque, sans-serif' }}>
@@ -333,7 +343,7 @@ function SessionCard({ live, index, now }: { live: LiveClass; now: number; index
       {/* Thumbnail strip */}
       <div className="relative overflow-hidden" style={{ height: 120 }}>
         {thumb ? (
-          <img src={thumb} alt={live.course?.title ?? live.title}
+          <img src={thumb} alt={effCourseTitle(live) ?? live.title}
             className="h-full w-full object-cover" />
         ) : (
           <div className="h-full w-full" style={{ background: gradient }} />
@@ -395,9 +405,9 @@ function SessionCard({ live, index, now }: { live: LiveClass; now: number; index
           {live.title}
         </h3>
 
-        {live.course && (
+        {effCourseTitle(live) && (
           <p className="mt-0.5 flex items-center gap-1 truncate text-[11px]" style={{ color: 'var(--color-text-muted)' }}>
-            <GraduationCap size={9} />{live.course.title}
+            <GraduationCap size={9} />{effCourseTitle(live)}
           </p>
         )}
 
@@ -414,8 +424,8 @@ function SessionCard({ live, index, now }: { live: LiveClass; now: number; index
           {/* CTA — locked for non-enrolled users */}
           {live.isEnrolled === false ? (
             /* Not purchased — show lock + link to course */
-            live.course?.slug ? (
-              <Link href={`/courses/${live.course.slug}`}>
+            effCourseSlug(live) ? (
+              <Link href={`/courses/${effCourseSlug(live)}`}>
                 <motion.button whileHover={{ scale: 1.04 }} whileTap={{ scale: 0.97 }}
                   className="flex items-center gap-1 rounded-xl px-3 py-1.5 text-[10px] font-bold"
                   style={{ background: 'rgba(99,102,241,0.09)', color: '#6366F1', border: '1px solid rgba(99,102,241,0.20)' }}>
@@ -530,7 +540,7 @@ export default function LiveClassesPage() {
       const q = search.trim().toLowerCase()
       list = list.filter(l =>
         l.title.toLowerCase().includes(q) ||
-        l.course?.title?.toLowerCase().includes(q),
+        effCourseTitle(l)?.toLowerCase().includes(q),
       )
     }
     return list.sort((a, b) => new Date(a.scheduledStart).getTime() - new Date(b.scheduledStart).getTime())

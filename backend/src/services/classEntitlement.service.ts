@@ -127,6 +127,29 @@ export function doorsFor(live: ClassDoors): Door[] {
   return doors
 }
 
+/* THE DOOR AN ACADEMY COMES THROUGH, by academy alone.
+   ─────────────────────────────────────────────────────
+   resolveClassEntitlement() answers "may this student in, and through which
+   door" — it reads enrolments and can refuse. This answers only the second
+   half, and deliberately asks nothing about enrolment.
+
+   That is what a HISTORY needs. A booking already happened: which of the
+   student's courses it was filed under is a fact about the past, and it must
+   not change because the enrolment lapsed, the course was unpublished, or the
+   module was later blocked. Routing the labels through the entitlement
+   resolver would make a cancelled or expired row fall back to the HOST
+   academy's course name, which is the bug this exists to prevent rather than a
+   different flavour of it.
+
+   Returns undefined when the caller has no academy, or when no door names
+   theirs — both of which mean "describe this class as the host document does",
+   which is what every unshared class already is. */
+export function doorForOrg(live: ClassDoors, orgId: string | null | undefined): Door | undefined {
+  if (!orgId) return undefined
+  const want = String(orgId)
+  return doorsFor(live).find(d => d.organizationId && String(d.organizationId) === want)
+}
+
 /* THE ACADEMY TEST, AND ITS FALSY SEMANTICS ARE LOAD-BEARING.
 
    The check being replaced reads, at liveClassJoin.service.ts:

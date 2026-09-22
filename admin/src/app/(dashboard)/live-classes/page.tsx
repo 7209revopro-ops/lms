@@ -741,6 +741,9 @@ function CalendarView({ items, meetings = [], onSlotClick }: {
     const d = new Date(); d.setDate(1); d.setHours(0, 0, 0, 0); return d
   })
   const [editLive, setEditLive] = useState<LiveClass | null>(null)
+  /* Resolved ONCE for the whole grid rather than per chip — the hook reads the
+     viewer's academy, and a month can hold a hundred chips. */
+  const calendarViewer = useViewerAcademy()
   /* The day whose full session list is open. A month cell can only show a few
      chips before it stops being a calendar, so everything past the cap lives
      here rather than being unreachable — which is what "+N more" used to be:
@@ -920,12 +923,26 @@ function CalendarView({ items, meetings = [], onSlotClick }: {
                     {sessions.slice(0, MAX_CHIPS).map(s => {
                       const c = chipColor(s)
                       return (
+                        /* OWNERSHIP DECIDES WHETHER THIS CHIP OPENS.
+                           Every chip opened the Edit modal, including a class
+                           the OTHER academy hosts — and Edit, Delete and Repeat
+                           all answer 404 to a guest academy, so the month view
+                           was the one screen that still offered three routes to
+                           an error. The list and card views on this same page
+                           already gate on isHost. A guest's chip stays visible
+                           and readable, because seeing the other academy's
+                           session is the point of sharing; it simply does not
+                           pretend to be editable. */
                         <Button
                           key={s.id}
                           variant="ghost"
                           size="sm"
+                          disabled={!academyViewOf(s, calendarViewer).isHost}
                           onClick={() => setEditLive(s)}
-                          className="w-full text-left rounded-md px-2 py-1 h-auto hover:brightness-125"
+                          title={academyViewOf(s, calendarViewer).isHost
+                            ? undefined
+                            : `Shared by ${academyViewOf(s, calendarViewer).hostLabel} — only they can change it`}
+                          className="w-full text-left rounded-md px-2 py-1 h-auto hover:brightness-125 disabled:cursor-default disabled:opacity-100 disabled:hover:brightness-100"
                           style={{ background: c.bg, border: `1px solid ${c.border}` }}>
                           <p className="truncate text-[10px] font-semibold leading-tight" style={{ color: c.color }}>
                             {fmtTime(s.scheduledStart, zoneOf(s.organizationSlug))} · {s.title}
@@ -1717,9 +1734,17 @@ export default function LiveClassesPage() {
     if (deliveryFilter === 'online')  list = list.filter(l => (l as any).isOnline !== false)
     if (deliveryFilter === 'offline') list = list.filter(l => (l as any).isOnline === false)
     if (courseFilter) {
+      /* A SHARED CLASS BELONGS TO BOTH COURSES.
+         `course` is the HOST academy's, and a guest academy reaches the class
+         through its OWN course named in guestCohorts[].courseId. Matching only
+         the host's meant a Bangalore admin filtering by their own course lost
+         the very class that course is the door to — the filter hid the feature.
+         The course dropdown lists the caller's own courses, so without the
+         second clause no cohort course could ever be selected usefully. */
       list = list.filter(l => {
         const cId = typeof l.course === 'object' ? l.course?.id : l.courseId
-        return cId === courseFilter
+        if (cId === courseFilter) return true
+        return (l.guestCohorts ?? []).some(c => String(c.courseId) === courseFilter)
       })
     }
     if (languageFilter) list = list.filter(l => (l as any).language === languageFilter)

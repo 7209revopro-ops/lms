@@ -151,7 +151,27 @@ export class LiveClassRepository extends BaseRepository<ILiveClass> {
     const query: Record<string, unknown> = {}
 
     if (filter.courseIds && filter.courseIds.length > 0) {
-      query['courseId'] = { $in: filter.courseIds.map(id => new Types.ObjectId(id)) }
+      const ids = filter.courseIds.map(id => new Types.ObjectId(id))
+      /* THE GUEST DOOR'S COURSE COUNTS TOO.
+         This is the programme narrowing for a category-scoped caller, and it
+         asked only about `courseId` — which on a shared class is the HOST
+         academy's course. A guest academy's programme-scoped sub_admin holds
+         their OWN course in this list and never the host's, so a class their
+         own cohort sits in matched nothing: it was missing from their console
+         list, the timetable grid, the status tabs and the live badge, while
+         /admin/bookings would happily show them its roster. The same "ask the
+         guest door's question for a guest caller" fix the academy clause below
+         already had.
+
+         Composed under $and rather than assigned to $or, because the status
+         buckets further down assign query.$or and a second assignment deletes
+         the first silently — the P-04 shape.
+
+         The guest arm is gated on the feature switch, so with cross-academy
+         classes off this is byte-identical to the plain courseId match. */
+      andFilter(query, CROSS_ORG_CLASSES_ENABLED
+        ? { $or: [{ courseId: { $in: ids } }, { 'guestCohorts.courseId': { $in: ids } }] }
+        : { courseId: { $in: ids } })
     }
     if (filter.organizationId && Types.ObjectId.isValid(filter.organizationId)) {
       /* CLASSES THIS ACADEMY IS SERVED BY, not only the ones it owns.

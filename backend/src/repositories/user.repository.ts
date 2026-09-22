@@ -213,7 +213,19 @@ export class UserRepository extends BaseRepository<IUser> {
          Composed under $and, never assigned to $or: the search and category
          clauses above already own `filter.$or`, and assigning it again here
          would silently drop the caller's search terms. */
-      if (role === 'instructor') {
+      /* ALSO WHEN NO ROLE WAS ASKED FOR, which is the Users page's own default.
+         Keying the widening on `role === 'instructor'` meant the borrowing
+         academy saw a lent instructor in the Instructors tab and not in Users —
+         the same account, present on one screen and absent on the next, which
+         reads as "the sharing did not work" rather than as a filter. Measured:
+         `?role=instructor` returned the lent instructor, no role filter
+         returned 18 rows and none of them was them.
+
+         Widening the unfiltered list is safe because `role: 'instructor'` is
+         INSIDE sharedInstructorFilter's clause rather than assumed by the
+         caller — so it can only ever admit a lent instructor, never a student
+         of the other academy. Every other role stays strictly scoped. */
+      if (role === undefined || role === 'instructor') {
         andFilter(filter, sharedInstructorFilter(params.organizationId))
       } else {
         filter['organizationId'] = new Types.ObjectId(params.organizationId)

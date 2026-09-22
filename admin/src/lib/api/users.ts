@@ -226,7 +226,14 @@ export function useUpdateUser() {
   return useMutation({
     mutationFn: async ({
       id, ...dto
-    }: { id: string; role?: AdminUser['role']; isActive?: boolean; isVerified?: boolean; name?: string; email?: string; category?: '4x-trading' | 'digital-marketing' | 'ai' | 'jura' | null; categories?: ('4x-trading' | 'digital-marketing' | 'ai' | 'jura')[]; avatarUrl?: string; headline?: string; bio?: string; program?: 'ai' | 'digital_marketing' | 'forex' | 'jura' }) => {
+      /* `sharedAcrossOrgs` lends an instructor to the other academy. The
+         backend has accepted it on this PATCH since the feature shipped and
+         this type never named it, so no screen could send it even by accident:
+         an instructor could be lent at creation and never afterwards, and
+         un-lending had no route at all. Who may set it is the server's
+         business — an admin or super admin, and only the academy that OWNS
+         the instructor. */
+    }: { id: string; role?: AdminUser['role']; isActive?: boolean; isVerified?: boolean; name?: string; email?: string; category?: '4x-trading' | 'digital-marketing' | 'ai' | 'jura' | null; categories?: ('4x-trading' | 'digital-marketing' | 'ai' | 'jura')[]; avatarUrl?: string; headline?: string; bio?: string; program?: 'ai' | 'digital_marketing' | 'forex' | 'jura'; sharedAcrossOrgs?: boolean }) => {
       const res = await api.patch<{ success: true; data: AdminUser }>(`/admin/users/${id}`, dto)
       return res.data.data
     },

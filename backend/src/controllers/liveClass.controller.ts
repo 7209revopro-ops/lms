@@ -4,6 +4,7 @@ import { instructorOwnsSession, callerOrgForRead, classServesOrg } from '@/utils
 import { ensureOrgSlugs, orgSlugFor } from '@/utils/orgSlugs.ts'
 import { academyClock } from '@/utils/academyClock.ts'
 import { doorsFor, entitlementFrom, loadEnrolmentIndex, type Door, type ClassDoors } from '@/services/classEntitlement.service.ts'
+import { CROSS_ORG_CLASSES_ENABLED } from '@/utils/featureFlags.ts'
 import { logger } from '@/utils/logger.ts'
 import { LiveClassService, LiveClassError } from '@/services/liveClass.service.ts'
 import { SectionService } from '@/services/section.service.ts'
@@ -78,6 +79,13 @@ export function seatsLeftForDoor(
 /** A door carrying the labels its own academy's catalogue gives it. */
 export interface LabelledDoor extends Door {
   courseTitle?:  string
+  /* THE SLUG OF *YOUR* COURSE, which is how a course page is addressed.
+     The student lists render an "Enroll" call to action on a class the caller
+     has not bought yet, linking to `course.slug` — the HOST academy's course.
+     A guest student clicking it was sent to another academy's product page,
+     which is the one link on the row that has to be right. Nothing else can
+     rebuild it: the door names the course by id only. */
+  courseSlug?:   string
   program?:      string
   /* The guest COURSE's own blurb and level. Same rule as the module's:
      the host's `course` on the DTO carries both already, but they
@@ -110,7 +118,7 @@ export async function labelGuestDoors(
     if (d.sectionId && Types.ObjectId.isValid(d.sectionId)) sectionIds.add(d.sectionId)
   }
 
-  const courses  = new Map<string, { title?: string; program?: string; description?: string; level?: string }>()
+  const courses  = new Map<string, { title?: string; slug?: string; program?: string; description?: string; level?: string }>()
   const sections = new Map<string, { title?: string; order?: number; description?: string }>()
 
   if (courseIds.size > 0 || sectionIds.size > 0) {
@@ -118,14 +126,14 @@ export async function labelGuestDoors(
     const [courseRows, sectionRows] = await Promise.all([
       courseIds.size > 0
         ? CourseModel.find({ _id: { $in: [...courseIds].map(id => new Types.ObjectId(id)) } })
-            .select('title program description level').lean()
+            .select('title slug program description level').lean()
         : Promise.resolve([] as any[]),
       sectionIds.size > 0
         ? SectionModel.find({ _id: { $in: [...sectionIds].map(id => new Types.ObjectId(id)) } })
             .select('title order description').lean()
         : Promise.resolve([] as any[]),
     ])
-    for (const c of courseRows as any[]) courses.set(String(c._id), { title: c.title, program: c.program, description: c.description, level: c.level })
+    for (const c of courseRows as any[]) courses.set(String(c._id), { title: c.title, slug: c.slug, program: c.program, description: c.description, level: c.level })
     for (const s of sectionRows as any[]) sections.set(String(s._id), { title: s.title, order: s.order, description: s.description })
   }
 
@@ -139,6 +147,7 @@ export async function labelGuestDoors(
     return {
       ...door,
       ...(course?.title   ? { courseTitle:  course.title }   : {}),
+      ...(course?.slug    ? { courseSlug:   course.slug }    : {}),
       ...(course?.program ? { program:      course.program } : {}),
       ...(course?.description ? { courseDescription: course.description } : {}),
       ...(course?.level       ? { courseLevel:       course.level }       : {}),
@@ -156,6 +165,7 @@ export async function labelGuestDoors(
 export function yourCohortFrom(door: LabelledDoor | undefined): {
   courseId?:     string
   courseTitle?:  string
+  courseSlug?:   string
   program?:      string
   courseDescription?: string
   courseLevel?:       string
@@ -168,6 +178,7 @@ export function yourCohortFrom(door: LabelledDoor | undefined): {
   return {
     courseId:     door.courseId  ?? undefined,
     courseTitle:  door.courseTitle,
+    courseSlug:   door.courseSlug,
     program:      door.program,
     courseDescription: door.courseDescription,
     courseLevel:       door.courseLevel,
@@ -950,7 +961,35 @@ export class LiveClassController {
         const { CourseModel } = await import('@/models/schema.ts')
         const courseIdStr = isPopulated(live.courseId as any) ? (live.courseId as any).id : String(live.courseId)
         const course = await CourseModel.findById(courseIdStr).select('program').lean()
-        if (!course || (course as any).program !== scope) {
+        let inScope = !!course && (course as any).program === scope
+
+        /* THE GUEST DOOR'S COURSE IS ALSO "THIS PROGRAMME".
+           The check above asks only about the HOST course, which on a shared
+           class belongs to the other academy and carries its programme. A guest
+           academy's programme-scoped admin therefore got 403 on a class their
+           own programme's course is the door to: the list showed it (the
+           repository was widened) and opening it answered Access denied.
+
+           Narrowed to a cohort serving the CALLER'S OWN academy, not any
+           cohort — otherwise a Dubai sub_admin would inherit scope from a
+           course belonging to Bangalore. #canManage has already decided the
+           academy question; this is only about the programme. */
+        if (!inScope && CROSS_ORG_CLASSES_ENABLED) {
+          const callerOrg = req.user?.organizationId
+          const cohorts = ((live as { guestCohorts?: Array<{ organizationId?: unknown; courseId?: unknown }> }).guestCohorts ?? [])
+            .filter(c => !callerOrg || String(c.organizationId ?? '') === String(callerOrg))
+          for (const c of cohorts) {
+            /* Guarded: a legacy cohort row with no course would make findById
+               cast an empty string and throw, turning a scope question into a
+               500 on a read. */
+            const gcId = String(c.courseId ?? '')
+            if (!Types.ObjectId.isValid(gcId)) continue
+            const gc = await CourseModel.findById(gcId).select('program').lean()
+            if (gc && (gc as any).program === scope) { inScope = true; break }
+          }
+        }
+
+        if (!inScope) {
           res.status(403).json({ success: false, error: { code: 'FORBIDDEN', message: 'Access denied.' } }); return
         }
       }
@@ -1023,6 +1062,13 @@ export class LiveClassController {
       scheduledStart:   string | Date
       durationMins:     number
       type?:            'external' | 'internal'
+      /* Which in-app engine backs an `internal` class. Read out of `dto` by a
+         cast further down and never declared here, so `repeat` had no way to
+         pass it and every copy of a LiveKit class was born with provider
+         undefined — which the service defaults to 'mux'. A weekly In-App
+         Stream series therefore produced one interactive session and N Mux
+         broadcasts that nobody could speak in. */
+      provider?:        'mux' | 'livekit'
       instructorId?:    string
       sectionId?:       string
       sessionCapacity?: number
@@ -1035,6 +1081,16 @@ export class LiveClassController {
       /* Pins the host academy instead of inheriting the caller's. Only repeat
          uses it — see the note at its call site. */
       organizationId?:  string
+      /* These cohorts are a COPY of a class the caller may already manage, not
+         a new sharing decision. Only repeat sets it, and only after #canManage
+         has passed on the source. Without it the super-admin gate below refuses
+         the owning academy's own admin: sharing this class was approved once
+         already, and "repeat it weekly" is not a second approval to give.
+
+         Deliberately not a way around the gate — an inherited list is compared
+         against the source's, exactly as the edit path compares against the
+         stored one. */
+      inheritedCohorts?: boolean
     },
     req: Request,
     seriesId?: string,
@@ -1134,7 +1190,7 @@ export class LiveClassController {
        every ordinary edit, on every class, fail for everyone who is not a
        super admin. */
     const wantsCohorts = Array.isArray(dto.guestCohorts) && dto.guestCohorts.length > 0
-    if (wantsCohorts && req.user?.role !== 'super_admin') {
+    if (wantsCohorts && !dto.inheritedCohorts && req.user?.role !== 'super_admin') {
       throw new LiveClassError('CROSS_ACADEMY_FORBIDDEN',
         'Only a super admin can share a class with another academy', 403)
     }
@@ -1147,7 +1203,7 @@ export class LiveClassController {
       scheduledStart:  new Date(dto.scheduledStart),
       durationMins:    dto.durationMins,
       type:            sessionType,
-      provider:        (dto as { provider?: 'mux' | 'livekit' }).provider,
+      provider:        dto.provider,
       meetingUrl,
       googleMeetCode,
       sectionId:       dto.sectionId,
@@ -1298,6 +1354,8 @@ export class LiveClassController {
           scheduledStart,
           durationMins:    source.durationMins,
           type:            source.type,
+          /* An In-App Stream class repeats as an In-App Stream class. */
+          provider:        (source as { provider?: 'mux' | 'livekit' }).provider,
           instructorId:    String(source.instructorId),
           sectionId:       source.sectionId ? String(source.sectionId) : undefined,
           sessionCapacity: source.sessionCapacity,
@@ -1322,7 +1380,12 @@ export class LiveClassController {
                 ...(c['sectionId'] ? { sectionId: String(c['sectionId']) } : {}),
                 seatFloor:      Number(c['seatFloor'] ?? 0),
               })),
-              overflowSeats: repeatOverflow }
+              overflowSeats: repeatOverflow,
+              /* #canManage has already passed on the source, so this caller
+                 may run this class. Copying its own cohorts is not a fresh
+                 sharing decision and must not need super_admin — otherwise the
+                 academy that owns a shared class cannot make it weekly. */
+              inheritedCohorts: true }
             : {}),
           organizationId:  source.organizationId ? String(source.organizationId) : undefined,
         }, req, seriesId)

@@ -67,6 +67,46 @@ export class UserService {
        any non-instructor, so a bad payload fails loudly rather than widening a
        student list. */
     if (dto.sharedAcrossOrgs !== undefined) update.sharedAcrossOrgs = dto.sharedAcrossOrgs
+
+    /* ONLY AN INSTRUCTOR MAY BE LENT — enforced here because nothing else on
+       this path enforces it.
+
+       UserSchema carries a pre('validate') hook for exactly this rule, and its
+       comment says a validator "is the one check that cannot be forgotten at a
+       new call site". That is true of save(), and false of this one: the
+       repository updates through findByIdAndUpdate, and a DOCUMENT hook does
+       not run on a query. `runValidators: true` runs the PATH validators —
+       enum, required, min — and no document middleware at all. Measured, not
+       assumed: a lent instructor patched to role 'admin' came back
+       `role=admin sharedAcrossOrgs=true`, and a plain student patched with
+       `{ sharedAcrossOrgs: true }` came back shared.
+
+       The create route refuses the same combination with INVALID_SHARED_ROLE
+       and had no counterpart here, so the rule held until the first edit.
+
+       THE ROLE AFTER THE PATCH is what matters, not the role in the request:
+       both halves of the pair can arrive separately. Changing the role away
+       from instructor without mentioning the flag is the common case, and it is
+       REFUSED rather than silently cleared — clearing it would un-lend the
+       instructor as a side effect of a role change, and the borrowing academy's
+       classes are assigned to them. Those classes would then refuse every
+       subsequent save with INSTRUCTOR_NOT_FOUND. Better to make the operator
+       do it in the order they can see. */
+    if (dto.role !== undefined || dto.sharedAcrossOrgs !== undefined) {
+      const current = await this.repo.findById(id)
+      if (!current) throw new UserError('USER_NOT_FOUND', 'User not found.', 404)
+      const nextRole   = dto.role ?? current.role
+      const nextShared = dto.sharedAcrossOrgs ?? current.sharedAcrossOrgs === true
+      if (nextShared && nextRole !== 'instructor') {
+        throw new UserError(
+          'INVALID_SHARED_ROLE',
+          dto.sharedAcrossOrgs === true
+            ? 'Only instructors can be shared between organizations.'
+            : 'This instructor is shared with both organizations. Turn that off before changing their role.',
+          400,
+        )
+      }
+    }
     if (dto.categories !== undefined) {
       /* Multi-select path: set categories directly, keep category in sync with first */
       update.categories = dto.categories as any

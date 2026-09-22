@@ -20,7 +20,8 @@ import { SectionService } from '@/services/section.service.ts'
 import { OrderService } from '@/services/order.service.ts'
 import { CouponService } from '@/services/coupon.service.ts'
 import {
-  requireSameOrgUser, requireImpersonableStudent, callerMayAccess, instructorOwnsSession, callerOrgForRead,
+  requireSameOrgUser, requireImpersonableStudent, requireBorrowedInstructorUnchanged,
+  callerMayAccess, instructorOwnsSession, callerOrgForRead,
   servedClassFilter, classServesOrg, andFilter,
 } from '@/utils/tenancy.ts'
 import { CROSS_ORG_CLASSES_ENABLED } from '@/utils/featureFlags.ts'
@@ -505,6 +506,9 @@ router.post ('/users', requirePermission('users','create'),          validate(us
 router.patch ('/users/:id', requirePermission('users','update'),
   requireAdmin,
   requireSameOrgUser('id'),
+  /* requireSameOrgUser lets EITHER academy's admin through for a lent
+     instructor. This says what that does not extend to — see the guard. */
+  requireBorrowedInstructorUnchanged('id'),
   (req: Request, res: Response, next: NextFunction) => {
     if (req.user!.role === 'admin' && (req.body as any).role === 'super_admin') {
       res.status(403).json({ success: false, error: { code: 'FORBIDDEN', message: 'Only super admins can grant super admin access.' } })
@@ -2959,8 +2963,22 @@ router.patch('/bookings/:id/attendance', requireInstructor, requirePermission('b
        out again without taking it from any pool, so the room ends up holding
        more seats than it has. 'attended' also feeds the attendance history, so
        it can credit a class the student never took. */
-    const booking = await ClassBookingModel.findByIdAndUpdate(
-      { _id: id, status: { $in: ['booked', 'attended', 'missed'] } } as never,
+    /* findOneAndUpdate, NOT findByIdAndUpdate. This was written as
+       findByIdAndUpdate with the filter object passed where the ID goes, forced
+       past the compiler with `as never` — and mongoose pulls `_id` out of that
+       object and DISCARDS everything else, so the status clause above was never
+       applied. Measured: a seat stored as 'cancelled' came back as a document
+       and was written to 'attended'. The `as never` is the tell; a cast whose
+       only job is to silence an argument-type error is usually silencing the
+       bug as well.
+
+       Everything the comment above describes therefore happened: a released
+       seat was resurrected without being taken from any pool, so the room held
+       more seats than it has, and the student was credited with a class they
+       never took — which then counts against the 2x-attendance cap on their
+       next booking. */
+    const booking = await ClassBookingModel.findOneAndUpdate(
+      { _id: id, status: { $in: ['booked', 'attended', 'missed'] } },
       { status },
       { new: true },
     ).populate('userId', 'id name email').lean({ virtuals: true })

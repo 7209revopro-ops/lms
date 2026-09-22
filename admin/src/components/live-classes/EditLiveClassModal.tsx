@@ -67,7 +67,7 @@ export function EditLiveClassModal({ live, onClose, onSuccess }: Props) {
   const [originalStart]                         = useState(() => isoToDatetimeLocal(live.scheduledStart, classZone))
   const [durationMins,     setDurationMins]     = useState(live.durationMins)
   const [isOnline,         setIsOnline]         = useState<boolean>((live as any).isOnline ?? true)
-  const [type,             setType]             = useState<LiveClassType>(live.type)
+  const [type]                                  = useState<LiveClassType>(live.type)
   const [meetingUrl,       setMeetingUrl]       = useState(live.meetingUrl ?? '')
   const [location,         setLocation]         = useState<string>((live as any).location ?? '')
   const [room,             setRoom]             = useState<string>((live as any).room ?? '')
@@ -101,6 +101,17 @@ export function EditLiveClassModal({ live, onClose, onSuccess }: Props) {
     seatFloor:      Number(c.seatFloor ?? 0),
   }))
   const [cohorts, setCohorts] = useState<GuestCohortInput[]>(storedCohorts)
+  /* SHARING A CLASS FOR THE FIRST TIME *FROM HERE* NEEDS AN OVERFLOW.
+     Once a class has pools the backend refuses overflowSeats outright
+     (OVERFLOW_NOT_EDITABLE) — moving seats around an allocated class goes
+     through a floor change, which has a donor. Before it has pools this is the
+     one moment the number can be chosen, and the field was read-only, so a
+     class first shared through Edit was locked at zero unpromised seats for
+     good. `hostSeatsLeft` present IS "already allocated". */
+  const alreadyAllocated = typeof (live as any).hostSeatsLeft === 'number'
+  const [overflow, setOverflow] = useState<number>(
+    alreadyAllocated ? ((live as any).overflowSeatsLeft ?? 0) : 0,
+  )
   /* How many seats each academy is already sitting in, so a floor cannot be
      dragged below them and the reason is visible before the round trip. */
   const heldByOrg: Record<string, number> = {}
@@ -151,7 +162,6 @@ export function EditLiveClassModal({ live, onClose, onSuccess }: Props) {
              including a save that only touched the title. */
           scheduledStart:   datetimeLocalToISO(start, classZone),
           durationMins,
-          type,
           isOnline,
           meetingUrl:       isOnline && type === 'external' ? meetingUrl.trim() || undefined : undefined,
           location:         !isOnline ? location.trim() || undefined : undefined,
@@ -161,7 +171,14 @@ export function EditLiveClassModal({ live, onClose, onSuccess }: Props) {
           status,
           instructorId:     instructorId || undefined,
           courseId:         activeCourseId !== originalCourseId ? activeCourseId : undefined,
-          sectionId:        sectionId || undefined,
+          /* AN EMPTY STRING MEANS "no specific module", and it has to reach
+             the server as one. `|| undefined` turned the user's choice into an
+             omitted key, and an omitted key means "leave it alone" — so
+             selecting "No specific module" and saving looked like it worked and
+             changed nothing. A class could be gated and never un-gated, which
+             on a shared class also locks every guest cohort into naming a
+             module of its own. */
+          sectionId:        sectionId,
           sessionCapacity:  sessionCapacity !== '' ? sessionCapacity : undefined,
           language,
           /* Sent ONLY by a super admin. This modal re-sends its whole form on
@@ -170,6 +187,11 @@ export function EditLiveClassModal({ live, onClose, onSuccess }: Props) {
              of every class — and the server's gate, which fires on a list that
              DIFFERS from what is stored, would start refusing title changes. */
           ...(isSuper ? { guestCohorts: cohorts } : {}),
+          /* Only on the first sharing, and only when there is something to
+             share with — the server refuses an overflow with no cohort behind
+             it, and refuses any overflow at all once the class is allocated. */
+          ...(isSuper && !alreadyAllocated && cohorts.length > 0
+            ? { overflowSeats: overflow } : {}),
         },
       })
       onSuccess()
@@ -452,20 +474,29 @@ export function EditLiveClassModal({ live, onClose, onSuccess }: Props) {
               <div>
                 <label className="mb-1 block text-[10px] font-semibold uppercase tracking-widest"
                   style={{ color: 'rgba(255,255,255,0.35)' }}>Session type</label>
-                <div className="flex gap-2">
-                  {(['external', 'internal'] as const).map(t => (
-                    <button key={t} type="button" onClick={() => setType(t)}
-                      className="flex flex-1 items-center justify-center gap-1.5 rounded-xl py-2 text-xs font-semibold transition-all"
-                      style={type === t
-                        ? { background: t === 'internal' ? 'rgba(0,87,184,0.20)' : 'rgba(99,102,241,0.20)',
-                            color:      t === 'internal' ? '#0057b8' : '#818CF8',
-                            border:     `1px solid ${t === 'internal' ? 'rgba(0,87,184,0.35)' : 'rgba(99,102,241,0.35)'}` }
-                        : { background: 'rgba(255,255,255,0.04)', color: 'rgba(255,255,255,0.45)',
-                            border: '1px solid rgba(255,255,255,0.08)' }}>
-                      {t === 'internal' ? <Tv2 size={11} /> : <ExternalLink size={11} />}
-                      {t === 'internal' ? 'In-App Stream' : 'External Link'}
-                    </button>
-                  ))}
+                {/* FIXED AT CREATION, and shown rather than offered.
+
+                    These were two live buttons. `type` is not in
+                    liveUpdateSchema, and validate() strips what a schema does
+                    not name, so switching them and saving changed nothing at
+                    all: the modal reported success, closed, and reopened on
+                    the original type. Changing it for real is not a field
+                    edit — an External Link session needs a Meet link minted
+                    and an In-App Stream needs a room opened, and neither
+                    exists for a class that was created as the other kind.
+
+                    A control that cannot do what it appears to do is worse
+                    than no control, so this states the fact instead. */}
+                <div className="flex items-center gap-2 rounded-xl px-3 py-2"
+                  style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)',
+                           color: type === 'internal' ? '#0057b8' : '#818CF8' }}>
+                  {type === 'internal' ? <Tv2 size={11} /> : <ExternalLink size={11} />}
+                  <span className="text-xs font-semibold">
+                    {type === 'internal' ? 'In-App Stream' : 'External Link'}
+                  </span>
+                  <span className="ml-auto text-[10px]" style={{ color: 'rgba(255,255,255,0.35)' }}>
+                    set when the session was created
+                  </span>
                 </div>
               </div>
 
@@ -557,13 +588,35 @@ export function EditLiveClassModal({ live, onClose, onSuccess }: Props) {
           <div>
             <label className="mb-1 block text-[10px] font-semibold uppercase tracking-widest"
               style={{ color: 'rgba(255,255,255,0.35)' }}>Instructor</label>
-            <select value={instructorId} onChange={e => setInstructorId(e.target.value)}
-              className={base} style={{ ...selStyle }}>
-              <option value="">Default (current user)</option>
-              {instructors.map(i => (
-                <option key={i.id} value={i.id}>{i.name}</option>
-              ))}
-            </select>
+            {/* THE CLASS'S OWN INSTRUCTOR IS ALWAYS AN OPTION, even when the
+                picker's list no longer contains them.
+
+                The list is the instructors this academy may schedule. An
+                instructor who was lent and then un-lent, deactivated or
+                deleted drops out of it — and a <select> whose value matches no
+                option renders BLANK, so the field read as "nobody is teaching
+                this" on a class that has a teacher, and the fix for it was
+                invisible because the control looked empty rather than wrong.
+
+                Listing them keeps the control truthful and makes re-saving a
+                no-op the server now accepts (an unchanged instructorId is no
+                longer re-validated). Picking anyone else still reassigns. */}
+            {(() => {
+              const known   = instructors.some(i => i.id === instructorId)
+              const current = live.instructor?.name ?? 'Current instructor'
+              return (
+                <select value={instructorId} onChange={e => setInstructorId(e.target.value)}
+                  className={base} style={{ ...selStyle }}>
+                  <option value="">Default (current user)</option>
+                  {!known && instructorId && (
+                    <option value={instructorId}>{current} — no longer available to this academy</option>
+                  )}
+                  {instructors.map(i => (
+                    <option key={i.id} value={i.id}>{i.name}</option>
+                  ))}
+                </select>
+              )
+            })()}
           </div>
 
           {/* Language */}
@@ -624,7 +677,9 @@ export function EditLiveClassModal({ live, onClose, onSuccess }: Props) {
                 : undefined}
               hostGated={!!sectionId}
               sessionCapacity={sessionCapacity === '' ? 0 : Number(sessionCapacity)}
-              overflowSeats={(live as any).overflowSeatsLeft ?? 0}
+              overflowSeats={overflow}
+              /* Editable only in the window where the server will accept it. */
+              {...(isSuper && !alreadyAllocated ? { onOverflowChange: setOverflow } : {})}
               readOnly={!isSuper}
               heldByOrg={heldByOrg}
               /* Present only once the class HAS pools. Its presence switches

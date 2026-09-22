@@ -107,7 +107,8 @@
     "test:joinclass-adv": "bun src/tests/joinclass.adversarial.suite.ts",
     "test:bookingfixes": "bun src/tests/bookingfixes.suite.ts",
     "test:bookingsapi": "bun src/tests/bookingsapi.suite.ts",
-    "test:crossorgauthoring": "bun src/tests/crossorgauthoring.suite.ts"
+    "test:crossorgauthoring": "bun src/tests/crossorgauthoring.suite.ts",
+    "test:crossorgfixes": "bun src/tests/crossorgfixes.suite.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1046.0",

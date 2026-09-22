@@ -12,10 +12,11 @@
  *     student sees the failure inside the app
  */
 import { Router, type Request, type Response, type NextFunction } from 'express'
-import { resolveClassEntitlement } from '@/services/classEntitlement.service.ts'
+import { resolveClassEntitlement, doorForOrg } from '@/services/classEntitlement.service.ts'
 import { reserveSeat, releaseSeat, seatStampFrom } from '@/services/seatPool.service.ts'
 import { ensureOrgSlugs, orgSlugFor } from '@/utils/orgSlugs.ts'
 import { callerOrgForRead } from '@/utils/tenancy.ts'
+import { labelGuestDoors, yourCohortFrom } from '@/controllers/liveClass.controller.ts'
 import { z } from 'zod'
 import { resolveLiveStatus, isBookingOpen, bookingClosesAt, studentJoinWindow } from '@/utils/liveStatus.ts'
 import { authenticate, requireEnrollmentApproval } from '@/middleware/auth.middleware.ts'
@@ -404,7 +405,12 @@ router.get('/me', authenticate, validate(bookingQuerySchema, 'query'), async (re
            read the link without ever being let in. */
         .populate({
           path:   'liveClassId',
-          select: 'id title scheduledStart durationMins status muxPlaybackId type isOnline language location room courseId sectionId instructorId',
+          /* organizationId and guestCohorts are here so the caller's own DOOR
+             can be resolved — see `yourCohort` below. Neither is serialised:
+             the cohort array names another academy's course and module ids,
+             which is staff-only (see STAFF_ONLY_FIELDS in the live-class
+             controller), so both are stripped off the row before it ships. */
+          select: 'id title scheduledStart durationMins status muxPlaybackId type isOnline language location room courseId sectionId instructorId organizationId guestCohorts',
           populate: [
             { path: 'courseId',     select: 'id title slug thumbnailUrl' },
             { path: 'sectionId',    select: 'id title order' },
@@ -427,16 +433,47 @@ router.get('/me', authenticate, validate(bookingQuerySchema, 'query'), async (re
        server-side. Serialising the URL here would hand it to every row —
        cancelled ones included — at any hour, which is a way into the room
        without ever being let in. */
-    const rows = (docs as any[]).map(b => {
+    /* WHICH OF THE STUDENT'S OWN COURSES THIS SEAT WAS FOR.
+       ──────────────────────────────────────────────────────
+       A cross-academy class is owned by one academy and serves others, each
+       through the guest academy's OWN course and module — that is the entire
+       point of a guest cohort. The populate above walks `courseId` and
+       `sectionId` off the class document, and those are the HOST's.
+
+       So a Bangalore student holding a seat in a Dubai-hosted class read their
+       Booking History as "[E2E] Trading Foundations · [E2E] Module 1" — a
+       course they are not enrolled on and a module that does not exist in their
+       academy — instead of their own course and module. Measured on real data,
+       not inferred. The module line is the worse half: module access is what
+       the cohort's sectionId actually gates, so the row named the wrong thing
+       in the one place a student would look to check it.
+
+       The schedule already solves this with `yourCohort`, and the fix is to
+       send the same field from the same builders rather than a second
+       description of the same door. One pair of queries for the whole page, and
+       nothing is asked at all when no row came through a guest door — which is
+       every row until a class is actually shared. */
+    const callerOrg = req.user!.organizationId
+    const doors     = (docs as any[]).map(b =>
+      b.liveClassId ? doorForOrg(b.liveClassId, callerOrg) : undefined)
+    const label     = await labelGuestDoors(doors)
+
+    const rows = (docs as any[]).map((b, i) => {
       const lc = b.liveClassId
       if (!lc?.scheduledStart) return b
       const w = studentJoinWindow(lc.scheduledStart)
+      /* Never serialised — see the note on the projection above. */
+      const { organizationId: _org, guestCohorts: _cohorts, ...classRow } = lc as Record<string, unknown>
       return {
         ...b,
         liveClassId: {
-          ...lc,
+          ...classRow,
           joinOpensAt:  w.opensAt.toISOString(),
           joinClosesAt: w.closesAt.toISOString(),
+          /* Absent on a class the student reached through the host door, which
+             is every unshared class — so the row serialises exactly as it did
+             for all of them. */
+          yourCohort:   yourCohortFrom(label(doors[i])),
         },
       }
     })

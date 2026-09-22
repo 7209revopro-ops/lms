@@ -86,6 +86,13 @@ export const effProgram  = (lc: LiveClass) => lc.yourCohort?.program  ?? (lc.cou
 export const effCourseTitle = (lc: LiveClass): string | undefined =>
   lc.yourCohort?.courseTitle ?? lc.course?.title
 
+/** The slug of the course the caller came through, which is how its page is
+    addressed. The "Enroll" call to action on a class the caller has not bought
+    yet is built from this; on a shared class the host's slug would send a
+    guest student to the other academy's product page. */
+export const effCourseSlug = (lc: LiveClass): string | undefined =>
+  lc.yourCohort?.courseId ? lc.yourCohort.courseSlug : lc.course?.slug
+
 /** The course blurb and level of the door the caller came through. Same rule
     as the module's: a guest reads their OWN academy's course, never the
     host's, so there is no fallback across doors. */

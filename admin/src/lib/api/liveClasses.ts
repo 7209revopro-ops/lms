@@ -193,6 +193,13 @@ export interface UpdateLiveClassInput {
   /* Sending the stored set unchanged is a no-op any editor may perform;
      CHANGING it is a super admin's decision. */
   guestCohorts?:     GuestCohortInput[]
+  /** Seats promised to nobody, set when a class is FIRST shared. The backend
+      accepts it only while the class has no pools yet and answers
+      OVERFLOW_NOT_EDITABLE afterwards (moving seats around an allocated class
+      goes through a floor change, which has a donor). This type omitted it, so
+      a class shared for the first time through the Edit modal — rather than at
+      creation — was permanently stuck with an overflow of zero. */
+  overflowSeats?:    number
   courseId?:         string
   sectionId?:        string
   title?:            string

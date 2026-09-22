@@ -276,10 +276,27 @@ const UserSchema = new Schema<IUser>(
   baseSchemaOptions,
 )
 
-/* Only an instructor may be lent. Enforced at the schema so no route, script or
-   import can persist a shared student — the widening in user.repository.ts is
-   guarded on role as well, but a validator is the one check that cannot be
-   forgotten at a new call site. */
+/* Only an instructor may be lent.
+
+   THIS HOOK DOES NOT COVER EVERY PATH, and the comment here used to say it
+   did — "a validator is the one check that cannot be forgotten at a new call
+   site". pre('validate') is DOCUMENT middleware: it runs on save(), and not on
+   findByIdAndUpdate / updateOne / updateMany, whatever `runValidators` says —
+   that option runs PATH validators (enum, required, min), never document
+   middleware. The admin PATCH path goes through findByIdAndUpdate, so this hook
+   was silent on it: a lent instructor patched to role 'admin' kept the flag,
+   and a student could be patched into being shared.
+
+   So the rule is enforced in two places and both are needed:
+     · here, for every save() — creation, scripts, imports, hydrated edits;
+     · in UserService#adminUpdate, for the admin PATCH, which compares the role
+       the user will HAVE after the patch rather than the one in the request.
+
+   The readers are guarded on role as well (sharedInstructorFilter in
+   utils/tenancy.ts puts `role: 'instructor'` inside the clause rather than
+   assuming it), which is what kept a shared student from leaking while this
+   was broken. Defence in depth is why it was a correctness bug and not an
+   incident. */
 UserSchema.pre('validate', function (next) {
   if (this.sharedAcrossOrgs && this.role !== 'instructor') {
     next(new Error('sharedAcrossOrgs may only be set on an instructor'))

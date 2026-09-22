@@ -35,6 +35,21 @@ export interface MyBooking {
     courseId?:      { id: string; title: string; slug: string; thumbnailUrl?: string }
     sectionId?:     { id: string; title: string; order?: number }
     instructorId?:  { id: string; name: string; avatarUrl?: string }
+    /* WHICH OF *YOUR* COURSES THIS SEAT WAS FOR, on a class another academy
+       hosts and shares with yours. The three refs above are walked off the
+       CLASS, so on a shared class they are the host academy's course and
+       module — a course you are not enrolled on and a module that does not
+       exist in your academy. This is the same field the schedule carries
+       (see yourCohort in lib/api/liveClasses.ts) and it wins wherever both
+       are present. Absent on every class your own academy owns. */
+    yourCohort?: {
+      courseId?:     string
+      courseTitle?:  string
+      program?:      string
+      sectionId?:    string
+      sectionTitle?: string
+      sectionOrder?: number
+    }
     /* No meetingUrl and no join window on a booking row: the Join button on
        My Classes reads the window from the matching /live-classes row and
        fetches the link through POST /live-classes/:id/join. */
