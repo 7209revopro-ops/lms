@@ -66,11 +66,42 @@ export interface ExamAttemptRow {
   graded:     boolean
 }
 
+export interface AttemptDetail {
+  attempt: {
+    id: string
+    student: { id: string; name: string; email: string }
+    status: 'in_progress' | 'submitted' | 'suspended'
+    startedAt: string | null
+    submittedAt: string | null
+    suspendedReason: string | null
+    violations: number
+    totalMarks: number | null
+    maxMarks: number | null
+    passed: boolean | null
+    graded: boolean
+  }
+  exam: { id: string; title: string; passPercent: number }
+  questions: Array<{
+    id: string
+    text: string
+    type: ExamQuestionType
+    choices: string[]
+    maxMarks: number
+    correctAnswer: string | null
+    autoGradable: boolean
+    answer: string
+    marksAwarded: number | null
+    feedback: string | null
+  }>
+  logs: Array<{ event: string; detail: string | null; timestamp: string }>
+}
+
 /* ─── Query keys (admin-namespaced, per CLAUDE.md) ── */
 export const examKeys = {
   all:      ['admin', 'exams'] as const,
   forCourse: (courseId: string) => ['admin', 'exams', 'course', courseId] as const,
   attempts:  (examId: string)   => ['admin', 'exams', 'attempts', examId] as const,
+  attempt:   (examId: string, attemptId: string) => ['admin', 'exams', 'attempt', examId, attemptId] as const,
 }
 
 /* ─── The exam for a course (null if none) ────────── */
@@ -125,5 +156,18 @@ export function useExamAttempts(examId: string | undefined) {
     },
     enabled: !!examId,
     staleTime: 15_000,
+  })
+}
+
+/* ─── One attempt in full (answers vs. key + proctoring log) ── */
+export function useAttemptDetail(examId: string | undefined, attemptId: string | undefined) {
+  return useQuery({
+    queryKey: examKeys.attempt(examId ?? '', attemptId ?? ''),
+    queryFn: async () => {
+      const res = await api.get<{ success: true; data: AttemptDetail }>(`/admin/exams/${examId}/attempts/${attemptId}`)
+      return res.data.data
+    },
+    enabled: !!examId && !!attemptId,
+    retry: false,
   })
 }

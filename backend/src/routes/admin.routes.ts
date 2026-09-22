@@ -1823,6 +1823,17 @@ router.get('/exams/:examId/attempts', async (req: Request, res: Response, next: 
   } catch (err) { next(err) }
 })
 
+/* GET one attempt in full — answers vs. the key + the proctoring activity log. */
+router.get('/exams/:examId/attempts/:attemptId', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const examId = String(req.params['examId'] ?? '')
+    const exam = await examSvc.getRaw(examId)
+    await sectionSvc.assertCourseEditable(String(exam.courseId), req.user!.id, req.user!.role, req.user!.categoryScope)
+    const detail = await examSvc.getAttemptDetail(examId, String(req.params['attemptId'] ?? ''))
+    sendSuccess(res, detail)
+  } catch (err) { next(err) }
+})
+
 /* ─── Assignment management ────────────────────────── */
 router.get('/lessons/:lessonId/assignment', async (req: Request, res: Response, next: NextFunction) => {
   try {

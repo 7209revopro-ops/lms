@@ -9,8 +9,8 @@ import {
 } from 'lucide-react'
 import {
   useCourseExam, useExamResult,
-  startExam, getExamStatus, saveExamAnswer, submitExam,
-  type StudentExamQuestion, type ExamStart,
+  startExam, getExamStatus, saveExamAnswer, submitExam, logExamEvent,
+  type StudentExamQuestion, type ExamStart, type ExamAntiCheat,
 } from '@/lib/api/exam'
 import Spinner from '@/components/ui/Spinner'
 
@@ -47,12 +47,20 @@ export default function ExamPage({
   const [starting, setStarting] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [startError, setStartError] = useState<string | null>(null)
+  const [warning, setWarning] = useState<string | null>(null)   // transient anti-cheat notice
 
   const answersRef = useRef(answers)
   answersRef.current = answers
   const saveTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({})
   const finishedRef = useRef(false)   // guards against double auto-submit
   const initedRef = useRef(false)     // the phase decision must run only once
+  const examIdRef = useRef('')
+  examIdRef.current = examId
+  const lastSwitchRef = useRef(0)     // debounces blur + visibilitychange firing together
+  const warnTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  const antiCheat: ExamAntiCheat | undefined = courseExam?.exam.antiCheat
+  const maxViolations = courseExam?.exam.maxViolations ?? 4
 
   /* ── Decide the initial phase once the exam loads ── */
   useEffect(() => {
@@ -135,6 +143,77 @@ export default function ExamPage({
     }, 25_000)
     return () => clearInterval(iv)
   }, [phase, examId])
+
+  /* ── Anti-cheat: report a proctoring event; the server owns suspension ── */
+  const flashWarning = useCallback((msg: string) => {
+    setWarning(msg)
+    if (warnTimerRef.current) clearTimeout(warnTimerRef.current)
+    warnTimerRef.current = setTimeout(() => setWarning(null), 4000)
+  }, [])
+
+  const report = useCallback(async (event: string, detail?: string) => {
+    const id = examIdRef.current
+    if (!id || finishedRef.current) return
+    try {
+      const r = await logExamEvent(id, event, detail)
+      if (r.suspended) { finishedRef.current = true; setPhase('result'); return }
+      if (event === 'tab_switch' || event === 'blur') {
+        const left = Math.max(0, maxViolations - r.violations)
+        flashWarning(left > 0
+          ? `Leaving the exam is recorded. ${left} more and your attempt will be suspended.`
+          : 'Warning recorded.')
+      } else if (event === 'screenshot') {
+        flashWarning('Screenshots are not allowed and have been recorded.')
+      }
+    } catch { /* logging must never block the exam */ }
+  }, [maxViolations, flashWarning])
+
+  /* ── DOM guards while taking (honour each exam's anti-cheat toggles) ── */
+  useEffect(() => {
+    if (phase !== 'taking' || !antiCheat) return
+
+    const onCopyPaste = (e: Event) => { e.preventDefault(); void report(e.type === 'paste' ? 'paste' : e.type === 'cut' ? 'cut' : 'copy') }
+    const onContext = (e: Event) => { e.preventDefault(); void report('right_click') }
+    const onTabSwitch = (kind: 'tab_switch' | 'blur') => {
+      const now = Date.now()
+      if (now - lastSwitchRef.current < 1200) return   // one count per switch
+      lastSwitchRef.current = now
+      void report(kind)
+    }
+    const onVisibility = () => { if (document.hidden) onTabSwitch('tab_switch') }
+    const onBlur = () => onTabSwitch('blur')
+    const onKey = (e: KeyboardEvent) => {
+      const k = e.key
+      const combo = (e.metaKey || e.ctrlKey) && e.shiftKey && ['S', 's', '3', '4', '5'].includes(k)
+      if (k === 'PrintScreen' || combo) void report('screenshot')
+    }
+
+    if (antiCheat.blockCopyPaste) {
+      document.addEventListener('copy', onCopyPaste)
+      document.addEventListener('cut', onCopyPaste)
+      document.addEventListener('paste', onCopyPaste)
+    }
+    if (antiCheat.blockRightClick) document.addEventListener('contextmenu', onContext)
+    if (antiCheat.tabSwitchSuspend) {
+      document.addEventListener('visibilitychange', onVisibility)
+      window.addEventListener('blur', onBlur)
+    }
+    if (antiCheat.screenshotSuspend) {
+      window.addEventListener('keyup', onKey)
+      window.addEventListener('keydown', onKey)
+    }
+
+    return () => {
+      document.removeEventListener('copy', onCopyPaste)
+      document.removeEventListener('cut', onCopyPaste)
+      document.removeEventListener('paste', onCopyPaste)
+      document.removeEventListener('contextmenu', onContext)
+      document.removeEventListener('visibilitychange', onVisibility)
+      window.removeEventListener('blur', onBlur)
+      window.removeEventListener('keyup', onKey)
+      window.removeEventListener('keydown', onKey)
+    }
+  }, [phase, antiCheat, report])
 
   /* ── Answer handling: local state + debounced server save ── */
   const setAnswer = useCallback((qid: string, value: string) => {
@@ -237,6 +316,16 @@ export default function ExamPage({
             <div className="h-full rounded-full transition-all" style={{ width: `${((current + 1) / questions.length) * 100}%`, background: 'var(--color-primary)' }} />
           </div>
         </div>
+
+        <AnimatePresence>
+          {warning && (
+            <motion.div initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }}
+              className="mb-4 flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm font-semibold"
+              style={{ background: 'rgba(239,68,68,0.10)', color: '#B91C1C', border: '1px solid rgba(239,68,68,0.25)' }}>
+              <ShieldAlert size={15} /> {warning}
+            </motion.div>
+          )}
+        </AnimatePresence>
 
         {q && (
           <AnimatePresence mode="wait">

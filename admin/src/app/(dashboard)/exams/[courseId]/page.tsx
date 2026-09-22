@@ -408,6 +408,7 @@ export default function ExamBuilderPage() {
                     <th className="py-2 pr-4 font-semibold">Status</th>
                     <th className="py-2 pr-4 font-semibold">Score</th>
                     <th className="py-2 pr-4 font-semibold">Violations</th>
+                    <th className="py-2 font-semibold"></th>
                   </tr>
                 </thead>
                 <tbody>
@@ -423,6 +424,11 @@ export default function ExamBuilderPage() {
                         {a.passed != null && <span className="ml-1.5 text-xs" style={{ color: a.passed ? '#10b981' : '#ef4444' }}>{a.passed ? 'Pass' : 'Fail'}</span>}
                       </td>
                       <td className="py-2.5 pr-4 text-white">{a.violations}</td>
+                      <td className="py-2.5 text-right">
+                        <Link href={`/exams/${courseId}/attempts/${a.attemptId}`} className="text-xs font-semibold" style={{ color: '#4d9bff' }}>
+                          View
+                        </Link>
+                      </td>
                     </tr>
                   ))}
                 </tbody>

@@ -156,6 +156,88 @@ export class AdminExamService {
     })
   }
 
+  /* ── One attempt in full: student, answers vs. the key, and the proctor log. ── */
+  async getAttemptDetail(examId: string, attemptId: string): Promise<{
+    attempt: {
+      id: string
+      student: { id: string; name: string; email: string }
+      status: string
+      startedAt: Date | null
+      submittedAt: Date | null
+      suspendedReason: string | null
+      violations: number
+      totalMarks: number | null
+      maxMarks: number | null
+      passed: boolean | null
+      graded: boolean
+    }
+    exam: { id: string; title: string; passPercent: number }
+    questions: Array<{
+      id: string
+      text: string
+      type: ExamQuestionType
+      choices: string[]
+      maxMarks: number
+      correctAnswer: string | null   // admins may see the key
+      autoGradable: boolean
+      answer: string
+      marksAwarded: number | null
+      feedback: string | null
+    }>
+    logs: Array<{ event: string; detail: string | null; timestamp: Date }>
+  }> {
+    if (!Types.ObjectId.isValid(examId) || !Types.ObjectId.isValid(attemptId)) {
+      throw new ExamError('NOT_FOUND', 'Attempt not found.', 404)
+    }
+    const exam = await ExamModel.findById(examId)
+    if (!exam) throw new ExamError('NOT_FOUND', 'Exam not found.', 404)
+
+    const attempt = await ExamAttemptModel.findOne({ _id: attemptId, examId })
+      .populate('userId', 'name email')
+      .lean()
+    if (!attempt) throw new ExamError('NOT_FOUND', 'Attempt not found.', 404)
+
+    const logs = await ExamLogModel.find({ attemptId }).sort({ timestamp: 1 }).lean()
+
+    const byId = new Map((attempt.answers ?? []).map(a => [a.questionId, a]))
+    const questions = [...exam.questions].sort((a, b) => a.order - b.order).map((q) => {
+      const a = byId.get(String(q._id))
+      const autoGradable = q.type === 'mcq' || q.type === 'true_false'
+      return {
+        id:            String(q._id),
+        text:          q.text,
+        type:          q.type,
+        choices:       q.choices ?? [],
+        maxMarks:      q.maxMarks,
+        correctAnswer: autoGradable ? (q.correctAnswer ?? null) : null,
+        autoGradable,
+        answer:        a?.answer ?? '',
+        marksAwarded:  a?.marksAwarded ?? null,
+        feedback:      a?.feedback ?? null,
+      }
+    })
+
+    const u = attempt.userId as unknown as { _id: Types.ObjectId; name?: string; email?: string } | null
+    return {
+      attempt: {
+        id:              String(attempt._id),
+        student:         { id: u ? String(u._id) : '', name: u?.name ?? 'Unknown', email: u?.email ?? '' },
+        status:          attempt.status,
+        startedAt:       attempt.startedAt ?? null,
+        submittedAt:     attempt.submittedAt ?? null,
+        suspendedReason: attempt.suspendedReason ?? null,
+        violations:      attempt.violations ?? 0,
+        totalMarks:      attempt.totalMarks ?? null,
+        maxMarks:        attempt.maxMarks ?? null,
+        passed:          attempt.passed ?? null,
+        graded:          Boolean(attempt.gradedAt),
+      },
+      exam: { id: String(exam._id), title: exam.title, passPercent: exam.passPercent },
+      questions,
+      logs: logs.map(l => ({ event: l.event, detail: l.detail ?? null, timestamp: l.timestamp })),
+    }
+  }
+
   /* ── Validation shared by create + update. ── */
   private validate(dto: ExamUpsertInput): void {
     if (!dto.questions.length) throw new ExamError('NO_QUESTIONS', 'Add at least one question.', 400)
