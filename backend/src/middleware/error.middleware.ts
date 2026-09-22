@@ -13,6 +13,7 @@ import { FavoriteError } from '@/services/favorite.service.ts'
 import { OutlineError } from '@/services/section.service.ts'
 import { UserError } from '@/services/user.service.ts'
 import { QuizError } from '@/services/quiz.service.ts'
+import { ExamError } from '@/services/exam.service.ts'
 import { AssignmentError } from '@/services/assignment.service.ts'
 import { ClassAssignmentError } from '@/services/classAssignment.service.ts'
 import { CertificateError } from '@/services/certificate.service.ts'
@@ -125,6 +126,10 @@ export function errorMiddleware(
     return
   }
   if (err instanceof QuizError) {
+    sendError(res, err.code, err.message, err.statusCode)
+    return
+  }
+  if (err instanceof ExamError) {
     sendError(res, err.code, err.message, err.statusCode)
     return
   }

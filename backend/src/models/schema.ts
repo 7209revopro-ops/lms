@@ -1286,6 +1286,183 @@ AssignmentSubmissionSchema.index({ userId: 1, courseId: 1 })
 export const AssignmentSubmissionModel = mongoose.model<IAssignmentSubmission>('AssignmentSubmission', AssignmentSubmissionSchema)
 
 /* ─────────────────────────────────────────────────────
+   EXAM — a timed, proctored, one-attempt assessment for a COURSE.
+
+   Deliberately separate from Quiz (which is per-lesson, auto-graded and
+   multi-attempt): an Exam is course-level, its clock is enforced server-side,
+   a student gets one attempt, short/essay answers are graded by hand, and every
+   attempt carries a proctoring activity trail. See EXAM_FEATURE_PLAN.md.
+───────────────────────────────────────────────────── */
+export type ExamQuestionType = 'mcq' | 'true_false' | 'short' | 'essay'
+
+export interface IExamQuestion {
+  _id:           Types.ObjectId
+  text:          string
+  type:          ExamQuestionType
+  /* mcq: the options; true_false: ['True','False']; short/essay: []. */
+  choices:       string[]
+  /* mcq/tf only — an index string, used for auto-grading. Absent for
+     short/essay, which an admin grades by hand. */
+  correctAnswer?: string
+  order:         number
+  maxMarks:      number
+  explanation?:  string
+}
+
+export interface IExamAntiCheat {
+  blockCopyPaste:    boolean
+  blockRightClick:   boolean
+  screenshotSuspend: boolean   // a screenshot attempt instantly suspends the attempt
+  tabSwitchSuspend:  boolean   // reaching maxViolations suspends the attempt
+}
+
+export interface IExam extends Document {
+  id:              string
+  courseId:        Types.ObjectId
+  title:           string
+  instructions?:   string
+  durationMinutes: number
+  passPercent:     number
+  questions:       IExamQuestion[]
+  availableFrom?:  Date
+  availableTo?:    Date
+  maxViolations:   number
+  antiCheat:       IExamAntiCheat
+  isPublished:     boolean
+  createdAt:       Date
+  updatedAt:       Date
+}
+
+const ExamQuestionSchema = new Schema<IExamQuestion>({
+  text:          { type: String, required: true, maxlength: 4000 },
+  type:          { type: String, enum: ['mcq', 'true_false', 'short', 'essay'], required: true },
+  choices:       [{ type: String, maxlength: 1000 }],
+  correctAnswer: { type: String },
+  order:         { type: Number, default: 0 },
+  maxMarks:      { type: Number, default: 1, min: 0 },
+  explanation:   { type: String, maxlength: 2000 },
+}, { _id: true })
+
+const ExamSchema = new Schema<IExam>(
+  {
+    courseId:        { type: Schema.Types.ObjectId, ref: 'Course', required: true, unique: true },
+    title:           { type: String, required: true, maxlength: 200 },
+    instructions:    { type: String, maxlength: 4000 },
+    durationMinutes: { type: Number, required: true, min: 1, default: 70 },
+    passPercent:     { type: Number, default: 50, min: 0, max: 100 },
+    questions:       [ExamQuestionSchema],
+    availableFrom:   { type: Date },
+    availableTo:     { type: Date },
+    maxViolations:   { type: Number, default: 4, min: 1 },
+    antiCheat:       {
+      blockCopyPaste:    { type: Boolean, default: true },
+      blockRightClick:   { type: Boolean, default: true },
+      screenshotSuspend: { type: Boolean, default: true },
+      tabSwitchSuspend:  { type: Boolean, default: true },
+    },
+    isPublished:     { type: Boolean, default: false },
+  },
+  baseSchemaOptions,
+)
+
+export const ExamModel = mongoose.model<IExam>('Exam', ExamSchema)
+
+/* ─────────────────────────────────────────────────────
+   EXAM ATTEMPT — one per (student, exam). The unique index is what makes the
+   exam one-attempt: a second start returns the same row.
+───────────────────────────────────────────────────── */
+export type ExamAttemptStatus = 'in_progress' | 'submitted' | 'suspended'
+
+export interface IExamAttemptAnswer {
+  questionId:    string
+  answer:        string
+  marksAwarded?: number
+  feedback?:     string
+}
+
+export interface IExamAttempt extends Document {
+  id:              string
+  userId:          Types.ObjectId
+  examId:          Types.ObjectId
+  courseId:        Types.ObjectId
+  status:          ExamAttemptStatus
+  startedAt:       Date
+  submittedAt?:    Date
+  suspendedReason?: string
+  answers:         IExamAttemptAnswer[]
+  totalMarks?:     number
+  maxMarks?:       number
+  passed?:         boolean
+  violations:      number   // running tab-switch/blur count, drives auto-suspend
+  gradedAt?:       Date
+  gradedBy?:       Types.ObjectId
+  createdAt:       Date
+  updatedAt:       Date
+}
+
+const ExamAttemptAnswerSchema = new Schema<IExamAttemptAnswer>({
+  questionId:   { type: String, required: true },
+  answer:       { type: String, default: '' },
+  marksAwarded: { type: Number, min: 0 },
+  feedback:     { type: String, maxlength: 2000 },
+}, { _id: false })
+
+const ExamAttemptSchema = new Schema<IExamAttempt>(
+  {
+    userId:          { type: Schema.Types.ObjectId, ref: 'User', required: true },
+    examId:          { type: Schema.Types.ObjectId, ref: 'Exam', required: true },
+    courseId:        { type: Schema.Types.ObjectId, ref: 'Course', required: true },
+    status:          { type: String, enum: ['in_progress', 'submitted', 'suspended'], default: 'in_progress' },
+    startedAt:       { type: Date, default: Date.now },
+    submittedAt:     { type: Date },
+    suspendedReason: { type: String, maxlength: 500 },
+    answers:         [ExamAttemptAnswerSchema],
+    totalMarks:      { type: Number, min: 0 },
+    maxMarks:        { type: Number, min: 0 },
+    passed:          { type: Boolean },
+    violations:      { type: Number, default: 0, min: 0 },
+    gradedAt:        { type: Date },
+    gradedBy:        { type: Schema.Types.ObjectId, ref: 'User' },
+  },
+  baseSchemaOptions,
+)
+
+ExamAttemptSchema.index({ userId: 1, examId: 1 }, { unique: true })
+ExamAttemptSchema.index({ examId: 1, status: 1 })
+
+export const ExamAttemptModel = mongoose.model<IExamAttempt>('ExamAttempt', ExamAttemptSchema)
+
+/* ─────────────────────────────────────────────────────
+   EXAM LOG — append-only proctoring trail (tab switches, paste attempts,
+   screenshots, …). No delete endpoint: the audit trail is the point.
+───────────────────────────────────────────────────── */
+export interface IExamLog extends Document {
+  id:        string
+  attemptId: Types.ObjectId
+  userId:    Types.ObjectId
+  examId:    Types.ObjectId
+  event:     string
+  detail?:   string
+  timestamp: Date
+}
+
+const ExamLogSchema = new Schema<IExamLog>(
+  {
+    attemptId: { type: Schema.Types.ObjectId, ref: 'ExamAttempt', required: true },
+    userId:    { type: Schema.Types.ObjectId, ref: 'User', required: true },
+    examId:    { type: Schema.Types.ObjectId, ref: 'Exam', required: true },
+    event:     { type: String, required: true, maxlength: 64 },
+    detail:    { type: String, maxlength: 500 },
+    timestamp: { type: Date, default: Date.now },
+  },
+  baseSchemaOptions,
+)
+
+ExamLogSchema.index({ attemptId: 1, timestamp: 1 })
+
+export const ExamLogModel = mongoose.model<IExamLog>('ExamLog', ExamLogSchema)
+
+/* ─────────────────────────────────────────────────────
    USER ACHIEVEMENT — awarded badge / milestone
 ───────────────────────────────────────────────────── */
 export interface IUserAchievement extends Document {

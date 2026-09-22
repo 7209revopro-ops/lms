@@ -13,6 +13,7 @@ import notificationRoutes  from './notifications.routes.ts'
 import favoriteRoutes      from './favorites.routes.ts'
 import achievementRoutes   from './achievements.routes.ts'
 import quizRoutes          from './quizzes.routes.ts'
+import examRoutes          from './exams.routes.ts'
 import assignmentRoutes    from './assignments.routes.ts'
 import certificateRoutes   from './certificates.routes.ts'
 import streakRoutes        from './streaks.routes.ts'
@@ -85,6 +86,7 @@ router.use('/notifications', notificationRoutes)
 router.use('/favorites',     favoriteRoutes)
 router.use('/achievements',  achievementRoutes)
 router.use('/quizzes',       quizRoutes)
+router.use('/exams',         examRoutes)
 router.use('/assignments',   assignmentRoutes)
 router.use('/certificates',  certificateRoutes)
 router.use('/streaks',       streakRoutes)
