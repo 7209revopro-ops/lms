@@ -197,7 +197,11 @@ function QuickCreateModal({
   const [start,           setStart]           = useState(draft.dateISO)
   const [durationMins,    setDurationMins]    = useState(60)
   const [sessionCapacity, setSessionCapacity] = useState<number | ''>(500)
-  const [type,            setType]            = useState<LiveClassType>('external')
+  /* In-app by default, matching the New Session modal. No provider choice on
+     this form, so internal means Mux (the backend's own default) — a
+     broadcast that scales, so the 500 above stays right and only the type
+     moves. */
+  const [type,            setType]            = useState<LiveClassType>('internal')
   const [instructorId,    setInstructorId]    = useState('')
   const [language,        setLanguage]        = useState('English')
   const [error,           setError]           = useState<string | null>(null)

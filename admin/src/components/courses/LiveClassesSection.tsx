@@ -476,7 +476,11 @@ function CreateForm({
   }) => Promise<void>
   error: string | null
 }) {
-  const [type,            setType]            = useState<LiveClassType>('external')
+  /* In-app by default, matching the New Session modal. No provider choice on
+     this form, so internal means Mux (the backend's own default) — a
+     broadcast that scales, so the 500 above stays right and only the type
+     moves. */
+  const [type,            setType]            = useState<LiveClassType>('internal')
   const [title,           setTitle]           = useState('')
   const [description,     setDescription]     = useState('')
   const [start,           setStart]           = useState('')

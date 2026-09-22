@@ -1126,18 +1126,12 @@ function QuickCreateModal({ onClose, onSuccess, categoryProgram }: { onClose: ()
      and seatsFor() only refills the field when a mode is CLICKED. Leaving the
      old default here would open every new Meet session at 30 seats, silently,
      for anyone who never touched the type buttons. */
-  const [sessionCapacity, setSessionCapacity] = useState<number | ''>(OPEN_SEATS_DEFAULT)
-  const [type,            setType]            = useState<LiveClassType>('external')
+  const [sessionCapacity, setSessionCapacity] = useState<number | ''>(seatsFor(DEFAULT_TYPE, DEFAULT_PROVIDER))
+  const [type,            setType]            = useState<LiveClassType>(DEFAULT_TYPE)
   /* Which in-app engine backs an internal class. Mux is a one-way broadcast
      that scales to hundreds; LiveKit is an interactive room capped at
      LIVEKIT_MAX_SEATS by the meeting platform. */
-  const [provider,        setProvider]        = useState<'mux' | 'livekit'>('livekit')
-
-  /* Seats follow the mode, because the sensible number differs by an order of
-     magnitude. Refilled only when a mode is CLICKED — never on re-render — so a
-     hand-typed count survives everything except deliberately switching mode. */
-  const seatsFor = (t: LiveClassType, p: 'mux' | 'livekit') =>
-    t === 'internal' && p === 'livekit' ? LIVEKIT_MAX_SEATS : OPEN_SEATS_DEFAULT
+  const [provider,        setProvider]        = useState<'mux' | 'livekit'>(DEFAULT_PROVIDER)
   const chooseType = (t: LiveClassType) => {
     setType(t); setSessionCapacity(seatsFor(t, provider))
   }
@@ -1667,6 +1661,29 @@ function GridCalendarView({ items, onEditClick }: { items: LiveClass[]; onEditCl
 }
 
 /* ── Page ────────────────────────────────────────────── */
+/* WHAT A NEW SESSION OPENS ON.
+
+   In-app, because that is what this academy runs most of the time and the
+   old default quietly made Google Meet the norm: the type buttons are two
+   equal pills, so anyone who did not touch them got Meet.
+
+   Seats have to move with it, and this is the trap the comment below the
+   state warns about — seatsFor only refills the field when a mode is
+   CLICKED, so a default type that disagrees with the default seat count is
+   silently wrong for everyone who never touches the buttons. LiveKit is an
+   interactive room capped at LIVEKIT_MAX_SEATS; opening it at
+   OPEN_SEATS_DEFAULT would offer 500 seats in a room that holds 30. Both
+   defaults and the rule that ties them now sit together, above the
+   component, so the initialiser can use the same function the buttons do. */
+const DEFAULT_TYPE: LiveClassType = 'internal'
+const DEFAULT_PROVIDER: 'mux' | 'livekit' = 'livekit'
+
+/* Seats follow the mode, because the sensible number differs by an order of
+   magnitude. Refilled only when a mode is CLICKED — never on re-render — so a
+   hand-typed count survives everything except deliberately switching mode. */
+const seatsFor = (t: LiveClassType, p: 'mux' | 'livekit') =>
+  t === 'internal' && p === 'livekit' ? LIVEKIT_MAX_SEATS : OPEN_SEATS_DEFAULT
+
 export default function LiveClassesPage() {
   const [activeFilter,   setActiveFilter]   = useState<FilterKey>('all')
   const [typeFilter,     setTypeFilter]     = useState<'all' | 'internal' | 'external'>('all')
