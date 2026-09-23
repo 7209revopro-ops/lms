@@ -37,6 +37,14 @@ const envSchema = z.object({
      Must match the portal's LMS_SSO_SECRET. */
   ROOT_ERP_SECRET: z.string().default(''),
 
+  /* The shared secret the Delta sales CRM presents when it asks about mentor
+     schedules or books time with one. A second caller on the same endpoints
+     as the portal, kept on its own secret rather than sharing ROOT_ERP_SECRET
+     — so revoking one system's access is not revoking both, and a bad
+     request in the log names which system sent it. Unset means the CRM
+     cannot reach these endpoints at all; it does not fall back to anything. */
+  SALES_CRM_SECRET: z.string().default(''),
+
   /* Bcrypt */
   BCRYPT_ROUNDS: z.coerce.number().min(10).max(14).default(12),
 

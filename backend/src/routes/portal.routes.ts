@@ -19,35 +19,68 @@ import {
 const router = Router()
 
 /**
- * Server-to-server, from the Root portal only.
+ * Server-to-server, from the Root portal or the Delta sales CRM. Nobody else.
  *
- * No session and no cookie: the caller proves itself with a shared secret,
- * compared in constant time so the comparison says nothing about how close a
- * wrong guess was.
+ * No session and no cookie: each caller proves itself with its own shared
+ * secret, compared in constant time so the comparison says nothing about how
+ * close a wrong guess was. Two secrets rather than one shared between them —
+ * revoking the CRM's access must never mean revoking the portal's, and a
+ * request whose secret is wrong should not have to guess which of two
+ * systems it was trying to be.
  *
  * Unconfigured means off, not open. A deployment that has not been told about
- * the portal must not expose its people by default.
+ * a caller must not expose its people to it by default — checked per caller,
+ * so leaving the CRM's secret unset does not also close the portal's door.
+ *
+ * Which caller answered is kept on the request. Nothing downstream currently
+ * reads it — every endpoint here already takes the acting person's identity
+ * as part of its input, from whichever system sent it — but a system this
+ * many callers deep should say who it heard from when something goes wrong,
+ * not just that somebody with a valid secret asked.
  */
-function portalOnly(req: Request, res: Response, next: NextFunction): void {
-  if (!env.ROOT_ERP_SECRET) {
-    sendError(res, 'NOT_CONFIGURED', 'The Root portal integration is not configured — set ROOT_ERP_SECRET', 503)
-    return
+type Caller = 'portal' | 'crm'
+
+declare global {
+  // eslint-disable-next-line @typescript-eslint/no-namespace
+  namespace Express {
+    interface Request {
+      caller?: Caller
+    }
   }
+}
+
+function timingSafeEqualString(presented: string, expected: string): boolean {
+  const a = Buffer.from(presented)
+  const b = Buffer.from(expected)
+  return a.length === b.length && timingSafeEqual(a, b)
+}
+
+function callerAuth(req: Request, res: Response, next: NextFunction): void {
   const presented = req.headers['x-portal-secret']
   if (typeof presented !== 'string') {
     sendError(res, 'UNAUTHORIZED', 'Bad secret', 401)
     return
   }
-  const a = Buffer.from(presented)
-  const b = Buffer.from(env.ROOT_ERP_SECRET)
-  if (a.length !== b.length || !timingSafeEqual(a, b)) {
-    sendError(res, 'UNAUTHORIZED', 'Bad secret', 401)
+
+  if (env.ROOT_ERP_SECRET && timingSafeEqualString(presented, env.ROOT_ERP_SECRET)) {
+    req.caller = 'portal'
+    next()
     return
   }
-  next()
+  if (env.SALES_CRM_SECRET && timingSafeEqualString(presented, env.SALES_CRM_SECRET)) {
+    req.caller = 'crm'
+    next()
+    return
+  }
+
+  if (!env.ROOT_ERP_SECRET && !env.SALES_CRM_SECRET) {
+    sendError(res, 'NOT_CONFIGURED', 'No caller is configured for this integration — set ROOT_ERP_SECRET or SALES_CRM_SECRET', 503)
+    return
+  }
+  sendError(res, 'UNAUTHORIZED', 'Bad secret', 401)
 }
 
-router.use(portalOnly)
+router.use(callerAuth)
 
 const wrap =
   (fn: (req: Request, res: Response) => Promise<void> | void) =>
