@@ -1249,8 +1249,8 @@ export default function ClassBookingsPage() {
   const panelRef = useRef<HTMLDivElement>(null)
   const toast    = useToast()
 
-  const {data:allClasses=[],isLoading:loadCls} = useAllLiveClasses()
-  const {data:bkData,         isLoading:loadBk}  = useMyBookings({per_page:100})
+  const {data:allClasses=[],isLoading:loadCls,isError:errCls,refetch:refetchCls} = useAllLiveClasses()
+  const {data:bkData,         isLoading:loadBk, isError:errBk, refetch:refetchBk}  = useMyBookings({per_page:100})
   const myBookings: MyBooking[] = bkData?.docs ?? []
 
   const bookingMap = useMemo(()=>{
@@ -1585,6 +1585,7 @@ export default function ClassBookingsPage() {
   const isTree = view==='courses'
 
   const isLoading = loadCls||loadBk
+  const isError   = (errCls||errBk) && !isLoading
 
   /* ── Status tab config ── */
   const isOfflineMode = filterDelivery==='offline'
@@ -1938,7 +1939,26 @@ export default function ClassBookingsPage() {
           </div>
         )}
 
-        {!isLoading&&isTree&&(
+        {!isLoading&&isError&&(
+          <div className="flex flex-col items-center gap-4 rounded-3xl bg-[var(--color-bg-surface)] py-20 text-center"
+            style={{border: '1px solid var(--color-border)'}}>
+            <div className="flex h-16 w-16 items-center justify-center rounded-3xl"
+              style={{background:'rgba(239,68,68,0.08)',border:'1px solid rgba(239,68,68,0.18)'}}>
+              <AlertCircle size={26} style={{color: 'var(--color-danger)'}}/>
+            </div>
+            <p className="syne font-700 text-lg" style={{color: 'var(--color-text-primary)'}}>Couldn't load your schedule</p>
+            <p className="dm max-w-xs text-sm" style={{color: 'var(--color-text-muted)'}}>
+              We couldn't reach the server. Your classes are still there — check your connection and try again.
+            </p>
+            <button type="button" onClick={()=>{refetchCls();refetchBk()}}
+              className="rounded-full px-5 py-2.5 text-sm font-semibold"
+              style={{background:'rgba(0,87,184,0.10)',color: 'var(--color-primary)',border:'1px solid rgba(0,87,184,0.20)'}}>
+              Try again
+            </button>
+          </div>
+        )}
+
+        {!isLoading&&!isError&&isTree&&(
           <>
             <Hierarchy
               /* AnimatePresence identifies its child BY KEY — without one it
@@ -1960,7 +1980,7 @@ export default function ClassBookingsPage() {
           </>
         )}
 
-        {!isLoading&&!isTree&&(
+        {!isLoading&&!isError&&!isTree&&(
           <AnimatePresence mode="wait">
             <motion.div
               key={`${rangeStart.toISOString()}-${search}-${filterStatus}-${filterAccess}-${filterDelivery}-${filterProgram}-${filterCourse}-${filterInstructor}-${filterLanguage}`}
