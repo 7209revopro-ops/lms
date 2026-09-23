@@ -1166,9 +1166,13 @@ function QuickCreateModal({ onClose, onSuccess, categoryProgram }: { onClose: ()
   const [error,           setError]           = useState<string | null>(null)
 
   /* Cross-academy sharing. The modal has no `me` of its own — the page's is a
-     sibling scope — so it reads the caller here. */
+     sibling scope — so it reads the caller here. Same pair the backend guard
+     accepts (liveClass.controller.ts) and the same pair that may already lend
+     an instructor to the other academy — a sub_admin manages one academy and
+     may not author into another's timetable. */
   const { data: me } = useCurrentUser()
   const isSuper = me?.role === 'super_admin'
+  const canShareAcrossOrgs = isSuper || me?.role === 'admin'
   const activeOrgId = useOrgStore((st: { activeOrgId: string | null }) => st.activeOrgId)
   const [cohorts,  setCohorts]  = useState<GuestCohortInput[]>([])
   const [overflow, setOverflow] = useState(0)
@@ -1220,7 +1224,7 @@ function QuickCreateModal({ onClose, onSuccess, categoryProgram }: { onClose: ()
     /* An empty "Add an academy" row reaches zod as organizationId: '' and comes
        back as "String must contain at least 1 character(s)" with the field path
        stripped — a sentence about a string, for a problem about an academy. */
-    if (isSuper) {
+    if (canShareAcrossOrgs) {
       const problem = cohortsProblem(cohorts, !!sectionId)
       if (problem) { setError(problem); return }
     }
@@ -1241,7 +1245,7 @@ function QuickCreateModal({ onClose, onSuccess, categoryProgram }: { onClose: ()
            refuses a NON-EMPTY list from anyone who is not a super admin, so
            an empty array would be harmless — but sending nothing keeps an
            ordinary class on the exact request shape it had before. */
-        ...(isSuper && cohorts.length
+        ...(canShareAcrossOrgs && cohorts.length
           ? { guestCohorts: cohorts, overflowSeats: overflow }
           : {}),
       })
@@ -1421,7 +1425,7 @@ function QuickCreateModal({ onClose, onSuccess, categoryProgram }: { onClose: ()
             />
           </div>
 
-          {isSuper && (
+          {canShareAcrossOrgs && (
             <GuestCohortsField
               value={cohorts}
               onChange={setCohorts}

@@ -47,6 +47,10 @@ const scopedAdminNavItems = [
   { label: 'Dashboard',        href: '/',                       icon: LayoutDashboard },
   { label: 'Requests',   href: '/enrollment-requests',    icon: ClipboardCheck },
   { label: 'Users',      href: '/users',                  icon: UserCog },
+  /* Instructors are created from the Instructors page, and a sub-admin's
+     only creatable role IS instructor — so the page has to be reachable
+     from here, not only from the link the Users page offers. */
+  { label: 'Instructors', href: '/instructors',          icon: GraduationCap },
   { label: 'Devices',    href: '/devices',                icon: MonitorSmartphone },
   { label: 'Courses',          href: '/courses',                icon: BookOpen },
   { label: 'Live Classes',     href: '/live-classes',           icon: Video },

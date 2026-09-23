@@ -2,11 +2,14 @@
 
 import { useState, useEffect, useRef } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { X, ChevronDown, Check, Eye, EyeOff, Camera } from 'lucide-react'
+import Link from 'next/link'
+import { X, ChevronDown, Check, Eye, EyeOff, Camera, ShieldAlert } from 'lucide-react'
 import { useQueryClient } from '@tanstack/react-query'
 import Spinner from '@/components/ui/Spinner'
 import { api } from '@/lib/axios'
 import { useToast } from '@/store/ui.store'
+import { useOrgStore } from '@/store/org.store'
+import { useOrganizations } from '@/lib/api/organizations'
 import type { CurrentAdmin } from '@/lib/api/user'
 import type { AdminUserRole } from '@/lib/api/users'
 
@@ -108,19 +111,30 @@ function SelectField<T extends string>({
 }
 
 /* ── Role + program data ─────────────────────────── */
-const ROLE_OPTIONS_BY_CREATOR: Record<string, { value: AdminUserRole; label: string }[]> = {
+/* Who may create whom, in the order the dropdown lists them. Mirrors the
+   guard on POST /admin/users: only a super admin may mint another super
+   admin, and an admin may not mint an admin.
+
+   Instructors are deliberately absent. They are created from the Instructors
+   page, whose form carries the programme category and the cross-academy
+   toggle this one never had — an instructor made here arrived without
+   either. A sub-admin's ONLY creatable role was instructor, so for them this
+   modal has nothing left to offer, and the Users page sends them to the
+   Instructors page instead of opening an empty form. */
+export const STAFF_ROLE_OPTIONS_BY_CREATOR: Record<string, { value: AdminUserRole; label: string }[]> = {
   super_admin: [
-    { value: 'admin',      label: 'Admin' },
-    { value: 'sub_admin',  label: 'Sub Admin' },
-    { value: 'instructor', label: 'Instructor' },
+    { value: 'super_admin', label: 'Super Admin' },
+    { value: 'admin',       label: 'Admin' },
+    { value: 'sub_admin',   label: 'Sub Admin' },
   ],
   admin: [
-    { value: 'sub_admin',  label: 'Sub Admin' },
-    { value: 'instructor', label: 'Instructor' },
+    { value: 'sub_admin',   label: 'Sub Admin' },
   ],
-  sub_admin: [
-    { value: 'instructor', label: 'Instructor' },
-  ],
+}
+
+/** The staff roles this person may create here. Empty means: not this form. */
+export function creatableStaffRoles(creatorRole: string) {
+  return STAFF_ROLE_OPTIONS_BY_CREATOR[creatorRole] ?? []
 }
 
 const PROGRAM_OPTIONS: { value: 'ai' | 'digital_marketing' | 'forex' | 'jura'; label: string }[] = [
@@ -130,15 +144,8 @@ const PROGRAM_OPTIONS: { value: 'ai' | 'digital_marketing' | 'forex' | 'jura'; l
   { value: 'jura',              label: 'JURA' },
 ]
 
-const PROGRAM_TO_CATEGORY: Record<string, '4x-trading' | 'digital-marketing' | 'ai' | 'jura'> = {
-  ai:                'ai',
-  digital_marketing: 'digital-marketing',
-  forex:             '4x-trading',
-  jura:              'jura',
-}
-
 function needsProgram(role: AdminUserRole) {
-  return role === 'sub_admin' || role === 'instructor'
+  return role === 'sub_admin'
 }
 
 /* ── Modal ───────────────────────────────────────── */
@@ -149,8 +156,22 @@ interface Props {
 }
 
 export function AddUserModal({ me, open, onClose }: Props) {
-  const roleOptions = ROLE_OPTIONS_BY_CREATOR[me.role] ?? []
-  const defaultRole = roleOptions[0]?.value ?? 'instructor'
+  const roleOptions = creatableStaffRoles(me.role)
+  /* Admin, not the first entry: the most privileged role in the list must be
+     chosen on purpose, never landed on. */
+  const defaultRole: AdminUserRole =
+    (roleOptions.find(o => o.value === 'admin') ?? roleOptions[0])?.value ?? 'admin'
+
+  /* Which academy. The API resolves it from the org switcher for a super
+     admin, but the switcher's default is "All Orgs", which sends nothing —
+     and then answered "Select an academy for this account" to a form that
+     had no academy field. A super admin now picks it here, prefilled from
+     the switcher when one is selected. A super admin being created needs
+     none: that is the one role that belongs to every academy. */
+  const isSuper     = me.role === 'super_admin'
+  const activeOrgId = useOrgStore(st => st.activeOrgId)
+  const { data: orgs } = useOrganizations(isSuper)
+  const [orgId, setOrgId] = useState<string>('')
 
   const [name,          setName]          = useState('')
   const [email,         setEmail]         = useState('')
@@ -172,15 +193,19 @@ export function AddUserModal({ me, open, onClose }: Props) {
     if (open) {
       setName(''); setEmail(''); setPassword(''); setShowPass(false)
       setRole(defaultRole); setProgram('')
+      setOrgId(activeOrgId ?? '')
       setAvatarFile(null); setAvatarPreview(null)
       setErrors({})
     }
-  }, [open, defaultRole])
+  }, [open, defaultRole, activeOrgId])
+
+  const needsOrg = isSuper && role !== 'super_admin'
 
   const validate = () => {
     const e: Record<string, string> = {}
     if (!avatarFile) e.avatar = 'Profile photo is required'
     if (needsProgram(role) && !program) e.program = 'Program is required'
+    if (needsOrg && !orgId) e.org = 'Select which academy this account belongs to'
     setErrors(e)
     return Object.keys(e).length === 0
   }
@@ -207,13 +232,8 @@ export function AddUserModal({ me, open, onClose }: Props) {
         name: name.trim(), email: email.trim(), password, role,
       }
       if (avatarUrl) body.avatarUrl = avatarUrl
-      if (needsProgram(role) && program) {
-        if (role === 'instructor') {
-          body.category = PROGRAM_TO_CATEGORY[program]
-        } else {
-          body.program = program
-        }
-      }
+      if (needsProgram(role) && program) body.program = program
+      if (needsOrg && orgId) body.organizationId = orgId
 
       await api.post('/admin/users', body)
       qc.invalidateQueries({ queryKey: ['admin', 'users'] })
@@ -245,7 +265,7 @@ export function AddUserModal({ me, open, onClose }: Props) {
     },
   }
 
-  if (!open) return null
+  if (!open || roleOptions.length === 0) return null
 
   return (
     <div className="fixed inset-0 z-50 flex items-end justify-center p-4 sm:items-center">
@@ -399,11 +419,32 @@ export function AddUserModal({ me, open, onClose }: Props) {
               label="Role"
               value={role}
               options={roleOptions}
-              onChange={v => { setRole(v); setProgram(''); setErrors(prev => ({ ...prev, program: '' })) }}
+              onChange={v => { setRole(v); setProgram(''); setErrors(prev => ({ ...prev, program: '', org: '' })) }}
               locked={roleOptions.length <= 1}
             />
 
-            {/* Program — required for sub_admin and instructor */}
+            {/* Said once, where the choice is made: nothing outranks this role,
+                so nobody is above the person about to be created. */}
+            {role === 'super_admin' && (
+              <p className="flex items-start gap-2 rounded-xl px-3 py-2.5 text-[11px] leading-relaxed"
+                style={{ background: 'rgba(168,85,247,0.10)', border: '1px solid rgba(168,85,247,0.28)', color: 'rgba(221,196,255,0.92)' }}>
+                <ShieldAlert size={13} className="mt-px flex-shrink-0" />
+                <span>A super admin sees and manages every academy and every account — including other super admins. Nothing outranks this role.</span>
+              </p>
+            )}
+
+            {/* Academy — a super admin creating an admin or sub-admin */}
+            {needsOrg && (
+              <SelectField
+                label="Academy"
+                value={orgId}
+                options={(orgs ?? []).map(o => ({ value: o.id, label: o.name }))}
+                onChange={v => { setOrgId(v); setErrors(prev => ({ ...prev, org: '' })) }}
+                error={errors.org}
+              />
+            )}
+
+            {/* Program — required for sub_admin */}
             {needsProgram(role) && (
               <SelectField
                 label="Program"
@@ -414,6 +455,14 @@ export function AddUserModal({ me, open, onClose }: Props) {
               />
             )}
           </div>
+
+          <p className="mt-4 text-[11px] leading-relaxed" style={{ color: 'rgba(255,255,255,0.38)' }}>
+            Instructors are added from the{' '}
+            <Link href="/instructors?add=1" onClick={onClose} className="font-medium hover:underline" style={{ color: '#3b82f6' }}>
+              Instructors page
+            </Link>
+            , where their programme and academy availability are set.
+          </p>
 
           {/* Actions */}
           <div className="mt-5 flex justify-end gap-2">

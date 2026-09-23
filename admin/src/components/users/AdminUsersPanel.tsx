@@ -3,9 +3,10 @@
 import { useState, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { useRouter } from 'next/navigation'
+import Link from 'next/link'
 import {
   Search, ChevronLeft, ChevronRight,
-  Pencil, Trash2, Eye, UserPlus, ChevronDown,
+  Pencil, Trash2, Eye, UserPlus, ChevronDown, GraduationCap,
 } from 'lucide-react'
 import {
   useUsers, useDeleteUser, useImpersonateUser, type AdminUser,
@@ -16,7 +17,7 @@ import { useImpersonationStore } from '@/store/impersonation.store'
 import { useToast } from '@/store/ui.store'
 import { EditUserModal } from '@/components/users/EditUserModal'
 import { UserViewModal } from '@/components/users/UserViewModal'
-import { AddUserModal } from '@/components/users/AddUserModal'
+import { AddUserModal, creatableStaffRoles } from '@/components/users/AddUserModal'
 import { AvatarImg } from '@/components/ui/AvatarImg'
 
 const ROLE_STYLE: Record<string, { bg: string; color: string; label: string }> = {
@@ -216,13 +217,24 @@ export function AdminUsersPanel() {
           </p>
         )}
 
-        <motion.button
-          onClick={() => setAddOpen(true)}
-          whileHover={{ y: -1 }} whileTap={{ scale: 0.97 }}
-          className="flex items-center gap-2 rounded-xl px-4 py-2 text-sm font-semibold text-white"
-          style={{ background: 'linear-gradient(135deg,#0057b8,#003d80)', boxShadow: '0 4px 14px rgba(0,87,184,0.28)' }}>
-          <UserPlus size={14} />New User
-        </motion.button>
+        {creatableStaffRoles(me.role).length > 0 ? (
+          <motion.button
+            onClick={() => setAddOpen(true)}
+            whileHover={{ y: -1 }} whileTap={{ scale: 0.97 }}
+            className="flex items-center gap-2 rounded-xl px-4 py-2 text-sm font-semibold text-white"
+            style={{ background: 'linear-gradient(135deg,#0057b8,#003d80)', boxShadow: '0 4px 14px rgba(0,87,184,0.28)' }}>
+            <UserPlus size={14} />New User
+          </motion.button>
+        ) : (
+          /* Instructors are created from the Instructors page. For a sub-admin
+             that was the only role this form offered, so the button goes there
+             rather than opening a form with nothing in it. */
+          <Link href="/instructors?add=1"
+            className="flex items-center gap-2 rounded-xl px-4 py-2 text-sm font-semibold text-white transition-transform hover:-translate-y-px"
+            style={{ background: 'linear-gradient(135deg,#0057b8,#003d80)', boxShadow: '0 4px 14px rgba(0,87,184,0.28)' }}>
+            <GraduationCap size={14} />Add Instructor
+          </Link>
+        )}
       </div>
 
       <div className="overflow-hidden rounded-2xl" style={{ border: '1px solid rgba(255,255,255,0.07)' }}>

@@ -14,7 +14,12 @@ export default function InstructorsPage() {
   const router = useRouter()
   const [modalOpen, setModalOpen] = useState(() => searchParams.get('add') === '1')
   const { data: me } = useCurrentUser()
-  const isAdmin = ['super_admin', 'admin', 'sub_admin'].includes(me?.role ?? '')
+  /* Support is not staff-management ('admin' in name), but POST /admin/users
+     has always let support create instructor and student accounts — this is
+     its one UI path to the former. Without it here, the Users page's "Add
+     Instructor" link (creatableStaffRoles('support') is empty, so it never
+     offers the New User form) sent support to a page that opened nothing. */
+  const canCreate = ['super_admin', 'admin', 'sub_admin', 'support'].includes(me?.role ?? '')
 
   const handleClose = () => {
     setModalOpen(false)
@@ -29,7 +34,7 @@ export default function InstructorsPage() {
           subtitle="Course authors and educators"
           badge={{ label: 'Users', color: '#A78BFA' }}
         />
-        {isAdmin && (
+        {canCreate && (
           <motion.button
             onClick={() => setModalOpen(true)}
             whileHover={{ y: -1, boxShadow: '0 6px 20px rgba(0,87,184,0.28)' }}
@@ -45,7 +50,7 @@ export default function InstructorsPage() {
 
       <UserTable role="instructor" label="Instructors" />
 
-      {isAdmin && <AddInstructorModal open={modalOpen} onClose={handleClose} />}
+      {canCreate && <AddInstructorModal open={modalOpen} onClose={handleClose} />}
     </div>
   )
 }

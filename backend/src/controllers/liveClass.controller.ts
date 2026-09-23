@@ -1174,25 +1174,27 @@ export class LiveClassController {
     }
 
     /* ── WHO MAY SHARE A CLASS WITH ANOTHER ACADEMY ──────────────────────
-       Super admins only, and this gate ships in the same change that first
-       lets cohorts through the validator — because forwarding them without it
-       IS the hole.
-
-       #assertCohortsUsable checks that a cohort is COHERENT (the academy
-       exists, the course is really that academy's) and never asks who is
-       asking. The route's own guard is requirePermission('live-classes',
-       'create'), which short-circuits for any account without a custom role.
-       So the moment cohorts reach the service, a Dubai sub_admin who guesses a
-       Bangalore organisation id can publish into Bangalore's timetable.
+       super_admin and admin — the same pair that may lend an instructor to
+       the other academy (POST /admin/users' sharedAcrossOrgs check, a few
+       hundred lines up). sub_admin and support cannot, because #assertCohortsUsable
+       checks that a cohort is COHERENT (the academy exists, the course is
+       really that academy's) and never asks who is asking. The route's own
+       guard is requirePermission('live-classes', 'create'), which short-circuits
+       for any account without a custom role. So the moment cohorts reach the
+       service, a Dubai sub_admin who guesses a Bangalore organisation id can
+       publish into Bangalore's timetable — an admin naming Bangalore is
+       making the same call they already make when lending an instructor
+       there; a sub_admin cannot make either.
 
        Gated on a NON-EMPTY array, never on the key being present: the edit
        modal re-sends its whole form on every save, so refusing `[]` would make
-       every ordinary edit, on every class, fail for everyone who is not a
-       super admin. */
+       every ordinary edit, on every class, fail for everyone who may not
+       author a cross-academy one. */
+    const CAN_SHARE_ACROSS_ORGS = new Set(['super_admin', 'admin'])
     const wantsCohorts = Array.isArray(dto.guestCohorts) && dto.guestCohorts.length > 0
-    if (wantsCohorts && !dto.inheritedCohorts && req.user?.role !== 'super_admin') {
+    if (wantsCohorts && !dto.inheritedCohorts && !CAN_SHARE_ACROSS_ORGS.has(req.user?.role ?? '')) {
       throw new LiveClassError('CROSS_ACADEMY_FORBIDDEN',
-        'Only a super admin can share a class with another academy', 403)
+        'Only an admin or super admin can share a class with another academy', 403)
     }
 
     const live = await this.service.create({
@@ -1473,13 +1475,13 @@ export class LiveClassController {
          Gated on a NON-EMPTY array, and only when it actually differs from
          what is stored. The edit modal re-sends its entire form on every
          save, so refusing on the key's mere presence would break every
-         ordinary edit — a title change, a reschedule — for every admin who is
-         not a super admin, on every class in the panel.
+         ordinary edit — a title change, a reschedule — for every admin who
+         may not change sharing, on every class in the panel.
 
          Comparing against the stored set means re-sending a class's own
          cohorts unchanged is a no-op that anyone allowed to edit the class may
-         perform, while actually changing who it is shared with is a super
-         admin's decision. */
+         perform, while actually changing who it is shared with is a
+         super-admin-or-admin decision — same pair as create, above. */
       if (Array.isArray(dto['guestCohorts'])) {
         const incoming = dto['guestCohorts'] as Array<Record<string, unknown>>
         const stored   = ((oldForCohorts as any)?.guestCohorts ?? []) as Array<Record<string, unknown>>
@@ -1492,9 +1494,9 @@ export class LiveClassController {
           [...incoming].map(shape).sort().join(',') === [...stored].map(shape).sort().join(',')
 
         if (!same) {
-          if (req.user?.role !== 'super_admin') {
+          if (!['super_admin', 'admin'].includes(req.user?.role ?? '')) {
             throw new LiveClassError('CROSS_ACADEMY_FORBIDDEN',
-              'Only a super admin can change which academies a class is shared with', 403)
+              'Only an admin or super admin can change which academies a class is shared with', 403)
           }
           data.guestCohorts = incoming as any
         }

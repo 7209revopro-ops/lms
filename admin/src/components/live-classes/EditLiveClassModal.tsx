@@ -88,12 +88,15 @@ export function EditLiveClassModal({ live, onClose, onSuccess }: Props) {
   const [recordingUrl, setRecordingUrl] = useState<string>(live.recordingUrl ?? '')
   const [error,        setError]        = useState<string | null>(null)
 
-  /* Cross-academy sharing, pre-filled from what is stored. Only a super admin
-     may CHANGE it; everyone else sees it read-only, because the server refuses
-     a changed list with CROSS_ACADEMY_FORBIDDEN and a disabled control is a
-     better explanation than a 403. */
+  /* Cross-academy sharing, pre-filled from what is stored. A super admin or an
+     admin may CHANGE it — the same pair that may share a class on create, and
+     the same pair that may already lend an instructor to the other academy.
+     Everyone else sees it read-only, because the server refuses a changed
+     list with CROSS_ACADEMY_FORBIDDEN and a disabled control is a better
+     explanation than a 403. */
   const { data: me } = useCurrentUser()
   const isSuper = me?.role === 'super_admin'
+  const canShareAcrossOrgs = isSuper || me?.role === 'admin'
   const storedCohorts: GuestCohortInput[] = ((live as any).guestCohorts ?? []).map((c: any) => ({
     organizationId: String(c.organizationId),
     courseId:       String(c.courseId),
@@ -153,7 +156,7 @@ export function EditLiveClassModal({ live, onClose, onSuccess }: Props) {
     /* Caught here so the admin reads a sentence about academies rather than
        zod's "String must contain at least 1 character(s)" with the field path
        stripped off on the way back. */
-    if (isSuper) {
+    if (canShareAcrossOrgs) {
       const problem = cohortsProblem(cohorts, !!sectionId)
       if (problem) { setError(problem); return }
     }
@@ -188,16 +191,17 @@ export function EditLiveClassModal({ live, onClose, onSuccess }: Props) {
           sectionId:        sectionId,
           sessionCapacity:  sessionCapacity !== '' ? sessionCapacity : undefined,
           language,
-          /* Sent ONLY by a super admin. This modal re-sends its whole form on
-             every save and is mounted from five places, so including the key
-             for everyone else would put a cohort list on every ordinary edit
-             of every class — and the server's gate, which fires on a list that
-             DIFFERS from what is stored, would start refusing title changes. */
-          ...(isSuper ? { guestCohorts: cohorts } : {}),
+          /* Sent only by someone who may change sharing. This modal re-sends
+             its whole form on every save and is mounted from five places, so
+             including the key for everyone else would put a cohort list on
+             every ordinary edit of every class — and the server's gate, which
+             fires on a list that DIFFERS from what is stored, would start
+             refusing title changes. */
+          ...(canShareAcrossOrgs ? { guestCohorts: cohorts } : {}),
           /* Only on the first sharing, and only when there is something to
              share with — the server refuses an overflow with no cohort behind
              it, and refuses any overflow at all once the class is allocated. */
-          ...(isSuper && !alreadyAllocated && cohorts.length > 0
+          ...(canShareAcrossOrgs && !alreadyAllocated && cohorts.length > 0
             ? { overflowSeats: overflow } : {}),
         },
       })
@@ -671,7 +675,7 @@ export function EditLiveClassModal({ live, onClose, onSuccess }: Props) {
             )}
           </div>
 
-          {(isSuper || cohorts.length > 0) && (
+          {(canShareAcrossOrgs || cohorts.length > 0) && (
             <GuestCohortsField
               value={cohorts}
               onChange={setCohorts}
@@ -689,8 +693,8 @@ export function EditLiveClassModal({ live, onClose, onSuccess }: Props) {
               bookedSeats={Number((live as any).bookedCount ?? 0)}
               overflowSeats={overflow}
               /* Editable only in the window where the server will accept it. */
-              {...(isSuper && !alreadyAllocated ? { onOverflowChange: setOverflow } : {})}
-              readOnly={!isSuper}
+              {...(canShareAcrossOrgs && !alreadyAllocated ? { onOverflowChange: setOverflow } : {})}
+              readOnly={!canShareAcrossOrgs}
               heldByOrg={heldByOrg}
               /* Present only once the class HAS pools. Its presence switches
                  the summary from create-time arithmetic (which re-splits the
@@ -701,7 +705,7 @@ export function EditLiveClassModal({ live, onClose, onSuccess }: Props) {
                     .map((c: any) => [String(c.organizationId), Number(c.seatFloor ?? 0)]))
                 : undefined}
               storedCapacity={(live as any).sessionCapacity}
-              readOnlySummary={!isSuper
+              readOnlySummary={!canShareAcrossOrgs
                 ? ((live as any).guestCohorts ?? []).map((c: any) => ({
                     academy:   String(c.organizationSlug ?? c.organizationId),
                     seatFloor: Number(c.seatFloor ?? 0),

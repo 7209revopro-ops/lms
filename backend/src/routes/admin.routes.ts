@@ -177,10 +177,14 @@ const usersQuerySchema = z.object({
 const rateFor = (currency: string): number =>
   currency === 'AED' ? env.UAE_EXCHANGE_RATE : env.INR_EXCHANGE_RATE
 
-/* ─── Organizations (super_admin only) ─────────────
-   Only a super admin sees every academy, because only they can switch
-   between them. Scoped admins get their own via /my-organization below. */
-router.get('/organizations', requireRole('super_admin'), async (req: Request, res: Response, next: NextFunction) => {
+/* ─── Organizations ─────────────────────────────────
+   A super admin sees every academy because only they can switch between
+   them. An org-scoped admin cannot switch, but needs this same list to name
+   a GUEST academy when sharing a class or lending an instructor — both are
+   already an admin's call (sharedAcrossOrgs on instructor creation has never
+   required super_admin), and the cross-org class guard below is the same
+   rule. sub_admin and support get their own via /my-organization, not this. */
+router.get('/organizations', requireRole('super_admin', 'admin'), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { OrganizationModel } = await import('@/models/schema.ts')
     const orgs = await OrganizationModel.find().select('name slug currency').lean()
@@ -424,8 +428,16 @@ router.post ('/users', requirePermission('users','create'),          validate(us
 
       /* `||` not `??`: an unselected picker sends an empty string, which is
          "not chosen", not "chosen as empty" — it should still fall back to
-         the switcher rather than skipping past it into the refusal below. */
-      const orgId = isSuper ? (bodyOrg || callerOrg) : callerOrg
+         the switcher rather than skipping past it into the refusal below.
+
+         EXCEPT for a new super_admin. The org switcher's choice rides on
+         X-Organization-Id on every admin request, including this one, so a
+         super admin creating another super admin while the switcher sits on
+         Dubai would otherwise stamp Dubai onto an account the product treats
+         as belonging to none — invisible from Bangalore, and gone from the
+         list the moment the switcher moves off Dubai. The one deliberate
+         signal for "no academy" is the target role itself. */
+      const orgId = userDto.role === 'super_admin' ? undefined : isSuper ? (bodyOrg || callerOrg) : callerOrg
 
       /* super_admin is the one role that legitimately belongs to no single
          academy. Everyone else must have one, or they are invisible to every
