@@ -19,6 +19,7 @@ import { AssignmentService } from '@/services/assignment.service.ts'
 import { SectionService } from '@/services/section.service.ts'
 import { OrderService } from '@/services/order.service.ts'
 import { CouponService } from '@/services/coupon.service.ts'
+import { AnnouncementService } from '@/services/announcement.service.ts'
 import {
   requireSameOrgUser, requireImpersonableStudent, requireBorrowedInstructorUnchanged,
   callerMayAccess, instructorOwnsSession, callerOrgForRead,
@@ -49,6 +50,7 @@ const assignSvc  = new AssignmentService()
 const sectionSvc = new SectionService()
 const orderSvc   = new OrderService()
 const couponSvc  = new CouponService()
+const announcementSvc = new AnnouncementService()
 const userSvc    = new UserService()
 
 /* ── Admin-portal auth routes (public — no cookie guard) ──────────────
@@ -2165,6 +2167,108 @@ router.get('/coupons/validate', async (req: Request, res: Response, next: NextFu
       discountType:  coupon.discountType,
       discountValue: coupon.discountValue,
     })
+  } catch (err) { next(err) }
+})
+
+/* ─── Announcements (super_admin + admin only) ──────────────────────
+   Who may CREATE one at all is requireAdmin — sub_admin and support cannot,
+   the same rank cross-academy class sharing and instructor lending already
+   draw the line at. Which academy a row belongs to is resolved below,
+   because a schema/service call cannot see the caller's role. */
+const announcementCreateSchema = z.object({
+  title:           z.string().min(3).max(150).trim(),
+  description:     z.string().min(1).max(3000).trim(),
+  mediaUrl:        z.string().url().optional().or(z.literal('')),
+  startDate:       z.string().refine(s => !isNaN(Date.parse(s)), 'Invalid start date'),
+  endDate:         z.string().refine(s => !isNaN(Date.parse(s)), 'Invalid end date'),
+  /* Present + null is a super_admin's deliberate "every academy". Present +
+     a real id targets one academy. Absent falls back to the caller's own
+     academy (or the org switcher, for a super_admin) — see the route. */
+  organizationId:  z.string().nullable().optional(),
+})
+const announcementUpdateSchema = announcementCreateSchema.partial().extend({
+  isActive: z.boolean().optional(),
+})
+
+router.get('/announcements', requireAdmin, requirePermission('announcements','list'), async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { page, per_page } = parsePagination(req.query as Record<string, unknown>)
+    /* super_admin sees every academy's rows (including the unscoped ones);
+       an org admin sees only their own academy's — never another's, and
+       never the unscoped rows a super_admin authored, which they cannot
+       edit anyway. Mirrors Coupons' list scoping exactly. */
+    const orgFilter = req.user!.role === 'super_admin' ? undefined : req.user!.organizationId
+    const { docs, totalCount } = await announcementSvc.list(page, per_page, orgFilter)
+    sendSuccess(res, docs, undefined, 200, buildPaginationMeta(totalCount, page, per_page))
+  } catch (err) { next(err) }
+})
+
+router.post('/announcements', requireAdmin, requirePermission('announcements','create'), validate(announcementCreateSchema), async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const isSuper = req.user!.role === 'super_admin'
+    const body = req.body as { organizationId?: string | null }
+    const orgKeyPresent = Object.prototype.hasOwnProperty.call(body, 'organizationId')
+
+    /* An org admin may not name another academy, or "every academy" — that
+       is a cross-tenant write, refused rather than silently redirected to
+       their own academy, same rule as everywhere else in this codebase. */
+    if (!isSuper && orgKeyPresent && body.organizationId && body.organizationId !== req.user!.organizationId) {
+      res.status(403).json({ success: false, error: {
+        code: 'FORBIDDEN', message: 'You can only create announcements for your own academy.',
+      } })
+      return
+    }
+    if (!isSuper && orgKeyPresent && body.organizationId === null) {
+      res.status(403).json({ success: false, error: {
+        code: 'FORBIDDEN', message: 'Only a super admin can create an announcement for every academy.',
+      } })
+      return
+    }
+
+    /* A super_admin who sent the key — even an explicit null — meant it: that
+       is how "All Academies" is chosen. One who did not is deferred to the
+       org switcher, same fallback the class-creation and user-creation
+       routes already use. An org admin always gets their own academy,
+       whatever the body said. */
+    const organizationId = isSuper
+      ? (orgKeyPresent ? body.organizationId : (req.user!.organizationId ?? null))
+      : req.user!.organizationId
+
+    const { organizationId: _bodyOrg, ...announcementDto } = req.body as z.infer<typeof announcementCreateSchema>
+    const announcement = await announcementSvc.create({
+      ...announcementDto,
+      organizationId,
+      createdBy: req.user!.id,
+    })
+    sendSuccess(res, announcement, 'Announcement created', 201)
+  } catch (err) { next(err) }
+})
+
+router.patch('/announcements/:id', requireAdmin, requirePermission('announcements','update'), validate(announcementUpdateSchema), async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const isSuper = req.user!.role === 'super_admin'
+    const body = req.body as { organizationId?: string | null }
+    const orgKeyPresent = Object.prototype.hasOwnProperty.call(body, 'organizationId')
+    if (!isSuper && orgKeyPresent) {
+      res.status(403).json({ success: false, error: {
+        code: 'FORBIDDEN', message: 'Only a super admin can change which academy an announcement belongs to.',
+      } })
+      return
+    }
+    const announcement = await announcementSvc.update(
+      String(req.params['id'] ?? ''),
+      req.body as never,
+      isSuper ? undefined : req.user!.organizationId,
+    )
+    sendSuccess(res, announcement, 'Announcement updated')
+  } catch (err) { next(err) }
+})
+
+router.delete('/announcements/:id', requireAdmin, requirePermission('announcements','delete'), async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const isSuper = req.user!.role === 'super_admin'
+    await announcementSvc.remove(String(req.params['id'] ?? ''), isSuper ? undefined : req.user!.organizationId)
+    sendSuccess(res, null, 'Announcement deleted')
   } catch (err) { next(err) }
 })
 

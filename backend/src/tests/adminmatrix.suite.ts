@@ -160,6 +160,7 @@ try {
     ['reviews',         '/admin/reviews'],
     ['orders',          '/admin/orders'],
     ['coupons',         '/admin/coupons'],
+    ['announcements',   '/admin/announcements'],
     ['reports',         '/admin/reports/attendance'],
     ['support',         '/support/admin'],
     ['audit logs',      '/audit-logs'],

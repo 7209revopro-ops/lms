@@ -142,6 +142,7 @@ try {
        PERMISSION_RESOURCES and granted nothing by the read-only role. */
     const probes: [string, string, string, unknown][] = [
       ['coupons',  'POST',   '/admin/coupons',        { code: 'X', discountType: 'percent', discountValue: 10 }],
+      ['announcements', 'POST', '/admin/announcements', { title: 'X', description: 'Y', startDate: '2026-01-01T00:00:00.000Z', endDate: '2026-01-02T00:00:00.000Z' }],
       ['orders',   'GET',    '/admin/orders',         undefined],
       ['bookings', 'GET',    '/admin/bookings',       undefined],
       ['reports',  'GET',    '/admin/reports/attendance', undefined],

@@ -7,6 +7,7 @@ import { api } from '@/lib/axios'
 export const PERMISSION_RESOURCES = [
   'users', 'courses', 'live-classes', 'bookings',
   'orders', 'categories', 'coupons', 'reviews', 'reports', 'roles', 'support',
+  'announcements',
 ] as const
 
 export type PermissionResource = typeof PERMISSION_RESOURCES[number]

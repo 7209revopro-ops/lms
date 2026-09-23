@@ -10,6 +10,7 @@ import reviewRoutes        from './reviews.routes.ts'
 import adminRoutes         from './admin.routes.ts'
 import liveClassRoutes     from './liveClasses.routes.ts'
 import notificationRoutes  from './notifications.routes.ts'
+import announcementRoutes  from './announcements.routes.ts'
 import favoriteRoutes      from './favorites.routes.ts'
 import achievementRoutes   from './achievements.routes.ts'
 import quizRoutes          from './quizzes.routes.ts'
@@ -83,6 +84,7 @@ router.use('/reviews',     reviewRoutes)
 router.use('/admin',         adminRoutes)
 router.use('/live-classes',  liveClassRoutes)
 router.use('/notifications', notificationRoutes)
+router.use('/announcements', announcementRoutes)
 router.use('/favorites',     favoriteRoutes)
 router.use('/achievements',  achievementRoutes)
 router.use('/quizzes',       quizRoutes)

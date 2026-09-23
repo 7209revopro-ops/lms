@@ -46,6 +46,7 @@ const RESOURCE_LABELS: Record<PermissionResource, string> = {
   'reports':      'Reports',
   'roles':        'Roles',
   'support':      'Support',
+  'announcements':'Announcements',
 }
 
 function permissionsFromRole(role: Role): ResourcePermission[] {

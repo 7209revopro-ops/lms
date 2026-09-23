@@ -8,7 +8,7 @@ import {
   LayoutDashboard, BookOpen, Users, GraduationCap,
   Tag, Star, Settings, ChevronLeft, ChevronRight, LogOut, X,
   ShoppingBag, Ticket, Map, ClipboardList, Video, CalendarDays, BarChart3, ShieldCheck, UserCog, LifeBuoy,
-  ClipboardCheck, Film, MonitorSmartphone, FileCheck2,
+  ClipboardCheck, Film, MonitorSmartphone, FileCheck2, Megaphone,
 } from 'lucide-react'
 import { useUIStore } from '@/store/ui.store'
 import { mayReachClassroom } from '@/lib/classroomAccess'
@@ -36,6 +36,9 @@ const adminNavItems = [
   { label: 'Categories',     href: '/categories',        icon: Tag },
   { label: 'Reviews',        href: '/reviews',           icon: Star },
   { label: 'Orders',         href: '/orders',            icon: ShoppingBag },
+  /* super_admin + admin only, enforced server-side (requireAdmin) — not
+     offered to sub_admin/support/instructor in their own nav arrays below. */
+  { label: 'Announcements',  href: '/announcements',     icon: Megaphone },
   { label: 'Coupons',        href: '/coupons',           icon: Ticket },
   { label: 'Reports',        href: '/reports',           icon: BarChart3 },
   { label: 'Support',        href: '/support',           icon: LifeBuoy },

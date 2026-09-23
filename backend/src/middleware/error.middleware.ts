@@ -19,6 +19,7 @@ import { ClassAssignmentError } from '@/services/classAssignment.service.ts'
 import { CertificateError } from '@/services/certificate.service.ts'
 import { OrderError } from '@/services/order.service.ts'
 import { CouponError } from '@/services/coupon.service.ts'
+import { AnnouncementError } from '@/services/announcement.service.ts'
 import { DiscussionError } from '@/services/discussion.service.ts'
 import { NoteError } from '@/services/note.service.ts'
 import { BookmarkError } from '@/services/bookmark.service.ts'
@@ -166,6 +167,10 @@ export function errorMiddleware(
     return
   }
   if (err instanceof CouponError) {
+    sendError(res, err.code, err.message, err.statusCode)
+    return
+  }
+  if (err instanceof AnnouncementError) {
     sendError(res, err.code, err.message, err.statusCode)
     return
   }

@@ -9,6 +9,7 @@ import { RightSidebar, RightSidebarToggle } from '@/components/layout/RightSideb
 import { VerifyEmailBanner } from '@/components/auth/VerifyEmailBanner'
 import { EnrollmentStatusBanner } from '@/components/auth/EnrollmentStatusBanner'
 import { InstallPrompt } from '@/components/pwa/InstallPrompt'
+import { AnnouncementPopup } from '@/components/announcements/AnnouncementPopup'
 import { Toaster } from '@/components/ui/Toaster'
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
@@ -44,6 +45,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       <RightSidebar />
       <RightSidebarToggle />
       <InstallPrompt />
+      <AnnouncementPopup />
       <Toaster />
     </div>
   )

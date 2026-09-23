@@ -1,6 +1,7 @@
 'use client'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { apiGet, apiPatch, api } from '@/lib/axios'
+import { ANNOUNCEMENT_DISMISS_PREFIX } from '@/lib/announcementDismiss'
 
 export interface EnrollmentApplication {
   phone?:             string
@@ -125,8 +126,22 @@ export function useVerifyAbzerReturn() {
   })
 }
 
-/* POST /auth/logout — server clears the cookies. */
+/* POST /auth/logout — server clears the cookies.
+
+   Also clears every announcement's per-session dismissal flag. Those live in
+   sessionStorage precisely so a NEW session re-shows a still-active
+   announcement — but sessionStorage alone only clears when the tab closes,
+   and a genuine sign-out-then-sign-in in the SAME tab is a new session in
+   every sense that matters here except that one. Without this sweep, "log
+   out, log back in" would leave an announcement silently dismissed. */
 export function logout(): Promise<void> {
+  if (typeof window !== 'undefined') {
+    try {
+      for (const key of Object.keys(sessionStorage)) {
+        if (key.startsWith(ANNOUNCEMENT_DISMISS_PREFIX)) sessionStorage.removeItem(key)
+      }
+    } catch { /* storage blocked — nothing to clear */ }
+  }
   return api.post('/auth/logout').then(() => {/* no-op */}).catch(() => {/* best-effort */})
 }
 

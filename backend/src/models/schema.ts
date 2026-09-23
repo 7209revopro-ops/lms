@@ -318,6 +318,7 @@ export const UserModel = mongoose.model<IUser>('User', UserSchema)
 export const PERMISSION_RESOURCES = [
   'users', 'courses', 'live-classes', 'bookings',
   'orders', 'categories', 'coupons', 'reviews', 'reports', 'roles', 'support',
+  'announcements',
 ] as const
 export type PermissionResource = typeof PERMISSION_RESOURCES[number]
 
@@ -1619,6 +1620,63 @@ CouponSchema.index({ isActive: 1 })
 CouponSchema.index({ organizationId: 1 })
 
 export const CouponModel = mongoose.model<ICoupon>('Coupon', CouponSchema)
+
+/* ─────────────────────────────────────────────────────
+   ANNOUNCEMENT — admin-authored, scheduled, org-scoped broadcast
+   ─────────────────────────────────────────────────────
+   Shown to a student as a popup once per browser session while the current
+   moment sits inside [startDate, endDate]. "Is it active" is decided HERE,
+   server-side, by whoever queries this collection — never by the client's
+   own clock, the same authority split live-class status already uses.
+
+   organizationId is deliberately OPTIONAL, not required like Coupon's: a
+   coupon has no cross-academy concept, an announcement needs one. Unset
+   means "every academy" — the same convention AuditLog's own organizationId
+   already uses (schema.ts, AuditLogSchema) and the one the guest-cohort
+   class filter reads the unscoped case from. An admin (not super_admin) can
+   never produce an unscoped row — the route enforces that, this schema only
+   describes what is possible to store. */
+export interface IAnnouncement extends Document {
+  id:              string
+  title:           string
+  description:     string
+  /* A banner image, uploaded through the existing /uploads/image pipeline —
+     no new upload code for this feature. */
+  mediaUrl?:       string
+  startDate:       Date
+  endDate:         Date
+  organizationId?: Types.ObjectId | null
+  /* Lets an admin pull a live announcement early without deleting the row —
+     deleting loses the audit trail and the exact wording a support ticket
+     might need to reference later. */
+  isActive:        boolean
+  createdBy:       Types.ObjectId
+  createdAt:       Date
+  updatedAt:       Date
+}
+
+const AnnouncementSchema = new Schema<IAnnouncement>(
+  {
+    title:          { type: String, required: true, trim: true, maxlength: 150 },
+    description:    { type: String, required: true, trim: true, maxlength: 3000 },
+    mediaUrl:       { type: String, trim: true },
+    startDate:      { type: Date, required: true },
+    endDate:        { type: Date, required: true },
+    organizationId: { type: Schema.Types.ObjectId, ref: 'Organization' },
+    isActive:       { type: Boolean, default: true },
+    createdBy:      { type: Schema.Types.ObjectId, ref: 'User', required: true },
+  },
+  baseSchemaOptions,
+)
+
+/* Serves GET /announcements/active directly: isActive true, organizationId
+   either this academy or absent, and the two date bounds. Mongo can use a
+   PREFIX of a compound index for a query that only touches some of its
+   fields, so this one index also covers the admin list's org-filtered view. */
+AnnouncementSchema.index({ organizationId: 1, isActive: 1, startDate: 1, endDate: 1 })
+AnnouncementSchema.index({ endDate: 1 })
+
+export const AnnouncementModel = mongoose.model<IAnnouncement>('Announcement', AnnouncementSchema)
 
 /* ─────────────────────────────────────────────────────
    ORDER — Stripe payment record
