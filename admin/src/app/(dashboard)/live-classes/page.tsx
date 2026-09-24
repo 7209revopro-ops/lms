@@ -461,7 +461,7 @@ function TableRow({ live, index, showInstructor }: { live: LiveClass; index: num
   const isCancelled = live.status === 'cancelled'
   const isInternal   = live.type === 'internal'
   const isOffline    = (live as any).isOnline === false
-  const canAdminBook = isOffline && live.status === 'scheduled' && new Date(live.scheduledStart) > new Date()
+  const canAdminBook = live.status === 'scheduled' && new Date(live.scheduledStart) > new Date()
 
   /* Join button: external online class, 15 min before start → end */
   const now = Date.now()
@@ -678,7 +678,7 @@ function TableRow({ live, index, showInstructor }: { live: LiveClass; index: num
 
             {!isHost && <GuestReadOnlyNote hostLabel={hostLabel} />}
 
-            {/* Book for Student — offline scheduled classes only */}
+            {/* Book for Student — any scheduled class, online or offline */}
             {isHost && canAdminBook && (
               <Button
                 variant="ghost"

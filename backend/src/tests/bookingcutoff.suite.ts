@@ -271,16 +271,21 @@ try {
     const aJar: Jar = new Map()
     await call('POST', '/admin/auth/login', { jar: aJar, body: { email: admin.email, password: PW } })
 
-    /* Admin booking is OFFLINE-only — a pre-existing rule, nothing to do with
-       this change. Asserted so the refusal is attributed correctly: an admin
-       who cannot seat a student for an ONLINE class is hitting THAT rule, not
-       the new deadline. */
+    /* Admin booking used to be OFFLINE-only; an admin can now seat a student
+       into an ONLINE class too (M-16), reusing the exact same entitlement and
+       seat-pool machinery the student's own online self-booking route uses.
+       Asserted here, in the cut-off suite, because the point of this section
+       is that the deadline does not leak into the admin override — for
+       EITHER delivery mode. */
     const online = await mkClass(10 * MIN)
     const r = await call('POST', '/admin/bookings/book-for-student', {
       jar: aJar, body: { liveClassId: String(online._id), studentId: String(s1._id) },
     })
-    check('an online class is refused for being online, NOT for the deadline',
-      code(r) === 'ONLINE_CLASS', `${r.status} ${code(r)}`)
+    check('an online class inside the hour still seats the student',
+      r.status === 200 || r.status === 201,
+      `${r.status} ${code(r)} ${String(r.body?.error?.message ?? '')}`)
+    check('and the online booking exists',
+      await ClassBookingModel.countDocuments({ userId: s1._id, liveClassId: online._id, status: 'booked' }) === 1)
 
     /* The case the admin path is actually for. Ten minutes before an offline
        class is deep inside the student cut-off, and the admin must still be

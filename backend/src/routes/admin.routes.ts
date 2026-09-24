@@ -1650,10 +1650,6 @@ router.post('/bookings/book-for-student', requireAnyAdmin, validate(bookForStude
       res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Session not found' } }); return
     }
 
-    if ((session as any).isOnline !== false) {
-      res.status(400).json({ success: false, error: { code: 'ONLINE_CLASS', message: 'Admin booking is only available for offline (in-person) classes' } }); return
-    }
-
     if (session.status === 'cancelled' || session.status === 'ended') {
       res.status(400).json({ success: false, error: { code: 'SESSION_UNAVAILABLE', message: 'Session is no longer available for booking' } }); return
     }
