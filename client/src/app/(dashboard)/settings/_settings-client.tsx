@@ -671,6 +671,23 @@ export default function SettingsContent() {
                       onToggle={() => setNotifs(p => ({ ...p, [n.key]: !p[n.key as keyof typeof notifs] }))} />
                   </div>
                 ))}
+                {/* This one is real — it's the only toggle on this page that
+                    actually persists (PATCH /auth/me → whatsappMarketingOptIn).
+                    WhatsApp only sends announcement broadcasts to students who
+                    explicitly opted in here; your account-related WhatsApp
+                    messages (enrollment approval, booking confirmations, class
+                    reminders) aren't affected by this toggle. */}
+                <div className="flex items-center justify-between gap-4 rounded-xl p-4 hover:bg-[var(--color-bg-muted)] transition-colors"
+                  style={{ border: '1px solid var(--color-border)' }}>
+                  <div>
+                    <p className="text-sm font-semibold" style={{ color: 'var(--color-text-primary)' }}>WhatsApp announcements</p>
+                    <p className="text-xs mt-0.5" style={{ color: 'var(--color-text-muted)' }}>
+                      Get academy-wide announcements on WhatsApp, in addition to the in-app popup
+                    </p>
+                  </div>
+                  <Toggle on={!!user?.whatsappMarketingOptIn}
+                    onToggle={() => updateMutation.mutate({ whatsappMarketingOptIn: !user?.whatsappMarketingOptIn })} />
+                </div>
               </div>
             </div>
           )}

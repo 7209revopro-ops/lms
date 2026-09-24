@@ -29,6 +29,7 @@ import {
   sendClassStartingReminder,
   sendInstructor15MinReminder,
 } from '@/services/email.service.ts'
+import { sendClassReminderTomorrowWhatsApp, sendClassStartingSoonWhatsApp } from '@/services/whatsapp.service.ts'
 import { wantsStaffEmail } from '@/utils/emailPrefs.ts'
 import { SCHEDULE_LINK } from '@/utils/clientLinks.ts'
 
@@ -88,7 +89,7 @@ interface BookingWithRefs {
      always-present is exactly what let one removed account throw inside the
      dispatch loop and abort the whole batch — every other student's reminder
      for that run lost with it. */
-  userId: { _id: any; id: string; name: string; email: string } | null
+  userId: { _id: any; id: string; name: string; email: string; enrollmentApplication?: { phone?: string } } | null
   /* NULL when the class was deleted after the booking was made. Mongoose
      populates a dangling reference as null; typing it as always-present is
      what let the crash below through in the first place. */
@@ -170,6 +171,12 @@ async function dispatch(
      Same booking, same minute, two different times — and the mail was the
      only one of the two that was right. */
   academySlug?: string | null,
+  /* WhatsApp is best-effort ALONGSIDE email, not instead of it — supplied only
+     for the two tiers in phase 1 scope (day-before, five-min). A missing or
+     unusable phone number is handled inside whatsapp.service.ts itself
+     (normalizeWhatsAppNumber returns null → skipped, logged, never thrown),
+     so failure here never triggers the "email failed" system notification. */
+  whatsappFn?:  () => Promise<void>,
 ): Promise<void> {
   const dateLabel = fmtFull(sessionStart, academySlug)
   const timeLabel = fmtTime(sessionStart, academySlug)
@@ -209,7 +216,12 @@ async function dispatch(
     link:  notifLink ?? SCHEDULE_LINK,
   }).catch(err => logger.error({ err, userId, kind }, '[Reminder] Failed to create in-app notification'))
 
-  /* 2. Email — failure creates a system notification instead of silently dropping */
+  /* 2. WhatsApp — best-effort, never blocks or substitutes for the email below */
+  if (whatsappFn) {
+    void whatsappFn().catch(err => logger.debug({ err, userId, kind }, '[Reminder] WhatsApp send failed (non-fatal)'))
+  }
+
+  /* 3. Email — failure creates a system notification instead of silently dropping */
   try {
     await emailFn()
   } catch (err) {
@@ -239,7 +251,7 @@ export async function runDayBeforeReminders(): Promise<void> {
       /* organizationId comes back so the mail can be rendered in the READER's
          academy clock. On a shared class the student's academy and the class's
          differ, and an unlabelled ninety-minute gap is a missed class. */
-      .populate<{ userId: BookingWithRefs['userId'] }>('userId', 'name email organizationId')
+      .populate<{ userId: BookingWithRefs['userId'] }>('userId', 'name email organizationId enrollmentApplication.phone')
       .populate<{ liveClassId: BookingWithRefs['liveClassId'] }>('liveClassId', 'id title scheduledStart meetingUrl muxPlaybackId status')
       .lean({ virtuals: true }) as unknown as BookingWithRefs[]
 
@@ -258,6 +270,7 @@ export async function runDayBeforeReminders(): Promise<void> {
           joinUrl,
         ),
         undefined, slug,
+        () => sendClassReminderTomorrowWhatsApp(b.userId.enrollmentApplication?.phone, b.liveClassId.title, fmtFull(start, slug)),
       )
 
       await ClassBookingModel.findByIdAndUpdate(b._id, { reminderDayBeforeSent: true })
@@ -380,7 +393,7 @@ export async function runFiveMinReminders(): Promise<void> {
       /* organizationId comes back so the mail can be rendered in the READER's
          academy clock. On a shared class the student's academy and the class's
          differ, and an unlabelled ninety-minute gap is a missed class. */
-      .populate<{ userId: BookingWithRefs['userId'] }>('userId', 'name email organizationId')
+      .populate<{ userId: BookingWithRefs['userId'] }>('userId', 'name email organizationId enrollmentApplication.phone')
       .populate<{ liveClassId: BookingWithRefs['liveClassId'] }>('liveClassId', 'id title scheduledStart meetingUrl muxPlaybackId status')
       .lean({ virtuals: true }) as unknown as BookingWithRefs[]
 
@@ -397,6 +410,7 @@ export async function runFiveMinReminders(): Promise<void> {
           b.userId.email, b.userId.name, b.liveClassId.title, joinUrl, classAt, slug,
         ),
         undefined, slug,
+        () => sendClassStartingSoonWhatsApp(b.userId.enrollmentApplication?.phone, b.liveClassId.title, '5', joinUrl),
       )
 
       await ClassBookingModel.findByIdAndUpdate(b._id, { reminder5MinSent: true })

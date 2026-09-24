@@ -700,6 +700,7 @@ export class AdminController {
       const { UserModel } = await import('@/models/schema.ts')
       const { Types }     = await import('mongoose')
       const { sendEnrollmentApproved } = await import('@/services/email.service.ts')
+      const { sendEnrollmentApprovedWhatsApp } = await import('@/services/whatsapp.service.ts')
 
       const userId = String(req.params['userId'] ?? '')
       const scope  = req.user!.categoryScope as string | undefined
@@ -716,7 +717,7 @@ export class AdminController {
         res.status(400).json({ success: false, error: { code: 'MISSING_CATEGORIES', message: 'Select at least one category to assign.' } }); return
       }
 
-      const existing = await UserModel.findById(userId).select('email name categories category enrollmentStatus signupType').lean()
+      const existing = await UserModel.findById(userId).select('email name categories category enrollmentStatus signupType enrollmentApplication.phone').lean()
       if (!existing) { res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'User not found' } }); return }
 
       // Merge new categories with existing ones (avoid duplicates)
@@ -755,6 +756,12 @@ export class AdminController {
       })
 
       void sendEnrollmentApproved(existing.email, existing.name, mergedCats.join(', ')).catch(() => {})
+      void sendEnrollmentApprovedWhatsApp(
+        (existing as { enrollmentApplication?: { phone?: string } }).enrollmentApplication?.phone,
+        existing.name,
+        mergedCats.join(', '),
+        process.env['CLIENT_URL'] ?? 'http://localhost:3000',
+      ).catch(() => {})
 
       sendSuccess(res, { id: userId, enrollmentStatus: 'approved', categories: mergedCats }, 'Enrollment approved')
     } catch (err) { next(err) }

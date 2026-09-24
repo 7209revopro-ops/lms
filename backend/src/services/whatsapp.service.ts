@@ -1,83 +1,286 @@
-/**
- * WhatsApp service — WATI Business API integration.
- * Uses env vars: WATI_API_URL, WATI_API_KEY
- * Falls back to console logging when env vars are absent (dev mode).
- */
+/* ─────────────────────────────────────────────────────
+   WhatsAppService — Creatyvot (Meta Cloud API v25.0 proxy)
+   ─────────────────────────────────────────────────────
+   Same shape as email.service.ts on purpose: a persisted outbox, an
+   immediate best-effort attempt, and a cron drain for whatever that attempt
+   couldn't finish — see whatsappOutbox.job.ts. A caller stays fire-and-
+   forget (`void sendXWhatsApp(...).catch(log)`); durability is this layer's
+   job, not the caller's.
 
-const WATI_API_URL = process.env.WATI_API_URL ?? ''
-const WATI_API_KEY = process.env.WATI_API_KEY ?? ''
+   Creatyvot is a DROP-IN for graph.facebook.com — same paths, same payload
+   shapes, Graph version v25.0 only. The one difference: Authorization is
+   Bearer {WHATSAPP_API_KEY} (a Creatyvot wc_... key), never a Meta access
+   token. Success and error responses are raw Meta JSON, unwrapped.
 
-export interface WhatsAppTemplate {
+   Templates must be pre-approved in Meta Business Manager (via Creatyvot's
+   dashboard) before sendTemplate() will actually deliver anything — an
+   unapproved or misspelled template name comes back as a Meta error and is
+   classified permanent (see classify() below), so it fails the outbox row
+   rather than retrying forever. */
+import { logger } from '@/utils/logger.ts'
+import { env } from '@/config/env.ts'
+import { normalizeWhatsAppNumber } from '@/utils/normalizeWhatsAppNumber.ts'
+import { writeFile, mkdir } from 'fs/promises'
+import { join } from 'path'
+
+export type WhatsAppTemplateCategory = 'utility' | 'marketing' | 'authentication'
+
+export interface WhatsAppTemplateMessage {
+  to:           string        // digits-only MSISDN, already normalized
   templateName: string
-  parameters: Array<{ name: string; value: string }>
+  languageCode: string        // e.g. 'en_US'
+  params:       string[]      // positional {{1}}, {{2}}, … body variables
+  category?:    WhatsAppTemplateCategory
 }
 
-/**
- * Send a WhatsApp template message via WATI API.
- * @param phone E.164 format without '+', e.g. "919876543210"
- */
-export async function sendWhatsAppMessage(
-  phone: string,
+export interface WhatsAppSender {
+  send(msg: WhatsAppTemplateMessage): Promise<{ waMessageId?: string }>
+}
+
+/* ─── Console sender (dev) ───────────────────────────── */
+class ConsoleWhatsAppSender implements WhatsAppSender {
+  private static seq = 0
+  private readonly dir = process.env['WHATSAPP_LOG_DIR']?.trim()
+    || join(process.cwd(), '.logs', 'whatsapp')
+
+  async send(msg: WhatsAppTemplateMessage): Promise<{ waMessageId?: string }> {
+    try {
+      await mkdir(this.dir, { recursive: true })
+      const safe = msg.to.replace(/[^a-z0-9]/gi, '_')
+      const file = join(this.dir, `${Date.now()}-${String(ConsoleWhatsAppSender.seq++).padStart(4, '0')}-${safe}.json`)
+      await writeFile(file, JSON.stringify(msg, null, 2), 'utf8')
+      logger.info({ to: msg.to, template: msg.templateName, file }, '💬  [dev] WhatsApp message captured')
+    } catch (err) {
+      logger.error({ err }, 'WhatsApp log write failed')
+    }
+    return {}
+  }
+}
+
+/* ─── Creatyvot sender (production) ──────────────────── */
+/* Exported (unlike ConsoleWhatsAppSender) so tests can instantiate it
+   directly against a mocked fetch — same reasoning as email.service.ts
+   exporting PooledEmailSender: the behaviour under test is the HTTP/error
+   handling, not which sender NODE_ENV happens to pick. */
+export class CreatyvotWhatsAppSender implements WhatsAppSender {
+  constructor(
+    private readonly baseUrl:       string,
+    private readonly apiKey:        string,
+    private readonly phoneNumberId: string,
+  ) {}
+
+  async send(msg: WhatsAppTemplateMessage): Promise<{ waMessageId?: string }> {
+    const url = `${this.baseUrl}/v25.0/${this.phoneNumberId}/messages`
+    const body = {
+      messaging_product: 'whatsapp',
+      to:   msg.to,
+      type: 'template',
+      template: {
+        name: msg.templateName,
+        language: { code: msg.languageCode },
+        components: msg.params.length > 0
+          ? [{ type: 'body', parameters: msg.params.map(text => ({ type: 'text', text })) }]
+          : [],
+      },
+    }
+
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type':  'application/json',
+        'Authorization': `Bearer ${this.apiKey}`,
+      },
+      body: JSON.stringify(body),
+    })
+
+    const json = await res.json().catch(() => ({})) as {
+      messages?: { id: string }[]
+      error?: { code?: number; type?: string; message?: string; error_data?: { details?: string } }
+    }
+
+    if (!res.ok) {
+      const err = new WhatsAppApiError(
+        json.error?.message ?? `HTTP ${res.status}`,
+        res.status,
+        json.error,
+      )
+      throw err
+    }
+
+    return { waMessageId: json.messages?.[0]?.id }
+  }
+}
+
+/* ─────────────────────────────────────────────────────
+   Failure classification
+   ─────────────────────────────────────────────────────
+   Meta's error payload carries a `code` — the same handful of codes cover
+   nearly every rejection reason:
+     100/132001 — unknown/unapproved template, or a param count mismatch:
+                  PERMANENT, retrying changes nothing.
+     131026     — recipient has no WhatsApp / number unreachable: PERMANENT.
+     131047, 131056 — outside the 24h session window / re-engagement limit:
+                  PERMANENT for THIS send; a template message is exactly the
+                  tool for this case, so if it's still rejected there is
+                  nothing a retry fixes.
+     4, 80007   — app/account rate limit: TRANSIENT, worth a backoff retry.
+     anything 5xx from Creatyvot itself — TRANSIENT (their side, not Meta's).
+─────────────────────────────────────────────────────── */
+export class WhatsAppApiError extends Error {
+  constructor(
+    message: string,
+    public readonly httpStatus: number,
+    public readonly metaError?: { code?: number; type?: string; message?: string },
+  ) { super(message) }
+}
+
+const PERMANENT_META_CODES = new Set([100, 131026, 131047, 131051, 131056, 132000, 132001, 132005, 132007, 132012, 132015, 132016])
+
+/* Exported for direct unit testing — a pure function over the error shape,
+   same reasoning as CreatyvotWhatsAppSender above. */
+export function classify(err: unknown): 'permanent' | 'transient' {
+  if (err instanceof WhatsAppApiError) {
+    const code = err.metaError?.code
+    if (typeof code === 'number' && PERMANENT_META_CODES.has(code)) return 'permanent'
+    if (err.httpStatus >= 400 && err.httpStatus < 500 && err.httpStatus !== 429) return 'permanent'
+    return 'transient'
+  }
+  return 'transient'
+}
+
+/* ─── Singleton sender ────────────────────────────────── */
+function buildSender(): WhatsAppSender {
+  if (process.env['NODE_ENV'] === 'test') {
+    return new ConsoleWhatsAppSender()
+  }
+  if (env.WHATSAPP_API_KEY && env.WHATSAPP_PHONE_NUMBER_ID) {
+    logger.info({ baseUrl: env.WHATSAPP_API_BASE_URL }, 'WhatsApp backend: Creatyvot (Meta Cloud API v25.0)')
+    return new CreatyvotWhatsAppSender(env.WHATSAPP_API_BASE_URL, env.WHATSAPP_API_KEY, env.WHATSAPP_PHONE_NUMBER_ID)
+  }
+  logger.info('WhatsApp backend: console (set WHATSAPP_API_KEY + WHATSAPP_PHONE_NUMBER_ID to enable real sending)')
+  return new ConsoleWhatsAppSender()
+}
+
+const rawSender = buildSender()
+
+/* ─────────────────────────────────────────────────────
+   Durable outbox — mirrors email.service.ts exactly
+─────────────────────────────────────────────────────── */
+const BACKOFF_MIN = [1, 5, 15, 60, 240, 720, 1440]
+export const MAX_WHATSAPP_ATTEMPTS = 10
+
+export function whatsappBackoffFor(attempts: number): number {
+  const idx = Math.min(attempts, BACKOFF_MIN.length - 1)
+  return BACKOFF_MIN[idx]! * 60_000
+}
+
+/** Attempt one already-persisted row. Exported so the drain job reuses it. */
+export async function deliverWhatsAppOutboxRow(row: {
+  id: string; to: string; templateName: string; languageCode: string; params: string[]; attempts: number
+}): Promise<'sent' | 'retry' | 'failed'> {
+  const { WhatsAppOutboxModel } = await import('@/models/schema.ts')
+  try {
+    const { waMessageId } = await rawSender.send({
+      to: row.to, templateName: row.templateName, languageCode: row.languageCode, params: row.params,
+    })
+    await WhatsAppOutboxModel.updateOne({ _id: row.id }, {
+      $set: { status: 'sent', sentAt: new Date(), ...(waMessageId && { waMessageId }) }, $unset: { lastError: 1 },
+    })
+    return 'sent'
+  } catch (err) {
+    const attempts  = row.attempts + 1
+    const verdict   = classify(err)
+    const exhausted = attempts >= MAX_WHATSAPP_ATTEMPTS
+    const message   = String((err as Error)?.message ?? err).slice(0, 500)
+
+    if (verdict === 'permanent' || exhausted) {
+      await WhatsAppOutboxModel.updateOne({ _id: row.id }, {
+        $set: { status: 'failed', attempts, lastError: message },
+      })
+      logger.error({ to: row.to, template: row.templateName, attempts, verdict }, 'WhatsApp message permanently failed — needs a human')
+      return 'failed'
+    }
+
+    await WhatsAppOutboxModel.updateOne({ _id: row.id }, {
+      $set: { attempts, lastError: message, nextAttemptAt: new Date(Date.now() + whatsappBackoffFor(attempts)) },
+    })
+    return 'retry'
+  }
+}
+
+/* Strips characters Meta rejects inside a template parameter: newlines/tabs
+   and runs of 5+ spaces are refused outright by the Graph API, and a raw
+   param is exactly where a course/session TITLE (free text an admin typed)
+   could carry either. Truncated to a sane length — Meta caps body params
+   around 1024 chars, but a WhatsApp bubble is unreadable well before that. */
+function sanitiseParam(value: string): string {
+  return value.replace(/[\r\n\t]+/g, ' ').replace(/ {5,}/g, '    ').trim().slice(0, 300)
+}
+
+interface SendOptions {
+  category?: WhatsAppTemplateCategory
+}
+
+async function sendTemplate(
+  to: string | null | undefined,
   templateName: string,
-  parameters: Array<{ name: string; value: string }>,
+  params: string[],
+  opts: SendOptions = {},
+  languageCode = 'en_US',
 ): Promise<void> {
-  if (!WATI_API_URL || !WATI_API_KEY) {
-    console.log(`[WhatsApp DEV] → ${phone} | template: ${templateName} | params:`, parameters)
+  const normalized = normalizeWhatsAppNumber(to)
+  if (!normalized) {
+    logger.debug({ to, templateName }, 'WhatsApp send skipped — no usable phone number')
     return
   }
+  const clean = params.map(sanitiseParam)
 
-  const url = `${WATI_API_URL}/api/v1/sendTemplateMessage?whatsappNumber=${phone}`
-  const body = JSON.stringify({ template_name: templateName, broadcast_name: templateName, parameters })
-
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${WATI_API_KEY}`,
-    },
-    body,
+  const { WhatsAppOutboxModel } = await import('@/models/schema.ts')
+  /* Persist FIRST, same reasoning as the email outbox: if the process dies
+     between here and the send, the drain cron picks the row up; if we sent
+     first, there would be no record to retry from. */
+  const row = await WhatsAppOutboxModel.create({
+    to: normalized, templateName, languageCode, params: clean, category: opts.category,
   })
 
-  if (!res.ok) {
-    const text = await res.text().catch(() => 'unknown')
-    console.error(`[WhatsApp] WATI error ${res.status}: ${text}`)
-    // Non-fatal — don't throw so reminder job continues
-  }
+  await deliverWhatsAppOutboxRow({
+    id: String(row._id), to: normalized, templateName, languageCode, params: clean, attempts: 0,
+  })
 }
 
-/* ── Typed helpers matching the email templates ─── */
+/* ── Typed helpers, one per trigger event ─────────────── */
 
-export async function sendWABookingConfirmation(phone: string, name: string, sessionTitle: string, date: string): Promise<void> {
-  await sendWhatsAppMessage(phone, 'booking_confirmation', [
-    { name: 'name', value: name },
-    { name: 'session_title', value: sessionTitle },
-    { name: 'date', value: date },
-  ])
+export async function sendEnrollmentApprovedWhatsApp(
+  to: string | null | undefined, name: string, courseOrCategoryLabel: string, loginUrl: string,
+): Promise<void> {
+  await sendTemplate(to, 'enrollment_approved', [name, courseOrCategoryLabel, loginUrl], { category: 'utility' })
 }
 
-export async function sendWASessionLinkReminder(phone: string, name: string, sessionTitle: string, date: string, joinUrl: string): Promise<void> {
-  await sendWhatsAppMessage(phone, 'session_link_reminder', [
-    { name: 'name', value: name },
-    { name: 'session_title', value: sessionTitle },
-    { name: 'date', value: date },
-    { name: 'join_url', value: joinUrl },
-  ])
+export async function sendBookingConfirmedWhatsApp(
+  to: string | null | undefined, name: string, sessionTitle: string, dateStr: string, timeStr: string,
+): Promise<void> {
+  await sendTemplate(to, 'booking_confirmed', [name, sessionTitle, dateStr, timeStr], { category: 'utility' })
 }
 
-export async function sendWADayOfReminder(phone: string, name: string, sessionTitle: string, time: string, joinUrl: string): Promise<void> {
-  await sendWhatsAppMessage(phone, 'day_of_reminder', [
-    { name: 'name', value: name },
-    { name: 'session_title', value: sessionTitle },
-    { name: 'time', value: time },
-    { name: 'join_url', value: joinUrl },
-  ])
+export async function sendClassReminderTomorrowWhatsApp(
+  to: string | null | undefined, sessionTitle: string, whenStr: string,
+): Promise<void> {
+  await sendTemplate(to, 'class_reminder_tomorrow', [sessionTitle, whenStr], { category: 'utility' })
 }
 
-export async function sendWAPreSessionReminder(phone: string, name: string, sessionTitle: string, minutesLeft: number, joinUrl: string): Promise<void> {
-  await sendWhatsAppMessage(phone, 'pre_session_reminder', [
-    { name: 'name', value: name },
-    { name: 'session_title', value: sessionTitle },
-    { name: 'minutes_left', value: String(minutesLeft) },
-    { name: 'join_url', value: joinUrl },
-  ])
+/* joinUrl is inlined as plain body text rather than a template BUTTON
+   component: Meta buttons need their own component in the payload (a
+   separate parameter array from the body's), which WhatsAppOutboxModel's
+   flat params[] doesn't model, and WhatsApp auto-links a bare http(s) URL in
+   body text anyway — simplest thing that works for phase 1. */
+export async function sendClassStartingSoonWhatsApp(
+  to: string | null | undefined, sessionTitle: string, minutesLeft: string, joinUrl: string,
+): Promise<void> {
+  await sendTemplate(to, 'class_starting_soon', [sessionTitle, minutesLeft, joinUrl], { category: 'utility' })
+}
+
+export async function sendAnnouncementWhatsApp(
+  to: string | null | undefined, title: string, description: string,
+): Promise<void> {
+  await sendTemplate(to, 'announcement_broadcast', [title, description], { category: 'marketing' })
 }

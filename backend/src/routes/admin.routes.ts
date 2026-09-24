@@ -1787,6 +1787,15 @@ router.post('/bookings/book-for-student', requireAnyAdmin, validate(bookForStude
       body: `Your seat is confirmed for ${session.title} on ${dateLabel}.`, link: SCHEDULE_LINK,
     }).catch(() => {/* non-fatal */})
 
+    import('@/services/whatsapp.service.ts').then(({ sendBookingConfirmedWhatsApp }) => {
+      const { date: dateStr, time: timeStr } = academyClock(session.scheduledStart,
+        orgSlugFor((student as { organizationId?: unknown }).organizationId))
+      sendBookingConfirmedWhatsApp(
+        (student as { enrollmentApplication?: { phone?: string } }).enrollmentApplication?.phone,
+        (student as any).name, session.title, dateStr, timeStr,
+      ).catch(() => {/* non-fatal */})
+    }).catch(() => {/* non-fatal */})
+
     import('@/services/email.service.ts').then(({ sendBookingConfirmation }) => {
       sendBookingConfirmation(
         (student as any).email, (student as any).name, session.title, session.scheduledStart,
@@ -2241,6 +2250,42 @@ router.post('/announcements', requireAdmin, requirePermission('announcements','c
       createdBy: req.user!.id,
     })
     sendSuccess(res, announcement, 'Announcement created', 201)
+
+    /* WhatsApp broadcast — best-effort, fire-and-forget after the response.
+       MARKETING category (see whatsapp.service.ts), so unlike every other
+       WhatsApp trigger in this codebase this one requires explicit opt-in:
+       only students with whatsappMarketingOptIn === true are messaged, never
+       the full roster the in-app popup reaches. organizationId === null on
+       the announcement means "every academy", matching announcement.
+       repository.ts's own org-matching convention. */
+    void (async () => {
+      try {
+        const { UserModel } = await import('@/models/schema.ts')
+        const { Types }     = await import('mongoose')
+        const { sendAnnouncementWhatsApp } = await import('@/services/whatsapp.service.ts')
+        const { logger }    = await import('@/utils/logger.ts')
+
+        const orgFilter = organizationId && Types.ObjectId.isValid(organizationId)
+          ? { organizationId: new Types.ObjectId(organizationId) }
+          : {}
+        const students = await UserModel.find({
+          role: 'student', enrollmentStatus: 'approved', isActive: true,
+          whatsappMarketingOptIn: true,
+          ...orgFilter,
+        }).select('enrollmentApplication.phone').lean()
+
+        for (const s of students) {
+          await sendAnnouncementWhatsApp(
+            (s as { enrollmentApplication?: { phone?: string } }).enrollmentApplication?.phone,
+            announcementDto.title, announcementDto.description,
+          )
+        }
+        logger.info({ count: students.length, announcementId: announcement.id }, 'WhatsApp announcement broadcast queued')
+      } catch (err) {
+        const { logger } = await import('@/utils/logger.ts')
+        logger.error({ err }, 'WhatsApp announcement broadcast failed')
+      }
+    })()
   } catch (err) { next(err) }
 })
 

@@ -55,6 +55,7 @@ const SAFE_USER_FIELDS = [
   'bio', 'headline', 'websiteUrl',
   'twoFactorEnabled',
   'emailPrefs',
+  'whatsappMarketingOptIn',
   'aiUsage',
   'customRoleId', 'organizationId', 'program',
   'category', 'categories',

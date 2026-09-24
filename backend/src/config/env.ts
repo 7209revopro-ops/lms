@@ -118,6 +118,18 @@ const envSchema = z.object({
   TAMARA_BASE_URL:          z.string().default('https://api-sandbox.tamara.co'),
   TAMARA_CURRENCY:          z.string().length(3).default('AED'),
 
+  /* WhatsApp — Creatyvot's Meta Cloud API v25.0 proxy (connect.creatyvot.com).
+     Drop-in for graph.facebook.com: same paths, same payload shapes, but
+     Bearer auth is the wc_… key from the Creatyvot dashboard, NOT a Meta
+     access token. Blank API key ⇒ console-log sender (dev), same convention
+     as every other integration in this file. */
+  WHATSAPP_API_BASE_URL:     z.string().default('https://connect.creatyvot.com'),
+  WHATSAPP_API_KEY:          opt(z.string().min(1).regex(/^wc_/, 'WHATSAPP_API_KEY must start with wc_ — that is Creatyvot\'s own key, never a Meta access token')),
+  WHATSAPP_PHONE_NUMBER_ID:  opt(z.string().min(1)),
+  WHATSAPP_WABA_ID:          opt(z.string().min(1)),
+  /* Phase 2 — inbound delivery-status / reply webhook (not wired yet). */
+  WHATSAPP_WEBHOOK_VERIFY_TOKEN: opt(z.string().min(1)),
+
   /* Fallback conversion rates, used when a course carries no per-currency
      price. Before B-01 those overrides could not be stored at all, so these
      were the ONLY prices any non-USD gateway ever charged — and the INR one

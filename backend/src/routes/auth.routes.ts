@@ -131,6 +131,9 @@ const updateMeSchema = z.object({
   bio:        z.string().max(2000).optional(),
   avatarUrl:  z.string().url().or(z.literal('')).optional(),
   websiteUrl: z.string().url().or(z.literal('')).optional(),
+  /* Explicit opt-in for MARKETING-category WhatsApp messages (announcement
+     broadcasts) — see IUser.whatsappMarketingOptIn in schema.ts. */
+  whatsappMarketingOptIn: z.boolean().optional(),
 })
 
 /* Enrollment docs update — identity scans arrive as a `kyc/` key (H-11), the

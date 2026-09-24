@@ -133,6 +133,15 @@ export interface IUser extends Document {
       assignmentSubmitted?: boolean
     }
   }
+  /* Explicit opt-IN for MARKETING-category WhatsApp messages (announcement
+     broadcasts). This is the opposite default from emailPrefs: Meta requires
+     clear consent before a business sends marketing-category templates, so
+     absent/false means "do not send" rather than "send unless silenced".
+     UTILITY-category sends (enrollment approved, booking confirmed, class
+     reminders) don't check this — they use the same implicit consent as the
+     equivalent email, since the student gave the phone number for exactly
+     this kind of account-related contact. */
+  whatsappMarketingOptIn?: boolean
   /* Per-day AI chat usage (L-09). `day` is the local calendar date in the
      app's timezone (Asia/Dubai), so the allowance resets at local midnight
      rather than at an arbitrary UTC hour. */
@@ -216,6 +225,8 @@ const UserSchema = new Schema<IUser>(
         assignmentSubmitted: { type: Boolean },
       },
     },
+    /* No default on purpose — see IUser.whatsappMarketingOptIn. Absent ⇒ don't send. */
+    whatsappMarketingOptIn: { type: Boolean },
     aiUsage:          { day: { type: String }, count: { type: Number, default: 0 } },
     customRoleId:   { type: Schema.Types.ObjectId, ref: 'Role' },
     organizationId: { type: Schema.Types.ObjectId, ref: 'Organization' },
@@ -2295,6 +2306,61 @@ EmailOutboxSchema.index({ sentAt: 1 }, { expireAfterSeconds: 30 * 24 * 60 * 60 }
 export const EmailOutboxModel =
   mongoose.model<IEmailOutbox>('EmailOutbox', EmailOutboxSchema)
 
+/* ─────────────────────────────────────────────────────
+   WHATSAPP OUTBOX — same durability contract as EmailOutbox
+   ─────────────────────────────────────────────────────
+   A message-template send only ever reaches Creatyvot's Meta Cloud API proxy
+   AFTER a row here is persisted, for the same reason EmailOutbox exists: a
+   crashed process or a rejected send must leave something the drain cron can
+   retry, not a message that silently never happened.
+
+   `params` holds Meta's POSITIONAL template variables ({{1}}, {{2}}, …) in
+   order — Meta's body component takes an ordered array, not named fields, so
+   storing them as an ordered string[] matches exactly what gets replayed on
+   retry. `category` is stored for visibility only (UTILITY vs MARKETING vs
+   AUTHENTICATION) — it does not change delivery, only how the row reads in
+   an admin/ops query. */
+export type WhatsAppOutboxStatus = 'pending' | 'sent' | 'failed'
+
+export interface IWhatsAppOutbox extends Document {
+  id:            string
+  to:            string             // digits-only MSISDN, no '+'
+  templateName:  string
+  languageCode:  string
+  params:        string[]
+  category?:     'utility' | 'marketing' | 'authentication'
+  status:        WhatsAppOutboxStatus
+  attempts:      number
+  nextAttemptAt: Date
+  lastError?:    string
+  waMessageId?:  string             // Meta's message id, once accepted
+  sentAt?:       Date
+  createdAt:     Date
+  updatedAt:     Date
+}
+
+const WhatsAppOutboxSchema = new Schema<IWhatsAppOutbox>(
+  {
+    to:            { type: String, required: true, trim: true },
+    templateName:  { type: String, required: true },
+    languageCode:  { type: String, required: true, default: 'en_US' },
+    params:        [{ type: String }],
+    category:      { type: String, enum: ['utility', 'marketing', 'authentication'] },
+    status:        { type: String, enum: ['pending', 'sent', 'failed'], default: 'pending', index: true },
+    attempts:      { type: Number, default: 0 },
+    nextAttemptAt: { type: Date, default: () => new Date() },
+    lastError:     { type: String, maxlength: 500 },
+    waMessageId:   { type: String },
+    sentAt:        { type: Date },
+  },
+  baseSchemaOptions,
+)
+
+WhatsAppOutboxSchema.index({ status: 1, nextAttemptAt: 1 })
+WhatsAppOutboxSchema.index({ sentAt: 1 }, { expireAfterSeconds: 30 * 24 * 60 * 60 })
+
+export const WhatsAppOutboxModel =
+  mongoose.model<IWhatsAppOutbox>('WhatsAppOutbox', WhatsAppOutboxSchema)
 
 /* ─────────────────────────────────────────────────────
    NOTIFICATION DIGEST QUEUE — Standard-tier events awaiting their daily mail

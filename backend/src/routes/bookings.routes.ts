@@ -75,8 +75,10 @@ async function afterBookingCreated(
   /* THE RECIPIENT'S academy, not the class's. On a shared class the two
      differ, and the reader thinks in their own academy's clock. */
   academySlug?: string | null,
+  userPhone?: string | null,
 ): Promise<void> {
   const dateLabel = fmtDate(sessionStart, academySlug)
+  const { date: dateStr, time: timeStr } = academyClock(sessionStart, academySlug)
 
   /* 1. In-app notification — always */
   await notifSvc.create(userId, {
@@ -86,7 +88,12 @@ async function afterBookingCreated(
     link:  SCHEDULE_LINK,
   })
 
-  /* 2. Confirmation email — if it fails, add a system notification */
+  /* 2. WhatsApp — best-effort, alongside email, never blocking it */
+  void import('@/services/whatsapp.service.ts')
+    .then(({ sendBookingConfirmedWhatsApp }) => sendBookingConfirmedWhatsApp(userPhone, userName, sessionTitle, dateStr, timeStr))
+    .catch(() => {/* non-fatal, same as email below */})
+
+  /* 3. Confirmation email — if it fails, add a system notification */
   try {
     const { sendBookingConfirmation } = await import('@/services/email.service.ts')
     await sendBookingConfirmation(userEmail, userName, sessionTitle, sessionStart, academySlug)
@@ -359,6 +366,7 @@ router.post('/', authenticate, requireEnrollmentApproval, validate(createBooking
           lc.scheduledStart,
           joinUrl,
           orgSlugFor((user as { organizationId?: unknown }).organizationId),
+          (user as { enrollmentApplication?: { phone?: string } }).enrollmentApplication?.phone,
         )
       })().catch(() => {/* non-fatal */})
     }).catch(() => {/* non-fatal */})
