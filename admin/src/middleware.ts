@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import type { NextRequest } from 'next/server'
+import { PUBLIC_PATHS } from '@/lib/publicPaths'
 
 /**
  * Admin middleware — cookie-based auth guard.
@@ -11,16 +12,6 @@ import type { NextRequest } from 'next/server'
  * Protected pages → redirect to /login when cookie is absent.
  * /login → redirect to / when cookie is present (already signed in).
  */
-/* Auth screens reachable without a session — a locked-out admin must be able
-   to load these while signed out.
-
-   /sso belongs here for the same reason, and more so: somebody arriving from
-   the Root portal has no session yet, by definition. Without it the guard sent
-   them to /login before the page could redeem their token, so the one route
-   whose entire job is to establish a session was the one route that required
-   one already. */
-const PUBLIC_PATHS = new Set(['/login', '/forgot-password', '/reset-password', '/sso'])
-
 export function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl
 

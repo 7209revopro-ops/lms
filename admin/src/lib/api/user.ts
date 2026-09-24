@@ -52,13 +52,19 @@ export const userKeys = {
   me: ['auth', 'me'] as const,
 }
 
-export function useCurrentUser() {
+/* `enabled` defaults to true for every existing caller (a signed-in admin
+   asking who they are), and is set to false only on public/auth pages —
+   see TimezoneScope in app/providers.tsx. A page nobody is signed into yet
+   has no "current user" to ask for, and firing this anyway produced a 401
+   that the axios interceptor used to treat as a dead session and act on. */
+export function useCurrentUser(enabled = true) {
   return useQuery({
     queryKey: userKeys.me,
     queryFn:  async () => {
       const data = await apiGet<{ user: CurrentAdmin }>('/admin/auth/me')
       return data.user
     },
+    enabled,
     retry: false,
     staleTime: 60_000,
   })

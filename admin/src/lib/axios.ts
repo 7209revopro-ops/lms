@@ -1,6 +1,7 @@
 import axios from 'axios'
 import { useImpersonationStore } from '@/store/impersonation.store'
 import { useOrgStore } from '@/store/org.store'
+import { PUBLIC_PATHS } from '@/lib/publicPaths'
 
 /**
  * Admin API client.
@@ -91,8 +92,14 @@ function refreshAllowed(): boolean {
    cannot, such as a refresh that fails with 429 or never answers. */
 export const EXPIRED_PARAM = 'session=expired'
 
+/* Never bounce AWAY from a page nobody needs a session to use. This is what
+   used to break the reset-password page: TimezoneScope's unconditional
+   `useCurrentUser()` (see providers.tsx) 401s there by definition — the
+   admin clicking the link is signed out — and the refresh that followed
+   also 401s (no refresh cookie either), which used to hard-redirect the
+   admin to /login before they could see the form, let alone use it. */
 function toLogin() {
-  if (window.location.pathname === '/login') return
+  if (PUBLIC_PATHS.has(window.location.pathname)) return
   window.location.href = `/login?${EXPIRED_PARAM}`
 }
 
@@ -106,7 +113,7 @@ api.interceptors.response.use(
     }
 
     if (typeof window === 'undefined') return Promise.reject(err)
-    if (window.location.pathname === '/login') return Promise.reject(err)
+    if (PUBLIC_PATHS.has(window.location.pathname)) return Promise.reject(err)
 
     /* An expired IMPERSONATION token cannot be refreshed: /admin/auth/refresh
        renews the admin's own cookie, and the request would just be retried

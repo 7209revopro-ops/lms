@@ -45,10 +45,11 @@ const SYMBOL: Record<OrgCurrency['code'], string> = {
 
 const BASE: OrgCurrency = { code: 'USD', symbol: '$', exchangeRate: 1 }
 
-export function useMyOrganization() {
+export function useMyOrganization(enabled = true) {
   return useQuery({
     queryKey: ['admin', 'my-organization'],
     queryFn:  () => apiGet<MyOrg | null>('/admin/my-organization'),
+    enabled,
     staleTime: 5 * 60_000,
   })
 }
