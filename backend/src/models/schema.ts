@@ -131,6 +131,7 @@ export interface IUser extends Document {
       classScheduled?:      boolean
       classReminder?:       boolean
       assignmentSubmitted?: boolean
+      dailySchedule?:       boolean
     }
   }
   /* Explicit opt-IN for MARKETING-category WhatsApp messages (announcement
@@ -223,6 +224,7 @@ const UserSchema = new Schema<IUser>(
         classScheduled:      { type: Boolean },
         classReminder:       { type: Boolean },
         assignmentSubmitted: { type: Boolean },
+        dailySchedule:       { type: Boolean },
       },
     },
     /* No default on purpose — see IUser.whatsappMarketingOptIn. Absent ⇒ don't send. */
@@ -3028,3 +3030,41 @@ ClassAssignmentSchema.index({ studentId: 1, liveClassId: 1 }, { unique: true })
 
 export const ClassAssignmentModel =
   mongoose.model<IClassAssignment>('ClassAssignment', ClassAssignmentSchema)
+
+/* ─────────────────────────────────────────────────────
+   INSTRUCTOR SCHEDULE MAIL — the 9 PM "your schedule for tomorrow" send log.
+
+   One row per (instructor, day), claimed BEFORE the email is sent. The unique
+   index is the whole point: the job runs every 15 minutes through the evening
+   so a missed tick still sends, and a restart at 9 PM re-runs it — without this
+   an instructor would get the same summary two or three times. Claiming first
+   (rather than writing after the send) is what makes that true under a crash
+   between the two.
+
+   `forDate` is the day the schedule is FOR, as a calendar date in the
+   instructor's own academy zone ('2026-09-26'), not a UTC instant — that is the
+   key an instructor would recognise, and it cannot drift across midnight UTC.
+───────────────────────────────────────────────────── */
+export interface IInstructorScheduleMail extends Document {
+  instructorId: Types.ObjectId
+  forDate:      string   // YYYY-MM-DD in the instructor's academy zone
+  itemCount:    number
+  sentAt:       Date
+  createdAt:    Date
+  updatedAt:    Date
+}
+
+const InstructorScheduleMailSchema = new Schema<IInstructorScheduleMail>(
+  {
+    instructorId: { type: Schema.Types.ObjectId, ref: 'User', required: true },
+    forDate:      { type: String, required: true, match: /^\d{4}-\d{2}-\d{2}$/ },
+    itemCount:    { type: Number, default: 0, min: 0 },
+    sentAt:       { type: Date, default: () => new Date() },
+  },
+  baseSchemaOptions,
+)
+
+InstructorScheduleMailSchema.index({ instructorId: 1, forDate: 1 }, { unique: true })
+
+export const InstructorScheduleMailModel =
+  mongoose.model<IInstructorScheduleMail>('InstructorScheduleMail', InstructorScheduleMailSchema)

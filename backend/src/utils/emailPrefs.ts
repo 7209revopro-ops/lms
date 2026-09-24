@@ -23,6 +23,9 @@ export const STAFF_EMAIL_CATEGORIES = [
   'classScheduled',
   'classReminder',
   'assignmentSubmitted',
+  /* The 9 PM "your schedule for tomorrow" summary. Instructors only — see
+     jobs/instructorSchedule.job.ts. Opt-out like the rest: absent ⇒ send. */
+  'dailySchedule',
 ] as const
 
 export type StaffEmailCategory = typeof STAFF_EMAIL_CATEGORIES[number]

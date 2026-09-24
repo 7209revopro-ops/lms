@@ -118,6 +118,7 @@ const emailPrefsSchema = z.object({
     classScheduled:      z.boolean().optional(),
     classReminder:       z.boolean().optional(),
     assignmentSubmitted: z.boolean().optional(),
+    dailySchedule:       z.boolean().optional(),
   }).strict().optional(),
 }).strict()
 

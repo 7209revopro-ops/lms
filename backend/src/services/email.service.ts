@@ -739,6 +739,152 @@ export async function sendInstructor15MinReminder(
   })
 }
 
+/* ── Instructor: tomorrow's schedule (9 PM the evening before) ───────────── */
+
+/** One entry on an instructor's day — a class they teach or a meeting they host. */
+export interface ScheduleMailItem {
+  kind:          'class' | 'meeting'
+  title:         string
+  /** Course title for a class; "Student meeting" etc. for a meeting. */
+  subtitle?:     string
+  start:         Date
+  durationMins:  number
+  online:        boolean
+  /** Where to join an online item (Meet link, or the LMS studio). */
+  joinUrl?:      string
+  joinLabel?:    string
+  /** In-person only. */
+  location?:     string
+  room?:         string
+  /** Classes: seats booked of capacity. */
+  seats?:        { booked: number; capacity: number }
+  /** Meetings: who is coming. */
+  attendees?:    string[]
+}
+
+/* "09:00 AM – 10:30 AM GST" — the zone once, at the end. */
+function scheduleRange(start: Date, durationMins: number, academySlug?: string | null): string {
+  const a = academyClock(start, academySlug)
+  const b = academyClock(new Date(start.getTime() + durationMins * 60_000), academySlug)
+  const bare = a.time.endsWith(` ${a.tag}`) ? a.time.slice(0, -(a.tag.length + 1)) : a.time
+  return `${bare} – ${b.time}`
+}
+
+function scheduleAttendees(names: string[]): string {
+  if (names.length <= 4) return names.join(', ')
+  return `${names.slice(0, 4).join(', ')} and ${names.length - 4} more`
+}
+
+/**
+ * Build the email without sending it — shared by the job and the preview script.
+ * `forDay` is any instant inside the day being described (its start is fine).
+ */
+export function renderInstructorDailySchedule(
+  name:        string,
+  forDay:      Date,
+  items:       ScheduleMailItem[],
+  academySlug?: string | null,
+): { subject: string; html: string; text: string } {
+  const adminUrl    = process.env['ADMIN_URL'] ?? 'http://localhost:3001'
+  const timetable   = `${adminUrl}/live-classes/timetable`
+  const settingsUrl = `${adminUrl}/settings`
+  const clock       = academyClock(forDay, academySlug)
+  const shortDay    = forDay.toLocaleDateString('en-US', {
+    weekday: 'short', month: 'short', day: 'numeric', timeZone: clock.zone,
+  })
+
+  const footer = `You're receiving this because you teach at Delta.
+              <a href="${escapeHtml(settingsUrl)}" style="color:#9CA3AF">Turn off "Tomorrow's schedule"</a> in Settings → Email notifications.`
+
+  const button = (label: string) => `
+    <p style="margin:24px 0 8px">
+      <a href="${escapeHtml(sanitiseUrl(timetable))}" style="display:inline-block;background:linear-gradient(135deg,#0057b8,#2F6BFF);color:#fff;font-weight:600;padding:12px 24px;border-radius:12px;text-decoration:none;font-size:14px">
+        ${label}
+      </a>
+    </p>`
+
+  /* ── Nothing on: a short note, so silence never has to be interpreted. ── */
+  if (items.length === 0) {
+    const subject = `Nothing scheduled tomorrow — ${shortDay}`
+    const html = wrap(subject, `
+      <h2 style="margin:0 0 16px;font-size:20px;font-weight:700;color:#0D0F1A">No sessions tomorrow</h2>
+      <p>Hi ${escapeHtml(name)},</p>
+      <p>You have no classes or meetings scheduled for <strong>${escapeHtml(clock.date)}</strong>.</p>
+      <p style="color:#6B7280;font-size:14px">If you were expecting to teach, check your timetable or contact your academy admin.</p>
+      ${button('Open my timetable →')}
+    `, footer)
+    const text = `Hi ${name}, you have no classes or meetings scheduled for ${clock.date}.\nTimetable: ${timetable}`
+    return { subject, html, text }
+  }
+
+  const count   = `${items.length} session${items.length === 1 ? '' : 's'}`
+  const subject = `Your schedule for tomorrow — ${shortDay} (${count})`
+
+  const cards = items.map((it) => {
+    const range = scheduleRange(it.start, it.durationMins, academySlug)
+    /* A meeting's subtitle already says what it is ("Student meeting"). */
+    const kindLabel = it.kind === 'class' ? 'Live class' : (it.subtitle ? '' : 'Meeting')
+    const sub = [it.subtitle, kindLabel].filter(Boolean).map(s => escapeHtml(String(s))).join(' · ')
+
+    let where: string
+    if (it.online) {
+      where = it.joinUrl
+        ? `🎥 Online — <a href="${escapeHtml(sanitiseUrl(it.joinUrl))}" style="color:#0057b8;font-weight:600">${escapeHtml(it.joinLabel ?? 'Join link')}</a>`
+        : '🎥 Online — link not set yet'
+    } else {
+      const place = [it.location, it.room ? `Room ${it.room}` : ''].filter(Boolean).join(', ')
+      where = `📍 In person${place ? ` — ${escapeHtml(place)}` : ''}`
+    }
+
+    const extra = it.seats
+      ? `${it.seats.booked} of ${it.seats.capacity} seats booked`
+      : it.attendees?.length ? `With ${escapeHtml(scheduleAttendees(it.attendees))}` : ''
+
+    return `
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border:1px solid #E4E7ED;border-radius:12px;margin:0 0 12px;border-collapse:separate">
+        <tr><td style="padding:14px 16px">
+          <p style="margin:0;font-size:13px;font-weight:700;color:#0057b8">${escapeHtml(range)}</p>
+          <p style="margin:4px 0 0;font-size:15px;font-weight:700;color:#0D0F1A">${escapeHtml(it.title)}</p>
+          <p style="margin:2px 0 0;font-size:13px;color:#6B7280">${sub}</p>
+          <p style="margin:8px 0 0;font-size:13px;color:#374151">${where}</p>
+          ${extra ? `<p style="margin:4px 0 0;font-size:12px;color:#6B7280">${extra}</p>` : ''}
+        </td></tr>
+      </table>`
+  }).join('')
+
+  const html = wrap(subject, `
+    <h2 style="margin:0 0 16px;font-size:20px;font-weight:700;color:#0D0F1A">Your schedule for tomorrow</h2>
+    <p>Hi ${escapeHtml(name)}, here's what you have on <strong>${escapeHtml(clock.date)}</strong> — ${count}:</p>
+    <div style="margin:20px 0 0">${cards}</div>
+    ${button('Open my timetable →')}
+  `, footer)
+
+  const text = [
+    `Hi ${name}, your schedule for ${clock.date} (${count}):`,
+    '',
+    ...items.map((it) => {
+      const where = it.online
+        ? `Online${it.joinUrl ? ` — ${it.joinUrl}` : ''}`
+        : `In person${it.location || it.room ? ` — ${[it.location, it.room ? `Room ${it.room}` : ''].filter(Boolean).join(', ')}` : ''}`
+      return `• ${scheduleRange(it.start, it.durationMins, academySlug)} — ${it.title}${it.subtitle ? ` (${it.subtitle})` : ''}\n  ${where}`
+    }),
+    '',
+    `Timetable: ${timetable}`,
+  ].join('\n')
+
+  return { subject, html, text }
+}
+
+export async function sendInstructorDailySchedule(
+  to:          string,
+  name:        string,
+  forDay:      Date,
+  items:       ScheduleMailItem[],
+  academySlug?: string | null,
+): Promise<void> {
+  await sender.send({ to, ...renderInstructorDailySchedule(name, forDay, items, academySlug) })
+}
+
 export async function sendEnrollmentConfirmation(
   to: string,
   name: string,

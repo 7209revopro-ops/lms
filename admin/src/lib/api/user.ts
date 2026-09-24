@@ -9,6 +9,7 @@ import { apiGet, api } from '@/lib/axios'
    backend helper in backend/src/utils/emailPrefs.ts. */
 export const STAFF_EMAIL_CATEGORIES = [
   'enrollmentRequest', 'deviceApproval', 'classScheduled', 'classReminder', 'assignmentSubmitted',
+  'dailySchedule',
 ] as const
 export type StaffEmailCategory = typeof STAFF_EMAIL_CATEGORIES[number]
 

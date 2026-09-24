@@ -17,7 +17,11 @@ import {
    are in fact receiving. */
 const ADMIN_ALERT_ROLES = new Set(['super_admin', 'admin', 'sub_admin', 'support'])
 
-const GROUPS: { heading: string; rows: { key: StaffEmailCategory; label: string; hint: string }[] }[] = [
+/* `roles` narrows a row to the roles that can actually receive it. The evening
+   schedule goes to the `instructor` role only (by decision — an admin who is
+   the instructor of record on a class does not get it), so offering the switch
+   to anyone else would be a control that does nothing. */
+const GROUPS: { heading: string; rows: { key: StaffEmailCategory; label: string; hint: string; roles?: string[] }[] }[] = [
   {
     heading: 'Administration',
     rows: [
@@ -30,6 +34,7 @@ const GROUPS: { heading: string; rows: { key: StaffEmailCategory; label: string;
     rows: [
       { key: 'classScheduled',      label: 'Class scheduled',      hint: 'You are assigned as the instructor for a new session.' },
       { key: 'classReminder',       label: 'Class starting soon',  hint: 'A reminder 15 minutes before your session begins.' },
+      { key: 'dailySchedule',       label: "Tomorrow's schedule",  hint: 'Every evening at 9 PM, your classes and meetings for the next day.', roles: ['instructor'] },
       { key: 'assignmentSubmitted', label: 'Assignment submitted', hint: 'A student submits or revises an assignment for review.' },
     ],
   },
@@ -120,7 +125,7 @@ export function EmailNotificationsSection() {
             style={{ color: masterOn ? 'rgba(255,255,255,0.35)' : 'rgba(255,255,255,0.18)' }}>
             {group.heading}
           </p>
-          {group.rows.map(row => (
+          {group.rows.filter(row => !row.roles || row.roles.includes(me.role)).map(row => (
             <Row key={row.key} label={row.label} hint={row.hint}>
               <Switch
                 on={effectiveEmailPref(me, row.key)}
