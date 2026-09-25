@@ -36,6 +36,7 @@ const { WhatsAppOutboxModel } = await import('@/models/schema.ts')
 const {
   whatsappBackoffFor, MAX_WHATSAPP_ATTEMPTS, classify, WhatsAppApiError, CreatyvotWhatsAppSender,
   sendEnrollmentApprovedWhatsApp, sendBookingConfirmedWhatsApp, sendClassReminderTomorrowWhatsApp,
+  sendClassStartingSoonWhatsApp,
 } = await import('@/services/whatsapp.service.ts')
 const { drainWhatsAppOutboxOnce } = await import('@/jobs/whatsappOutbox.job.ts')
 const { normalizeWhatsAppNumber } = await import('@/utils/normalizeWhatsAppNumber.ts')
@@ -119,6 +120,32 @@ try {
       check('an unapproved template throws WhatsAppApiError', threw instanceof WhatsAppApiError)
       check('carrying Meta\'s real error code for classify() to read',
         (threw as InstanceType<typeof WhatsAppApiError>)?.metaError?.code === 132001)
+
+      /* A URL-button template (class_starting_soon) sends its button's
+         dynamic suffix in a SEPARATE component from the body — this is the
+         exact distinction whose absence produced a real Meta rejection,
+         "(#132000) Number of parameters does not match the expected number
+         of params", against the actually-approved template. */
+      calls.length = 0
+      await sender.send({ to: '919876543210', templateName: 'class_starting_soon', languageCode: 'en_US', params: ['Live Q&A', '5'], buttonParam: 'LIVECLASS123' })
+      const btnBody = JSON.parse(String(calls[0]!.init.body))
+      check('the body component carries exactly the 2 BODY variables, not the button param too',
+        JSON.stringify(btnBody.template.components[0].parameters.map((p: any) => p.text)) === JSON.stringify(['Live Q&A', '5']))
+      const buttonComponent = btnBody.template.components.find((c: any) => c.type === 'button')
+      check('a separate button component is sent', !!buttonComponent, JSON.stringify(btnBody.template.components))
+      check('with the right sub_type/index for a URL button',
+        buttonComponent?.sub_type === 'url' && buttonComponent?.index === '0')
+      check('carrying the live class id as its own parameter',
+        buttonComponent?.parameters?.[0]?.text === 'LIVECLASS123')
+
+      /* And the common case — no button param — must NOT emit an empty/stray
+         button component; Meta rejects a components array entry it didn't
+         ask for just as readily as a missing one. */
+      calls.length = 0
+      await sender.send({ to: '919876543210', templateName: 'enrollment_approved', languageCode: 'en_US', params: ['Alan'] })
+      const noBtnBody = JSON.parse(String(calls[0]!.init.body))
+      check('no button component is sent when there is no buttonParam',
+        !noBtnBody.template.components.some((c: any) => c.type === 'button'), JSON.stringify(noBtnBody.template.components))
     } finally {
       globalThis.fetch = realFetch
     }
@@ -193,8 +220,15 @@ try {
   check('the immediate attempt already marked it sent (console sender in test mode)', enroll?.status === 'sent')
 
   await sendBookingConfirmedWhatsApp('919876543210', 'Priya', 'Live Q&A', 'Tue, 30 Sep', '7:00 PM')
-  const booking = await WhatsAppOutboxModel.findOne({ templateName: 'booking_confirmed' }).lean() as any
+  const booking = await WhatsAppOutboxModel.findOne({ templateName: 'booking_confirmed_v2' }).lean() as any
   check('sendBookingConfirmedWhatsApp queues its own template', !!booking)
+
+  await sendClassStartingSoonWhatsApp('919876543210', 'Live Q&A', '5', 'LIVECLASS_ABC')
+  const starting = await WhatsAppOutboxModel.findOne({ templateName: 'class_starting_soon' }).lean() as any
+  check('sendClassStartingSoonWhatsApp queues exactly the 2 BODY params the approved template expects',
+    JSON.stringify(starting?.params) === JSON.stringify(['Live Q&A', '5']), JSON.stringify(starting?.params))
+  check('and stores the live class id as buttonParam, not a 3rd body param',
+    starting?.buttonParam === 'LIVECLASS_ABC', starting?.buttonParam)
 
   section('K · a title with newlines/injection characters cannot corrupt a template param')
   await sendClassReminderTomorrowWhatsApp('919876543210', 'Live\n\n\nQ&A     Session\t\ttitle', 'Tomorrow at 7pm')

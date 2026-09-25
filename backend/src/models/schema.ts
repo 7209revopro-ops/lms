@@ -134,15 +134,6 @@ export interface IUser extends Document {
       dailySchedule?:       boolean
     }
   }
-  /* Explicit opt-IN for MARKETING-category WhatsApp messages (announcement
-     broadcasts). This is the opposite default from emailPrefs: Meta requires
-     clear consent before a business sends marketing-category templates, so
-     absent/false means "do not send" rather than "send unless silenced".
-     UTILITY-category sends (enrollment approved, booking confirmed, class
-     reminders) don't check this — they use the same implicit consent as the
-     equivalent email, since the student gave the phone number for exactly
-     this kind of account-related contact. */
-  whatsappMarketingOptIn?: boolean
   /* Per-day AI chat usage (L-09). `day` is the local calendar date in the
      app's timezone (Asia/Dubai), so the allowance resets at local midnight
      rather than at an arbitrary UTC hour. */
@@ -227,8 +218,6 @@ const UserSchema = new Schema<IUser>(
         dailySchedule:       { type: Boolean },
       },
     },
-    /* No default on purpose — see IUser.whatsappMarketingOptIn. Absent ⇒ don't send. */
-    whatsappMarketingOptIn: { type: Boolean },
     aiUsage:          { day: { type: String }, count: { type: Number, default: 0 } },
     customRoleId:   { type: Schema.Types.ObjectId, ref: 'Role' },
     organizationId: { type: Schema.Types.ObjectId, ref: 'Organization' },
@@ -2319,9 +2308,10 @@ export const EmailOutboxModel =
    `params` holds Meta's POSITIONAL template variables ({{1}}, {{2}}, …) in
    order — Meta's body component takes an ordered array, not named fields, so
    storing them as an ordered string[] matches exactly what gets replayed on
-   retry. `category` is stored for visibility only (UTILITY vs MARKETING vs
-   AUTHENTICATION) — it does not change delivery, only how the row reads in
-   an admin/ops query. */
+   retry. `category` is stored for visibility only — it does not change
+   delivery, only how the row reads in an admin/ops query. Every template
+   sent today is UTILITY (transactional, tied to an existing relationship);
+   there is no MARKETING or AUTHENTICATION sender. */
 export type WhatsAppOutboxStatus = 'pending' | 'sent' | 'failed'
 
 export interface IWhatsAppOutbox extends Document {
@@ -2330,7 +2320,11 @@ export interface IWhatsAppOutbox extends Document {
   templateName:  string
   languageCode:  string
   params:        string[]
-  category?:     'utility' | 'marketing' | 'authentication'
+  /* A URL-button template's own parameter — a SEPARATE component from the
+     body's, so it lives in its own field rather than getting tacked onto
+     `params`. See whatsapp.service.ts's WhatsAppTemplateMessage. */
+  buttonParam?:  string
+  category?:     'utility'
   status:        WhatsAppOutboxStatus
   attempts:      number
   nextAttemptAt: Date
@@ -2347,7 +2341,8 @@ const WhatsAppOutboxSchema = new Schema<IWhatsAppOutbox>(
     templateName:  { type: String, required: true },
     languageCode:  { type: String, required: true, default: 'en_US' },
     params:        [{ type: String }],
-    category:      { type: String, enum: ['utility', 'marketing', 'authentication'] },
+    buttonParam:   { type: String },
+    category:      { type: String, enum: ['utility'] },
     status:        { type: String, enum: ['pending', 'sent', 'failed'], default: 'pending', index: true },
     attempts:      { type: Number, default: 0 },
     nextAttemptAt: { type: Date, default: () => new Date() },

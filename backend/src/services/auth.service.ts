@@ -645,7 +645,6 @@ export class AuthService {
       bio:        string
       avatarUrl:  string
       websiteUrl: string
-      whatsappMarketingOptIn: boolean
     }>,
   ): Promise<SafeUser> {
     const data: Record<string, unknown> = {}
@@ -654,7 +653,6 @@ export class AuthService {
     if (input.bio        !== undefined) data['bio']        = input.bio
     if (input.avatarUrl  !== undefined) data['avatarUrl']  = input.avatarUrl
     if (input.websiteUrl !== undefined) data['websiteUrl'] = input.websiteUrl
-    if (input.whatsappMarketingOptIn !== undefined) data['whatsappMarketingOptIn'] = input.whatsappMarketingOptIn
 
     const updated = await this.userRepo.updateById(userId, data)
     if (!updated) throw new AuthError('USER_NOT_FOUND', 'Account not found.', 404)

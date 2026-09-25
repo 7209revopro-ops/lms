@@ -23,13 +23,22 @@ import { normalizeWhatsAppNumber } from '@/utils/normalizeWhatsAppNumber.ts'
 import { writeFile, mkdir } from 'fs/promises'
 import { join } from 'path'
 
-export type WhatsAppTemplateCategory = 'utility' | 'marketing' | 'authentication'
+export type WhatsAppTemplateCategory = 'utility'
 
 export interface WhatsAppTemplateMessage {
   to:           string        // digits-only MSISDN, already normalized
   templateName: string
   languageCode: string        // e.g. 'en_US'
-  params:       string[]      // positional {{1}}, {{2}}, … body variables
+  params:       string[]      // positional {{1}}, {{2}}, … BODY variables
+  /* A URL-type BUTTON's dynamic suffix — a template with a button carries
+     its OWN parameter, in its OWN component, entirely separate from the
+     body's. Meta rejects a message with the wrong param count per
+     component, not just the wrong total — sending the button's value as a
+     third body param (what this used to do) is exactly what produced
+     "(#132000) Number of parameters does not match the expected number of
+     params" against the real, approved class_starting_soon template.
+     Index 0 only: no template here has more than one button. */
+  buttonParam?: string
   category?:    WhatsAppTemplateCategory
 }
 
@@ -78,9 +87,14 @@ export class CreatyvotWhatsAppSender implements WhatsAppSender {
       template: {
         name: msg.templateName,
         language: { code: msg.languageCode },
-        components: msg.params.length > 0
-          ? [{ type: 'body', parameters: msg.params.map(text => ({ type: 'text', text })) }]
-          : [],
+        components: [
+          ...(msg.params.length > 0
+            ? [{ type: 'body', parameters: msg.params.map(text => ({ type: 'text', text })) }]
+            : []),
+          ...(msg.buttonParam
+            ? [{ type: 'button', sub_type: 'url', index: '0', parameters: [{ type: 'text', text: msg.buttonParam }] }]
+            : []),
+        ],
       },
     }
 
@@ -176,12 +190,13 @@ export function whatsappBackoffFor(attempts: number): number {
 
 /** Attempt one already-persisted row. Exported so the drain job reuses it. */
 export async function deliverWhatsAppOutboxRow(row: {
-  id: string; to: string; templateName: string; languageCode: string; params: string[]; attempts: number
+  id: string; to: string; templateName: string; languageCode: string; params: string[]; buttonParam?: string; attempts: number
 }): Promise<'sent' | 'retry' | 'failed'> {
   const { WhatsAppOutboxModel } = await import('@/models/schema.ts')
   try {
     const { waMessageId } = await rawSender.send({
-      to: row.to, templateName: row.templateName, languageCode: row.languageCode, params: row.params,
+      to: row.to, templateName: row.templateName, languageCode: row.languageCode,
+      params: row.params, buttonParam: row.buttonParam,
     })
     await WhatsAppOutboxModel.updateOne({ _id: row.id }, {
       $set: { status: 'sent', sentAt: new Date(), ...(waMessageId && { waMessageId }) }, $unset: { lastError: 1 },
@@ -218,7 +233,8 @@ function sanitiseParam(value: string): string {
 }
 
 interface SendOptions {
-  category?: WhatsAppTemplateCategory
+  category?:    WhatsAppTemplateCategory
+  buttonParam?: string
 }
 
 async function sendTemplate(
@@ -234,17 +250,19 @@ async function sendTemplate(
     return
   }
   const clean = params.map(sanitiseParam)
+  const cleanButtonParam = opts.buttonParam !== undefined ? sanitiseParam(opts.buttonParam) : undefined
 
   const { WhatsAppOutboxModel } = await import('@/models/schema.ts')
   /* Persist FIRST, same reasoning as the email outbox: if the process dies
      between here and the send, the drain cron picks the row up; if we sent
      first, there would be no record to retry from. */
   const row = await WhatsAppOutboxModel.create({
-    to: normalized, templateName, languageCode, params: clean, category: opts.category,
+    to: normalized, templateName, languageCode, params: clean, buttonParam: cleanButtonParam, category: opts.category,
   })
 
   await deliverWhatsAppOutboxRow({
-    id: String(row._id), to: normalized, templateName, languageCode, params: clean, attempts: 0,
+    id: String(row._id), to: normalized, templateName, languageCode,
+    params: clean, buttonParam: cleanButtonParam, attempts: 0,
   })
 }
 
@@ -259,7 +277,7 @@ export async function sendEnrollmentApprovedWhatsApp(
 export async function sendBookingConfirmedWhatsApp(
   to: string | null | undefined, name: string, sessionTitle: string, dateStr: string, timeStr: string,
 ): Promise<void> {
-  await sendTemplate(to, 'booking_confirmed', [name, sessionTitle, dateStr, timeStr], { category: 'utility' })
+  await sendTemplate(to, 'booking_confirmed_v2', [name, sessionTitle, dateStr, timeStr], { category: 'utility' })
 }
 
 export async function sendClassReminderTomorrowWhatsApp(
@@ -268,19 +286,14 @@ export async function sendClassReminderTomorrowWhatsApp(
   await sendTemplate(to, 'class_reminder_tomorrow', [sessionTitle, whenStr], { category: 'utility' })
 }
 
-/* joinUrl is inlined as plain body text rather than a template BUTTON
-   component: Meta buttons need their own component in the payload (a
-   separate parameter array from the body's), which WhatsAppOutboxModel's
-   flat params[] doesn't model, and WhatsApp auto-links a bare http(s) URL in
-   body text anyway — simplest thing that works for phase 1. */
+/* The approved template's BODY takes exactly 2 params (title, minutes) and
+   its URL BUTTON takes its own, separate one — the live class id, appended
+   to the button's pre-registered base URL by Meta itself. Passing it as a
+   third body param (this used to) is exactly what produced Meta's real
+   "(#132000) Number of parameters does not match the expected number of
+   params" — the two components are validated independently. */
 export async function sendClassStartingSoonWhatsApp(
-  to: string | null | undefined, sessionTitle: string, minutesLeft: string, joinUrl: string,
+  to: string | null | undefined, sessionTitle: string, minutesLeft: string, liveClassId: string,
 ): Promise<void> {
-  await sendTemplate(to, 'class_starting_soon', [sessionTitle, minutesLeft, joinUrl], { category: 'utility' })
-}
-
-export async function sendAnnouncementWhatsApp(
-  to: string | null | undefined, title: string, description: string,
-): Promise<void> {
-  await sendTemplate(to, 'announcement_broadcast', [title, description], { category: 'marketing' })
+  await sendTemplate(to, 'class_starting_soon', [sessionTitle, minutesLeft], { category: 'utility', buttonParam: liveClassId })
 }

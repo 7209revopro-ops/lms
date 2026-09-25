@@ -54,10 +54,6 @@ export interface CurrentUser {
   signupType?:    'express' | 'full'
   category?:      '4x-trading' | 'digital-marketing' | 'ai' | 'jura'
   organizationId?: string
-  /** Explicit opt-in for MARKETING-category WhatsApp messages (announcement
-   *  broadcasts). Absent/false = not opted in; utility-category WhatsApp
-   *  messages (enrollment, bookings, reminders) don't check this. */
-  whatsappMarketingOptIn?: boolean
   enrollmentStatus?:            'pending' | 'approved' | 'cancelled' | 'rejected'
   enrollmentCancellationReason?: string
   rejectionReason?:             string
@@ -91,7 +87,7 @@ export function useCurrentUser() {
 export function useUpdateProfile() {
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: async (input: Partial<Pick<CurrentUser, 'name' | 'headline' | 'bio' | 'avatarUrl' | 'websiteUrl' | 'whatsappMarketingOptIn'>>) => {
+    mutationFn: async (input: Partial<Pick<CurrentUser, 'name' | 'headline' | 'bio' | 'avatarUrl' | 'websiteUrl'>>) => {
       const data = await apiPatch<{ user: CurrentUser }>('/auth/me', input)
       return data.user
     },
