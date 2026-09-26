@@ -11,7 +11,11 @@ import Spinner from '@/components/ui/Spinner'
 
 /* ─── Validation schema ─────────────────────────── */
 const loginSchema = z.object({
-  email: z.string().min(1, 'Email is required').email('Enter a valid email'),
+  /* .trim() before .email(): a pasted address carries whitespace more often
+     than a typed one, and without this it is refused as "invalid email"
+     instead of quietly accepted the way the backend already accepts it
+     (backend/src/routes/auth.routes.ts's loginSchema does the same). */
+  email: z.string().trim().min(1, 'Email is required').email('Enter a valid email'),
   password: z.string().min(6, 'Password must be at least 6 characters'),
   remember: z.boolean().optional(),
 })
@@ -525,7 +529,15 @@ export function LoginForm({ onSwitch }: LoginFormProps) {
               {...register('email')}
               type="email"
               placeholder="you@example.com"
-              autoComplete="email"
+              /* "username", not "email": this is the value the WHATWG spec and
+                 every major password manager key an autofill on, pairing it
+                 with the current-password field below. Mismatched hints (or
+                 none, as admin's form had) push browsers onto name/id
+                 heuristics instead — the exact ambiguity that lets a stale
+                 saved password autofill instead of the current one, which is
+                 what "worked correct credentials, reload fixed it" reports
+                 trace back to. */
+              autoComplete="username"
               className="w-full rounded-xl py-3 pl-10 pr-4 text-sm outline-none transition-all"
               style={{
                 background: errors.email ? '#FEF2F2' : 'var(--color-bg-surface)',

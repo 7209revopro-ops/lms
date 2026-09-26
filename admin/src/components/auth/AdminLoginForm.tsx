@@ -12,7 +12,11 @@ import { api } from '@/lib/axios'
 import Spinner from '@/components/ui/Spinner'
 
 const schema = z.object({
-  email:    z.string().email('Enter a valid email'),
+  /* .trim() before .email(): a pasted address carries whitespace more often
+     than a typed one, and without this it is refused as "invalid email"
+     instead of quietly accepted the way the backend already accepts it
+     (backend/src/routes/auth.routes.ts's loginSchema does the same). */
+  email:    z.string().trim().email('Enter a valid email'),
   password: z.string().min(1, 'Password is required'),
 })
 type Values = z.infer<typeof schema>
@@ -272,6 +276,15 @@ export function AdminLoginForm() {
             <input
               {...register('email')}
               type="email"
+              /* "username", not "email": this is the value the WHATWG spec and
+                 every major password manager key an autofill on. This form had
+                 no autocomplete hint at all, so Chrome/1Password fell back to
+                 name/id/placeholder heuristics to guess which saved credential
+                 pairs with the password field below — the exact ambiguity that
+                 lets a stale saved password get autofilled instead of the
+                 current one, which is what "worked correct credentials,
+                 reload fixed it" reports trace back to. */
+              autoComplete="username"
               placeholder="you@deltagroups.ae"
               className="w-full rounded-xl py-3 pl-10 pr-4 text-sm text-white outline-none transition-all placeholder:text-white/25"
               style={{
@@ -317,6 +330,7 @@ export function AdminLoginForm() {
             <input
               {...register('password')}
               type={showPw ? 'text' : 'password'}
+              autoComplete="current-password"
               placeholder="Enter your password"
               className="w-full rounded-xl py-3 pl-10 pr-11 text-sm text-white outline-none transition-all placeholder:text-white/25"
               style={{
