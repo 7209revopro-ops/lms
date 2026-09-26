@@ -29,6 +29,7 @@ const adminNavItems = [
   { label: 'Recordings',     href: '/recordings',        icon: Film },
   { label: 'Bookings',       href: '/bookings',          icon: CalendarDays },
   { label: 'Assignments',    href: '/assignments',       icon: ClipboardCheck },
+  { label: 'Support',        href: '/support',           icon: LifeBuoy },
   { label: 'Exams',          href: '/exams',             icon: FileCheck2 },
   { label: 'Students',       href: '/students',          icon: Users },
   { label: 'Devices',        href: '/devices',           icon: MonitorSmartphone },
@@ -41,7 +42,6 @@ const adminNavItems = [
   { label: 'Announcements',  href: '/announcements',     icon: Megaphone },
   { label: 'Coupons',        href: '/coupons',           icon: Ticket },
   { label: 'Reports',        href: '/reports',           icon: BarChart3 },
-  { label: 'Support',        href: '/support',           icon: LifeBuoy },
   { label: 'Audit Logs',     href: '/audit-logs',        icon: ClipboardList },
 ]
 
@@ -60,8 +60,8 @@ const scopedAdminNavItems = [
   { label: 'Recordings',       href: '/recordings',             icon: Film },
   { label: 'Bookings',         href: '/bookings',               icon: CalendarDays },
   { label: 'Assignments',      href: '/assignments',            icon: ClipboardCheck },
-  { label: 'Exams',            href: '/exams',                  icon: FileCheck2 },
   { label: 'Support',          href: '/support',                icon: LifeBuoy },
+  { label: 'Exams',            href: '/exams',                  icon: FileCheck2 },
 ]
 
 /* ── Instructor-restricted nav (view users + own content) ─ */
