@@ -84,8 +84,14 @@ async function proxy(req: NextRequest): Promise<NextResponse> {
      A dedicated header + shared secret is the only relay that survives the hop:
      nginx rewrites X-Real-IP and appends to X-Forwarded-For, and any header a
      browser can set is forgeable by anyone calling the API directly. With
-     PROXY_SHARED_SECRET unset nothing is sent and behaviour is unchanged. */
-  const proxySecret = process.env.PROXY_SHARED_SECRET
+     PROXY_SHARED_SECRET unset nothing is sent and behaviour is unchanged.
+
+     .trim() matches the backend's own resolution (rateLimit.middleware.ts) —
+     without it, a trailing space or newline pasted into just this app's
+     Vercel env var silently fails the backend's timingSafeEqual, the relay
+     looks "never proven," and every visitor to this app collapses onto one
+     shared rate-limit bucket. */
+  const proxySecret = process.env.PROXY_SHARED_SECRET?.trim()
   if (proxySecret) {
     const clientIp = pickClientIp(req.headers)
     if (clientIp) {

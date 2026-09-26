@@ -110,6 +110,11 @@ export interface IUser extends Document {
   /* Account safety */
   failedLoginAttempts: number
   lockedUntil?:  Date
+  /* When the most recent failed login was recorded. incrementFailedLogin
+     uses this to treat failures more than FAILURE_WINDOW_MS apart as an
+     unrelated new sequence rather than adding to a lifetime tally — see the
+     comment there for the incident this fixes. */
+  lastFailedLoginAt?: Date
   /* Timestamp the last admin password-reset mail was issued — backs an atomic
      per-account throttle so concurrent forgot-password bursts can't flood a
      staff inbox. */
@@ -199,6 +204,7 @@ const UserSchema = new Schema<IUser>(
     websiteUrl:   { type: String },
     failedLoginAttempts: { type: Number, default: 0 },
     lockedUntil:  { type: Date },
+    lastFailedLoginAt: { type: Date },
     /* select:false — internal throttle timestamp, never surfaced in a default
        query (the toJSON transform is a deny-list, so an un-hidden field would
        ride along in e.g. GET /admin/users). claimResetMailSlot filters/writes it

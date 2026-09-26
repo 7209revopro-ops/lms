@@ -358,6 +358,52 @@ section('I. Signing in with an address pasted with whitespace')
   check('I3 forgot-password accepts it too', forgot.status === 200, `status=${forgot.status}`)
 }
 
+/* ═════════════════ J — the rolling failure window (M-17) ═════════════════
+   Reported symptom: "invalid credentials, try again and again, then locked
+   out for 15 minutes" — hitting random users, not every time. Root cause:
+   failedLoginAttempts used to be a lifetime counter with no decay, so a
+   handful of UNRELATED failures spread across days (stale autofill, a
+   typo, a second tab) could silently sit at 3-4, and one more ordinary
+   miss — or even the next CORRECT password — tripped a lock that looked
+   like it came from nowhere. */
+section('J. Stale failures do not silently combine into a lockout')
+{
+  const PW = 'RollingWindow#9'
+  await addInstructorViaPanel('stale@t.local', PW)
+
+  // Three failures "long ago" — simulates the slow accumulation.
+  for (let i = 0; i < 3; i++) await signIn('stale@t.local', 'Wrong1')
+  await UserModel.updateOne(
+    { email: 'stale@t.local' },
+    { $set: { lastFailedLoginAt: new Date(Date.now() - 45 * 60 * 1000) } }, // 45 min ago
+  )
+  const beforeReset = await UserModel.findOne({ email: 'stale@t.local' }).lean() as any
+  check('J1 three stale failures are on the row before the fix would kick in',
+    beforeReset?.failedLoginAttempts === 3, `attempts=${beforeReset?.failedLoginAttempts}`)
+
+  // One more failure, well outside the 30-min window — should RESET to 1, not reach 4.
+  await signIn('stale@t.local', 'Wrong2')
+  const afterOneMore = await UserModel.findOne({ email: 'stale@t.local' }).lean() as any
+  check('J2 a failure outside the window resets the counter instead of incrementing',
+    afterOneMore?.failedLoginAttempts === 1, `attempts=${afterOneMore?.failedLoginAttempts}`)
+
+  // The actual, correct password must now succeed — this is the exact bug:
+  // before the fix, three old misses + one new one would have read as 4,
+  // and the pattern above (a burst of retries) would tip it to a lockout.
+  const real = await signIn('stale@t.local', PW)
+  check('J3 the correct password now signs in — no surprise lockout',
+    real.status === 200, `status=${real.status} code=${real.code}`)
+
+  // Contrast: failures WITHIN the window still combine and still lock —
+  // the actual brute-force protection must be unchanged.
+  await addInstructorViaPanel('burst@t.local', 'Burst#2026pw')
+  for (let i = 0; i < 5; i++) await signIn('burst@t.local', 'WrongBurst')
+  const burstLocked = await signIn('burst@t.local', 'Burst#2026pw')
+  check('J4 a real burst (all within the window) still locks the account',
+    burstLocked.status === 423 && burstLocked.code === 'ACCOUNT_LOCKED',
+    `status=${burstLocked.status} code=${burstLocked.code}`)
+}
+
 } catch (err) {
   fail++
   lines.push(`  FAIL  suite threw — ${(err as Error).message}\n${(err as Error).stack}`)

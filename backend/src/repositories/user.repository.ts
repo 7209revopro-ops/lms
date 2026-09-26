@@ -60,18 +60,42 @@ export class UserRepository extends BaseRepository<IUser> {
   async touchLastLogin(id: string): Promise<void> {
     await UserModel.findByIdAndUpdate(id, {
       $set:   { lastLoginAt: new Date(), failedLoginAttempts: 0 },
-      $unset: { lockedUntil: 1 },
+      $unset: { lockedUntil: 1, lastFailedLoginAt: 1 },
     }).exec()
   }
 
   /* ── Login-lockout helpers ──────────────────────── */
+  /* `failedLoginAttempts` used to be a lifetime counter — nothing ever
+     decremented it except a successful login or a password change. A
+     student could pick up occasional, unrelated failures over days (a stale
+     autofilled password, a caps-lock typo, a second tab silently retrying an
+     old credential) with no visible symptom each time, and then one more
+     ordinary mistake — or even their next CORRECT password, if it landed
+     right after the 5th failure was recorded — tripped a 15-minute lock out
+     of nowhere. That reproduced exactly as "random users randomly locked
+     out": fully deterministic per account, but each account's hidden
+     failure history was invisible to everyone.
+
+     FAILURE_WINDOW_MS treats failures more than 30 minutes apart as an
+     unrelated new sequence: the counter resets to 1 instead of incrementing.
+     A genuine brute-force burst (5 wrong passwords within 30 minutes) still
+     locks exactly as before — this only stops unrelated, spread-out misses
+     from silently combining into one. */
   async incrementFailedLogin(id: string): Promise<{ attempts: number; lockedUntil?: Date }> {
-    const MAX_ATTEMPTS  = 5
-    const LOCK_DURATION = 15 * 60 * 1000  // 15 min
+    const MAX_ATTEMPTS     = 5
+    const LOCK_DURATION    = 15 * 60 * 1000  // 15 min
+    const FAILURE_WINDOW_MS = 30 * 60 * 1000  // 30 min
+
+    const before = await UserModel.findById(id).select('lastFailedLoginAt').lean()
+    const now = new Date()
+    const outsideWindow = !!before?.lastFailedLoginAt
+      && now.getTime() - new Date(before.lastFailedLoginAt).getTime() > FAILURE_WINDOW_MS
 
     const updated = await UserModel.findByIdAndUpdate(
       id,
-      { $inc: { failedLoginAttempts: 1 } },
+      outsideWindow
+        ? { $set: { failedLoginAttempts: 1, lastFailedLoginAt: now } }
+        : { $inc: { failedLoginAttempts: 1 }, $set: { lastFailedLoginAt: now } },
       { new: true },
     ).exec()
     if (!updated) return { attempts: 0 }
@@ -94,7 +118,7 @@ export class UserRepository extends BaseRepository<IUser> {
   async updatePasswordHash(id: string, passwordHash: string): Promise<void> {
     await UserModel.findByIdAndUpdate(id, {
       $set:   { passwordHash, failedLoginAttempts: 0 },
-      $unset: { lockedUntil: 1 },
+      $unset: { lockedUntil: 1, lastFailedLoginAt: 1 },
     }).exec()
   }
 
