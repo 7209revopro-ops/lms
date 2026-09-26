@@ -7,12 +7,25 @@ import {
   FileText, X, ChevronDown, Search, MapPin, Calendar, Briefcase, CreditCard,
   Clock, CheckCircle2, XCircle, RefreshCw, Eye, Zap, Shield,
 } from 'lucide-react'
+import { isValidPhoneNumber } from 'libphonenumber-js'
 import { api } from '@/lib/axios'
 import { describeTransportError } from '@/lib/apiResponse'
 import { useCurrentUser, useCompleteRegistration } from '@/lib/api/user'
 import Spinner from '@/components/ui/Spinner'
 import { useDocumentUrl } from '@/lib/api/documents'
 import { PROGRAMS, PROGRAM_GROUPS, programLabel } from '@/lib/programs'
+
+/* Students type a local-looking number with the country code but no "+"
+   (971553646039, not +971553646039) far more often than they type the "+" a
+   phone keypad buries behind a long-press on "0". Rejecting that as "missing
+   country code" is technically correct and useless — the digits are right
+   there. Try the "+" the student left out before giving up on the number. */
+function normalizePhone(raw: string): { value: string; valid: boolean } {
+  const trimmed = raw.trim()
+  if (!trimmed) return { value: trimmed, valid: false }
+  const withPlus = trimmed.startsWith('+') ? trimmed : `+${trimmed.replace(/\D/g, '')}`
+  return { value: withPlus, valid: isValidPhoneNumber(withPlus) }
+}
 
 /* ── Constants ─────────────────────────────────────── */
 const COUNTRY_NAMES = [
@@ -612,14 +625,17 @@ export function RequestSection() {
       else if (/\d/.test(nameTrimmed))
         e['name'] = 'Name cannot contain numbers'
 
-      /* Phone — must include country code (+X…) and be 7-15 digits */
-      const phoneDigits = form.phone.replace(/\D/g, '')
-      if (!form.phone.trim())
+      /* Phone — validated against the real numbering plan for its country
+         (libphonenumber-js), not a generic digit-count guess. A student who
+         typed the country code without the leading "+" (971553646039) gets
+         it added for them rather than rejected — see normalizePhone(). */
+      if (!form.phone.trim()) {
         e['phone'] = 'Phone number is required'
-      else if (!form.phone.trim().startsWith('+'))
-        e['phone'] = 'Include country code (e.g. +971 50 123 4567)'
-      else if (phoneDigits.length < 7 || phoneDigits.length > 15)
-        e['phone'] = 'Phone must be 7–15 digits including country code'
+      } else {
+        const normalized = normalizePhone(form.phone)
+        if (!normalized.valid) e['phone'] = 'Enter a valid phone number with country code (e.g. +971 50 123 4567)'
+        else if (normalized.value !== form.phone) set('phone', normalized.value)
+      }
 
       /* Emergency contact — optional; if provided must be meaningful */
       if (form.emergencyContact.trim() && form.emergencyContact.trim().length < 5)
@@ -1036,11 +1052,14 @@ export function RequestSection() {
                     maxLength={20}
                     hint="Include country code (e.g. +971, +91, +44)"
                     onBlur={() => {
-                      const digits = form.phone.replace(/\D/g, '')
-                      if (form.phone && !form.phone.trim().startsWith('+'))
-                        setErrors(e => ({ ...e, phone: 'Include country code (e.g. +971 50 123 4567)' }))
-                      else if (form.phone && (digits.length < 7 || digits.length > 15))
-                        setErrors(e => ({ ...e, phone: 'Phone must be 7–15 digits including country code' }))
+                      if (!form.phone) return
+                      const normalized = normalizePhone(form.phone)
+                      if (!normalized.valid) {
+                        setErrors(e => ({ ...e, phone: 'Enter a valid phone number with country code (e.g. +971 50 123 4567)' }))
+                      } else {
+                        if (normalized.value !== form.phone) set('phone', normalized.value)
+                        clearError('phone')
+                      }
                     }}
                   />
                 </Field>
