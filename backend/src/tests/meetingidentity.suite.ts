@@ -131,6 +131,107 @@ section('The switch flips the whole product, not one call site')
     parsed.noName === 'basil@delta.test', String(parsed.noName))
 }
 
+/* ── The switch, through the REAL join path, not just the helper ──────────
+   The section above proves MEETING_DISPLAY_NAME=name flips
+   meetingDisplayName() in isolation. It does not prove the thing a person
+   actually joins through — classHandoff.service's issueHandoff/exchangeHandoff
+   — reads the switch at all, or reads it correctly for BOTH the student path
+   (name looked up fresh from the DB) and the host path this suite's own
+   history names as the one that drifted (liveClasses.routes.ts:host-ticket
+   used to hand the helper an email and nothing else, so it showed an email in
+   every mode — invisible in 'email' mode because that IS the answer, and only
+   surfaces once an operator turns the switch on). The default-mode end-to-end
+   block below cannot catch that class of bug either: in 'email' mode the
+   ticket reads the same whether or not a name was ever supplied. Only running
+   the real service with the switch ON proves the name was actually threaded
+   through, not just that the argument was well-formed.
+
+   A second spawned child, for the same reason as the first: the mode is read
+   once at import time, and this process already imported the module in
+   'email' mode above. Its own throwaway database, distinct from the main
+   block's, so the two can never race each other. */
+section('The switch, proven through the real service, not the helper alone')
+{
+  const { spawnSync } = await import('node:child_process')
+  const { writeFileSync, unlinkSync } = await import('node:fs')
+  const { join } = await import('node:path')
+  const { generateKeyPairSync } = await import('node:crypto')
+
+  const { privateKey } = generateKeyPairSync('ed25519')
+  const childPrivateKey = Buffer.from(
+    privateKey.export({ type: 'pkcs8', format: 'pem' }) as string,
+  ).toString('base64')
+
+  /* Inside src/, not a system tmpdir: '@/…' only resolves against THIS
+     project's tsconfig paths ('@/*' → 'src/*'), and bun finds that config by
+     walking up from the file it runs — a tmpdir has no tsconfig.json in its
+     ancestry at all. classHandoff.service.ts imports several more '@/…'
+     modules internally, so this has to be a real, if temporary, member of the
+     project. Removed in the finally below, success or failure. */
+  const probe = join(process.cwd(), 'src', 'scripts', `zz-meetingname-probe-${process.pid}.ts`)
+  const modelsPath  = '@/models/schema.ts'
+  const handoffPath = '@/services/classHandoff.service.ts'
+
+  writeFileSync(probe, [
+    `import '@/config/timezone.ts'`,
+    `const mongoose = (await import('mongoose')).default`,
+    `mongoose.set('autoIndex', false)`,
+    `await mongoose.connect(process.env.DATABASE_URL)`,
+    `if (mongoose.connection.db.databaseName !== 'lms_meetingidentity_suite_namemode') { console.error('REFUSING - not the throwaway database'); process.exit(1) }`,
+    `await mongoose.connection.db.dropDatabase()`,
+    `const { UserModel, OrganizationModel, CourseModel, LiveClassModel, EnrollmentModel, ClassBookingModel } = await import('${modelsPath}')`,
+    `const { issueHandoff, exchangeHandoff } = await import('${handoffPath}')`,
+    `const claimsOf = (jwt) => JSON.parse(Buffer.from(jwt.split('.')[1], 'base64url').toString('utf8'))`,
+    `const org = await OrganizationModel.create({ name: 'DXB', slug: 'dubai', currency: 'AED', paymentGateway: 'abzer' })`,
+    `const teacher = await UserModel.create({ name: 'Basil Mohammed', email: 'instructor@delta.test', passwordHash: 'x', role: 'instructor', isActive: true, isVerified: true, organizationId: org._id })`,
+    `const course = await CourseModel.create({ title: 'c', slug: 'c-nm-' + Date.now(), description: 'x', price: 0, isFree: true, status: 'published', language: 'English', organizationId: org._id, instructorId: teacher._id, category: 'ai', program: 'ai' })`,
+    `const live = await LiveClassModel.create({ courseId: course._id, instructorId: teacher._id, title: 'class', type: 'internal', provider: 'livekit', scheduledStart: new Date(), durationMins: 60, organizationId: org._id, sessionCapacity: 10, bookedCount: 1 })`,
+    `const pupil = await UserModel.create({ name: 'Zuriel Aloysius', email: 'student@delta.test', passwordHash: 'x', role: 'student', isActive: true, isVerified: true, organizationId: org._id, enrollmentStatus: 'approved' })`,
+    `await EnrollmentModel.create({ userId: pupil._id, courseId: course._id, status: 'active' })`,
+    `await ClassBookingModel.create({ userId: pupil._id, liveClassId: live._id, status: 'booked' })`,
+    `const hostOut = await exchangeHandoff((await issueHandoff(String(live._id), String(teacher._id), 'host')).code)`,
+    `const studentOut = await exchangeHandoff((await issueHandoff(String(live._id), String(pupil._id), 'student')).code)`,
+    /* Marker-prefixed, not "the last line of stdout": exchangeHandoff logs
+       through pino, which writes its own INFO/WARN lines to stdout on a
+       timer, arriving AFTER this synchronous console.log — the earlier
+       version of this probe took the last line and silently parsed one of
+       those instead, reading every check below as "got undefined". */
+    `console.log('RESULT_JSON:' + JSON.stringify({ hostName: claimsOf(hostOut.ticket).name, studentName: claimsOf(studentOut.ticket).name }))`,
+    `await mongoose.connection.db.dropDatabase()`,
+    `await mongoose.disconnect()`,
+  ].join('\n'))
+
+  try {
+    const proc = spawnSync(process.execPath, [probe], {
+      env: {
+        ...process.env,
+        MEETING_DISPLAY_NAME:          'name',
+        DATABASE_URL:                  'mongodb://localhost:27017/lms_meetingidentity_suite_namemode',
+        INTEGRATION_JWT_PRIVATE_KEY:   childPrivateKey,
+        INTEGRATION_JWT_KID:           'suite-key-namemode',
+      },
+      encoding: 'utf8',
+    })
+    const marker = String(proc.stdout ?? '').split('\n').find(l => l.startsWith('RESULT_JSON:'))
+    let parsed: any = {}
+    try { parsed = JSON.parse((marker ?? '').slice('RESULT_JSON:'.length) || '{}') }
+    catch { /* reported below, empty object fails every check */ }
+
+    check('with the switch on, the HOST ticket carries their real LMS name',
+      parsed.hostName === 'Basil Mohammed',
+      `got ${JSON.stringify(parsed.hostName)} — stderr: ${String(proc.stderr ?? '').slice(0, 500)}`)
+    check('not their email, which is the mode-off answer',
+      parsed.hostName !== 'instructor@delta.test', String(parsed.hostName))
+    check('and the STUDENT ticket carries their real LMS name too',
+      parsed.studentName === 'Zuriel Aloysius',
+      `got ${JSON.stringify(parsed.studentName)} — stderr: ${String(proc.stderr ?? '').slice(0, 500)}`)
+  } finally {
+    /* Success or failure, this is a temporary member of src/ and must not
+       survive the run. */
+    try { unlinkSync(probe) } catch { /* never written, or already gone */ }
+  }
+}
+
 /* ===============================================================
    AND NOW THE PATH A PERSON ACTUALLY TAKES.
 

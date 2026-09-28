@@ -260,12 +260,28 @@ router.post('/:id/host-ticket', authenticateAny, injectCategoryScope, async (req
         res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Live class not found' } }); return
       }
 
+      /* THE GAP THAT UNDID THE ONE-RULE FIX.
+         meetingDisplayName() was built precisely so every tile in a room obeys
+         one switch — MEETING_DISPLAY_NAME — instead of each caller deciding for
+         itself. This route still decided for itself: it never had a name to
+         hand the helper, only req.user.email off the JWT, so it called
+         meetingDisplayName({ email }) with no `name` key at all. In 'email' mode
+         that is invisible, because email is exactly what gets shown anyway —
+         which is why nothing caught it. The moment an operator sets
+         MEETING_DISPLAY_NAME=name to show real names, every OTHER join path
+         (join, join-ticket, the handoff service) starts reading `name` from the
+         DB right next to `email`, already fetched — and this one path alone
+         kept showing the instructor's and every admin observer's email, because
+         it never looked. Fetched here the same way its three siblings already
+         do. */
+      const { UserModel } = await import('@/models/schema.ts')
+      const hostMe = await UserModel.findById(req.user!.id).select('name').lean() as { name?: string } | null
+
       const minted = await mintHostTicket(String(req.params['id'] ?? ''), {
         userId: req.user!.id,
-        /* The instructor's own identity, by the one rule — see
-           utils/meetingIdentity.ts. req.user carries no display name, and the
-           email is what the default mode wants anyway. */
-        name:   meetingDisplayName({ email: req.user!.email }, 'Instructor'),
+        /* The instructor's/admin observer's own identity, by the one rule —
+           see utils/meetingIdentity.ts. */
+        name:   meetingDisplayName({ name: hostMe?.name, email: req.user!.email }, 'Instructor'),
         email:  req.user!.email,
         role:   req.user!.role,
         ...(hostCaller.org ? { organizationId: hostCaller.org } : {}),
