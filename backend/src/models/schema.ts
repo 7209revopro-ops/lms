@@ -172,6 +172,19 @@ export interface IUser extends Document {
   fullRegistrationSubmittedAt?: Date
   /* Enrollment application form data */
   enrollmentApplication?: IEnrollmentApplication
+  /* Sent on to Tetra Commission — see services/commissionStudents.service.ts */
+  commissionSync?: {
+    state?:         'pending' | 'sent' | 'failed' | 'skipped'
+    attempts?:      number
+    nextAttemptAt?: Date
+    lastError?:     string
+    studentCode?:   string
+    team?:          string
+    mentorName?:    string
+    alreadyThere?:  boolean
+    reason?:        string
+    sentAt?:        Date
+  }
   /* Meta */
   lastLoginAt?:  Date
   createdAt:     Date
@@ -279,6 +292,21 @@ const UserSchema = new Schema<IUser>(
         paymentMethod:      { type: String },
       }, { _id: false }),
       default: undefined,
+    },
+    /* Where this student stands with Tetra Commission, the commission portal.
+       Written only by the job that sends new students there; `skipped` is a
+       student finance enrolled, whom finance sends itself. */
+    commissionSync: {
+      state:         { type: String, enum: ['pending', 'sent', 'failed', 'skipped'] },
+      attempts:      { type: Number },
+      nextAttemptAt: { type: Date },
+      lastError:     { type: String },
+      studentCode:   { type: String },
+      team:          { type: String },
+      mentorName:    { type: String },
+      alreadyThere:  { type: Boolean },
+      reason:        { type: String },
+      sentAt:        { type: Date },
     },
   },
   baseSchemaOptions,
