@@ -7,6 +7,7 @@ import { orgTimeZone, setActiveTimeZone } from '@/lib/timezone'   // side effect
 import { useCurrentUser } from '@/lib/api/user'
 import { useMyOrganization } from '@/lib/currency'
 import { useOrgStore } from '@/store/org.store'
+import { useImpersonationStore } from '@/store/impersonation.store'
 import { PUBLIC_PATHS } from '@/lib/publicPaths'
 import { DevtoolsGuard } from '@/components/security/DevtoolsGuard'
 import { ContextMenuGuard } from '@/components/security/ContextMenuGuard'
@@ -40,48 +41,69 @@ function TimezoneScope({ children }: { children: React.ReactNode }) {
   return <div key={tz} style={{ display: 'contents' }}>{children}</div>
 }
 
-/* Refetches every admin-scoped query the instant the org switcher changes —
-   no page refresh needed.
+/* Refetches every cached query the instant the org switcher OR impersonation
+   changes — no page refresh needed, for either one.
 
-   Before this, AdminTopbar's switcher did exactly one thing: `setOrg(...)` on
-   the Zustand store. That store is read fresh by the axios interceptor on
-   every NEW request (src/lib/axios.ts), so a page opened after the switch was
-   always correct — but nothing told React Query the tenant had changed, so
-   every screen already on the page (courses, students, live classes, the
-   dashboard tiles) kept showing whatever it had cached from the OLD org until
-   the admin manually reloaded the tab. staleTime is 30s, so even a remount
-   inside that window would have served the stale cache straight back rather
-   than asking the server again.
+   TWO SIGNALS, THE SAME PROBLEM. AdminTopbar's org switcher does exactly one
+   thing on click: `setOrg(...)` on a Zustand store. Starting or ending
+   impersonation does exactly one thing too: `startImpersonation(...)` /
+   `endImpersonation()` on a DIFFERENT Zustand store. Both stores are read
+   fresh by the axios interceptor on every NEW request (src/lib/axios.ts) — as
+   the X-Organization-Id header and the impersonation Bearer token,
+   respectively — so a page opened after either action was always correct.
+   Nothing told React Query that the identity behind the browser tab had
+   changed, so every screen already open kept showing whatever it had cached
+   from BEFORE — the old org's courses, or the super admin's own name and role
+   while a "Viewing as [student]" banner sat right above it — until the admin
+   manually reloaded the tab. staleTime is 30s, so even a remount inside that
+   window (TimezoneScope below does exactly this on an org change) served the
+   stale cache straight back rather than asking the server again.
 
-   The fix is the one thing every admin query already has in common:
-   CLAUDE.md's own documented convention is that every admin query key is
-   namespaced ['admin', ...] specifically so it can never collide with the
-   client app's ['courses', ...] keys if the two ever share a browser tab —
-   and that same prefix is what makes ONE invalidateQueries call enough. React
-   Query matches by prefix, so ['admin'] reaches every admin-scoped query key
-   in the app (verified: no live query anywhere is registered outside that
-   prefix) without this file having to know any of their names, and without
-   ever touching the super admin's own identity query (useCurrentUser, which
-   does not start with 'admin' and does not depend on which org is selected).
+   ONE invalidateQueries CALL, WITH NO FILTER, NOT A PREFIX LIST. The first
+   version of this fix invalidated only queryKey: ['admin'], reasoning that
+   every admin query is namespaced that way (CLAUDE.md's own documented
+   convention, so the client app's ['courses', ...] keys can never collide
+   with this app's if the two ever share a browser tab). That was true and
+   remains true for course/student/live-class/booking data — but it missed
+   two real keys outside that prefix the moment impersonation was added to
+   the same problem:
+     · ['auth', 'me'] (useCurrentUser) — genuinely a DIFFERENT person's
+       profile while impersonating: GET /admin/auth/me resolves req.user.id
+       from the Bearer token's subject, so it returns the impersonated
+       account's own name and role. AdminTopbar reads this to decide
+       `isSuperAdmin`, which gates whether the org switcher renders at all —
+       so a stale identity query is not cosmetic, it can leave a control on
+       screen that the backend would now refuse.
+     · ['audit-logs', filter] — org-scoped admin data that simply never got
+       the 'admin' prefix.
+   A hand-maintained prefix list is exactly the kind of thing that silently
+   rots as the app grows; the next new query key is one omission away from
+   the same bug. An unfiltered invalidateQueries() cannot miss a straggler,
+   ever, and costs nothing extra to maintain as queries are added.
 
    invalidateQueries' default behaviour is exactly right and is left alone:
-   queries a mounted screen is actively showing refetch immediately: anything
-   cached but not currently on screen is only marked stale, and picks up the
-   new org the next time it is opened, rather than firing a burst of requests
-   for tabs nobody is looking at. */
-function OrgScopedQueries() {
-  const queryClient  = useQueryClient()
-  const activeOrgId  = useOrgStore(s => s.activeOrgId)
+   only queries a mounted screen is ACTIVELY showing refetch immediately —
+   which is bounded by whatever that one screen renders, not by the app's
+   whole query surface. Anything cached but not currently on screen is only
+   marked stale, and picks up the new org or identity the next time it is
+   opened, rather than firing a burst of requests for tabs nobody is looking
+   at. */
+function ScopedQueriesInvalidator() {
+  const queryClient        = useQueryClient()
+  const activeOrgId        = useOrgStore(s => s.activeOrgId)
+  const impersonationToken = useImpersonationStore(s => s.token)
   /* Skip the FIRST run. On initial load there is nothing cached yet — the
-     very first fetch of everything already carries whichever org the
-     switcher opened on — so invalidating then would only queue a second,
-     redundant round of requests for data that has not even arrived once. */
+     very first fetch of everything already carries whichever org and
+     identity the tab opened with — so invalidating then would only queue a
+     second, redundant round of requests for data that has not even arrived
+     once. One ref, not two: both signals share the same "already mounted"
+     question, and a change to either after mount is real and must refetch. */
   const mounted = useRef(false)
 
   useEffect(() => {
     if (!mounted.current) { mounted.current = true; return }
-    void queryClient.invalidateQueries({ queryKey: ['admin'] })
-  }, [activeOrgId, queryClient])
+    void queryClient.invalidateQueries()
+  }, [activeOrgId, impersonationToken, queryClient])
 
   return null
 }
@@ -94,7 +116,7 @@ export function Providers({ children }: { children: React.ReactNode }) {
     <QueryClientProvider client={queryClient}>
       <DevtoolsGuard />
       <ContextMenuGuard />
-      <OrgScopedQueries />
+      <ScopedQueriesInvalidator />
       <TimezoneScope>{children}</TimezoneScope>
     </QueryClientProvider>
   )
