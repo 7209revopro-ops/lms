@@ -8,6 +8,7 @@ import {
   Clock, CheckCircle2, XCircle, RefreshCw, Eye, Zap, Shield,
 } from 'lucide-react'
 import { isValidPhoneNumber } from 'libphonenumber-js'
+import { compressImageIfNeeded } from '@/lib/imageCompression'
 import { api } from '@/lib/axios'
 import { describeTransportError } from '@/lib/apiResponse'
 import { useCurrentUser, useCompleteRegistration } from '@/lib/api/user'
@@ -116,10 +117,12 @@ function Field({ label, required, error, children }: {
   )
 }
 
-function StyledInput({ value, onChange, placeholder, type = 'text', readOnly = false, icon, hint, maxLength, onBlur }: {
+function StyledInput({ value, onChange, placeholder, type = 'text', readOnly = false, icon, hint, maxLength, onBlur, autoComplete, inputMode, enterKeyHint }: {
   value: string; onChange: (v: string) => void; placeholder?: string
   type?: string; readOnly?: boolean; icon?: React.ReactNode; hint?: string
   maxLength?: number; onBlur?: () => void
+  autoComplete?: string; inputMode?: React.HTMLAttributes<HTMLInputElement>['inputMode']
+  enterKeyHint?: React.HTMLAttributes<HTMLInputElement>['enterKeyHint']
 }) {
   return (
     <div className="relative">
@@ -130,6 +133,7 @@ function StyledInput({ value, onChange, placeholder, type = 'text', readOnly = f
       )}
       <input type={type} value={value} readOnly={readOnly} placeholder={placeholder}
         maxLength={maxLength}
+        autoComplete={autoComplete} inputMode={inputMode} enterKeyHint={enterKeyHint}
         onChange={e => onChange(e.target.value)}
         style={{
           ...inputBase,
@@ -277,12 +281,18 @@ function fmtSize(bytes: number) {
   return bytes >= 1048576 ? `${(bytes / 1048576).toFixed(1)} MB` : `${Math.round(bytes / 1024)} KB`
 }
 
-function validateUploadFile(file: File): string | null {
-  if (!ALLOWED_MIME.includes(file.type))
-    return `"${file.name}" is not supported — use JPG, PNG, WebP, or PDF`
-  if (file.size > MAX_UPLOAD_BYTES)
-    return `File too large (${fmtSize(file.size)}) — max 5 MB`
-  return null
+/* Checked first and separately from size: a HEIC file can't be shrunk by
+   compressImageIfNeeded (browsers can't decode HEIC into a canvas either),
+   so it has to be caught here with guidance, not silently sent through to
+   the size check and refused with a message that doesn't say why. Mirrors
+   RegisterForm's fileTypeProblem() — the same iPhone default-camera-format
+   gap existed here without it. */
+function fileTypeProblem(file: File): string | null {
+  if (ALLOWED_MIME.includes(file.type)) return null
+  if (/hei[cf]/i.test(file.type) || /\.hei[cf]$/i.test(file.name)) {
+    return `"${file.name}" is a HEIC photo, which we cannot accept. Please choose a JPEG or PNG (on iPhone: Settings → Camera → Formats → Most Compatible).`
+  }
+  return `"${file.name}" is not supported — use JPG, PNG, WebP, or PDF`
 }
 
 function FileUpload({ label, file, onFile, accept = 'image/*,.pdf', uploading, uploadedUrl, onFileError }: {
@@ -292,12 +302,20 @@ function FileUpload({ label, file, onFile, accept = 'image/*,.pdf', uploading, u
   const inputRef = useRef<HTMLInputElement>(null)
   const [drag, setDrag] = useState(false)
   const [localErr, setLocalErr] = useState<string | null>(null)
+  const [compressing, setCompressing] = useState(false)
 
-  const handleFile = useCallback((f: File) => {
-    const err = validateUploadFile(f)
-    if (err) { setLocalErr(err); onFileError?.(err); return }
+  const handleFile = useCallback(async (f: File) => {
+    const typeErr = fileTypeProblem(f)
+    if (typeErr) { setLocalErr(typeErr); onFileError?.(typeErr); return }
     setLocalErr(null)
-    onFile(f)
+    setCompressing(true)
+    const compressed = await compressImageIfNeeded(f, MAX_UPLOAD_BYTES)
+    setCompressing(false)
+    if (compressed.size > MAX_UPLOAD_BYTES) {
+      const err = `File too large (${fmtSize(compressed.size)}) — max 5 MB`
+      setLocalErr(err); onFileError?.(err); return
+    }
+    onFile(compressed)
   }, [onFile, onFileError])
 
   const handleDrop = useCallback((e: React.DragEvent) => {
@@ -313,8 +331,8 @@ function FileUpload({ label, file, onFile, accept = 'image/*,.pdf', uploading, u
       <div
         onDragOver={e => { e.preventDefault(); setDrag(true) }}
         onDragLeave={() => setDrag(false)}
-        onDrop={handleDrop}
-        onClick={() => inputRef.current?.click()}
+        onDrop={compressing || uploading ? undefined : handleDrop}
+        onClick={() => { if (!compressing && !uploading) inputRef.current?.click() }}
         className="flex cursor-pointer flex-col items-center justify-center gap-2 rounded-xl p-5 transition-all"
         style={{
           border: `2px dashed ${hasErr ? '#EF4444' : drag ? '#0057b8' : uploadedUrl ? '#22C55E' : 'var(--color-text-muted)'}`,
@@ -323,7 +341,9 @@ function FileUpload({ label, file, onFile, accept = 'image/*,.pdf', uploading, u
         }}>
         <input ref={inputRef} type="file" accept={accept} className="hidden"
           onChange={e => { const f = e.target.files?.[0]; if (f) handleFile(f); e.target.value = '' }} />
-        {uploading ? (
+        {compressing ? (
+          <><Spinner size={20} /><p className="text-xs" style={{ color: 'var(--color-text-muted)' }}>Optimizing photo…</p></>
+        ) : uploading ? (
           <><Spinner size={20} /><p className="text-xs" style={{ color: 'var(--color-text-muted)' }}>Uploading…</p></>
         ) : uploadedUrl ? (
           <>
@@ -1038,11 +1058,12 @@ export function RequestSection() {
               <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                 <Field label="Full Name" required error={errors['name']}>
                   <StyledInput value={form.name} onChange={v => { set('name', v); clearError('name') }}
-                    placeholder="Your full name" icon={<User size={14} />} maxLength={80} />
+                    placeholder="Your full name" icon={<User size={14} />} maxLength={80}
+                    autoComplete="name" enterKeyHint="next" />
                 </Field>
                 <Field label="Email">
                   <StyledInput value={user?.email ?? ''} onChange={() => {}} readOnly
-                    icon={<Mail size={14} />} />
+                    icon={<Mail size={14} />} autoComplete="email" />
                 </Field>
                 <Field label="Phone / WhatsApp" required error={errors['phone']}>
                   <StyledInput value={form.phone}
@@ -1050,6 +1071,12 @@ export function RequestSection() {
                     placeholder="+971 50 123 4567"
                     icon={<Phone size={14} />}
                     maxLength={20}
+                    /* type="tel": this field had defaulted to type="text" ever
+                       since StyledInput's `type` prop was never passed here,
+                       so it showed a full alphabetic keyboard for a
+                       digits-and-plus field on every phone — the one input on
+                       this whole form typed on a numeric-heavy keypad most. */
+                    type="tel" inputMode="tel" autoComplete="tel" enterKeyHint="next"
                     hint="Include country code (e.g. +971, +91, +44)"
                     onBlur={() => {
                       if (!form.phone) return
@@ -1067,6 +1094,7 @@ export function RequestSection() {
                   <StyledInput value={form.emergencyContact}
                     onChange={v => { set('emergencyContact', v); clearError('emergencyContact') }}
                     placeholder="e.g. +971 50 000 0000"
+                    type="tel" inputMode="tel" autoComplete="tel" enterKeyHint="next"
                     icon={<Phone size={14} />} maxLength={30} />
                 </Field>
               </div>
@@ -1105,6 +1133,7 @@ export function RequestSection() {
                   <StyledInput value={form.occupation}
                     onChange={v => { set('occupation', v); clearError('occupation') }}
                     placeholder="e.g. Business Owner, Software Engineer…"
+                    autoComplete="organization-title" enterKeyHint="next"
                     icon={<Briefcase size={14} />} maxLength={60} />
                 </Field>
               </div>
@@ -1130,6 +1159,11 @@ export function RequestSection() {
                       form.idType === 'Aadhaar Card' ? '12-digit Aadhaar number' :
                                                        undefined
                     }
+                    /* Emirates ID / Aadhaar are pure digit entry — same reasoning
+                       as RegisterForm's ID Number field. Passport keeps the
+                       full keyboard since it mixes letters and digits. */
+                    inputMode={form.idType === 'Emirates ID' || form.idType === 'Aadhaar Card' ? 'numeric' : 'text'}
+                    autoComplete="off" enterKeyHint="done"
                     icon={<FileText size={14} />} maxLength={20} />
                 </Field>
               </div>
@@ -1148,12 +1182,14 @@ export function RequestSection() {
                 </Field>
                 <Field label="Villa / Apartment" error={errors['villa']}>
                   <StyledInput value={form.villa} onChange={v => set('villa', v)}
-                    placeholder="Villa 12, Apt 4B…" icon={<MapPin size={14} />} maxLength={60} />
+                    placeholder="Villa 12, Apt 4B…" autoComplete="address-line1" enterKeyHint="next"
+                    icon={<MapPin size={14} />} maxLength={60} />
                 </Field>
                 <Field label="City" required error={errors['city']}>
                   <StyledInput value={form.city}
                     onChange={v => { set('city', v); clearError('city') }}
-                    placeholder="Dubai, Abu Dhabi…" icon={<MapPin size={14} />} maxLength={60} />
+                    placeholder="Dubai, Abu Dhabi…" autoComplete="address-level2" enterKeyHint="next"
+                    icon={<MapPin size={14} />} maxLength={60} />
                 </Field>
                 <Field label="Country" required error={errors['addressCountry']}>
                   <CountrySelect value={form.addressCountry}

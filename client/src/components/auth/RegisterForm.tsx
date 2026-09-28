@@ -15,6 +15,8 @@ import Spinner from '@/components/ui/Spinner'
 import { PROGRAMS, PROGRAM_GROUPS, programLabel } from '@/lib/programs'
 import { describeTransportError, describeStatus } from '@/lib/apiResponse'
 import { uploadSignupDoc } from '@/lib/signupUpload'
+import { compressImageIfNeeded } from '@/lib/imageCompression'
+import { isValidPhoneNumber } from 'libphonenumber-js'
 
 /* ── Types ─────────────────────────────────────────── */
 interface FormData {
@@ -351,14 +353,6 @@ function formatIdNumber(raw: string, type: string): string {
   return raw.slice(0, 30)
 }
 
-function extractLocalPhone(full: string): string {
-  const sorted = [...COUNTRIES].sort((a, b) => b.dial.length - a.dial.length)
-  for (const c of sorted) {
-    if (full.startsWith(c.dial)) return full.slice(c.dial.length)
-  }
-  return full
-}
-
 /* ── Design tokens ─────────────────────────────────── */
 const inputBase = cn(
   'w-full rounded-xl border border-[var(--color-border)] bg-[var(--color-bg-surface)] px-3.5 py-2.5 text-sm text-[var(--color-text-primary)] outline-none transition-all',
@@ -595,7 +589,7 @@ function DatePicker({ value, onChange, error, min, max, placeholder = 'Select da
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: -6, scale: 0.98 }}
             transition={{ duration: 0.12 }}
-            className="absolute left-0 top-full z-[999] mt-1.5 w-72 select-none overflow-hidden rounded-2xl border border-[var(--color-border)] bg-[var(--color-bg-surface)] shadow-2xl">
+            className="absolute left-0 top-full z-[999] mt-1.5 w-80 max-w-[calc(100vw-2rem)] select-none overflow-hidden rounded-2xl border border-[var(--color-border)] bg-[var(--color-bg-surface)] shadow-2xl">
 
             {mode === 'day' && (<>
               <div className="flex items-center justify-between px-4 py-3" style={{ borderBottom: '1px solid #F1F3F8' }}>
@@ -621,12 +615,16 @@ function DatePicker({ value, onChange, error, min, max, placeholder = 'Select da
               </div>
               <div className="grid grid-cols-7 gap-y-0.5 px-3 pb-3">
                 {cells.map((d, i) => {
-                  if (!d) return <div key={`e${i}`} className="h-8" />
+                  if (!d) return <div key={`e${i}`} className="h-10" />
                   const dis = isDisabled(d), sel = isSelected(d), tod = isToday(d)
                   return (
                     <button key={d.getTime()} type="button" onClick={() => handleSelect(d)} disabled={dis}
                       className={cn(
-                        'mx-auto flex h-8 w-8 items-center justify-center rounded-full text-xs font-medium transition-all',
+                        /* 40px, not 32 — a date-of-birth picker gets scrubbed
+                           through many months/years, and 32px cells packed
+                           edge-to-edge are exactly the kind of target a thumb
+                           mis-hits on a real phone. */
+                        'mx-auto flex h-10 w-10 items-center justify-center rounded-full text-xs font-medium transition-all',
                         sel  ? 'bg-blue-600 text-white shadow-sm shadow-blue-200'
                         : tod ? 'border-2 border-blue-500 text-blue-600 hover:bg-[var(--color-hover)]'
                         : dis ? 'cursor-not-allowed text-gray-200'
@@ -810,16 +808,23 @@ function PhoneInput({ value, onChange, error, placeholder = '50 000 0000' }: {
             exit={{ opacity: 0, y: -6, scale: 0.98 }}
             transition={{ duration: 0.12 }}
             className="absolute left-0 top-full z-[999] mt-1.5 overflow-hidden rounded-xl border border-[var(--color-border)] bg-[var(--color-bg-surface)] shadow-xl"
-            style={{ width: 300 }}>
+            /* A fixed 300px panel anchored to the field's left edge runs past
+               the right edge of the viewport on a narrow phone (iPhone SE,
+               older Android at 320-360px) once the field itself isn't flush
+               against the screen edge. Clamping to the viewport keeps the
+               whole search box and list reachable without horizontal scroll. */
+            style={{ width: 300, maxWidth: 'calc(100vw - 2rem)' }}>
             {/* Search */}
             <div className="border-b border-[var(--color-border)] p-2.5">
               <div className="flex items-center gap-2 rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-muted)] px-2.5 py-1.5">
                 <Search size={12} className="text-[var(--color-text-muted)] flex-shrink-0" />
                 <input ref={searchRef} value={search} onChange={e => setSearch(e.target.value)}
                   placeholder="Search country or code…"
+                  inputMode="search" enterKeyHint="search"
                   className="flex-1 bg-transparent text-xs text-[var(--color-text-secondary)] outline-none placeholder:text-[var(--color-text-muted)]" />
                 {search && (
-                  <button type="button" onClick={() => setSearch('')} className="text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)]">
+                  <button type="button" onClick={() => setSearch('')} aria-label="Clear search"
+                    className="-mr-1 flex h-8 w-8 flex-shrink-0 items-center justify-center text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)]">
                     <X size={11} />
                   </button>
                 )}
@@ -911,9 +916,11 @@ function CountryPicker({ value, onChange, error, placeholder = 'Search and selec
                 <Search size={12} className="text-[var(--color-text-muted)] flex-shrink-0" />
                 <input ref={searchRef} value={search} onChange={e => setSearch(e.target.value)}
                   placeholder="Search country…"
+                  inputMode="search" enterKeyHint="search"
                   className="flex-1 bg-transparent text-xs text-[var(--color-text-secondary)] outline-none placeholder:text-[var(--color-text-muted)]" />
                 {search && (
-                  <button type="button" onClick={() => setSearch('')} className="text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)]">
+                  <button type="button" onClick={() => setSearch('')} aria-label="Clear search"
+                    className="-mr-1 flex h-8 w-8 flex-shrink-0 items-center justify-center text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)]">
                     <X size={11} />
                   </button>
                 )}
@@ -944,12 +951,27 @@ function CountryPicker({ value, onChange, error, placeholder = 'Search and selec
 }
 
 /* ── FileDropzone ───────────────────────────────────── */
-function FileDropzone({ label, accept, file, onFile, onClear, hint }: {
+function FileDropzone({ label, accept, file, onFile, onClear, hint, processing }: {
   label: string; accept: string; file: File | null
-  onFile: (f: File) => void; onClear: () => void; hint?: string
+  /* Async: the caller compresses an oversized image before validating size,
+     which takes real time on a phone — FileDropzone doesn't await this
+     itself, it just shows `processing` while the caller's own state says so. */
+  onFile: (f: File) => void | Promise<void>; onClear: () => void; hint?: string
+  processing?: boolean
 }) {
   const ref = useRef<HTMLInputElement>(null)
   const [dragging, setDragging] = useState(false)
+  if (processing) {
+    return (
+      <div className="flex flex-col gap-1.5">
+        <label className="text-[12.5px] font-semibold text-[var(--color-text-secondary)] tracking-wide">{label}</label>
+        <div className="flex flex-col items-center gap-2 rounded-xl border-2 border-dashed border-blue-200 bg-blue-50 px-4 py-5 text-center">
+          <Spinner size={18} />
+          <p className="text-xs font-semibold text-blue-600">Optimizing photo for upload…</p>
+        </div>
+      </div>
+    )
+  }
   return (
     <div className="flex flex-col gap-1.5">
       <label className="text-[12.5px] font-semibold text-[var(--color-text-secondary)] tracking-wide">{label}</label>
@@ -962,8 +984,8 @@ function FileDropzone({ label, accept, file, onFile, onClear, hint }: {
             <p className="truncate text-xs font-semibold text-[var(--color-text-primary)]">{file.name}</p>
             <p className="text-[10px] text-[var(--color-text-muted)]">{(file.size / 1024).toFixed(0)} KB</p>
           </div>
-          <button type="button" onClick={onClear}
-            className="flex-shrink-0 rounded-full p-1 text-[var(--color-text-muted)] transition-colors hover:bg-red-100 hover:text-red-500">
+          <button type="button" onClick={onClear} aria-label="Remove file"
+            className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full text-[var(--color-text-muted)] transition-colors hover:bg-red-100 hover:text-red-500">
             <X size={12} />
           </button>
         </div>
@@ -1016,6 +1038,9 @@ export function RegisterForm({ onSwitch, lockFull = false }: { onSwitch: () => v
   const [avatarFile,    setAvatarFile]    = useState<File | null>(null)
   const [avatarPreview, setAvatarPreview] = useState<string | null>(null)
   const [avatarError,   setAvatarError]   = useState<string | null>(null)
+  const [avatarBusy,    setAvatarBusy]    = useState(false)
+  const [passportBusy,  setPassportBusy]  = useState(false)
+  const [idDocBusy,     setIdDocBusy]     = useState(false)
   const [showTerms,     setShowTerms]     = useState(false)
 
   /* Set by next()/submit() when validation refuses. The refused field can be a
@@ -1083,19 +1108,22 @@ export function RegisterForm({ onSwitch, lockFull = false }: { onSwitch: () => v
         errs.email = 'Enter a valid email address'
       }
 
+      /* Real numbering-plan validation (libphonenumber-js), same check
+         RequestSection's enrollment form uses — PhoneInput always produces a
+         dial code + digits string, so unlike that form's free-text field
+         there's no "+" to add back, just real validity to confirm. A generic
+         5-13 digit length guess let through numbers that were the wrong
+         length for the selected country specifically. */
       if (!data.phone) {
         errs.phone = 'Phone number is required'
-      } else {
-        const local = extractLocalPhone(data.phone)
-        if (local.length < 5) errs.phone = 'Enter a complete phone number'
-        else if (local.length > 13) errs.phone = 'Phone number is too long'
+      } else if (!isValidPhoneNumber(data.phone)) {
+        errs.phone = 'Enter a valid phone number for the selected country'
       }
 
       if (!data.emergencyContact) {
         errs.emergencyContact = 'Emergency contact is required'
-      } else {
-        const local = extractLocalPhone(data.emergencyContact)
-        if (local.length < 5) errs.emergencyContact = 'Enter a complete phone number'
+      } else if (!isValidPhoneNumber(data.emergencyContact)) {
+        errs.emergencyContact = 'Enter a valid phone number for the selected country'
       }
 
       if (!data.gender) errs.gender = 'Please select gender'
@@ -1434,22 +1462,33 @@ export function RegisterForm({ onSwitch, lockFull = false }: { onSwitch: () => v
               <div className="absolute inset-0 flex items-center justify-center rounded-full bg-black/30 opacity-0 transition-opacity group-hover:opacity-100">
                 <Camera size={15} className="text-white" />
               </div>
+              {avatarBusy && (
+                <div className="absolute inset-0 flex items-center justify-center rounded-full bg-black/50">
+                  <Spinner size={18} />
+                </div>
+              )}
             </div>
           </label>
+          {avatarBusy && (
+            <p className="text-[11px] font-medium text-blue-500">Optimizing photo…</p>
+          )}
           <input id="avatar-upload" type="file" accept="image/*" className="hidden"
-            onChange={e => {
+            onChange={async e => {
               const f = e.target.files?.[0]
               e.target.value = ''
               if (!f) return
               const problem = fileTypeProblem(f, PHOTO_TYPES, 'Profile photo')
               if (problem) { setAvatarError(problem); return }
-              if (f.size > MAX_FILE_BYTES) {
+              setAvatarError(null)
+              setAvatarBusy(true)
+              const compressed = await compressImageIfNeeded(f, MAX_FILE_BYTES)
+              setAvatarBusy(false)
+              if (compressed.size > MAX_FILE_BYTES) {
                 setAvatarError('Profile photo must not exceed 3 MB')
                 return
               }
-              setAvatarFile(f)
-              setAvatarPreview(URL.createObjectURL(f))
-              setAvatarError(null)
+              setAvatarFile(compressed)
+              setAvatarPreview(URL.createObjectURL(compressed))
             }}
           />
           <p className="text-[11px] text-[var(--color-text-muted)]">Profile photo <span className="text-red-400">*</span> <span className="text-[var(--color-text-muted)]">(max 3 MB)</span></p>
@@ -1464,6 +1503,7 @@ export function RegisterForm({ onSwitch, lockFull = false }: { onSwitch: () => v
           <div className="relative">
             <User size={14} className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-[var(--color-text-muted)]" />
             <Input error={errors.name} value={data.name} placeholder="e.g. Ahmed Al Mansouri" maxLength={120}
+              autoComplete="name" enterKeyHint="next"
               className="pl-9" onChange={e => set('name', e.target.value)} />
           </div>
         </Field>
@@ -1472,6 +1512,7 @@ export function RegisterForm({ onSwitch, lockFull = false }: { onSwitch: () => v
           <div className="relative">
             <Mail size={14} className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-[var(--color-text-muted)]" />
             <Input error={errors.email} value={data.email} type="email" placeholder="you@example.com"
+              autoComplete="email" inputMode="email" enterKeyHint="next"
               className="pl-9" onChange={e => set('email', e.target.value)} />
           </div>
         </Field>
@@ -1509,6 +1550,7 @@ export function RegisterForm({ onSwitch, lockFull = false }: { onSwitch: () => v
           <div className="relative">
             <Globe size={14} className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-[var(--color-text-muted)]" />
             <Input error={errors.nationality} value={data.nationality} placeholder="e.g. Emirati" maxLength={80}
+              autoComplete="off" enterKeyHint="next"
               className="pl-9"
               onChange={e => set('nationality', e.target.value.replace(/[^a-zA-Z\s\-]/g, ''))} />
           </div>
@@ -1523,6 +1565,7 @@ export function RegisterForm({ onSwitch, lockFull = false }: { onSwitch: () => v
           <div className="relative">
             <Briefcase size={14} className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-[var(--color-text-muted)]" />
             <Input error={errors.occupation} value={data.occupation} placeholder="e.g. Business Owner" maxLength={120}
+              autoComplete="organization-title" enterKeyHint="next"
               className="pl-9" onChange={e => set('occupation', e.target.value)} />
           </div>
         </Field>
@@ -1547,6 +1590,13 @@ export function RegisterForm({ onSwitch, lockFull = false }: { onSwitch: () => v
                   error={errors.idNumber}
                   value={data.idNumber}
                   placeholder={cfg.placeholder}
+                  /* Emirates ID and Aadhaar are pure digit entry — the numeric
+                     keypad matters here far more than on a free-text field,
+                     since these are the two longest strings (15 and 12
+                     digits) anyone types on this whole form. Passport/Other
+                     allow letters, so they keep the full keyboard. */
+                  inputMode={data.idType === 'Emirates ID' || data.idType === 'Aadhaar Card' ? 'numeric' : 'text'}
+                  autoComplete="off" enterKeyHint="done"
                   onChange={e => set('idNumber', formatIdNumber(e.target.value, data.idType))}
                 />
                 <p className="pl-0.5 text-[11px] text-[var(--color-text-muted)]">{cfg.hint}</p>
@@ -1570,6 +1620,7 @@ export function RegisterForm({ onSwitch, lockFull = false }: { onSwitch: () => v
           <div className="relative">
             <MapPin size={14} className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-[var(--color-text-muted)]" />
             <Input error={errors.villa} value={data.villa} placeholder="Villa 12, Al Barsha" maxLength={120}
+              autoComplete="address-line1" enterKeyHint="next"
               className="pl-9" onChange={e => set('villa', e.target.value)} />
           </div>
         </Field>
@@ -1578,6 +1629,7 @@ export function RegisterForm({ onSwitch, lockFull = false }: { onSwitch: () => v
           <div className="relative">
             <MapPin size={14} className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-[var(--color-text-muted)]" />
             <Input error={errors.city} value={data.city} placeholder="Dubai" maxLength={80}
+              autoComplete="address-level2" enterKeyHint="next"
               className="pl-9" onChange={e => set('city', e.target.value)} />
           </div>
         </Field>
@@ -1596,14 +1648,19 @@ export function RegisterForm({ onSwitch, lockFull = false }: { onSwitch: () => v
               label="Passport Copy * (PDF, JPG, PNG)"
               accept=".pdf,.jpg,.jpeg,.png,.webp"
               file={data.passportFile}
-              onFile={f => {
+              processing={passportBusy}
+              onFile={async f => {
                 const problem = fileTypeProblem(f, DOC_TYPES, 'Passport copy')
                 if (problem) { setErrors(e => ({ ...e, passportFile: problem })); return }
-                if (f.size > MAX_FILE_BYTES) {
+                setErrors(e => ({ ...e, passportFile: undefined }))
+                setPassportBusy(true)
+                const compressed = await compressImageIfNeeded(f, MAX_FILE_BYTES)
+                setPassportBusy(false)
+                if (compressed.size > MAX_FILE_BYTES) {
                   setErrors(e => ({ ...e, passportFile: 'Passport copy must not exceed 3 MB' }))
                   return
                 }
-                set('passportFile', f)
+                set('passportFile', compressed)
               }}
               onClear={() => set('passportFile', null)}
               hint="Clear scan or photo of your passport identity page (max 3 MB)"
@@ -1630,14 +1687,19 @@ export function RegisterForm({ onSwitch, lockFull = false }: { onSwitch: () => v
                   label={`${docMeta.label} * (PDF, JPG, PNG)`}
                   accept=".pdf,.jpg,.jpeg,.png,.webp"
                   file={data.idDocFile}
-                  onFile={f => {
+                  processing={idDocBusy}
+                  onFile={async f => {
                     const problem = fileTypeProblem(f, DOC_TYPES, docMeta.label)
                     if (problem) { setErrors(e => ({ ...e, idDocFile: problem })); return }
-                    if (f.size > MAX_FILE_BYTES) {
+                    setErrors(e => ({ ...e, idDocFile: undefined }))
+                    setIdDocBusy(true)
+                    const compressed = await compressImageIfNeeded(f, MAX_FILE_BYTES)
+                    setIdDocBusy(false)
+                    if (compressed.size > MAX_FILE_BYTES) {
                       setErrors(e => ({ ...e, idDocFile: `${docMeta.label} must not exceed 3 MB` }))
                       return
                     }
-                    set('idDocFile', f)
+                    set('idDocFile', compressed)
                   }}
                   onClear={() => set('idDocFile', null)}
                   hint={docMeta.hint}
@@ -1761,11 +1823,16 @@ export function RegisterForm({ onSwitch, lockFull = false }: { onSwitch: () => v
             <input
               type={showPw ? 'text' : 'password'} value={data.password}
               placeholder="Min. 8 chars, uppercase + number"
+              autoComplete="new-password" enterKeyHint="next"
               onChange={e => set('password', e.target.value)}
               className={cn(errors.password ? inputErr : inputBase, 'pl-9 pr-10')}
             />
             <button type="button" onClick={() => setShowPw(x => !x)}
-              className="absolute right-3.5 top-1/2 -translate-y-1/2 text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)] transition-colors">
+              aria-label={showPw ? 'Hide password' : 'Show password'}
+              /* The glyph is 15px; the tappable button is 44px so a thumb
+                 doesn't need to land on the icon exactly, same fix already
+                 applied to the login forms this session. */
+              className="absolute right-0.5 top-1/2 flex h-11 w-11 -translate-y-1/2 items-center justify-center text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)] transition-colors">
               {showPw ? <EyeOff size={15} /> : <Eye size={15} />}
             </button>
           </div>
@@ -1788,11 +1855,13 @@ export function RegisterForm({ onSwitch, lockFull = false }: { onSwitch: () => v
             <input
               type={showCpw ? 'text' : 'password'} value={data.confirmPassword}
               placeholder="Repeat your password"
+              autoComplete="new-password" enterKeyHint="done"
               onChange={e => set('confirmPassword', e.target.value)}
               className={cn(errors.confirmPassword ? inputErr : inputBase, 'pl-9 pr-10')}
             />
             <button type="button" onClick={() => setShowCpw(x => !x)}
-              className="absolute right-3.5 top-1/2 -translate-y-1/2 text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)] transition-colors">
+              aria-label={showCpw ? 'Hide password' : 'Show password'}
+              className="absolute right-0.5 top-1/2 flex h-11 w-11 -translate-y-1/2 items-center justify-center text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)] transition-colors">
               {showCpw ? <EyeOff size={15} /> : <Eye size={15} />}
             </button>
           </div>
@@ -2111,13 +2180,13 @@ export function RegisterForm({ onSwitch, lockFull = false }: { onSwitch: () => v
                 </button>
               )}
               {step < 3 ? (
-                <button type="button" onClick={next}
-                  className="ml-auto flex items-center gap-1.5 rounded-xl px-5 py-2.5 text-sm font-bold text-white transition-all hover:opacity-90 active:scale-[0.98]"
+                <button type="button" onClick={next} disabled={avatarBusy || passportBusy || idDocBusy}
+                  className="ml-auto flex items-center gap-1.5 rounded-xl px-5 py-2.5 text-sm font-bold text-white transition-all hover:opacity-90 active:scale-[0.98] disabled:opacity-60 disabled:cursor-not-allowed"
                   style={{ background: 'var(--color-primary)', boxShadow: '0 4px 14px rgba(0,87,184,0.3)' }}>
                   Continue <ChevronRight size={15} />
                 </button>
               ) : (
-                <button type="button" onClick={submit} disabled={loading}
+                <button type="button" onClick={submit} disabled={loading || avatarBusy || passportBusy || idDocBusy}
                   className="ml-auto flex items-center gap-2 rounded-xl px-5 py-2.5 text-sm font-bold text-white transition-all hover:opacity-90 active:scale-[0.98] disabled:opacity-60 disabled:cursor-not-allowed"
                   style={{ background: 'var(--color-primary)', boxShadow: '0 4px 14px rgba(0,87,184,0.3)' }}>
                   {loading ? <><Spinner size={14} /> Submitting…</> : 'Submit Application'}
