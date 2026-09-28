@@ -16,7 +16,11 @@
    such places and five more that approve, and a hook missed at any one of them
    would drop students silently. Tetra Commission is idempotent on the LMS user
    id and leaves an email it already has alone, so a retry never makes a second
-   student. Sending never holds up a sign-up or an enrolment.
+   student. Sending never holds up a sign-up or an enrolment. The sweep runs
+   every 15 seconds, so a student is there within half a minute of counting.
+
+   An outage is waited out however long it lasts; only a refusal that cannot
+   come right (a bad secret, a malformed student) stops.
 
    Off unless COMMISSION_API_URL and COMMISSION_S2S_SECRET are set (the secret
    equals LMS_S2S_SECRET on the Tetra Commission server).
@@ -25,12 +29,11 @@ import { EnrollmentModel, UserModel, OrganizationModel, CourseModel, SystemSetti
 import { logger } from '@/utils/logger.ts'
 
 const BATCH = 20
-const MAX_ATTEMPTS = 8
 const TIMEOUT_MS = 20_000
 /* A student made a moment ago may still be half-way through the request that
    made them — finance marks its enrolment in that same request — so they wait
-   a minute before counting. */
-const SETTLE_MS = 60_000
+   a few seconds before counting. */
+const SETTLE_MS = 15_000
 export const SINCE_KEY = 'commission_students_since'
 
 export function commissionConfigured(): boolean {
@@ -174,7 +177,8 @@ export async function drainCommissionStudentsOnce(now = new Date()): Promise<{ s
       const notReady  = err instanceof CommissionNotReadyError
       const attempts  = (student.commissionSync?.attempts ?? 0) + 1
       const message   = (err as Error).message?.slice(0, 500)
-      const giveUp    = permanent || (!notReady && attempts >= MAX_ATTEMPTS)
+      // Down, not deployed, or not configured there: waited out, however long.
+      const giveUp    = permanent
       await UserModel.updateOne({ _id: student._id }, {
         $set: {
           'commissionSync.state':         giveUp ? 'failed' : 'pending',

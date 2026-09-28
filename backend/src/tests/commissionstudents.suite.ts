@@ -7,12 +7,12 @@
      B. only real students (approved, or given a course) created since it was
         switched on; never blocked accounts, other roles, or anybody older;
      C. students finance enrolled are left to finance;
-     D. a student made a moment ago waits a minute (their request may still be
-        running);
+     D. a student made a moment ago waits a few seconds (their request may
+        still be running);
      E. what is sent: name, phone, country, academy, the first course;
      F. what comes back is kept, and a sent student is never sent again;
-     G. not deployed or not configured there: waited for, never given up;
-        a bad secret: stopped; an outage: retried, then given up.
+     G. not deployed, not configured there, or down: waited out, never given
+        up; a bad secret: stopped.
 
    The Tetra Commission half is proven on its side
    (tetracapitals backend/test-lms-students.sh).
@@ -146,7 +146,7 @@ const f = await sync(finance)
 check('left to finance, and marked so it is not looked at again', f?.state === 'skipped' && !received.some(r => r.email === 'finance@lms.test') && t.skipped === 1, JSON.stringify(f))
 
 step('D. Made a moment ago')
-check('waits its minute', !(await sync(fresh)))
+check('waits a few seconds', !(await sync(fresh)))
 await UserModel.collection.updateOne({ _id: fresh }, { $set: { createdAt: at(2 * MIN) } })
 await UserModel.collection.updateOne({ _id: waiting }, { $set: { enrollmentStatus: 'approved' } })
 await drainCommissionStudentsOnce()
@@ -205,7 +205,8 @@ check('down: retried later', o?.state === 'pending' && o?.attempts === 1 && new 
 await UserModel.collection.updateOne({ _id: outage }, { $set: { 'commissionSync.attempts': 7, 'commissionSync.nextAttemptAt': at(MIN) } })
 await drainCommissionStudentsOnce()
 o = await sync(outage)
-check('...and given up after eight tries', o?.state === 'failed' && o?.attempts === 8, JSON.stringify(o))
+check('...and still waiting after eight tries, never given up', o?.state === 'pending' && o?.attempts === 8 &&
+  new Date(String(o?.nextAttemptAt)).getTime() - Date.now() <= 15 * MIN, JSON.stringify(o))
 process.env.COMMISSION_API_URL = TC_URL
 
 await mongoose.connection.dropDatabase()

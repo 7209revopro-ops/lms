@@ -1,10 +1,14 @@
 /* ─────────────────────────────────────────────────────
-   New students → Tetra Commission, every minute
+   New students → Tetra Commission, every 15 seconds
    ─────────────────────────────────────────────────────
    The sweep itself is services/commissionStudents.service.ts. Runs on the one
    process with the scheduler (see index.ts), like the outbox drains: two
    processes sweeping the same students would send each twice — harmless on
    the far side, which is idempotent, but pointless.
+
+   Every 15 seconds rather than every minute, so a new student is in Tetra
+   Commission within half a minute. The sweep is two small queries when there
+   is nothing to send, and `running` skips a tick that would overlap.
 ───────────────────────────────────────────────────── */
 import cron from 'node-cron'
 import { commissionConfigured, drainCommissionStudentsOnce } from '@/services/commissionStudents.service.ts'
@@ -18,7 +22,7 @@ export function startCommissionStudentsJob(): void {
     return
   }
   logger.info('Tetra Commission is configured — new students are sent there')
-  cron.schedule('* * * * *', () => {
+  cron.schedule('*/15 * * * * *', () => {
     if (running) return
     running = true
     void drainCommissionStudentsOnce()
