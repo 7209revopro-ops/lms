@@ -11,12 +11,14 @@ import { EnrollmentStatusBanner } from '@/components/auth/EnrollmentStatusBanner
 import { InstallPrompt } from '@/components/pwa/InstallPrompt'
 import { AnnouncementPopup } from '@/components/announcements/AnnouncementPopup'
 import { Toaster } from '@/components/ui/Toaster'
+import { RootPortalHistoryBridge } from '@/components/RootPortalHistoryBridge'
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   const { rightPanelOpen } = useUIStore()
 
   return (
     <div className="min-h-screen" style={{ background: 'var(--color-bg-page)' }}>
+      <RootPortalHistoryBridge />
       {/* Mobile drawer only — desktop sidebar removed */}
       <ClientSidebar />
 

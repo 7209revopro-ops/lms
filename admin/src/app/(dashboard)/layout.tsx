@@ -6,6 +6,7 @@ import { AdminTopbar } from '@/components/layout/AdminTopbar'
 import { DeleteModal } from '@/components/courses/DeleteModal'
 import { Toaster } from '@/components/ui/Toaster'
 import { AdminGuard } from '@/components/auth/AdminGuard'
+import { RootPortalHistoryBridge } from '@/components/RootPortalHistoryBridge'
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   const { sidebarCollapsed } = useUIStore()
@@ -24,6 +25,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
      and the CSS transition keeps the collapse/expand slide. */
   return (
     <AdminGuard>
+      <RootPortalHistoryBridge />
       <div
         className="min-h-dvh"
         style={{
