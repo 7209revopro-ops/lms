@@ -5,10 +5,14 @@ import './globals.css'
 export const metadata: Metadata = {
   title: { template: '%s — Delta Admin', default: 'Delta Institutions Admin' },
   description: 'Delta Institutions administration portal',
+  /* Same Delta 'd' mark the client uses (client/public/icons/icone.png,
+     copied in verbatim), not the generic blue-triangle icon.svg placeholder
+     — a browser tab told the two apps apart only by which one had the real
+     logo. */
   icons: {
-    icon:     [{ url: '/icons/icon.svg', type: 'image/svg+xml' }],
-    shortcut: '/icons/icon.svg',
-    apple:    '/icons/icon.svg',
+    icon:     [{ url: '/icons/icone.png', type: 'image/png' }],
+    shortcut: '/icons/icone.png',
+    apple:    '/icons/icone.png',
   },
   manifest:        '/manifest.webmanifest',
   applicationName: 'Delta Institutions Admin',
