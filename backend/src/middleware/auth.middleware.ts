@@ -668,29 +668,63 @@ export async function requireCheckoutEligibility(
   next()
 }
 
+/* Read-only validity check for an impersonation token on a route that must
+   never reject (optionalAuthenticate). Mirrors the checks applyImpersonation()
+   makes for strict routes, but returns a boolean instead of sending an error:
+   a revoked or expired impersonation simply degrades to anonymous here. A token
+   with no `isn` is an ordinary session and always passes. */
+async function impersonationStillValid(payload: { isn?: string }): Promise<boolean> {
+  if (!payload.isn) return true
+  const { Types } = await import('mongoose')
+  if (!Types.ObjectId.isValid(payload.isn)) return false
+  const { ImpersonationSessionModel } = await import('@/models/schema.ts')
+  const session = await ImpersonationSessionModel.findById(payload.isn)
+    .select('revokedAt expiresAt').lean() as { revokedAt?: Date; expiresAt?: Date } | null
+  if (!session || session.revokedAt) return false
+  if (session.expiresAt && session.expiresAt.getTime() <= Date.now()) return false
+  return true
+}
+
 export async function optionalAuthenticate(
   req: Request,
   _res: Response,
   next: NextFunction,
 ): Promise<void> {
+  /* `lms_imp_at` wins, exactly as in authenticate(): a super admin viewing the
+     client portal as a student carries only the impersonation cookie on the
+     client origin. Reading just lms_at here left every optional route — the
+     course catalogue, course detail, per-lesson content gating — treating an
+     impersonated session as anonymous, so an impersonated Bangalore student saw
+     Dubai's courses too (the catalogue only scopes to an org when it knows the
+     viewer's org). */
+  const impersonationToken = req.cookies?.[IMPERSONATION_COOKIE]
   const cookieToken = req.cookies?.[ACCESS_COOKIE]
   const authHeader  = req.headers['authorization']
   const bearerToken = authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : null
-  const token       = cookieToken ?? bearerToken
+  const token       = impersonationToken ?? cookieToken ?? bearerToken
 
   if (token) {
     try {
       const payload = await verifyAccessToken(token, 'client')
-      /* A deleted or disabled account is simply anonymous here — this guard
-         never rejects, it only personalises (P-06). */
+      /* A deleted or disabled account, or a revoked/expired impersonation, is
+         simply anonymous here — this guard never rejects, it only personalises. */
       const account = await loadAccountState(payload.sub)
-      if (account?.isActive) {
+      if (account?.isActive && await impersonationStillValid(payload)) {
         req.user = {
           id:    payload.sub!,
           email: payload.email,
           role:  account.role,
         }
         if (account.organizationId) req.user.organizationId = account.organizationId
+        /* Record the impersonation so read-only personalisation (e.g. the
+           forensic watermark) still attributes to the real operator. */
+        if (payload.isn) {
+          req.user.impersonationId = String(payload.isn)
+          if (payload.act) {
+            req.user.impersonatorId    = payload.act.sub
+            req.user.impersonatorEmail = payload.act.email
+          }
+        }
       }
     } catch {
       /* expired / invalid — treat as unauthenticated */
