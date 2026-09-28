@@ -17,6 +17,7 @@
     "test:security": "bun src/tests/security.suite.ts",
     "test:tabby": "bun src/tests/tabby.suite.ts",
     "test:tamara": "bun src/tests/tamara.suite.ts",
+    "test:paymentaccess": "bun --no-env-file src/tests/paymentaccess.suite.ts",
     "check:seats": "bun src/scripts/check-seat-writes.ts",
     "check:languages": "bun src/scripts/check-languages.ts",
     "test:crossorgclass:concurrency": "bun src/tests/crossorgclass.concurrency.suite.ts",

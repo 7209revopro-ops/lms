@@ -14,6 +14,7 @@ import { validate } from '@/middleware/validate.middleware.ts'
 import { OrderService } from '@/services/order.service.ts'
 import { AuthService } from '@/services/auth.service.ts'
 import { logger } from '@/utils/logger.ts'
+import { PAYMENT_ACCESS_STATUSES, type PaymentAccessStatus } from '@/models/schema.ts'
 
 const router = Router()
 const orderSvc = new OrderService()
@@ -193,6 +194,10 @@ const financeEnrolmentSchema = z.object({
   invoiceId:     z.string().min(1).max(200),
   invoiceNumber: z.string().max(60).optional(),
   amount:        z.coerce.number().min(0).optional(),
+  /* How much of the fee is paid: paid opens every module, partial the first
+     half, unpaid none. Absent from an older finance, which means full access
+     exactly as before. */
+  paymentStatus: z.enum(PAYMENT_ACCESS_STATUSES).optional(),
 })
 
 router.post('/finance/enrolment', validate(financeEnrolmentSchema), async (req: Request, res: Response, next: NextFunction) => {
@@ -208,9 +213,10 @@ router.post('/finance/enrolment', validate(financeEnrolmentSchema), async (req: 
       return
     }
 
-    const { email, name, phone, courseSlug, invoiceId, invoiceNumber, amount } = req.body as {
+    const { email, name, phone, courseSlug, invoiceId, invoiceNumber, amount, paymentStatus } = req.body as {
       email: string; name?: string; phone?: string; courseSlug: string
       invoiceId: string; invoiceNumber?: string; amount?: number
+      paymentStatus?: PaymentAccessStatus
     }
 
     let result
@@ -219,6 +225,7 @@ router.post('/finance/enrolment', validate(financeEnrolmentSchema), async (req: 
         email, courseSlug, externalId: invoiceId,
         ...(name ? { name } : {}), ...(phone ? { phone } : {}),
         ...(amount !== undefined ? { amount } : {}),
+        ...(paymentStatus ? { paymentStatus } : {}),
       })
     } catch (err) {
       /* An unmapped or renamed slug is the caller's mistake and will fail the
@@ -245,10 +252,51 @@ router.post('/finance/enrolment', validate(financeEnrolmentSchema), async (req: 
     }
 
     logger.info(
-      { invoiceId, invoiceNumber, email, courseSlug: result.courseSlug, created: result.created, repeat: result.alreadyProcessed },
+      { invoiceId, invoiceNumber, email, courseSlug: result.courseSlug, created: result.created, repeat: result.alreadyProcessed, access: result.access },
       'Finance enrolment provisioned in LMS',
     )
     sendSuccess(res, { ...result, ...(loginLink ? { loginLink } : {}) }, 'Enrolment provisioned')
+  } catch (err) { next(err) }
+})
+
+/* ────────────────────────────────────────────────────────────────────────────
+   POST /integrations/finance/enrolment/access   (Delta Finance → LMS)
+   ────────────────────────────────────────────────────────────────────────────
+   Accounts recorded more of the fee on an invoice this LMS already
+   provisioned: open what the new payment status allows. Only ever opens —
+   paid unlocks every module, partial the first half; a lower status than the
+   one already applied changes nothing. An enrolment finance did not create
+   with a payment status is left exactly as it is.
+
+   404 when this LMS never provisioned the invoice: finance stops retrying,
+   because asking again will not make the enrolment exist.
+──────────────────────────────────────────────────────────────────────────── */
+const financeAccessSchema = z.object({
+  invoiceId:     z.string().min(1).max(200),
+  paymentStatus: z.enum(PAYMENT_ACCESS_STATUSES),
+})
+
+router.post('/finance/enrolment/access', validate(financeAccessSchema), async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const secret = String(process.env['FINANCE_S2S_SECRET'] ?? '')
+    if (!secret) {
+      res.status(503).json({ success: false, error: { code: 'INTEGRATION_DISABLED', message: 'Finance integration is not configured' } })
+      return
+    }
+    if (!secretOk(req.headers['x-finance-secret'], secret)) {
+      logger.warn('Finance enrolment access: invalid or missing X-Finance-Secret')
+      res.status(401).json({ success: false, error: { code: 'UNAUTHORISED', message: 'Bad secret' } })
+      return
+    }
+
+    const { invoiceId, paymentStatus } = req.body as { invoiceId: string; paymentStatus: PaymentAccessStatus }
+    const access = await orderSvc.updateFinanceEnrolmentAccess(invoiceId, paymentStatus)
+    if (!access) {
+      res.status(404).json({ success: false, error: { code: 'UNKNOWN_ENROLMENT', message: 'No enrolment here came from that invoice' } })
+      return
+    }
+    logger.info({ invoiceId, paymentStatus, access }, 'Finance enrolment access updated')
+    sendSuccess(res, access, access.changed ? 'Access updated' : 'Access unchanged')
   } catch (err) { next(err) }
 })
 

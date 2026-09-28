@@ -3,6 +3,8 @@ import { SectionRepository } from '@/repositories/section.repository.ts'
 import { CourseRepository } from '@/repositories/course.repository.ts'
 import { LessonRepository } from '@/repositories/lesson.repository.ts'
 import type { ISection } from '@/models/schema.ts'
+import { onModuleAdded } from '@/services/paymentAccess.service.ts'
+import { logger } from '@/utils/logger.ts'
 
 /* ─── Domain error ──────────────────────────────────── */
 export class OutlineError extends Error {
@@ -145,12 +147,22 @@ export class SectionService {
       throw new OutlineError('INVALID_ID', 'Invalid course id', 400)
     }
     const existingCount = await this.repo.countByCourse(input.courseId)
-    return this.repo.create({
+    const section = await this.repo.create({
       courseId:    new Types.ObjectId(input.courseId) as unknown as ISection['courseId'],
       title:       input.title.trim(),
       description: input.description?.trim() ?? '',
       order:       existingCount,
     } as Partial<ISection>)
+
+    /* Students who have paid part of the fee see half the modules. A new one
+       past that half must arrive locked for them, or it would be open by
+       accident. Never fails the module being created. */
+    try {
+      await onModuleAdded(input.courseId, section.id)
+    } catch (err) {
+      logger.warn({ err, courseId: input.courseId }, 'Could not keep part-paid enrolments to their half after a new module')
+    }
+    return section
   }
 
   async update(id: string, input: UpdateInput): Promise<ISection> {

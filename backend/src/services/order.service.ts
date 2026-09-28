@@ -17,7 +17,8 @@ import { NotificationService } from '@/services/notification.service.ts'
 import { sendEnrollmentConfirmation } from '@/services/email.service.ts'
 import { CourseModel, UserModel } from '@/models/schema.ts'
 import { env } from '@/config/env.ts'
-import type { OrderGateway, IOrder } from '@/models/schema.ts'
+import type { OrderGateway, IOrder, PaymentAccessStatus } from '@/models/schema.ts'
+import { applyInitialPaymentAccess, raisePaymentAccess, type AccessSummary } from '@/services/paymentAccess.service.ts'
 import { logger } from '@/utils/logger.ts'
 
 /* What a Tabby webhook delivery resulted in. `retry` is the one the HTTP layer
@@ -1878,6 +1879,8 @@ export class OrderService {
     /** The finance invoice this came from — the idempotency key. */
     externalId: string
     amount?: number
+    /** How much of the fee is paid. Absent from an older finance: full access, as before. */
+    paymentStatus?: PaymentAccessStatus
   }): Promise<{
     userId: string
     created: boolean
@@ -1885,6 +1888,7 @@ export class OrderService {
     courseSlug: string
     courseTitle: string
     organizationSlug: string | null
+    access?: AccessSummary
   }> {
     const { OrderModel } = await import('@/models/schema.ts')
 
@@ -1912,7 +1916,27 @@ export class OrderService {
       }
     }
 
+    /* Whether this student already had the course. Only an enrolment this
+       call creates follows the payment rule: somebody already enrolled keeps
+       exactly the access they have. */
+    const { EnrollmentModel } = await import('@/models/schema.ts')
+    const courseForRule = await CourseModel.findOne({ slug: input.courseSlug }).select('_id').lean()
+    const userForRule = courseForRule
+      ? await UserModel.findOne({ email: input.email.toLowerCase().trim() }).select('_id').lean()
+      : null
+    const enrolledBefore = courseForRule && userForRule
+      ? await EnrollmentModel.exists({ userId: userForRule._id, courseId: courseForRule._id })
+      : null
+
     const result = await this.provisionManualPurchase(input)
+
+    let access: AccessSummary | undefined
+    if (input.paymentStatus && courseForRule && !enrolledBefore) {
+      const enrollment = await EnrollmentModel.findOne({ userId: result.userId, courseId: courseForRule._id }).select('_id').lean()
+      if (enrollment) {
+        access = await applyInitialPaymentAccess(enrollment._id, courseForRule._id, input.paymentStatus, input.externalId)
+      }
+    }
 
     /* The order provisionManualPurchase just wrote, stamped with where it came
        from. Marked after the fact rather than by changing that method, because
@@ -1924,7 +1948,23 @@ export class OrderService {
       { sort: { createdAt: -1 } },
     )
 
-    return { ...result, alreadyProcessed: false }
+    return { ...result, alreadyProcessed: false, ...(access ? { access } : {}) }
+  }
+
+  /* Finance recorded more of the fee: open what the new status allows. Found
+     through the order finance's provisioning wrote, so only that enrolment is
+     ever touched. Null when finance never provisioned this invoice here. */
+  async updateFinanceEnrolmentAccess(invoiceId: string, status: PaymentAccessStatus): Promise<AccessSummary | null> {
+    const { OrderModel, EnrollmentModel } = await import('@/models/schema.ts')
+    const order = await OrderModel.findOne({ 'externalRef.source': 'finance', 'externalRef.id': invoiceId })
+      .select('userId courseId').lean()
+    if (!order) return null
+    const enrollment = await EnrollmentModel.findOne({
+      userId: (order as { userId: unknown }).userId,
+      courseId: (order as { courseId: unknown }).courseId,
+    }).select('_id').lean()
+    if (!enrollment) return null
+    return raisePaymentAccess(enrollment._id, status)
   }
 
   private async _createEnrollment(userId: string, courseId: string): Promise<void> {

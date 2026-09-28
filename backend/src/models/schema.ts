@@ -690,6 +690,14 @@ export const LessonModel = mongoose.model<ILesson>('Lesson', LessonSchema)
 export const ENROLLMENT_SOURCES = ['purchase', 'free', 'admin', 'script', 'unknown'] as const
 export type EnrollmentSource = typeof ENROLLMENT_SOURCES[number]
 
+/* How much of the fee finance says is paid, on an enrolment finance created.
+     paid     every module open
+     partial  the first half of the modules open (rounded up), the rest locked
+     unpaid   no module open until a payment is recorded
+   Absent on every enrolment made any other way — this never touches those. */
+export const PAYMENT_ACCESS_STATUSES = ['unpaid', 'partial', 'paid'] as const
+export type PaymentAccessStatus = typeof PAYMENT_ACCESS_STATUSES[number]
+
 export interface IEnrollment extends Document {
   id:              string
   userId:          Types.ObjectId
@@ -702,6 +710,7 @@ export interface IEnrollment extends Document {
   completedAt?:    Date
   certificateId?:  string   // generated cert UUID
   blockedLessons:  Types.ObjectId[]  // lessons blocked by admin/instructor
+  paymentAccess?:  { status?: PaymentAccessStatus; invoiceId?: string; updatedAt?: Date }
   organizationId?: Types.ObjectId
   createdAt:       Date
   updatedAt:       Date
@@ -722,6 +731,13 @@ const EnrollmentSchema = new Schema<IEnrollment>(
     completedAt:     { type: Date },
     certificateId:   { type: String },
     blockedLessons:  [{ type: Schema.Types.ObjectId, ref: 'Lesson' }],
+    /* Set only by finance provisioning (services/paymentAccess.service.ts):
+       which modules are open follows how much of the fee is paid. */
+    paymentAccess: {
+      status:    { type: String, enum: PAYMENT_ACCESS_STATUSES },
+      invoiceId: { type: String },
+      updatedAt: { type: Date },
+    },
     organizationId:  { type: Schema.Types.ObjectId, ref: 'Organization' },
   },
   baseSchemaOptions,
