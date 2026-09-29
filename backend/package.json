@@ -86,6 +86,7 @@
     "test:regvalidation": "bun src/tests/registrationvalidation.suite.ts",
     "test:remindermails": "bun src/tests/remindermails.suite.ts",
     "test:mentornoshow": "bun src/tests/mentornoshow.suite.ts",
+    "test:attendance": "bun src/tests/attendance.suite.ts",
     "test:meetlink": "bun src/tests/meetlinkchange.suite.ts",
     "test:newsessiongate": "bun src/tests/newsessiongate.suite.ts",
     "test:newsessiongate-prop": "bun src/tests/newsessiongate.property.suite.ts",

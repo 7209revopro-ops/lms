@@ -1028,6 +1028,16 @@ export interface ILiveClass extends Document {
   mentorReminderSent:    boolean   // stage 1 — nudged the mentor at start time
   mentorNoShowAlertSent: boolean   // stage 2 — escalated at start+5min
 
+  /* Auto-attendance finalization (reminders.job.ts runAttendanceFinalization).
+     Every booking still 'booked' once the class has been over for a while is
+     decided automatically — 'attended' if attendedAt was ever set (a real
+     LiveKit join or a gated external join-link hand-off), 'missed'
+     otherwise — closing the loop the ClassBooking model's own comment
+     describes but nothing used to act on: attendedAt was evidence nobody
+     read, and status stayed 'booked' until a human clicked every seat by
+     hand. Set once per class so the job never re-scans it. */
+  attendanceFinalized: boolean
+
   /* Multi-org */
   organizationId?: Types.ObjectId
 
@@ -1121,6 +1131,7 @@ const LiveClassSchema = new Schema<ILiveClass>(
     instructorJoinedAt:          { type: Date },
     mentorReminderSent:          { type: Boolean, default: false },
     mentorNoShowAlertSent:       { type: Boolean, default: false },
+    attendanceFinalized:         { type: Boolean, default: false },
     organizationId:              { type: Schema.Types.ObjectId, ref: 'Organization' },
     guestCohorts:                { type: [GuestCohortSchema], default: [] },
     hostSeatsLeft:               { type: Number, min: 0 },
@@ -2760,7 +2771,13 @@ export interface IClassBooking extends Document {
      not the student turned up, and collapsing the two would destroy the
      difference between "cancelled in advance" and "no-showed". */
   attendedAt?:      Date
-  attendanceSource?: 'livekit'
+  /* 'livekit': the CLT participant.joined webhook — a real, in-the-moment
+     presence signal. 'click': the gated hand-off in POST /live-classes/:id/
+     join for an external (Zoom/Meet) class — the student already cleared
+     booking/enrolment/module/academy/time-window checks to get here, so it
+     is the strongest signal available for a provider the LMS never hears
+     from again, just not as strong as an actual room-join event. */
+  attendanceSource?: 'livekit' | 'click'
 
   /* WHICH DOOR THIS SEAT CAME THROUGH.
 
@@ -2806,7 +2823,7 @@ const ClassBookingSchema = new Schema<IClassBooking>(
     status:      { type: String, enum: ['booked', 'attended', 'missed', 'cancelled'], default: 'booked' },
     bookedAt:    { type: Date, default: Date.now },
     attendedAt:       { type: Date },
-    attendanceSource: { type: String, enum: ['livekit'] },
+    attendanceSource: { type: String, enum: ['livekit', 'click'] },
     cancelledAt: { type: Date },
     seatPoolKind:       { type: String, enum: ['flat', 'host', 'guest', 'overflow'] },
     seatOrganizationId: { type: Schema.Types.ObjectId, ref: 'Organization', index: true },

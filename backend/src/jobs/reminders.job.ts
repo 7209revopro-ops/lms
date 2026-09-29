@@ -771,6 +771,84 @@ async function runRecordingPoller(): Promise<void> {
   }
 }
 
+/* ── Auto-attendance finalization ─────────────────────────
+   attendedAt (set by the CLT participant.joined webhook for internal/LiveKit
+   classes, or by the gated join-link hand-off in resolveMeetJoin for
+   external ones) has always been evidence nobody acted on — ClassBooking's
+   own field comment says status stays 'booked' regardless, and nothing
+   automated ever moved it. That is the "unmarked" bucket in
+   /admin/bookings/stats: every seat waiting on a human to click it by hand.
+
+   This closes the loop, once a class has been over long enough that no more
+   evidence is coming in: 'booked' -> 'attended' if attendedAt was ever set,
+   'booked' -> 'missed' otherwise. Never touches a seat that already moved —
+   cancelled, or already decided by a human before this ever got to it.
+
+   OFFLINE (in-person) classes are excluded entirely: nobody clicks a link
+   for those, so there is no attendedAt to check, and finalizing them would
+   mark every single seat 'missed' regardless of who actually showed up. They
+   stay fully manual, exactly as before this feature existed. */
+export async function runAttendanceFinalization(): Promise<void> {
+  try {
+    const { LiveClassModel, ClassBookingModel } = await import('@/models/schema.ts')
+    const now      = new Date()
+    const earliest = new Date(now.getTime() - 48 * 60 * 60 * 1000)   // don't rescan classes older than 48h
+    /* Necessary-but-not-sufficient on scheduledStart alone — durationMins
+       varies per class, so the real "has this ended" check happens per-class
+       below, the same two-step shape runRecordingPoller already uses just
+       above. 15 min buffer past scheduledStart is the loosest possible
+       filter; a 10-minute class and a 3-hour class both pass it, and both
+       get the exact end-time check next. */
+    const candidates = await LiveClassModel.find({
+      status: { $ne: 'cancelled' },
+      isOnline: { $ne: false },
+      /* $ne: true, not `false` — a class inserted by anything that bypasses
+         Mongoose defaults (a raw driver script, a migration, a fixture
+         written before this field existed) has the field simply ABSENT, and
+         Mongo's equality match on `false` does not consider "absent" a
+         match. The org-scope filters elsewhere in this codebase hit this
+         exact class of bug already (see auditlog.repository.ts's own
+         $exists:false arm) — same fix, applied here before it ever shipped
+         rather than after. */
+      attendanceFinalized: { $ne: true },
+      scheduledStart: { $gte: earliest, $lt: new Date(now.getTime() - 15 * 60 * 1000) },
+    }).select('_id scheduledStart durationMins').lean()
+
+    /* 15-minute buffer past the class's OWN end time — long enough for a
+       trailing webhook delivery or a last click to land before a seat is
+       decided for good. */
+    const ended = candidates.filter(c => {
+      const endMs = new Date(c.scheduledStart).getTime() + c.durationMins * 60_000
+      return endMs + 15 * 60_000 < now.getTime()
+    })
+
+    let attendedCount = 0, missedCount = 0
+    for (const cls of ended) {
+      try {
+        const toAttended = await ClassBookingModel.updateMany(
+          { liveClassId: cls._id, status: 'booked', attendedAt: { $exists: true } },
+          { $set: { status: 'attended' } },
+        )
+        const toMissed = await ClassBookingModel.updateMany(
+          { liveClassId: cls._id, status: 'booked' },
+          { $set: { status: 'missed' } },
+        )
+        attendedCount += toAttended.modifiedCount ?? 0
+        missedCount   += toMissed.modifiedCount ?? 0
+        await LiveClassModel.findByIdAndUpdate(cls._id, { attendanceFinalized: true })
+      } catch (err) {
+        logger.error({ err, classId: cls._id }, '[Attendance] Finalization failed for one class')
+      }
+    }
+
+    if (ended.length) {
+      logger.info(`[Attendance] Finalized ${ended.length} classes — ${attendedCount} attended, ${missedCount} missed`)
+    }
+  } catch (err) {
+    logger.error({ err }, '[Attendance] Finalization job error')
+  }
+}
+
 /* ── Entry point ─────────────────────────────────────── */
 /* Each run* function above is exported for one reason: so a test can call it.
 
@@ -838,6 +916,9 @@ export function startReminderJobs(): void {
 
   // Every 15 min — poll Google Meet API for completed recordings (classes ended in last 48 h)
   cron.schedule('*/15 * * * *', exclusive('recording-poller', runRecordingPoller))
+
+  // Every 15 min — finalize attendance (booked -> attended/missed) for online classes ended 15+ min ago
+  cron.schedule('*/15 * * * *', exclusive('attendance-finalization', runAttendanceFinalization))
 
   logger.info('[Reminders] Cron jobs scheduled')
 }

@@ -2618,8 +2618,19 @@ async function buildBookingFilter(
         ] }
       : { courseId: clause }
 
-  // Programme-scoped admins (sub_admin) only see their program's bookings
-  const scope = (req.user as any)?.categoryScope as string | undefined
+  /* Programme-scoped admins (sub_admin) only see their program's bookings —
+     NOT instructors. categoryScope is set for both roles (injectCategoryScope,
+     auth.middleware.ts), but an instructor's comes from their OWN profile
+     category, which does not have to match every class they are assigned to
+     teach — the exact "JURA-tagged instructor assigned to a 4x-trading
+     session" case adminGetById's own comment already documents and fixes a
+     few hundred lines up. This endpoint had the identical bug: `instructorId`
+     above already proved this class is genuinely the caller's own, and then
+     this intersected it with a course-programme filter anyway, emptying the
+     roster, the stats strip and the CSV export for their own class the
+     moment their profile category disagreed with what they'd been assigned
+     to teach. */
+  const scope = req.user?.role === 'instructor' ? undefined : ((req.user as any)?.categoryScope as string | undefined)
   let scopedCourseIds: MongoTypes.ObjectId[] | null = null
   if (scope) {
     const { CourseModel } = await import('@/models/schema.ts')

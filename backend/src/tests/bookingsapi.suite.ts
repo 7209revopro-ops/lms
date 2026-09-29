@@ -540,6 +540,50 @@ section('K. an admin cancel reaches the student, legibly')
     body.slice(0, 200))
 }
 
+/* ═══════════ L — an instructor's own class-category mismatch never locks them out ═══════════
+   Regression: categoryScope is set for BOTH sub_admin and instructor
+   (injectCategoryScope, auth.middleware.ts), but only sub_admin's is meant
+   to narrow this endpoint (the comment right above the scope read said so —
+   the code just didn't enforce it). An instructor assigned to teach outside
+   their own profile category — a perfectly ordinary staffing decision,
+   exactly like the one adminGetById's own comment already documents and
+   guards against — got an empty roster, a zero stats strip and an empty
+   CSV for a class that WAS genuinely theirs, the moment instructorId
+   correctly matched but the bolted-on course-programme filter didn't. */
+section('L. An instructor sees their own class even when its course is outside their profile category')
+{
+  const { CourseModel: CM, LiveClassModel: LC, ClassBookingModel: CB } = await import('@/models/schema.ts')
+
+  const juraInstructor = await mk('jura-teach@ba.test', 'instructor', orgA, { category: 'jura' })
+  const forexCourseForJuraTeacher = await CM.create({
+    title: 'Forex 202', slug: 'forex-202-ba', description: 'd',
+    instructorId: juraInstructor._id, price: 0, isFree: true, status: 'published',
+    language: 'English', organizationId: orgA._id, program: '4x-trading',
+  })
+  const crossCategoryClass = await LC.create({
+    title: 'Cross-category session', courseId: forexCourseForJuraTeacher._id,
+    instructorId: juraInstructor._id, organizationId: orgA._id,
+    scheduledStart: new Date(Date.now() + 2 * 24 * 60 * MIN), durationMins: 60, type: 'external',
+    isOnline: true, status: 'scheduled', language: 'English', sessionCapacity: 30, bookedCount: 0,
+    meetingUrl: 'https://meet.google.com/ba-cross-category',
+  })
+  const crossStudent = await mk('cross-student@ba.test', 'student', orgA, { enrollmentStatus: 'approved' })
+  await CB.create({ userId: crossStudent._id, liveClassId: crossCategoryClass._id, status: 'booked', bookedAt: new Date() })
+
+  const juraTeacherJar = await login('jura-teach@ba.test')
+  const res = await call('GET', `/admin/bookings?liveClassId=${crossCategoryClass._id}`, juraTeacherJar)
+  check('L1 the instructor sees the one booking on their own class, not an empty roster',
+    res.rows.length === 1, JSON.stringify(res.body))
+  check('L2 the row is really the right one', String(res.rows[0]?.userId?._id ?? res.rows[0]?.userId) === String(crossStudent._id))
+
+  /* The same mismatch, checked without a liveClassId filter, against the
+     stats endpoint the class's attendance page also reads — the FIRST
+     symptom this bug actually produced live (a "1/1 attended" strip showing
+     0/0 for the assigned instructor). */
+  const stats = await call('GET', `/admin/bookings/stats?liveClassId=${crossCategoryClass._id}`, juraTeacherJar)
+  check('L3 the stats endpoint agrees — total is 1, not 0', stats.body?.data?.total === 1, JSON.stringify(stats.body))
+}
+
 } catch (err) {
   fail++
   lines.push(`\n  FATAL  ${(err as Error).stack ?? String(err)}`)

@@ -420,6 +420,23 @@ export async function resolveMeetJoin(
   const window = MEET_WINDOW(live)
   await assertStudentMayJoin(live, ctx, window)
 
+  /* Auto-attendance evidence. This IS the join — the URL leaves the server
+     nowhere else (see the comment above this function) — and by the time
+     execution reaches here assertStudentMayJoin has already cleared booking,
+     enrolment, module, academy and the time window, so this is the strongest
+     signal available for a provider (Zoom/Meet) that never calls the LMS
+     back. Idempotent — $exists:false makes the FIRST click the one that
+     counts, matching the CLT webhook's identical first-join-wins shape —
+     and best-effort: a write failure here must never block the student from
+     actually getting into class. runAttendanceFinalization (reminders.job.ts)
+     is what turns this timestamp into the booking's real 'attended' status
+     once the class is over. */
+  const { ClassBookingModel } = await import('@/models/schema.ts')
+  void ClassBookingModel.updateOne(
+    { userId: new Types.ObjectId(ctx.userId), liveClassId: live._id, status: 'booked', attendedAt: { $exists: false } },
+    { $set: { attendedAt: new Date(), attendanceSource: 'click' } },
+  ).catch(err => logger.error({ err, liveClassId: live.id, actor: ctx.userId }, 'auto-attendance write failed'))
+
   logger.info({ liveClassId: live.id, actor: ctx.userId }, 'Meet link released to booked student')
   return { url: live.meetingUrl!, closesAt: new Date(window.closesAt) }
 }
