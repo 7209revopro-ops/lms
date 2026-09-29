@@ -29,6 +29,7 @@ import bookmarksRoutes     from './bookmarks.routes.ts'
 import learningPathRoutes  from './learningpaths.routes.ts'
 import aiRoutes            from './ai.routes.ts'
 import auditLogRoutes      from './auditlog.routes.ts'
+import emailOutboxRoutes   from './emailoutbox.routes.ts'
 import uploadRoutes        from './upload.routes.ts'
 import bookingRoutes       from './bookings.routes.ts'
 import feedbackRoutes      from './feedback.routes.ts'
@@ -109,6 +110,7 @@ router.use('/learning-paths',  learningPathRoutes)
 router.use('/ai',              aiRoutes)
 /* 8.11 Audit log */
 router.use('/audit-logs',      auditLogRoutes)
+router.use('/email-logs',      emailOutboxRoutes)
 /* Media uploads (image / video) */
 router.use('/uploads',         uploadRoutes)
 /* Class bookings (Phase 3) */

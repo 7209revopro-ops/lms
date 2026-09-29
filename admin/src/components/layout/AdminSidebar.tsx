@@ -8,7 +8,7 @@ import {
   LayoutDashboard, BookOpen, Users, GraduationCap,
   Tag, Star, Settings, ChevronLeft, ChevronRight, LogOut, X,
   ShoppingBag, Ticket, Map, ClipboardList, Video, CalendarDays, BarChart3, ShieldCheck, UserCog, LifeBuoy,
-  ClipboardCheck, Film, MonitorSmartphone, FileCheck2, Megaphone,
+  ClipboardCheck, Film, MonitorSmartphone, FileCheck2, Megaphone, Mail,
 } from 'lucide-react'
 import { useUIStore } from '@/store/ui.store'
 import { mayReachClassroom } from '@/lib/classroomAccess'
@@ -110,10 +110,15 @@ function SidebarContent({ collapsed, onClose }: SidebarContentProps) {
   const withClassroom = mayReachClassroom(user?.role)
     ? baseNavItems
     : baseNavItems.filter(i => i.href !== '/recordings')
-  // Role/permission management is platform-wide (spans every organization) —
-  // only super_admin manages it, so the link is hidden for org-scoped admins.
+  // Role/permission management and the email send log are both
+  // platform-wide (span every organization, no org to scope by) — only
+  // super_admin sees either, same reasoning as the backend route guard
+  // (requireSuperAdmin, not requireAdmin) on GET /email-logs.
   const navItems  = user?.role === 'super_admin'
-    ? [...withClassroom, { label: 'Roles', href: '/roles', icon: ShieldCheck }]
+    ? [...withClassroom,
+        { label: 'Roles',      href: '/roles',       icon: ShieldCheck },
+        { label: 'Email Logs', href: '/email-logs',  icon: Mail },
+      ]
     : withClassroom
   const roleLabel = isInstructor ? 'Instructor' : isManager ? 'Manager' : 'Admin'
   const bottomItems = isInstructor ? [] : [settingsItem]
