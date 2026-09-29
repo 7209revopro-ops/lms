@@ -739,6 +739,87 @@ export async function sendInstructor15MinReminder(
   })
 }
 
+/* ── Mentor no-show detection (reminders.job.ts) ──────────────────────────
+   Two stages: a stage-1 nudge to the mentor alone at start time, then a
+   stage-2 escalation at start+5min if they still have not joined — sent to
+   the mentor again plus super_admins, the class's academy admin(s) and its
+   programme's sub_admin(s). See reminders.job.ts for the cron tiers and
+   LiveClassModel.instructorJoinedAt/mentorReminderSent/mentorNoShowAlertSent
+   for how "joined" is detected (a real webhook for internal/LiveKit classes,
+   a click-to-join proxy for external ones — no positive signal either way
+   means the check simply never fires, same false-negative every other
+   calendar-based reminder in this file already lives with). */
+
+export async function sendMentorJoinReminder(
+  to: string,
+  name: string,
+  liveTitle: string,
+  joinUrl: string,
+): Promise<void> {
+  const subject = `⏰ Your class "${liveTitle}" has started — join now`
+  const html = wrap(subject, `
+    <h2 style="margin:0 0 16px;font-size:20px;font-weight:700;color:#0D0F1A">Your class has started</h2>
+    <p>Hi ${escapeHtml(name)},</p>
+    <p><strong>${escapeHtml(liveTitle)}</strong> was scheduled to start now, and we haven't seen you join yet. Students may already be waiting.</p>
+    <p style="margin:24px 0">
+      <a href="${escapeHtml(sanitiseUrl(joinUrl))}" style="display:inline-block;background:linear-gradient(135deg,#EF4444,#DC2626);color:#fff;font-weight:700;padding:14px 28px;border-radius:12px;text-decoration:none;font-size:15px">
+        Join now →
+      </a>
+    </p>
+  `)
+  await sender.send({
+    to, subject, html,
+    text: `Hi ${name},\n\n"${liveTitle}" was scheduled to start now, and we haven't seen you join yet. Students may already be waiting.\n\nJoin now: ${joinUrl}`,
+  })
+}
+
+export async function sendMentorNoShowAlert(
+  to: string,
+  recipientName: string,
+  mentorName: string,
+  liveTitle: string,
+  scheduledStart: Date,
+  academySlug?: string | null,
+): Promise<void> {
+  const when = academyTime(scheduledStart, academySlug)
+  const subject = `⚠️ Mentor has not joined: ${liveTitle}`
+  const html = wrap(subject, `
+    <h2 style="margin:0 0 16px;font-size:20px;font-weight:700;color:#0D0F1A">Mentor has not joined their class</h2>
+    <p>Hi ${escapeHtml(recipientName)},</p>
+    <p><strong>${escapeHtml(mentorName)}</strong> has not joined <strong>${escapeHtml(liveTitle)}</strong>, scheduled for <strong>${escapeHtml(when)}</strong> — it has now been more than 5 minutes since the scheduled start.</p>
+    <p style="color:#6B7280;font-size:13px">This is an automated alert. The mentor has already been reminded once and may still join late — check the Instructor Attendance page in the admin panel for the current status.</p>
+  `)
+  await sender.send({
+    to, subject, html,
+    text: `Hi ${recipientName},\n\n${mentorName} has not joined "${liveTitle}", scheduled for ${when} — it has now been more than 5 minutes since the scheduled start.\n\nThis is an automated alert. Check the Instructor Attendance page in the admin panel for the current status.`,
+  })
+}
+
+/** The mentor's own copy of the stage-2 escalation — same event as
+    sendMentorNoShowAlert, addressed to the admins/sub-admins, but written in
+    second person rather than third so it doesn't read as a report about a
+    stranger. */
+export async function sendMentorNoShowSelfAlert(
+  to: string,
+  name: string,
+  liveTitle: string,
+  scheduledStart: Date,
+  academySlug?: string | null,
+): Promise<void> {
+  const when = academyTime(scheduledStart, academySlug)
+  const subject = `⚠️ You have not joined: ${liveTitle}`
+  const html = wrap(subject, `
+    <h2 style="margin:0 0 16px;font-size:20px;font-weight:700;color:#0D0F1A">You have not joined your class</h2>
+    <p>Hi ${escapeHtml(name)},</p>
+    <p><strong>${escapeHtml(liveTitle)}</strong> was scheduled for <strong>${escapeHtml(when)}</strong>, and it has now been more than 5 minutes since the scheduled start without you joining.</p>
+    <p style="color:#6B7280;font-size:13px">Your organization admin and program coordinators have also been notified. Please join now if you can, or contact your admin if something is preventing you.</p>
+  `)
+  await sender.send({
+    to, subject, html,
+    text: `Hi ${name},\n\n"${liveTitle}" was scheduled for ${when}, and it has now been more than 5 minutes since the scheduled start without you joining.\n\nYour organization admin and program coordinators have also been notified. Please join now if you can, or contact your admin if something is preventing you.`,
+  })
+}
+
 /* ── Instructor: tomorrow's schedule (9 PM the evening before) ───────────── */
 
 /** One entry on an instructor's day — a class they teach or a meeting they host. */

@@ -277,6 +277,28 @@ export class UserRepository extends BaseRepository<IUser> {
       courseId: { $in: courses.map(c => c._id) },
     }) as unknown as Types.ObjectId[]
   }
+
+  /* Staff to escalate a mentor no-show to: the super_admins (platform-wide,
+     unscoped — reminders.job.ts adds them separately) plus, for one academy
+     and one programme, its admin(s) and its programme's sub_admin(s).
+
+     `program` here is the SUB_ADMIN vocabulary ('forex', 'digital_marketing',
+     'ai', 'jura' — schema.ts:251), not the course/categoryScope vocabulary
+     ('4x-trading', 'digital-marketing', ... — injectCategoryScope,
+     auth.middleware.ts:557-562). The caller maps the class's course category
+     to this before calling; mixing the two up here would silently match
+     nobody, since sub_admin.program never actually contains '4x-trading'. */
+  async findOrgStaffForProgram(organizationId: string, program?: string): Promise<IUser[]> {
+    if (!Types.ObjectId.isValid(organizationId)) return []
+    const orgId = new Types.ObjectId(organizationId)
+    const orFilter: Record<string, unknown>[] = [
+      { role: 'admin', organizationId: orgId, isActive: true },
+    ]
+    if (program) {
+      orFilter.push({ role: 'sub_admin', organizationId: orgId, program, isActive: true })
+    }
+    return UserModel.find({ $or: orFilter }).lean() as unknown as IUser[]
+  }
 }
 
 /* ─────────────────────────────────────────────────────

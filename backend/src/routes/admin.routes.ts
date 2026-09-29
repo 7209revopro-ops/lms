@@ -1598,6 +1598,52 @@ const liveUpdateSchema = withCohortRules(z.object({
 
 router.get   ('/courses/:courseId/live-classes',          live.adminListForCourse)
 router.get   ('/live-classes',                            live.adminListAll)
+/* Registered BEFORE /live-classes/:id — Express matches routes in
+   declaration order, and "no-shows" would otherwise be swallowed as an :id
+   value by the dynamic route below. Gated to admin+ (not instructor): the
+   people this alerts are exactly the people this page is for. */
+router.get('/live-classes/no-shows', requireAnyAdmin, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { page, per_page } = parsePagination(req.query as Record<string, unknown>)
+    const { LiveClassModel } = await import('@/models/schema.ts')
+
+    const filter: Record<string, unknown> = { mentorNoShowAlertSent: true }
+    /* Same tenancy shape as adminListAll just above: super_admin unscoped,
+       everyone else pinned to their own academy. A sub_admin's programme
+       scope is intentionally NOT applied here — they were one of the people
+       this alert was sent TO (reminders.job.ts), so seeing every no-show in
+       their academy, not just their own programme's, is the point: it is
+       their inbox as much as it is a course filter. */
+    if (req.user?.role !== 'super_admin' && req.user?.organizationId) {
+      filter['organizationId'] = req.user.organizationId
+    }
+
+    const [docs, totalCount] = await Promise.all([
+      LiveClassModel.find(filter)
+        .sort({ scheduledStart: -1 })
+        .skip((page - 1) * per_page).limit(per_page)
+        .populate('instructorId', 'name email')
+        .populate('courseId', 'title')
+        .lean({ virtuals: true }),
+      LiveClassModel.countDocuments(filter),
+    ])
+
+    sendSuccess(res, docs.map((d: any) => ({
+      id:                 d.id ?? String(d._id),
+      title:              d.title,
+      scheduledStart:     d.scheduledStart,
+      type:               d.type,
+      status:             d.status,
+      instructor:         d.instructorId ? { id: String(d.instructorId._id ?? d.instructorId), name: d.instructorId.name, email: d.instructorId.email } : null,
+      course:             d.courseId ? { title: d.courseId.title } : null,
+      /* Set if the mentor eventually joined AFTER the alert already fired —
+         a late join, not a resolved mystery. Surfacing it here rather than
+         dropping the row once joined keeps the page an honest record of
+         "this alert fired," not a live-only queue that erases its own history. */
+      instructorJoinedAt: d.instructorJoinedAt ?? null,
+    })), undefined, 200, buildPaginationMeta(totalCount, page, per_page))
+  } catch (err) { next(err) }
+})
 router.get   ('/live-classes/:id',                        live.adminGetById)
 router.post  ('/live-classes', requirePermission('live-classes','create'),                            validate(liveCreateSchema), audit('liveclass.create', 'LiveClass', undefined, r => ({ title: r.body.title, scheduledStart: r.body.scheduledStart })), live.adminCreate)
 const liveRepeatSchema = z.object({ weeks: z.coerce.number().int().min(1).max(52) })

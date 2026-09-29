@@ -28,12 +28,33 @@ import {
   sendFiveMinReminder,
   sendClassStartingReminder,
   sendInstructor15MinReminder,
+  sendMentorJoinReminder,
+  sendMentorNoShowAlert,
+  sendMentorNoShowSelfAlert,
 } from '@/services/email.service.ts'
 import { sendClassReminderTomorrowWhatsApp, sendClassStartingSoonWhatsApp } from '@/services/whatsapp.service.ts'
 import { wantsStaffEmail } from '@/utils/emailPrefs.ts'
 import { SCHEDULE_LINK } from '@/utils/clientLinks.ts'
+import { UserRepository } from '@/repositories/user.repository.ts'
+import { env } from '@/config/env.ts'
 
 const notifSvc = new NotificationService()
+const userRepo = new UserRepository()
+
+/* Course.program stores the '4x-trading'/'digital-marketing'/'ai'/'jura'
+   vocabulary (the same one categoryScope uses, auth.middleware.ts:557-562) —
+   its name suggests otherwise, but grep the field and it's plain unenforced
+   String. User.program (the sub_admin's own scoping field, schema.ts:251)
+   uses a DIFFERENT vocabulary: 'forex'/'digital_marketing'/'ai'/'jura'. This
+   maps a class's course into the vocabulary its sub_admins are actually
+   stored under — querying UserModel with the course's raw value would match
+   nobody, silently. */
+const SUB_ADMIN_PROGRAM_OF: Record<string, string> = {
+  'ai':               'ai',
+  'digital-marketing':'digital_marketing',
+  '4x-trading':       'forex',
+  'jura':             'jura',
+}
 
 /* ── Types ──────────────────────────────────────────── */
 /* Bookings whose class starts inside [from, to].
@@ -539,6 +560,176 @@ export async function runInstructor15MinReminders(): Promise<void> {
   }
 }
 
+/* ── Mentor no-show detection — stage 1: nudge at start time ───────────────
+   "Joined" is LiveClassModel.instructorJoinedAt — a real webhook for
+   internal/LiveKit classes (cltWebhook.service.ts onParticipantJoined), a
+   click-to-join proxy for external ones (POST /:id/mark-joined). Either way,
+   an unset timestamp is the only signal this job needs; it does not care
+   which provider set it or will set it.
+
+   Window widened to 8 minutes against the 5-minute tick for the same reason
+   instructor-15min's window was widened above: a 5-minute window against a
+   5-minute tick only covers every start time if ticks are never late, and
+   the miss here is silent — the flag just never gets set. */
+export async function runMentorJoinReminder(): Promise<void> {
+  try {
+    const { LiveClassModel } = await import('@/models/schema.ts')
+    await warmSlugs()
+    const now  = new Date()
+    const from = new Date(now.getTime() - 8 * 60 * 1000)
+    const to   = now
+
+    const classes = await LiveClassModel.find({
+      status: { $in: ['scheduled', 'live'] },
+      isOnline: { $ne: false },
+      instructorJoinedAt: { $exists: false },
+      mentorReminderSent: false,
+      scheduledStart: { $gte: from, $lte: to },
+    })
+      .populate<{ instructorId: { id: string; name: string; email: string } }>('instructorId', 'name email role emailPrefs')
+      .lean({ virtuals: true })
+
+    for (const cls of classes) {
+      const instructor = cls.instructorId as any
+      const liveClassId = String(cls.id ?? cls._id)
+
+      if (!instructor?.email) {
+        await LiveClassModel.findByIdAndUpdate(cls._id, { mentorReminderSent: true })
+        continue
+      }
+
+      /* External: the Zoom/Meet link students see, straight from the record.
+         Internal: there is no external link at all — the instructor's door
+         into the room is the LMS studio page, not a URL this job can mint
+         (that needs a signed CLT ticket, minted per-click, not per-reminder). */
+      const joinUrl = cls.type === 'external'
+        ? cls.meetingUrl
+        : `${env.ADMIN_URL}/live-classes/${liveClassId}/studio`
+      if (!joinUrl) {
+        await LiveClassModel.findByIdAndUpdate(cls._id, { mentorReminderSent: true })
+        continue
+      }
+
+      try {
+        await notifSvc.create(String(instructor.id ?? instructor._id), {
+          kind:  'class-reminder',
+          title: 'Your class has started',
+          body:  `"${cls.title}" was scheduled to start now — please join.`,
+          link:  `/live-classes/${liveClassId}`,
+        })
+        if (wantsStaffEmail(instructor, 'classReminder')) {
+          await sendMentorJoinReminder(instructor.email, instructor.name ?? 'Instructor', cls.title, joinUrl)
+        }
+        await LiveClassModel.findByIdAndUpdate(cls._id, { mentorReminderSent: true })
+        logger.info({ classId: cls._id, instructor: instructor.email }, '[Reminders] Mentor join reminder sent')
+      } catch (err) {
+        logger.error({ err, classId: cls._id }, '[Reminders] Mentor join reminder failed')
+      }
+    }
+
+    if (classes.length) logger.info(`[Reminders] Mentor join reminder: processed ${classes.length} classes`)
+  } catch (err) {
+    logger.error({ err }, '[Reminders] mentor-join-reminder job error')
+  }
+}
+
+/* ── Mentor no-show detection — stage 2: escalate at start+5min ─────────────
+   Still not joined 5 minutes after the reminder's own window ended. Notifies,
+   in order: the class's academy admin(s), its course programme's sub_admin(s)
+   (mapped through SUB_ADMIN_PROGRAM_OF), every super_admin platform-wide, and
+   the mentor themselves — matching what the product asked for exactly: admin,
+   org admin, org+programme sub-admin, and the mentor.
+
+   Window: classes whose start+5min falls in the last ~8 minutes, i.e.
+   scheduledStart between 13 and 5 minutes ago — the same 8-minute margin as
+   stage 1, just shifted 5 minutes later. */
+export async function runMentorNoShowEscalation(): Promise<void> {
+  try {
+    const { LiveClassModel, UserModel } = await import('@/models/schema.ts')
+    await warmSlugs()
+    const now  = new Date()
+    const from = new Date(now.getTime() - 13 * 60 * 1000)
+    const to   = new Date(now.getTime() - 5 * 60 * 1000)
+
+    const classes = await LiveClassModel.find({
+      status: { $in: ['scheduled', 'live'] },
+      isOnline: { $ne: false },
+      instructorJoinedAt: { $exists: false },
+      mentorNoShowAlertSent: false,
+      scheduledStart: { $gte: from, $lte: to },
+    })
+      .populate<{ instructorId: { id: string; name: string; email: string } }>('instructorId', 'name email')
+      .populate<{ courseId: { program?: string } }>('courseId', 'program')
+      .lean({ virtuals: true })
+
+    for (const cls of classes) {
+      const liveClassId = String(cls.id ?? cls._id)
+      const instructor  = cls.instructorId as any
+      const orgId       = (cls as { organizationId?: unknown }).organizationId
+
+      /* No academy to escalate within — extremely unlikely for a real class,
+         but if it happens there is no admin/sub_admin set to notify. Still
+         mark it handled so the job does not re-read it forever; the mentor
+         still gets their own copy below regardless of org. */
+      try {
+        const courseProgram = (cls.courseId as { program?: string } | undefined)?.program
+        const subAdminProgram = courseProgram ? SUB_ADMIN_PROGRAM_OF[courseProgram] : undefined
+        const slug = orgSlugFor(orgId)
+        const when = new Date(cls.scheduledStart)
+        const mentorName = instructor?.name ?? 'The instructor'
+
+        const staff = orgId ? await userRepo.findOrgStaffForProgram(String(orgId), subAdminProgram) : []
+        const superAdmins = await UserModel.find({ role: 'super_admin', isActive: true })
+          .select('name email').lean() as { id?: string; _id?: unknown; name?: string; email?: string }[]
+
+        /* super_admins are platform-wide and never in `staff` (findOrgStaffForProgram
+           only matches admin/sub_admin), so no de-dupe needed between the two lists. */
+        const recipients = [...staff, ...superAdmins]
+
+        for (const r of recipients) {
+          if (!r.email) continue
+          const recipientId = String((r as { id?: string }).id ?? (r as { _id?: unknown })._id)
+          await notifSvc.create(recipientId, {
+            kind:  'mentor-no-show',
+            title: `Mentor has not joined: ${cls.title}`,
+            body:  `${mentorName} has not joined their class, scheduled for ${academyTime(when, slug)}.`,
+            link:  `/live-classes/${liveClassId}`,
+          })
+          try {
+            await sendMentorNoShowAlert(r.email, r.name ?? 'Admin', mentorName, cls.title, when, slug)
+          } catch (err) {
+            logger.error({ err, classId: cls._id, to: r.email }, '[Reminders] Mentor no-show alert email failed')
+          }
+        }
+
+        if (instructor?.email) {
+          await notifSvc.create(String(instructor.id ?? instructor._id), {
+            kind:  'mentor-no-show',
+            title: `You have not joined: ${cls.title}`,
+            body:  `Your class was scheduled for ${academyTime(when, slug)} and you still have not joined.`,
+            link:  `/live-classes/${liveClassId}`,
+          })
+          try {
+            await sendMentorNoShowSelfAlert(instructor.email, instructor.name ?? 'Instructor', cls.title, when, slug)
+          } catch (err) {
+            logger.error({ err, classId: cls._id }, '[Reminders] Mentor no-show self-alert email failed')
+          }
+        }
+
+        await LiveClassModel.findByIdAndUpdate(cls._id, { mentorNoShowAlertSent: true })
+        logger.warn({ classId: cls._id, instructor: instructor?.email, recipients: recipients.length },
+          '[Reminders] Mentor no-show escalated')
+      } catch (err) {
+        logger.error({ err, classId: cls._id }, '[Reminders] Mentor no-show escalation failed')
+      }
+    }
+
+    if (classes.length) logger.info(`[Reminders] Mentor no-show escalation: processed ${classes.length} classes`)
+  } catch (err) {
+    logger.error({ err }, '[Reminders] mentor-no-show job error')
+  }
+}
+
 /* ── Recording poller ────────────────────────────────── */
 async function runRecordingPoller(): Promise<void> {
   try {
@@ -638,6 +829,12 @@ export function startReminderJobs(): void {
 
   // Every 5 min — instructor 15-min reminder with Google Meet link (13–17 min window)
   cron.schedule('*/5 * * * *', exclusive('instructor-15min', runInstructor15MinReminders))
+
+  // Every 5 min — mentor no-show stage 1: nudge the mentor if not joined by start time
+  cron.schedule('*/5 * * * *', exclusive('mentor-join-reminder', runMentorJoinReminder))
+
+  // Every 5 min — mentor no-show stage 2: escalate to admins/sub-admins if still not joined 5 min after start
+  cron.schedule('*/5 * * * *', exclusive('mentor-no-show', runMentorNoShowEscalation))
 
   // Every 15 min — poll Google Meet API for completed recordings (classes ended in last 48 h)
   cron.schedule('*/15 * * * *', exclusive('recording-poller', runRecordingPoller))

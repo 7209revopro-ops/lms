@@ -602,6 +602,22 @@ export function isInteractiveRoom(
   return l.provider === 'livekit' || !!l.cltRoomName
 }
 
+/* ── Mentor no-show detection: click-to-join proxy ──────────────────────
+   External (Zoom/Meet) classes have no webhook — the meeting happens
+   entirely off-platform — so this click is the only signal
+   reminders.job.ts's mentor no-show jobs have to work with for these. Fired
+   best-effort on every Join click regardless of who's clicking; the server
+   only actually records it when the caller IS the assigned instructor
+   (POST /live-classes/:id/mark-joined), so an admin observer's click is a
+   harmless no-op. Never blocks or delays opening the meeting link. */
+export function markInstructorJoined(liveClassId: string): void {
+  void apiPost(`/live-classes/${liveClassId}/mark-joined`).catch(() => {
+    /* Best-effort. A failed write here should never stop the instructor
+       from actually joining their class — the link has already opened by
+       the time this fires. */
+  })
+}
+
 /* ── Mentor meetings ──────────────────────────────────────
    Time booked with a mentor from the Root portal: a staff catch-up, one
    student, or an outside client. Not classes — nobody enrols, no cohort is

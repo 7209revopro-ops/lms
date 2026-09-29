@@ -316,6 +316,36 @@ router.post('/:id/host-ticket', authenticateAny, injectCategoryScope, async (req
   } catch (err) { next(err) }
 })
 
+/* POST /live-classes/:id/mark-joined — records the instructor's own click on
+   an EXTERNAL (Zoom/Meet) class's Join link, for the mentor no-show jobs in
+   reminders.job.ts. There is no webhook for these providers — the meeting
+   happens entirely off-platform — so a click is the best signal available:
+   intent, not confirmed presence, unlike the real `participant.joined`
+   webhook internal/LiveKit classes get (cltWebhook.service.ts).
+   Only counts when the caller IS the assigned instructor; an admin
+   observer's click on the same visible Join link is a harmless no-op, not an
+   error, so the button never needs to know who is clicking it. Idempotent —
+   the first click is the one the no-show jobs read. */
+router.post('/:id/mark-joined', authenticateAny, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { LiveClassModel } = await import('@/models/schema.ts')
+    const id   = String(req.params['id'] ?? '')
+    const live = await LiveClassModel.findById(id).select('instructorId instructorJoinedAt').lean()
+    if (!live) {
+      res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Live class not found' } })
+      return
+    }
+    if (String(live.instructorId) !== String(req.user!.id)) {
+      sendSuccess(res, { recorded: false })
+      return
+    }
+    if (!(live as { instructorJoinedAt?: Date }).instructorJoinedAt) {
+      await LiveClassModel.updateOne({ _id: id }, { $set: { instructorJoinedAt: new Date() } })
+    }
+    sendSuccess(res, { recorded: true })
+  } catch (err) { next(err) }
+})
+
 /* Student join ticket. Same shape as /host-ticket, but every entitlement rule
    in §7 of the plan runs first: booking, enrolment, module access, academy and
    the time window. A refusal here is the ONLY thing standing between a student

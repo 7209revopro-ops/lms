@@ -865,6 +865,7 @@ export type NotificationKind =
   | 'booking-confirmed'
   | 'booking-cancelled'
   | 'class-reminder'
+  | 'mentor-no-show'
   | 'system'
 
 export interface INotification extends Document {
@@ -882,7 +883,7 @@ export interface INotification extends Document {
 const NotificationSchema = new Schema<INotification>(
   {
     userId: { type: Schema.Types.ObjectId, ref: 'User', required: true },
-    kind:   { type: String, enum: ['enrollment','lesson-complete','course-complete','review-posted','live-class-scheduled','achievement','booking-confirmed','booking-cancelled','class-reminder','system'], required: true },
+    kind:   { type: String, enum: ['enrollment','lesson-complete','course-complete','review-posted','live-class-scheduled','achievement','booking-confirmed','booking-cancelled','class-reminder','mentor-no-show','system'], required: true },
     title:  { type: String, required: true, maxlength: 255 },
     body:   { type: String, maxlength: 1000 },
     link:   { type: String, maxlength: 1024 },
@@ -1010,6 +1011,23 @@ export interface ILiveClass extends Document {
   /* Instructor reminder tracking */
   reminderInstructor15MinSent: boolean
 
+  /* Mentor no-show detection.
+     instructorJoinedAt is set two different ways depending on `type`:
+       - internal (LiveKit): the CLT `participant.joined` webhook, the moment
+         the instructor's own client actually enters the room — a real signal.
+       - external (Zoom/Meet): there is no webhook — the meeting happens on a
+         provider we never hear from — so this is set when the instructor
+         clicks "Join" in the admin panel (POST /live-classes/:id/mark-joined).
+         That is a proxy for intent, not confirmed presence, and the two
+         no-show jobs below are the only consumers that need to know which:
+         they run off `type` too, so an external instructor who clicked Join
+         but never actually connected will not be flagged, the same false-
+         negative every calendar-integration reminder in this file already
+         accepts for lack of a better signal. */
+  instructorJoinedAt?:   Date
+  mentorReminderSent:    boolean   // stage 1 — nudged the mentor at start time
+  mentorNoShowAlertSent: boolean   // stage 2 — escalated at start+5min
+
   /* Multi-org */
   organizationId?: Types.ObjectId
 
@@ -1100,6 +1118,9 @@ const LiveClassSchema = new Schema<ILiveClass>(
     room:              { type: String, maxlength: 100 },
     rescheduledReason:           { type: String, maxlength: 2000 },
     reminderInstructor15MinSent: { type: Boolean, default: false },
+    instructorJoinedAt:          { type: Date },
+    mentorReminderSent:          { type: Boolean, default: false },
+    mentorNoShowAlertSent:       { type: Boolean, default: false },
     organizationId:              { type: Schema.Types.ObjectId, ref: 'Organization' },
     guestCohorts:                { type: [GuestCohortSchema], default: [] },
     hostSeatsLeft:               { type: Number, min: 0 },

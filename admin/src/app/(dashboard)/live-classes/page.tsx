@@ -12,7 +12,7 @@ import {
   UserCheck, LayoutGrid, Building2, MapPin, UserPlus,
   ChevronDown, User, Globe,
 } from 'lucide-react'
-import { useAllLiveClasses, useCreateLiveClass, useMyMeetings, type LiveClass, type LiveClassType, type MentorMeeting } from '@/lib/api/liveClasses'
+import { useAllLiveClasses, useCreateLiveClass, useMyMeetings, markInstructorJoined, type LiveClass, type LiveClassType, type MentorMeeting } from '@/lib/api/liveClasses'
 import { CLASS_LANGUAGES, withFlagAndNative } from '@/lib/languages'
 import { datetimeLocalToISO, zoneOf, foreignZoneTag } from '@/lib/timezone'
 import { useCourses } from '@/lib/api/courses'
@@ -636,6 +636,7 @@ function TableRow({ live, index, showInstructor }: { live: LiveClass; index: num
                 href={meetUrl}
                 target="_blank"
                 rel="noopener noreferrer"
+                onClick={() => markInstructorJoined(live.id)}
                 className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-[11px] font-bold transition-all hover:opacity-90"
                 style={{ background: 'linear-gradient(135deg,#22C55E,#16A34A)', color: '#fff', textDecoration: 'none' }}
                 title="Join Google Meet">

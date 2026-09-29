@@ -108,7 +108,21 @@ async function onParticipantJoined(evt: CltEvent): Promise<string> {
   }
 
   const live = await classForRoom(evt.roomName)
-  const { ClassBookingModel } = await import('@/models/schema.ts')
+  const { ClassBookingModel, LiveClassModel } = await import('@/models/schema.ts')
+
+  /* The instructor has no booking row — bookings are student seat
+     reservations — so without this branch every internal class's real join
+     event silently fell through to "no open booking to mark" and the mentor
+     no-show jobs (reminders.job.ts) never had a positive signal to check
+     against. $set only, never overwritten by a later duplicate delivery —
+     the FIRST join is the one the no-show jobs need to see. */
+  if (String(live.instructorId) === lmsUserId) {
+    if ((live as { instructorJoinedAt?: Date }).instructorJoinedAt) return 'instructor join already recorded'
+    const joinedAt = evt.data?.['joinedAt'] ? new Date(String(evt.data['joinedAt'])) : new Date()
+    await LiveClassModel.updateOne({ _id: live._id }, { $set: { instructorJoinedAt: joinedAt } })
+    logger.info({ liveClassId: live.id, lmsUserId }, 'instructor join recorded from CLT')
+    return 'instructor join recorded'
+  }
 
   const res = await ClassBookingModel.updateOne(
     {
