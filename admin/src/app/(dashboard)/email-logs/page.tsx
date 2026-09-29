@@ -1,10 +1,10 @@
 'use client'
 
-import { useState } from 'react'
-import { motion } from 'framer-motion'
+import { useState, useRef, useEffect } from 'react'
+import { motion, AnimatePresence } from 'framer-motion'
 import {
-  Mail, ChevronLeft, ChevronRight, Search, X,
-  AlertCircle, CheckCircle2, Clock, XCircle,
+  Mail, ChevronLeft, ChevronRight, ChevronDown, Search, X,
+  AlertCircle, CheckCircle2, Clock, XCircle, Check, Inbox,
 } from 'lucide-react'
 import { useEmailLogs, fetchEmailLogHtml, type EmailLog, type EmailLogStatus } from '@/lib/api/emailLogs'
 import Spinner from '@/components/ui/Spinner'
@@ -35,6 +35,81 @@ function StatusBadge({ status }: { status: EmailLogStatus }) {
 }
 
 const STATUS_OPTIONS: (EmailLogStatus | '')[] = ['', 'sent', 'pending', 'failed']
+
+/* ─── Status filter dropdown ──────────────────────────────
+   A native <select>'s popup is drawn by the OS/browser, not this app —
+   on most platforms that means a flat, unstyled list that floats over
+   whatever's beneath it with no rounding or border, clashing with the
+   rest of the dark UI. This is a fully custom listbox instead, styled
+   and animated to match everything else on the page. */
+function StatusDropdown({ value, onChange }: { value: EmailLogStatus | ''; onChange: (v: EmailLogStatus | '') => void }) {
+  const [open, setOpen] = useState(false)
+  const ref = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!open) return
+    const onDocClick = (e: MouseEvent) => { if (!ref.current?.contains(e.target as Node)) setOpen(false) }
+    const onEscape   = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(false) }
+    document.addEventListener('mousedown', onDocClick)
+    document.addEventListener('keydown', onEscape)
+    return () => {
+      document.removeEventListener('mousedown', onDocClick)
+      document.removeEventListener('keydown', onEscape)
+    }
+  }, [open])
+
+  const current = value ? STATUS_META[value] : null
+
+  return (
+    <div ref={ref} className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen(o => !o)}
+        className="flex items-center gap-2 rounded-xl px-3 py-2 text-xs font-medium text-white outline-none transition-colors hover:bg-white/[0.08]"
+        style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)', minWidth: 140 }}>
+        {current ? (
+          <span className="flex items-center gap-1.5">
+            <current.icon size={11} style={{ color: current.text }} />
+            {current.label}
+          </span>
+        ) : (
+          <span style={{ color: 'rgba(255,255,255,0.6)' }}>All statuses</span>
+        )}
+        <ChevronDown size={12} className="ml-auto transition-transform"
+          style={{ color: 'rgba(255,255,255,0.35)', transform: open ? 'rotate(180deg)' : 'none' }} />
+      </button>
+
+      <AnimatePresence>
+        {open && (
+          <motion.div
+            initial={{ opacity: 0, y: -4, scale: 0.98 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: -4, scale: 0.98 }}
+            transition={{ duration: 0.12 }}
+            className="absolute left-0 top-[calc(100%+6px)] z-20 overflow-hidden rounded-xl py-1 shadow-2xl"
+            style={{ background: '#181B29', border: '1px solid rgba(255,255,255,0.1)', minWidth: 160 }}>
+            {STATUS_OPTIONS.map(s => {
+              const meta = s ? STATUS_META[s] : null
+              const selected = s === value
+              return (
+                <button
+                  key={s || 'all'}
+                  type="button"
+                  onClick={() => { onChange(s); setOpen(false) }}
+                  className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs transition-colors hover:bg-white/[0.06]"
+                  style={{ color: selected ? 'white' : 'rgba(255,255,255,0.65)' }}>
+                  {meta ? <meta.icon size={11} style={{ color: meta.text }} /> : <Inbox size={11} style={{ color: 'rgba(255,255,255,0.4)' }} />}
+                  <span className="flex-1 font-medium">{meta ? meta.label : 'All statuses'}</span>
+                  {selected && <Check size={12} style={{ color: '#60A5FA' }} />}
+                </button>
+              )
+            })}
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  )
+}
 
 /* ─── Row ──────────────────────────────────────────────── */
 function LogRow({ log, index }: { log: EmailLog; index: number }) {
@@ -177,17 +252,7 @@ export default function EmailLogsPage() {
 
       {/* Filters */}
       <div className="flex flex-wrap items-center gap-3">
-        <select
-          value={status}
-          onChange={e => { setStatus(e.target.value as EmailLogStatus | ''); setPage(1) }}
-          className="rounded-xl px-3 py-2 text-xs text-white outline-none"
-          style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)' }}>
-          {STATUS_OPTIONS.map(s => (
-            <option key={s} value={s} style={{ background: '#1A1D2E' }}>
-              {s ? STATUS_META[s].label : 'All statuses'}
-            </option>
-          ))}
-        </select>
+        <StatusDropdown value={status} onChange={v => { setStatus(v); setPage(1) }} />
 
         <div className="flex items-center gap-1.5 rounded-xl px-3 py-2"
           style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)' }}>
@@ -233,9 +298,20 @@ export default function EmailLogsPage() {
                   </div>
                 </td></tr>
               ) : !data?.docs.length ? (
-                <tr><td colSpan={8} className="py-16 text-center text-sm"
-                  style={{ color: 'rgba(255,255,255,0.3)' }}>
-                  No email log entries found.
+                <tr><td colSpan={8} className="py-16 text-center">
+                  <div className="flex flex-col items-center gap-2">
+                    <Inbox size={22} style={{ color: 'rgba(255,255,255,0.2)' }} />
+                    <p className="text-sm" style={{ color: 'rgba(255,255,255,0.4)' }}>
+                      {hasFilter ? 'No emails match these filters.' : 'No email log entries yet.'}
+                    </p>
+                    {hasFilter && (
+                      <button onClick={clearAll}
+                        className="mt-1 text-xs font-semibold transition-colors hover:text-white"
+                        style={{ color: '#60A5FA' }}>
+                        Clear filters
+                      </button>
+                    )}
+                  </div>
                 </td></tr>
               ) : data.docs.map((log, i) => (
                 <LogRow key={log.id} log={log} index={i} />
