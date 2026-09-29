@@ -286,20 +286,22 @@ export async function sendClassReminderTomorrowWhatsApp(
   await sendTemplate(to, 'class_reminder_tomorrow', [sessionTitle, whenStr], { category: 'utility' })
 }
 
-/* class_starting_soon renamed to class_starting_soon_v2 to match the
-   template now APPROVED on the Meta/Creatyvot account — same rename this
-   file already made for booking_confirmed_v2. The approved template's BODY
-   still takes exactly 2 params (title, minutes) and its URL BUTTON takes its
-   own, separate one — the live class id, appended to the button's
-   pre-registered base URL by Meta itself. Passing it as a third body param
-   is exactly what produced Meta's real "(#132000) Number of parameters does
-   not match the expected number of params" — the two components are
-   validated independently. Unverified against the real Graph API in this
-   change (the prior rename was); confirm with a live send before relying on
-   it, the same way booking_confirmed_v2 and the button-component fix were
-   confirmed with a real test student. */
+/* v2 → v3: dropped the URL BUTTON component entirely rather than fix it a
+   third time. A button's dynamic suffix is validated as its own component,
+   separate from the body's {{1}}/{{2}} — every bug this template has had
+   (the #132000 param-count mismatch, the dropped-button-on-falsy-id bug) came
+   from that split. v3 has no button and no link at all: the body just tells
+   the student to open the LMS, go to My Bookings and tap Join — the same
+   three-tap path the app's own UI already puts in front of them, spelled
+   out in words instead of handed to them as a URL. Back to the original 2
+   body params (title, minutes) — nothing to append a live class id to.
+
+   MUST be approved in Meta Business Manager (via Creatyvot) under this exact
+   name before sendTemplate() will deliver anything — see the file header.
+   Unverified against the real Graph API; confirm with a live send to a test
+   student once approved, the same way v2 and booking_confirmed_v2 were. */
 export async function sendClassStartingSoonWhatsApp(
-  to: string | null | undefined, sessionTitle: string, minutesLeft: string, liveClassId: string,
+  to: string | null | undefined, sessionTitle: string, minutesLeft: string,
 ): Promise<void> {
-  await sendTemplate(to, 'class_starting_soon_v2', [sessionTitle, minutesLeft], { category: 'utility', buttonParam: liveClassId })
+  await sendTemplate(to, 'class_starting_soon_v3', [sessionTitle, minutesLeft], { category: 'utility' })
 }

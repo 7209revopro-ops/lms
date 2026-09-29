@@ -412,12 +412,6 @@ export async function runFiveMinReminders(): Promise<void> {
         undefined, slug,
         () => sendClassStartingSoonWhatsApp(
           b.userId.enrollmentApplication?.phone, b.liveClassId.title, '5',
-          /* `id` is a lean virtual and is not always materialised on a
-             populated subdocument — see getJoinUrl's identical fallback
-             above. An empty buttonParam is falsy, so without this the
-             button component was silently dropped instead of sent, and
-             Meta rejected the message for a missing required parameter. */
-          String(b.liveClassId.id ?? (b.liveClassId as { _id?: unknown })._id ?? ''),
         ),
       )
 

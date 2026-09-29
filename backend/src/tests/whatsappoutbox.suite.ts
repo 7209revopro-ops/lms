@@ -121,13 +121,15 @@ try {
       check('carrying Meta\'s real error code for classify() to read',
         (threw as InstanceType<typeof WhatsAppApiError>)?.metaError?.code === 132001)
 
-      /* A URL-button template (class_starting_soon_v2) sends its button's
-         dynamic suffix in a SEPARATE component from the body — this is the
-         exact distinction whose absence produced a real Meta rejection,
-         "(#132000) Number of parameters does not match the expected number
-         of params", against the actually-approved template. */
+      /* A URL-button template sends its button's dynamic suffix in a
+         SEPARATE component from the body — this is the exact distinction
+         whose absence produced a real Meta rejection, "(#132000) Number of
+         parameters does not match the expected number of params", against
+         class_starting_soon_v2 (since retired for v3, which drops the button
+         entirely — buttonParam itself is still live sender infrastructure,
+         exercised here directly rather than through a real template). */
       calls.length = 0
-      await sender.send({ to: '919876543210', templateName: 'class_starting_soon_v2', languageCode: 'en_US', params: ['Live Q&A', '5'], buttonParam: 'LIVECLASS123' })
+      await sender.send({ to: '919876543210', templateName: 'generic_url_button_template', languageCode: 'en_US', params: ['Live Q&A', '5'], buttonParam: 'LIVECLASS123' })
       const btnBody = JSON.parse(String(calls[0]!.init.body))
       check('the body component carries exactly the 2 BODY variables, not the button param too',
         JSON.stringify(btnBody.template.components[0].parameters.map((p: any) => p.text)) === JSON.stringify(['Live Q&A', '5']))
@@ -223,12 +225,12 @@ try {
   const booking = await WhatsAppOutboxModel.findOne({ templateName: 'booking_confirmed_v2' }).lean() as any
   check('sendBookingConfirmedWhatsApp queues its own template', !!booking)
 
-  await sendClassStartingSoonWhatsApp('919876543210', 'Live Q&A', '5', 'LIVECLASS_ABC')
-  const starting = await WhatsAppOutboxModel.findOne({ templateName: 'class_starting_soon_v2' }).lean() as any
-  check('sendClassStartingSoonWhatsApp queues exactly the 2 BODY params the approved template expects',
+  await sendClassStartingSoonWhatsApp('919876543210', 'Live Q&A', '5')
+  const starting = await WhatsAppOutboxModel.findOne({ templateName: 'class_starting_soon_v3' }).lean() as any
+  check('sendClassStartingSoonWhatsApp queues the 2 BODY params v3 expects — no link, no button',
     JSON.stringify(starting?.params) === JSON.stringify(['Live Q&A', '5']), JSON.stringify(starting?.params))
-  check('and stores the live class id as buttonParam, not a 3rd body param',
-    starting?.buttonParam === 'LIVECLASS_ABC', starting?.buttonParam)
+  check('and does not set a buttonParam — v3 has no button component',
+    starting?.buttonParam === undefined, starting?.buttonParam)
 
   section('K · a title with newlines/injection characters cannot corrupt a template param')
   await sendClassReminderTomorrowWhatsApp('919876543210', 'Live\n\n\nQ&A     Session\t\ttitle', 'Tomorrow at 7pm')
