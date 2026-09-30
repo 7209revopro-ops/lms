@@ -286,22 +286,42 @@ export async function sendClassReminderTomorrowWhatsApp(
   await sendTemplate(to, 'class_reminder_tomorrow', [sessionTitle, whenStr], { category: 'utility' })
 }
 
-/* v2 → v3: dropped the URL BUTTON component entirely rather than fix it a
-   third time. A button's dynamic suffix is validated as its own component,
-   separate from the body's {{1}}/{{2}} — every bug this template has had
-   (the #132000 param-count mismatch, the dropped-button-on-falsy-id bug) came
-   from that split. v3 has no button and no link at all: the body just tells
-   the student to open the LMS, go to My Bookings and tap Join — the same
-   three-tap path the app's own UI already puts in front of them, spelled
-   out in words instead of handed to them as a URL. Back to the original 2
-   body params (title, minutes) — nothing to append a live class id to.
+/* v3 → v4: brings the URL button BACK, but not the way v1/v2 had it. v1/v2's
+   button carried a DYNAMIC suffix (the live class id), sent per-message as
+   `buttonParam` — Meta validates that as its own component, separate from
+   the body's {{1}}/{{2}}, and that split is exactly what produced every bug
+   this template has had: the #132000 param-count mismatch, and the button
+   silently vanishing whenever the id was falsy (`buttonParam ? [...] : []`
+   → an empty components array → Meta rejects the whole send for a missing
+   required component). v3 dropped the button entirely rather than fight
+   that a third time.
+
+   v4's button has NO dynamic suffix at all — it points at the same static
+   `{CLIENT_URL}/live-classes` URL for every student and every class, entered
+   directly into the Meta template definition (via Creatyvot) rather than
+   sent per-message. Structurally this cannot reproduce either v1/v2 bug:
+   there is no `buttonParam`, no per-send button component, nothing whose
+   presence depends on a live class id being truthy. sendTemplate() below is
+   called exactly as v3 was — 2 body params, no `buttonParam` — the button is
+   just part of the approved template now, the same way the logo or a fixed
+   footer line would be.
+
+   Why a static "My Bookings" link and not a deep link straight into the
+   class: /live-classes already has everything a deep link would need to
+   duplicate — the student's booked/live sessions, the Join button that
+   fires auto-attendance the instant it's tapped, and (via the client's
+   `?from=` bounce-back) a return trip here after login if the session had
+   expired. A static button reaches all of that in one tap for an
+   already-logged-in student, without reopening the per-message component
+   validation that broke this template twice.
 
    MUST be approved in Meta Business Manager (via Creatyvot) under this exact
-   name before sendTemplate() will deliver anything — see the file header.
+   name, WITH the static URL button configured on the template itself,
+   before sendTemplate() will deliver anything — see the file header.
    Unverified against the real Graph API; confirm with a live send to a test
    student once approved, the same way v2 and booking_confirmed_v2 were. */
 export async function sendClassStartingSoonWhatsApp(
   to: string | null | undefined, sessionTitle: string, minutesLeft: string,
 ): Promise<void> {
-  await sendTemplate(to, 'class_starting_soon_v3', [sessionTitle, minutesLeft], { category: 'utility' })
+  await sendTemplate(to, 'class_starting_soon_v4', [sessionTitle, minutesLeft], { category: 'utility' })
 }
