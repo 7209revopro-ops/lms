@@ -813,6 +813,29 @@ try {
     check('the service refuses a reviewer from the other academy', reviewThrew === 'NOT_FOUND', reviewThrew)
     check('...and the submission is untouched',
       (await ClassAssignmentModel.findById(created._id).lean() as any)?.status === 'pending')
+
+    /* Regression — a super_admin who has picked a DIFFERENT academy via the
+       admin topbar's org switcher (X-Organization-Id → caller.organizationId,
+       see auth.middleware.ts) must not be able to approve/reject a
+       submission outside that academy either. #reviewable() used to skip its
+       org check for every super_admin unconditionally — the sibling of the
+       #reach() bug already fixed for the list/stats endpoints, missed here. */
+    let switchedReviewThrew = ''
+    try {
+      await svc.review({ id: String(superAdmin._id), role: 'super_admin', organizationId: String(blr._id) },
+        String(created._id), 'approved')
+    } catch (e) { switchedReviewThrew = String((e as { code?: string }).code ?? (e as Error).message) }
+    check('a super_admin switched to Bangalore cannot review Dubai\'s submission',
+      switchedReviewThrew === 'NOT_FOUND', switchedReviewThrew)
+    check('...and it is still untouched',
+      (await ClassAssignmentModel.findById(created._id).lean() as any)?.status === 'pending')
+
+    /* But a super_admin with NO org selected (organizationId undefined, "All
+       Orgs" in the switcher) is unrestricted, same as before this fix. */
+    const unscopedReview = await svc.review(
+      { id: String(superAdmin._id), role: 'super_admin' } as never, String(created._id), 'approved')
+    check('a super_admin on "All Orgs" can still review any academy\'s submission',
+      unscopedReview?.status === 'approved', String(unscopedReview?.status))
   }
 
 } finally {

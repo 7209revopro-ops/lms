@@ -1,6 +1,6 @@
 import { Router, type Request, type Response, type NextFunction } from 'express'
 import { z } from 'zod'
-import { authenticate, authenticateAny, requireRole } from '@/middleware/auth.middleware.ts'
+import { authenticate, authenticateAny, authenticateAdmin, requireRole } from '@/middleware/auth.middleware.ts'
 import { validate } from '@/middleware/validate.middleware.ts'
 import { ClassAssignmentService } from '@/services/classAssignment.service.ts'
 import { requiredDocumentRef } from '@/utils/documentRef.ts'
@@ -87,6 +87,13 @@ router.post('/:id/resubmit', authenticate, validate(resubmitSchema), async (req:
 })
 
 /* ── Reviewer ────────────────────────────────────────── */
+/* These three are admin-panel-only (no student ever hits them), so they use
+   authenticateAdmin rather than authenticateAny. That matters beyond cookie
+   plumbing: authenticateAdmin is the only guard that reads X-Organization-Id
+   for a super_admin (the org-switcher header — see auth.middleware.ts), so a
+   super_admin viewing "Bangalore Academy" actually gets scoped to it here.
+   authenticateAny never reads that header at all, which is what let a
+   super_admin see every academy's submissions regardless of the switcher. */
 
 const qs = (req: Request, key: string): string | undefined => {
   const v = req.query[key]
@@ -95,7 +102,7 @@ const qs = (req: Request, key: string): string | undefined => {
 
 router.get(
   '/review',
-  authenticateAny,
+  authenticateAdmin,
   requireRole('super_admin', 'admin', 'sub_admin', 'support', 'instructor'),
   async (req: Request, res: Response, next: NextFunction) => {
     try {
@@ -112,7 +119,7 @@ router.get(
    a missing record rather than a routing mistake. */
 router.get(
   '/review/stats',
-  authenticateAny,
+  authenticateAdmin,
   requireRole('super_admin', 'admin', 'sub_admin', 'support', 'instructor'),
   async (req: Request, res: Response, next: NextFunction) => {
     try {
@@ -123,7 +130,7 @@ router.get(
 
 router.patch(
   '/:id/review',
-  authenticateAny,
+  authenticateAdmin,
   requireRole('super_admin', 'admin', 'sub_admin', 'support', 'instructor'),
   validate(reviewSchema),
   async (req: Request, res: Response, next: NextFunction) => {

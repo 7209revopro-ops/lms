@@ -205,8 +205,12 @@ export class ClassAssignmentService {
       throw new ClassAssignmentError('FORBIDDEN', 'You cannot review submissions.', 403)
     }
     /* A super_admin carries no organizationId unless the topbar switcher
-       supplies one — and then they are scoped like anybody else. */
-    if (caller.role !== 'super_admin' && caller.organizationId && Types.ObjectId.isValid(caller.organizationId)) {
+       supplies one — and then they are scoped like anybody else. Keying this
+       off `caller.organizationId` being present, not off `caller.role`, is
+       the point: the earlier `role !== 'super_admin'` guard here guaranteed
+       this branch was skipped FOR every super_admin, switcher or not, which
+       is the opposite of what the comment above always said it should do. */
+    if (caller.organizationId && Types.ObjectId.isValid(caller.organizationId)) {
       return { organizationId: new Types.ObjectId(caller.organizationId) }
     }
     return {}
@@ -444,7 +448,12 @@ export class ClassAssignmentService {
     if (!STAFF.has(caller.role)) {
       throw new ClassAssignmentError('FORBIDDEN', 'You cannot review submissions.', 403)
     }
-    if (caller.role !== 'super_admin' && doc.organizationId && caller.organizationId &&
+    /* Same fix as #reach() above, for the same reason: keyed off whether
+       caller.organizationId is actually SET (i.e. the topbar switcher chose
+       an academy), not off role. The old `role !== 'super_admin'` clause let
+       a super_admin approve/reject another academy's submission even while
+       the switcher had a specific academy selected. */
+    if (doc.organizationId && caller.organizationId &&
         String(doc.organizationId) !== String(caller.organizationId)) {
       throw new ClassAssignmentError('NOT_FOUND', 'Submission not found.', 404)
     }

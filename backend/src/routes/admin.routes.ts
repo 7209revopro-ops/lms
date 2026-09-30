@@ -618,7 +618,13 @@ router.get('/impersonation-sessions', requireAnyAdmin, async (req: Request, res:
        it gets exactly the rows it is answerable for. */
     const filter: Record<string, unknown> = {}
     const orgId = req.user!.organizationId
-    if (req.user!.role !== 'super_admin' && orgId && Types.ObjectId.isValid(orgId)) {
+    /* Keyed off orgId being SET, not off role: a super_admin switched to one
+       academy via the topbar (X-Organization-Id, authenticateAdmin) must be
+       scoped to it here too. The old `role !== 'super_admin'` unconditionally
+       skipped this for every super_admin, leaking every academy's actor/
+       target emails, IP and user agent into a switcher-scoped view — the
+       exact class of listing the comment above says must never go unscoped. */
+    if (orgId && Types.ObjectId.isValid(orgId)) {
       filter['organizationId'] = new Types.ObjectId(orgId)
     }
     /* Narrowed to your own rows for everyone below a full admin — and ALSO
@@ -1329,7 +1335,15 @@ router.get('/recordings', requireAnyAdmin, requireClassroomAccess, async (req: R
 
     const filter: Record<string, unknown> = { cltRecordingId: { $exists: true } }
     const orgId = req.user!.organizationId
-    if (req.user!.role !== 'super_admin' && orgId && Types.ObjectId.isValid(orgId)) {
+    /* Keyed off orgId being SET, not off role: a super_admin who has picked
+       an academy via the topbar's org switcher (X-Organization-Id, read by
+       authenticateAdmin) must be scoped to it exactly like anybody else —
+       the comment two lines up already said so, but `role !== 'super_admin'`
+       here unconditionally skipped this branch for every super_admin
+       regardless of what the switcher sent, leaking every academy's
+       recordings into a switcher-scoped view. Same bug class already fixed
+       in classAssignment.service.ts's #reach()/#reviewable(). */
+    if (orgId && Types.ObjectId.isValid(orgId)) {
       /* CLASSES THIS ACADEMY IS SERVED BY, not only the ones it owns — the
          same widening the console list, the calendar and the bookings roster
          already carry. Strict ownership meant a guest academy could send its
@@ -2245,12 +2259,15 @@ const announcementUpdateSchema = announcementCreateSchema.partial().extend({
 router.get('/announcements', requireAdmin, requirePermission('announcements','list'), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { page, per_page } = parsePagination(req.query as Record<string, unknown>)
-    /* super_admin sees every academy's rows (including the unscoped ones);
-       an org admin sees only their own academy's — never another's, and
-       never the unscoped rows a super_admin authored, which they cannot
-       edit anyway. Mirrors Coupons' list scoping exactly. */
-    const orgFilter = req.user!.role === 'super_admin' ? undefined : req.user!.organizationId
-    const { docs, totalCount } = await announcementSvc.list(page, per_page, orgFilter)
+    /* Keyed off req.user!.organizationId being SET, not off role — that field
+       is already undefined for a super_admin on "All Orgs" and set from the
+       topbar's X-Organization-Id switcher otherwise (authenticateAdmin), so
+       passing it straight through scopes a switcher-selected super_admin
+       exactly like an org admin. Mirrors Coupons' list scoping exactly (see
+       /coupons just below) — the old `role === 'super_admin' ? undefined`
+       here was an extra bypass Coupons never had, and it meant a super_admin
+       saw every academy's announcements even with one academy selected. */
+    const { docs, totalCount } = await announcementSvc.list(page, per_page, req.user!.organizationId)
     sendSuccess(res, docs, undefined, 200, buildPaginationMeta(totalCount, page, per_page))
   } catch (err) { next(err) }
 })
@@ -3276,6 +3293,12 @@ router.get('/reports/attendance', requireInstructor, requirePermission('reports'
     const byStudent: Record<string, { user: any; total: number; attended: number; missed: number; booked: number }> = {}
     for (const b of bookings) {
       const u = b.userId as any
+      /* populate() resolves a dangling ref to null rather than throwing — the
+         student account was deleted after the booking was made. /admin/bookings
+         already treats this as a row to hide rather than a row to crash on
+         (see its "N hidden (deleted class or student)" count); this report
+         must skip it the same way instead of throwing on `u.id`. */
+      if (!u) continue
       const uid = String(u.id ?? u._id)
       if (!byStudent[uid]) byStudent[uid] = { user: { ...u, id: uid }, total: 0, attended: 0, missed: 0, booked: 0 }
       byStudent[uid].total++

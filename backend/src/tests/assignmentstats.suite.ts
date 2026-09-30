@@ -54,8 +54,8 @@ await new Promise<void>(r => server.once('listening', () => r()))
 const BASE = `http://127.0.0.1:${(server.address() as { port: number }).port}/api/v1`
 
 type Jar = Map<string, string>
-async function call(method: string, path: string, opts: { jar?: Jar; body?: unknown } = {}) {
-  const headers: Record<string, string> = {}
+async function call(method: string, path: string, opts: { jar?: Jar; body?: unknown; headers?: Record<string, string> } = {}) {
+  const headers: Record<string, string> = { ...opts.headers }
   if (opts.body !== undefined) headers['content-type'] = 'application/json'
   if (opts.jar?.size) headers['cookie'] = [...opts.jar].map(([k, v]) => `${k}=${v}`).join('; ')
   const res = await fetch(`${BASE}${path}`, {
@@ -302,6 +302,29 @@ try {
     const r = await stats(rootJar)
     check('the super admin sees both academies', r.body?.data?.totals?.total === 9,
       String(r.body?.data?.totals?.total))
+
+    /* Regression — the admin topbar's org switcher sends X-Organization-Id
+       for a super_admin (auth.middleware.ts, authenticateAdmin). A super
+       admin who has picked "Bangalore Academy" there must see ONLY
+       Bangalore's queue and stats, not Dubai's leaking through — this was
+       broken two ways at once: the review routes read the client-portal
+       guard (authenticateAny), which never looks at that header at all, and
+       even once it does, #reach's own condition skipped every super_admin
+       unconditionally instead of respecting an org the switcher supplied. */
+    const asBlr = { jar: rootJar, headers: { 'x-organization-id': String(blr._id) } }
+    const switched = await call('GET', '/class-assignments/review/stats', asBlr)
+    check('switched to Bangalore, the super admin\'s totals match Bangalore only',
+      switched.body?.data?.totals?.total === 2, String(switched.body?.data?.totals?.total))
+    check('...and Anna (Dubai) is absent from the breakdown',
+      !of(switched, String(anna._id)),
+      JSON.stringify((switched.body?.data?.instructors ?? []).map((x: any) => x.name)))
+
+    const switchedQueue = await call('GET', '/class-assignments/review', asBlr)
+    check('the queue is scoped the same way as the dashboard above it',
+      (switchedQueue.body?.data ?? []).length === 2, String((switchedQueue.body?.data ?? []).length))
+    check('and none of its rows belong to Dubai\'s Anna',
+      (switchedQueue.body?.data ?? []).every((x: any) => x.instructorId?.id !== String(anna._id) && x.instructorId?._id !== String(anna._id)),
+      JSON.stringify((switchedQueue.body?.data ?? []).map((x: any) => x.instructorId)))
   }
 
   /* ═══════════════════════════════════════════════ */

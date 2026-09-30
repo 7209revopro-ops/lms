@@ -88,8 +88,8 @@ await new Promise<void>(r => server.once('listening', () => r()))
 const BASE = `http://127.0.0.1:${(server.address() as { port: number }).port}/api/v1`
 
 type Jar = Map<string, string>
-async function call(method: string, path: string, opts: { jar?: Jar; body?: unknown } = {}) {
-  const headers: Record<string, string> = {}
+async function call(method: string, path: string, opts: { jar?: Jar; body?: unknown; headers?: Record<string, string> } = {}) {
+  const headers: Record<string, string> = { ...opts.headers }
   if (opts.body !== undefined) headers['content-type'] = 'application/json'
   if (opts.jar?.size) headers['cookie'] = [...opts.jar].map(([k, v]) => `${k}=${v}`).join('; ')
   const res = await fetch(`${BASE}${path}`, {
@@ -171,6 +171,32 @@ try {
   const blrTitles = (blrList.body?.data ?? []).map((r: any) => r.title)
   check('a Bangalore admin sees Bangalore', blrTitles.includes('blr-recorded'))
   check('and NOT Dubai', !blrTitles.includes('dubai-recorded'), JSON.stringify(blrTitles))
+
+  /* ═══════════════════════════════════════════════ */
+  section('B2 · the org switcher scopes a super_admin too, not just a scoped admin')
+  /* Regression — the admin topbar sends X-Organization-Id for a super_admin
+     (authenticateAdmin, auth.middleware.ts). The list route used to check
+     `role !== 'super_admin' && orgId && ...`, which skipped the org filter
+     for every super_admin unconditionally, switcher selection or not — so
+     "Bangalore Academy" selected in the switcher still showed Dubai's
+     recordings. Fixed to key off orgId being present, matching every other
+     admin listing's reach helper. */
+  {
+    const switched = await call('GET', '/admin/recordings', {
+      jar: jars['super'], headers: { 'x-organization-id': String(blr._id) },
+    })
+    const switchedTitles = (switched.body?.data ?? []).map((r: any) => r.title)
+    check('switched to Bangalore, the super admin sees Bangalore\'s recording',
+      switchedTitles.includes('blr-recorded'), JSON.stringify(switchedTitles))
+    check('...and NOT Dubai\'s, even though nothing else changed but the header',
+      !switchedTitles.includes('dubai-recorded'), JSON.stringify(switchedTitles))
+
+    const unswitched = await call('GET', '/admin/recordings', { jar: jars['super'] })
+    const unswitchedTitles = (unswitched.body?.data ?? []).map((r: any) => r.title)
+    check('with no header at all ("All Orgs"), the super admin still sees both',
+      unswitchedTitles.includes('dubai-recorded') && unswitchedTitles.includes('blr-recorded'),
+      JSON.stringify(unswitchedTitles))
+  }
 
   section('C · playback is minted on demand, and scoped')
   const play = await call('POST', `/admin/recordings/${dubaiRec._id}/playback`, { jar: jars['super'] })
