@@ -36,7 +36,7 @@ import { NotificationService } from '@/services/notification.service.ts'
    Anything that serialises a stored asset URL has to go through here. */
 import { sendSuccess, buildPaginationMeta } from '@/utils/response.ts'
 import { academyClock } from '@/utils/academyClock.ts'
-import { SCHEDULE_LINK } from '@/utils/clientLinks.ts'
+import { SCHEDULE_LINK, liveClassWatchUrl } from '@/utils/clientLinks.ts'
 
 const router = Router()
 const notifSvc = new NotificationService()
@@ -351,8 +351,7 @@ router.post('/', authenticate, requireEnrollmentApproval, validate(createBooking
     UserModel.findById(userId).then(user => {
       if (!user) return
       const lc = session  // use already-fetched session for title/start
-      const joinUrl = (lc as any).meetingUrl
-        ?? `${process.env['CLIENT_URL'] ?? 'http://localhost:3000'}/live-classes/${liveClassId}/watch`
+      const joinUrl = (lc as any).meetingUrl ?? liveClassWatchUrl(liveClassId)
 
       /* THE STUDENT'S OWN ACADEMY, not the class's. On a shared class those
          differ by ninety minutes, and the reader thinks in their own. */

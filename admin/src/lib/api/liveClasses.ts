@@ -48,6 +48,10 @@ export interface LiveClass {
 
   /* External-only */
   meetingUrl?:    string
+  /* The one link to copy or share for this class — meetingUrl when the class
+     is external and has one, else the class's own landing page. Present only
+     for staff callers (admin/instructor), never sent to students. */
+  shareUrl?:      string
 
   /* Internal-only (Mux) */
   muxPlaybackId?: string

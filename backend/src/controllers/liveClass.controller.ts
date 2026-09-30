@@ -16,7 +16,7 @@ import { wantsStaffEmail } from '@/utils/emailPrefs.ts'
 import { bookingClosesAt } from '@/utils/liveStatus.ts'
 import { parkCriticalMail, flushCriticalMail, isUrgent } from '@/jobs/criticalmail.job.ts'
 import type { CriticalKind } from '@/jobs/criticalmail.job.ts'
-import { SCHEDULE_LINK } from '@/utils/clientLinks.ts'
+import { SCHEDULE_LINK, liveClassWatchUrl } from '@/utils/clientLinks.ts'
 
 function isPopulated(v: unknown): v is Record<string, unknown> & { id: string } {
   return !!v && typeof v === 'object' && typeof (v as { id?: unknown }).id === 'string'
@@ -230,6 +230,15 @@ function toDTO(doc: any, entitled = true, staff = true, door?: LabelledDoor | un
 
     /* External-only */
     meetingUrl:     !isInternal && entitled ? j.meetingUrl : undefined,
+
+    /* STAFF ONLY — the one link to copy or share for this class. An external
+       class's own meetingUrl when it has one, else the class's landing page
+       (internal, offline, or external before a link is set) — never a raw
+       CLT/LiveKit room, which has no stable, reusable URL: only a one-time,
+       per-viewer handoff code. Handing this out is not a bypass — every
+       visitor still clears the same booking/enrolment/module/window gate the
+       in-app "Join" button does. */
+    shareUrl:       staff ? (j.meetingUrl || liveClassWatchUrl(j.id ?? String(doc._id))) : undefined,
 
     /* Internal-only (public fields — no muxStreamKey) */
     muxPlaybackId:  isInternal && entitled ? j.muxPlaybackId : undefined,

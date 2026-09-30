@@ -10,7 +10,7 @@ import {
   ChevronRight, PlayCircle, CalendarDays, Pencil, Search, X, Plus,
   LayoutList, CalendarRange, ChevronLeft, GraduationCap,
   UserCheck, LayoutGrid, Building2, MapPin, UserPlus,
-  ChevronDown, User, Globe,
+  ChevronDown, User, Globe, Share2, Check,
 } from 'lucide-react'
 import { useAllLiveClasses, useCreateLiveClass, useMyMeetings, markInstructorJoined, type LiveClass, type LiveClassType, type MentorMeeting } from '@/lib/api/liveClasses'
 import { CLASS_LANGUAGES, withFlagAndNative } from '@/lib/languages'
@@ -32,6 +32,8 @@ import { BookForStudentModal } from '@/components/live-classes/BookForStudentMod
 import { DarkSelect, DarkDateTimePicker, PillToggle } from '@/components/live-classes/FormWidgets'
 import { Button, MotionButton } from '@/components/ui/button'
 import Spinner from '@/components/ui/Spinner'
+import { useToast } from '@/store/ui.store'
+import { shareOrCopyLink } from '@/lib/shareLink'
 import { categoryScopeOf } from '@/lib/programScope'
 import { AvatarImg } from '@/components/ui/AvatarImg'
 import {
@@ -452,6 +454,45 @@ function StatsBar({ items }: { items: LiveClass[] }) {
   )
 }
 
+/* ── Copy / share class link ────────────────────────────
+   One button for both: a phone gets the native share sheet (WhatsApp, mail,
+   SMS…), everything else falls back to the clipboard. The link itself is the
+   server's shareUrl — the class's own gated landing page, or its meetingUrl
+   when it has one — never anything minted here, so there is nothing to
+   expire or leak by copying it twice. */
+function ShareLinkButton({ url, title }: { url?: string; title: string }) {
+  const toast = useToast()
+  const [justCopied, setJustCopied] = useState(false)
+  if (!url) return null
+
+  const onClick = async () => {
+    try {
+      const result = await shareOrCopyLink(url, title)
+      if (result === 'copied') {
+        setJustCopied(true)
+        toast.success('Class link copied')
+        setTimeout(() => setJustCopied(false), 1500)
+      }
+      /* 'shared' and 'cancelled' need no toast of their own — the share sheet
+         (or backing out of it) already told the admin what happened. */
+    } catch {
+      toast.error('Could not copy the link')
+    }
+  }
+
+  return (
+    <Button
+      variant="ghost"
+      size="icon-sm"
+      onClick={onClick}
+      className="h-7 w-7 rounded-lg"
+      style={{ color: justCopied ? '#34D399' : 'rgba(255,255,255,0.4)' }}
+      title="Copy class link to share">
+      {justCopied ? <Check size={13} /> : <Share2 size={13} />}
+    </Button>
+  )
+}
+
 /* ── Table row ───────────────────────────────────────── */
 function TableRow({ live, index, showInstructor }: { live: LiveClass; index: number; showInstructor: boolean }) {
   const router      = useRouter()
@@ -474,6 +515,13 @@ function TableRow({ live, index, showInstructor }: { live: LiveClass; index: num
     now < endMs                              // not past end time
   const [editOpen, setEditOpen] = useState(false)
   const [bookOpen, setBookOpen] = useState(false)
+
+  /* Sharing the link is a staff privilege, not a host one — a sub_admin
+     helping a co-admin's class still needs to paste the link into a WhatsApp
+     group. Scoped to the three roles asked for; support/instructor don't get
+     this button even though they can see the row. */
+  const { data: me } = useCurrentUser()
+  const canShareLink = me?.role === 'super_admin' || me?.role === 'admin' || me?.role === 'sub_admin'
 
   /* Whose room is this, and how much of it is actually THIS viewer's? A host
      with an exhausted floor and a guest academy reading the host's counter
@@ -629,6 +677,9 @@ function TableRow({ live, index, showInstructor }: { live: LiveClass; index: num
               title="Attendance">
               <UserCheck size={13} />
             </Link>
+
+            {/* Copy / share link — super_admin, admin, sub_admin */}
+            {canShareLink && <ShareLinkButton url={(live as any).shareUrl} title={live.title} />}
 
             {/* Join Google Meet — external online, 15 min before → end */}
             {canJoin && (

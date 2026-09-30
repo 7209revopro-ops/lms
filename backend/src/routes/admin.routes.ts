@@ -37,7 +37,7 @@ import { sendSuccess, buildPaginationMeta, parsePagination } from '@/utils/respo
 import { toSafeUser } from '@/models/types.ts'
 import { audit } from '@/middleware/audit.middleware.ts'
 import type { Request, Response, NextFunction } from 'express'
-import { SCHEDULE_LINK } from '@/utils/clientLinks.ts'
+import { SCHEDULE_LINK, liveClassWatchUrl } from '@/utils/clientLinks.ts'
 
 const router     = Router()
 const ctrl       = new AdminController()
@@ -1837,7 +1837,7 @@ router.post('/bookings/book-for-student', requireAnyAdmin, validate(bookForStude
     await ensureOrgSlugs()
     const dateLabel = academyClock(session.scheduledStart,
       orgSlugFor((student as { organizationId?: unknown }).organizationId)).full
-    const joinUrl = (session as any).meetingUrl ?? `${process.env['CLIENT_URL'] ?? 'http://localhost:3000'}/live-classes/${liveClassId}/watch`
+    const joinUrl = (session as any).meetingUrl ?? liveClassWatchUrl(liveClassId)
 
     notifSvc.create(studentId, {
       kind: 'booking-confirmed', title: `Booking confirmed: ${session.title}`,
