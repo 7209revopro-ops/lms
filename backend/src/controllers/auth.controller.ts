@@ -15,6 +15,7 @@ import {
   clearImpersonationCookie,
   resolveDeviceId,
 } from '@/utils/authCookies.ts'
+import { refreshTtl } from '@/utils/refreshTtl.ts'
 
 /* ─────────────────────────────────────────────────────
    AuthController
@@ -119,7 +120,11 @@ export class AuthController {
         )
         return
       }
-      setAuthCookies(res, result.tokens)
+      /* Same boolean the service just used to pick the refresh JWT's own exp
+         claim (refreshTtl(), auth.service.ts#issueTokens) — read here too so
+         the cookie's Max-Age agrees with it instead of always defaulting to
+         the full 30 days regardless of what the student chose. */
+      setAuthCookies(res, result.tokens, refreshTtl(req.body.remember))
       sendSuccess(res, { user: result.user }, 'Signed in successfully')
     } catch (err) {
       next(err)

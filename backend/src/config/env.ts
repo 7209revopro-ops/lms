@@ -18,6 +18,12 @@ const envSchema = z.object({
   JWT_REFRESH_SECRET:  z.string().min(32, 'JWT_REFRESH_SECRET must be at least 32 chars'),
   JWT_ACCESS_EXPIRES_IN:  z.string().default('15m'),
   JWT_REFRESH_EXPIRES_IN: z.string().default('30d'),
+  /* The client login form's "Remember me" checkbox, unchecked — a session
+     that outlives the tab but not a shared/public device left logged in for
+     a month. Only the plain email/password client login reads this; every
+     other issuance path (register, OTP, 2FA, magic link, admin login) keeps
+     the full JWT_REFRESH_EXPIRES_IN, unchanged. */
+  JWT_REFRESH_EXPIRES_IN_UNREMEMBERED: z.string().default('1d'),
 
   /* CORS */
   CLIENT_URL: z.string().url().default('http://localhost:3000'),

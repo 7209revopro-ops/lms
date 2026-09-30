@@ -40,7 +40,7 @@ function section(n: string) { lines.push(`\n${n}`) }
 const mongoose = (await import('mongoose')).default
 mongoose.set('autoIndex', false)
 const app = (await import('@/app.ts')).default
-const { UserModel, OrganizationModel } = await import('@/models/schema.ts')
+const { UserModel, OrganizationModel, RefreshTokenModel } = await import('@/models/schema.ts')
 const { hashPassword } = await import('@/utils/hash.ts')
 const { DEVICE_COOKIE } = await import('@/utils/authCookies.ts')
 
@@ -56,7 +56,7 @@ const BASE = `http://127.0.0.1:${(server.address() as { port: number }).port}/ap
 /* ── A Set-Cookie reader that keeps the ATTRIBUTES, not just the value.
       Everything here turns on Domain and Max-Age, which a normal cookie jar
       throws away. ───────────────────────────────────────────────────────── */
-interface Cookie { name: string; value: string; domain?: string; path?: string; deleted: boolean }
+interface Cookie { name: string; value: string; domain?: string; path?: string; maxAge?: number; deleted: boolean }
 
 function parseSetCookies(res: Response): Cookie[] {
   return (res.headers.getSetCookie?.() ?? []).map(raw => {
@@ -75,8 +75,20 @@ function parseSetCookies(res: Response): Cookie[] {
     const deleted = value === '' &&
       ((maxAge !== undefined && Number(maxAge) <= 0) ||
        (expires !== undefined && new Date(expires).getTime() <= Date.now()))
-    return { name, value, domain: attr('domain'), path: attr('path'), deleted }
+    return { name, value, domain: attr('domain'), path: attr('path'), maxAge: maxAge === undefined ? undefined : Number(maxAge), deleted }
   })
+}
+
+/** Decodes a JWT's payload WITHOUT verifying the signature — fine for a test
+ *  that already trusts the token came straight from this server's own
+ *  Set-Cookie header a moment ago; it only wants to read the `exp` claim. */
+function decodeJwtExp(token: string): number | undefined {
+  const parts = token.split('.')
+  if (parts.length !== 3) return undefined
+  try {
+    const payload = JSON.parse(Buffer.from(parts[1]!, 'base64url').toString('utf8'))
+    return typeof payload.exp === 'number' ? payload.exp : undefined
+  } catch { return undefined }
 }
 
 /** `domain: null` means "must have NO Domain attribute" — distinct from
@@ -250,6 +262,68 @@ try {
       [...names].join(','))
     check('the client login never touches an admin cookie',
       c.cookies.every(x => !x.name.startsWith('lms_admin')))
+  }
+
+  section('H — "Remember me" actually shortens the session when unchecked')
+  {
+    /* Three independent things used to each read JWT_REFRESH_EXPIRES_IN on
+       their own and only agreed by coincidence: the refresh JWT's own `exp`
+       claim, the lms_rt cookie's Max-Age, and the RefreshToken DB row's
+       expiresAt (its TTL index). This proves all three now move together off
+       one shared value (refreshTtl.ts) instead of the cookie being the only
+       thing (or nothing at all) that changes. */
+    const remembered = await post('/auth/login', { email: 'student@t.local', password: PW, remember: true })
+    const notRemembered = await post('/auth/login', { email: 'student@t.local', password: PW, remember: false })
+
+    /* Read the DB row right after the un-remembered login that created it —
+       not after the two logins below it, which would leave `.sort({
+       createdAt: -1 })` picking up one of THEIR (30-day) rows instead. */
+    const student = await UserModel.findOne({ email: 'student@t.local' }).lean()
+    const row = await RefreshTokenModel.findOne({ userId: student!._id }).sort({ createdAt: -1 }).lean()
+    check('the DB row backing the un-remembered session also expires in ~1 day',
+      !!row && Math.abs(row.expiresAt.getTime() - (Date.now() + 86_400 * 1000)) < 60_000,
+      row ? String(row.expiresAt) : 'no row found')
+
+    const omitted = await post('/auth/login', { email: 'student@t.local', password: PW })
+
+    const rtRemembered    = find(remembered.cookies, 'lms_rt', { deleted: false })[0]
+    const rtNotRemembered = find(notRemembered.cookies, 'lms_rt', { deleted: false })[0]
+    const rtOmitted       = find(omitted.cookies, 'lms_rt', { deleted: false })[0]
+
+    const THIRTY_DAYS_S = 30 * 86_400
+    const ONE_DAY_S     = 1  * 86_400
+
+    check('remember:true issues a ~30-day cookie',
+      !!rtRemembered?.maxAge && Math.abs(rtRemembered.maxAge - THIRTY_DAYS_S) < 60,
+      String(rtRemembered?.maxAge))
+    check('omitting remember defaults to the same ~30 days as remember:true',
+      !!rtOmitted?.maxAge && Math.abs(rtOmitted.maxAge - THIRTY_DAYS_S) < 60,
+      String(rtOmitted?.maxAge))
+    check('remember:false shortens the cookie to ~1 day, not 30',
+      !!rtNotRemembered?.maxAge && Math.abs(rtNotRemembered.maxAge - ONE_DAY_S) < 60,
+      String(rtNotRemembered?.maxAge))
+
+    /* The JWT's own exp claim, decoded straight off the cookie value — must
+       agree with the cookie's Max-Age, not just happen to look similar. */
+    const expRemembered    = decodeJwtExp(rtRemembered?.value ?? '')
+    const expNotRemembered = decodeJwtExp(rtNotRemembered?.value ?? '')
+    const nowS = Math.floor(Date.now() / 1000)
+    check('the remembered refresh JWT itself expires in ~30 days, matching its cookie',
+      !!expRemembered && Math.abs((expRemembered - nowS) - THIRTY_DAYS_S) < 60,
+      String(expRemembered ? expRemembered - nowS : expRemembered))
+    check('the un-remembered refresh JWT itself expires in ~1 day, matching its cookie',
+      !!expNotRemembered && Math.abs((expNotRemembered - nowS) - ONE_DAY_S) < 60,
+      String(expNotRemembered ? expNotRemembered - nowS : expNotRemembered))
+
+    /* Every OTHER issuance path ignores `remember` entirely and keeps the
+       full session — confirmed against registration, which never even sees
+       this field. */
+    const reg = await post('/auth/register', {
+      name: 'Fresh Student', email: `fresh-${Date.now()}@t.local`, password: 'CorrectHorse1',
+    })
+    const rtReg = find(reg.cookies, 'lms_rt', { deleted: false })[0]
+    check('registration (no remember field at all) still gets the full ~30-day session',
+      !!rtReg?.maxAge && Math.abs(rtReg.maxAge - THIRTY_DAYS_S) < 60, String(rtReg?.maxAge))
   }
 
 } finally {

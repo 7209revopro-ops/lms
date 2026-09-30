@@ -167,6 +167,11 @@ export interface RegisterDto {
 export interface LoginDto {
   email: string
   password: string
+  /* Client login form's "Remember me for 30 days" checkbox. Absent/true keeps
+     the full refresh-session length; false shortens it — see refreshTtl.ts.
+     Only auth.service.ts#login reads this; every other issuance path ignores
+     it and keeps the full-length session. */
+  remember?: boolean
 }
 
 export interface TokenPair {

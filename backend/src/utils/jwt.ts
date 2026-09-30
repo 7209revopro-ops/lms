@@ -149,14 +149,14 @@ function safeDuration(duration: string, fallback: string): string {
 /* ─── Sign refresh token ────────────────────────────
    Long-lived (default 30d), only carries sub
 ───────────────────────────────────────────────────── */
-export async function signRefreshToken(userId: string, audience?: TokenAudience): Promise<string> {
+export async function signRefreshToken(userId: string, audience?: TokenAudience, expiresIn?: string): Promise<string> {
   const jwt = new SignJWT({ type: 'refresh' } satisfies Omit<RefreshTokenPayload, 'sub'>)
     .setProtectedHeader({ alg: 'HS256' })
     .setSubject(userId)
     .setJti(newJti())
     .setIssuedAt()
     .setIssuer(JWT_ISSUER)
-    .setExpirationTime(safeDuration(env.JWT_REFRESH_EXPIRES_IN, '30d'))
+    .setExpirationTime(safeDuration(expiresIn ?? env.JWT_REFRESH_EXPIRES_IN, '30d'))
   if (audience) jwt.setAudience(audience)
   return jwt.sign(refreshKey)
 }
@@ -168,10 +168,10 @@ export async function generateTokenPair(payload: {
   id: string
   email: string
   role: UserRole
-}, audience?: TokenAudience): Promise<TokenPair> {
+}, audience?: TokenAudience, refreshExpiresIn?: string): Promise<TokenPair> {
   const [access_token, refresh_token] = await Promise.all([
     signAccessToken(payload, undefined, audience),
-    signRefreshToken(payload.id, audience),
+    signRefreshToken(payload.id, audience, refreshExpiresIn),
   ])
   return {
     access_token,

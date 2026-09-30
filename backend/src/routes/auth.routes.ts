@@ -59,6 +59,7 @@ const loginSchema = z.object({
      with how the address is stored and looked up. */
   email:    z.string().trim().email().toLowerCase(),
   password: z.string().min(1, 'Password is required'),
+  remember: z.boolean().optional(),
 })
 
 /* ─── Passwordless (email → OTP) login ────────────── */

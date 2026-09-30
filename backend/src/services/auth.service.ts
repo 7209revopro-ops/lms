@@ -2,7 +2,8 @@ import { createHash, randomBytes, randomInt } from 'crypto'
 import { SignJWT, jwtVerify, type JWTPayload } from 'jose'
 import { UserRepository, RefreshTokenRepository, AuthTokenRepository } from '@/repositories/user.repository.ts'
 import { hashPassword, comparePassword } from '@/utils/hash.ts'
-import { generateTokenPair, verifyRefreshToken, type TokenAudience } from '@/utils/jwt.ts'
+import { generateTokenPair, verifyRefreshToken, toSeconds, type TokenAudience } from '@/utils/jwt.ts'
+import { refreshTtl } from '@/utils/refreshTtl.ts'
 import { logger } from '@/utils/logger.ts'
 import { sendPasswordReset, sendVerifyEmail, sendRegistrationAttempt, sendLoginCode, sendCourseInvite, sendDeviceApprovalRequest } from '@/services/email.service.ts'
 import { wantsStaffEmail, isStaffEmailCategory, type EmailPrefs } from '@/utils/emailPrefs.ts'
@@ -326,7 +327,7 @@ export class AuthService {
     void this.userRepo.touchLastLogin(user.id)
 
     /* 7. Issue tokens */
-    const tokens = await this.#issueLoginTokens(user.id, user.email, user.role, meta, audience)
+    const tokens = await this.#issueLoginTokens(user.id, user.email, user.role, meta, audience, dto.remember)
 
     logger.info({ userId: user.id }, 'User logged in')
     return { user: toSafeUser(user), tokens }
@@ -1311,9 +1312,10 @@ export class AuthService {
     role: UserRole,
     meta?: SessionMeta,
     audience: TokenAudience = 'client',
+    remember?: boolean,
   ): Promise<TokenPair> {
     await this.#enforceDeviceForLogin(userId, role, meta)
-    return this.#issueTokens(userId, email, role, meta, audience)
+    return this.#issueTokens(userId, email, role, meta, audience, remember)
   }
 
   /* ── Issue + persist token pair ──────────────────── */
@@ -1323,14 +1325,21 @@ export class AuthService {
     role: UserRole,
     meta?: SessionMeta,
     audience: TokenAudience = 'client',
+    /* Only the plain email/password client login ever passes this — every
+       other call site (register, 2FA, OTP, magic link, rotation) omits it,
+       so refreshTtl(undefined) gives them the same full-length session this
+       always issued. `remember` and the refresh JWT/cookie/DB-row expiry it
+       controls are three reads of ONE value now — see refreshTtl.ts. */
+    remember?: boolean,
   ): Promise<TokenPair> {
+    const ttl = refreshTtl(remember)
+
     /* `audience` binds the pair to the portal that issued it (L-06). Defaults
        to 'client' so any caller that forgets to pass one produces the LESS
        privileged token rather than an admin one. */
-    const pair = await generateTokenPair({ id: userId, email, role }, audience)
+    const pair = await generateTokenPair({ id: userId, email, role }, audience, ttl)
 
-    const expiresAt = new Date()
-    expiresAt.setDate(expiresAt.getDate() + 30)
+    const expiresAt = new Date(Date.now() + toSeconds(ttl) * 1000)
 
     await this.tokenRepo.saveToken({
       userId,

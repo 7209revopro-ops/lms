@@ -115,7 +115,7 @@ export function LoginForm({ onSwitch }: LoginFormProps) {
       const res = await api.post<{
         success: true
         data: { user?: { role: string }; twoFactorRequired?: boolean; challengeToken?: string }
-      }>('/auth/login', { email: data.email, password: data.password })
+      }>('/auth/login', { email: data.email, password: data.password, remember: data.remember })
 
       // 2FA accounts get a short-lived challenge instead of a session.
       const payload = res.data?.data

@@ -107,7 +107,12 @@ function parseDurationMs(duration: string): number {
   }
 }
 
-export function setAuthCookies(res: Response, tokens: TokenPair): void {
+/* `refreshTtlOverride` is the same duration string (e.g. '1d') the caller
+   already passed to generateTokenPair() for the refresh JWT itself — see
+   refreshTtl.ts. Omitted, this keeps its old behaviour exactly: the env
+   default, same as every non-login-form issuance path (register, OTP, 2FA,
+   magic link, token rotation) that never passes one. */
+export function setAuthCookies(res: Response, tokens: TokenPair, refreshTtlOverride?: string): void {
   res.cookie(ACCESS_COOKIE, tokens.access_token, {
     httpOnly: true,
     secure:   isProd(),
@@ -122,7 +127,7 @@ export function setAuthCookies(res: Response, tokens: TokenPair): void {
     sameSite: 'lax',
     domain:   cookieDomain(),
     path:     REFRESH_PATH,
-    maxAge:   parseDurationMs(env.JWT_REFRESH_EXPIRES_IN),
+    maxAge:   parseDurationMs(refreshTtlOverride ?? env.JWT_REFRESH_EXPIRES_IN),
   })
   evictLegacyCookie(res, ACCESS_COOKIE,  '/')
   evictLegacyCookie(res, REFRESH_COOKIE, REFRESH_PATH)
