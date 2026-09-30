@@ -520,8 +520,11 @@ export class LiveClassService {
           : {},
       })
       if (room?.courseId) {
-        await this.liveRepo.updateOne({ _id: created._id }, { $set: { cltCourseId: room.courseId } })
+        const set: { cltCourseId: number; cltCourseCode?: string } = { cltCourseId: room.courseId }
+        if (room.courseCode) set.cltCourseCode = room.courseCode
+        await this.liveRepo.updateOne({ _id: created._id }, { $set: set })
         created.cltCourseId = room.courseId
+        if (room.courseCode) created.cltCourseCode = room.courseCode
       }
     }
 

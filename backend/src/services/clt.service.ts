@@ -153,6 +153,26 @@ export async function tryEnsureRoom(input: EnsureRoomInput): Promise<EnsureRoomR
 }
 
 /**
+ * The browser-facing URL for CLT's own no-login "join by code" page.
+ *
+ * NOT the entitlement-checked handoff this LMS otherwise uses everywhere —
+ * this is CLT's generic guest door: no LMS account, no booking, no enrolment
+ * check, just a name typed in and the host admitting from a lobby. It exists
+ * for people who were never going to have an LMS account in the first place
+ * (e.g. an admissions prospect sitting in on a class before enrolling), and
+ * must never be offered as the default "share this class" link for students
+ * who ARE meant to clear the LMS's own gate — see liveClass.controller.ts's
+ * shareUrl for that one.
+ *
+ * Same PUBLIC_URL-over-BASE_URL fallback as classHandoff.controller.ts's
+ * mint, deliberately not re-reading a third env var for one more purpose.
+ */
+export function publicJoinByCodeUrl(courseCode: string): string | undefined {
+  const base = (process.env['CLT_PUBLIC_URL'] || process.env['CLT_BASE_URL'] || '').replace(/\/+$/, '')
+  return base ? `${base}/join/${encodeURIComponent(courseCode)}` : undefined
+}
+
+/**
  * Ask CLT for a short-lived playback URL for one recording.
  *
  * Strict (throws) rather than best-effort: unlike room provisioning, there is

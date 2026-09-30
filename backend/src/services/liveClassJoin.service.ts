@@ -130,10 +130,10 @@ async function ensureRoomFor(live: ILiveClass): Promise<string> {
       capacity:       live.sessionCapacity,
     })
     if (room?.courseId) {
-      await LiveClassModel.updateOne(
-        { _id: live._id },
-        { $set: { cltRoomName: roomName, cltCourseId: room.courseId } },
-      )
+      const set: { cltRoomName: string; cltCourseId: number; cltCourseCode?: string } =
+        { cltRoomName: roomName, cltCourseId: room.courseId }
+      if (room.courseCode) set.cltCourseCode = room.courseCode
+      await LiveClassModel.updateOne({ _id: live._id }, { $set: set })
     } else {
       await LiveClassModel.updateOne({ _id: live._id }, { $set: { cltRoomName: roomName } })
     }

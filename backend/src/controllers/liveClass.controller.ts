@@ -17,6 +17,7 @@ import { bookingClosesAt } from '@/utils/liveStatus.ts'
 import { parkCriticalMail, flushCriticalMail, isUrgent } from '@/jobs/criticalmail.job.ts'
 import type { CriticalKind } from '@/jobs/criticalmail.job.ts'
 import { SCHEDULE_LINK, liveClassWatchUrl } from '@/utils/clientLinks.ts'
+import { publicJoinByCodeUrl } from '@/services/clt.service.ts'
 
 function isPopulated(v: unknown): v is Record<string, unknown> & { id: string } {
   return !!v && typeof v === 'object' && typeof (v as { id?: unknown }).id === 'string'
@@ -239,6 +240,18 @@ function toDTO(doc: any, entitled = true, staff = true, door?: LabelledDoor | un
        visitor still clears the same booking/enrolment/module/window gate the
        in-app "Join" button does. */
     shareUrl:       staff ? (j.meetingUrl || liveClassWatchUrl(j.id ?? String(doc._id))) : undefined,
+
+    /* STAFF + INTERNAL ONLY — CLT's own no-login "join by code" link, for
+       people who were never going to have an LMS account: an admissions
+       prospect, a guest sitting in before they enrol. Deliberately NOT the
+       default share link above — it skips every LMS entitlement check, and
+       the host's own lobby admission is the only gate left. Present once the
+       room has been provisioned (best-effort at class creation) and CLT's
+       public URL is configured; absent otherwise, same as every other
+       best-effort CLT field on this DTO. */
+    admissionJoinUrl: staff && isInternal && j.cltCourseCode
+      ? publicJoinByCodeUrl(j.cltCourseCode)
+      : undefined,
 
     /* Internal-only (public fields — no muxStreamKey) */
     muxPlaybackId:  isInternal && entitled ? j.muxPlaybackId : undefined,

@@ -459,18 +459,39 @@ function StatsBar({ items }: { items: LiveClass[] }) {
    SMS…), everything else falls back to the clipboard. The link itself is the
    server's shareUrl — the class's own gated landing page, or its meetingUrl
    when it has one — never anything minted here, so there is nothing to
-   expire or leak by copying it twice. */
-function ShareLinkButton({ url, title }: { url?: string; title: string }) {
+   expire or leak by copying it twice.
+
+   `admissionUrl`, when the server sends one, opens a second choice instead of
+   copying immediately: CLT's own no-login join-by-code link, for people who
+   were never going to have an LMS account (an admissions prospect, a guest
+   sitting in before they enrol). It skips every LMS entitlement check — a
+   host's own lobby admission is the only gate left — so it is never the
+   single-click default, and is labelled as exactly what it is right in the
+   menu rather than left for someone to discover the hard way. */
+function ShareLinkButton({ url, admissionUrl, title }: { url?: string; admissionUrl?: string; title: string }) {
   const toast = useToast()
   const [justCopied, setJustCopied] = useState(false)
+  const [open, setOpen] = useState(false)
+  const ref = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!open) return
+    const handler = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [open])
+
   if (!url) return null
 
-  const onClick = async () => {
+  const copy = async (target: string, successMessage: string) => {
+    setOpen(false)
     try {
-      const result = await shareOrCopyLink(url, title)
+      const result = await shareOrCopyLink(target, title)
       if (result === 'copied') {
         setJustCopied(true)
-        toast.success('Class link copied')
+        toast.success(successMessage)
         setTimeout(() => setJustCopied(false), 1500)
       }
       /* 'shared' and 'cancelled' need no toast of their own — the share sheet
@@ -480,16 +501,59 @@ function ShareLinkButton({ url, title }: { url?: string; title: string }) {
     }
   }
 
+  if (!admissionUrl) {
+    return (
+      <Button
+        variant="ghost"
+        size="icon-sm"
+        onClick={() => copy(url, 'Class link copied')}
+        className="h-7 w-7 rounded-lg"
+        style={{ color: justCopied ? '#34D399' : 'rgba(255,255,255,0.4)' }}
+        title="Copy class link to share">
+        {justCopied ? <Check size={13} /> : <Share2 size={13} />}
+      </Button>
+    )
+  }
+
   return (
-    <Button
-      variant="ghost"
-      size="icon-sm"
-      onClick={onClick}
-      className="h-7 w-7 rounded-lg"
-      style={{ color: justCopied ? '#34D399' : 'rgba(255,255,255,0.4)' }}
-      title="Copy class link to share">
-      {justCopied ? <Check size={13} /> : <Share2 size={13} />}
-    </Button>
+    <div ref={ref} className="relative">
+      <Button
+        variant="ghost"
+        size="icon-sm"
+        onClick={() => setOpen(v => !v)}
+        className="h-7 w-7 rounded-lg"
+        style={{ color: justCopied ? '#34D399' : 'rgba(255,255,255,0.4)' }}
+        title="Copy or share this class's link">
+        {justCopied ? <Check size={13} /> : <Share2 size={13} />}
+      </Button>
+
+      <AnimatePresence>
+        {open && (
+          <motion.div
+            initial={{ opacity: 0, y: -6, scale: 0.97 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: -6, scale: 0.97 }}
+            transition={{ duration: 0.12 }}
+            className="absolute right-0 top-full z-50 mt-1.5 min-w-[240px] overflow-hidden rounded-xl py-1"
+            style={{ background: '#1a1d2e', border: '1px solid rgba(255,255,255,0.12)', boxShadow: '0 16px 40px rgba(0,0,0,0.5)' }}>
+            <button
+              type="button"
+              onClick={() => copy(url, 'Class link copied')}
+              className="flex w-full flex-col items-start gap-0.5 px-3 py-2 text-left transition-colors hover:bg-white/[0.08]">
+              <span className="text-xs font-semibold" style={{ color: 'rgba(255,255,255,0.85)' }}>Copy class link</span>
+              <span className="text-[10px]" style={{ color: 'rgba(255,255,255,0.4)' }}>For enrolled students — checks their booking</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => copy(admissionUrl, 'Admission link copied')}
+              className="flex w-full flex-col items-start gap-0.5 px-3 py-2 text-left transition-colors hover:bg-white/[0.08]">
+              <span className="text-xs font-semibold" style={{ color: '#FBBF24' }}>Copy admission link</span>
+              <span className="text-[10px]" style={{ color: 'rgba(255,255,255,0.4)' }}>No LMS login — for prospects not yet enrolled</span>
+            </button>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
   )
 }
 
@@ -679,7 +743,13 @@ function TableRow({ live, index, showInstructor }: { live: LiveClass; index: num
             </Link>
 
             {/* Copy / share link — super_admin, admin, sub_admin */}
-            {canShareLink && <ShareLinkButton url={(live as any).shareUrl} title={live.title} />}
+            {canShareLink && (
+              <ShareLinkButton
+                url={(live as any).shareUrl}
+                admissionUrl={(live as any).admissionJoinUrl}
+                title={live.title}
+              />
+            )}
 
             {/* Join Google Meet — external online, 15 min before → end */}
             {canJoin && (

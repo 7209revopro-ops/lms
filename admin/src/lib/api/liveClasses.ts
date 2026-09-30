@@ -52,6 +52,11 @@ export interface LiveClass {
      is external and has one, else the class's own landing page. Present only
      for staff callers (admin/instructor), never sent to students. */
   shareUrl?:      string
+  /* CLT's own no-login "join by code" link — internal classes only, and only
+     once the room has been provisioned. Skips every LMS entitlement check;
+     for admissions prospects and other non-students, never the default share
+     link. See the backend DTO comment for the full reasoning. */
+  admissionJoinUrl?: string
 
   /* Internal-only (Mux) */
   muxPlaybackId?: string

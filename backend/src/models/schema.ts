@@ -969,6 +969,11 @@ export interface ILiveClass extends Document {
      roomName is derived from the class id, never chosen by a caller. */
   cltRoomName?:      string       // "lms-<liveClassId>"
   cltCourseId?:      number       // CLT courses.id, set when the room is provisioned
+  /* CLT's own no-login "join by code" identifier for this room (e.g.
+     "LMS4FF173A9") — set alongside cltCourseId, from the same ensureRoom
+     response. Lets a link be built straight to CLT's generic guest-join page,
+     bypassing every LMS entitlement check; see admissionJoinUrl in the DTO. */
+  cltCourseCode?:    string
   cltMeetingId?:     number       // CLT meetings.id, set when a host starts it
   /* CLT recordings.id. Stored instead of a URL: the stream endpoint needs a
      CLT admin token an LMS admin does not have, and a presigned link would go
@@ -1105,6 +1110,7 @@ const LiveClassSchema = new Schema<ILiveClass>(
     provider:          { type: String, enum: ['mux', 'livekit'], default: 'mux' },
     cltRoomName:       { type: String, maxlength: 64 },
     cltCourseId:       { type: Number },
+    cltCourseCode:     { type: String, maxlength: 32 },
     cltMeetingId:      { type: Number },
     cltRecordingId:    { type: Number },
     recordingDurationSecs: { type: Number },
