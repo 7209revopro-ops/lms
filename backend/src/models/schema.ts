@@ -1145,6 +1145,12 @@ export interface ILiveClass extends Document {
      from the same "repeat weekly" action. Not a foreign-key relation;
      there is no separate series/template document. */
   seriesId?:      Types.ObjectId
+  /* Set only on classes created by a timetable import (classImport.service.ts):
+     which import made it, and a stable key — course + spreadsheet session_id +
+     date — so re-running or resuming an import can never create the same class
+     twice, and "undo this import" knows exactly what to remove. */
+  importJobId?:   Types.ObjectId
+  importRef?:     string
 
   createdAt:      Date
   updatedAt:      Date
@@ -1220,6 +1226,8 @@ const LiveClassSchema = new Schema<ILiveClass>(
     hostSeatsLeft:               { type: Number, min: 0 },
     overflowSeatsLeft:           { type: Number, min: 0 },
     seriesId:                    { type: Schema.Types.ObjectId },
+    importJobId:                 { type: Schema.Types.ObjectId },
+    importRef:                   { type: String, maxlength: 200 },
   },
   baseSchemaOptions,
 )
@@ -1284,6 +1292,10 @@ LiveClassSchema.index({ muxLiveStreamId: 1 }, { sparse: true })
 LiveClassSchema.index({ cltRoomName: 1 }, { sparse: true })
 LiveClassSchema.index({ organizationId: 1 })
 LiveClassSchema.index({ seriesId: 1 }, { sparse: true })
+LiveClassSchema.index({ importJobId: 1 }, { sparse: true })
+/* Partial, not sparse: only imported classes carry a ref, and the uniqueness is
+   the duplicate-proofing for resume/re-import (see ILiveClass.importRef). */
+LiveClassSchema.index({ importRef: 1 }, { unique: true, partialFilterExpression: { importRef: { $type: 'string' } } })
 /* A guest academy's students and admins find the class by their OWN academy and
    their OWN course — never by the host's. */
 LiveClassSchema.index({ 'guestCohorts.organizationId': 1, scheduledStart: 1 })
@@ -2361,6 +2373,7 @@ export type AuditAction =
   | 'bulk.publish'    | 'bulk.archive'    | 'bulk.delete'
   | 'course.import'   | 'course.export'
   | 'liveclass.create' | 'liveclass.update' | 'liveclass.delete' | 'liveclass.repeat'
+  | 'liveclass.import' | 'liveclass.import.undo'
   | 'exam.upsert'      | 'exam.delete'      | 'exam.grade'       | 'exam.reset'
   /* Operator switches. `settings.device-limit` disables a security control
      for every academy at once, so it is audited like an impersonation. */
@@ -3240,3 +3253,130 @@ InstructorScheduleMailSchema.index({ instructorId: 1, forDate: 1 }, { unique: tr
 
 export const InstructorScheduleMailModel =
   mongoose.model<IInstructorScheduleMail>('InstructorScheduleMail', InstructorScheduleMailSchema)
+
+/* ─────────────────────────────────────────────────────
+   CLASS IMPORT — one run of "Import timetable" (classImport.service.ts).
+
+   A spreadsheet row is ONE weekly session; the import expands it into one
+   class per week for the chosen range. Each of those is an `item` here, so the
+   job record is the whole plan: progress reads it, resume re-runs the items
+   still `pending` or `failed`, and undo deletes the classes it created.
+
+   `actor` is a snapshot of the admin who started it. The classes are created
+   in the background, after the request that started them has returned, and
+   every rule in the normal create path (programme scope, instructor validity,
+   academy) is evaluated against this snapshot exactly as it would have been
+   against the live request.
+───────────────────────────────────────────────────── */
+export type ClassImportStatus     = 'running' | 'completed' | 'interrupted' | 'undone'
+export type ClassImportItemStatus = 'pending' | 'created' | 'skipped' | 'failed'
+export type ClassImportPlatform   = 'meet' | 'inapp'
+
+export interface IClassImportItem {
+  _id:            Types.ObjectId
+  sessionId:      string           // spreadsheet session_id, e.g. ENG-019
+  seriesId:       Types.ObjectId   // shared by every week of one row
+  dateKey:        string           // YYYY-MM-DD in the academy's zone
+  scheduledStart: Date
+  durationMins:   number
+  title:          string
+  instructorId:   Types.ObjectId
+  platform:       ClassImportPlatform
+  offline:        boolean          // in-person only: no link at all
+  location?:      string
+  room?:          string
+  importRef:      string
+  status:         ClassImportItemStatus
+  liveClassId?:   Types.ObjectId
+  error?:         string
+}
+
+export interface IClassImport extends Document {
+  id:             string
+  createdBy:      Types.ObjectId
+  actor:          { id: string; role: string; organizationId?: string; categoryScope?: string }
+  organizationId?: Types.ObjectId
+  courseId:       Types.ObjectId
+  fileName?:      string
+  settings: {
+    startDate:       string
+    weeks:           number
+    capacity:        number
+    language:        string
+    titleLabel?:     string
+    location?:       string
+    room?:           string
+    defaultPlatform: ClassImportPlatform
+  }
+  status:         ClassImportStatus
+  total:          number
+  created:        number
+  skipped:        number
+  failed:         number
+  items:          IClassImportItem[]
+  startedAt:      Date
+  finishedAt?:    Date
+  undoneAt?:      Date
+  undoneBy?:      Types.ObjectId
+  summariesSentAt?: Date
+  createdAt:      Date
+  updatedAt:      Date
+}
+
+const ClassImportItemSchema = new Schema<IClassImportItem>({
+  sessionId:      { type: String, required: true, maxlength: 100 },
+  seriesId:       { type: Schema.Types.ObjectId, required: true },
+  dateKey:        { type: String, required: true },
+  scheduledStart: { type: Date, required: true },
+  durationMins:   { type: Number, required: true },
+  title:          { type: String, required: true, maxlength: 255 },
+  instructorId:   { type: Schema.Types.ObjectId, ref: 'User', required: true },
+  platform:       { type: String, enum: ['meet', 'inapp'], required: true },
+  offline:        { type: Boolean, default: false },
+  location:       { type: String, maxlength: 500 },
+  room:           { type: String, maxlength: 100 },
+  importRef:      { type: String, required: true, maxlength: 200 },
+  status:         { type: String, enum: ['pending', 'created', 'skipped', 'failed'], default: 'pending' },
+  liveClassId:    { type: Schema.Types.ObjectId, ref: 'LiveClass' },
+  error:          { type: String, maxlength: 500 },
+}, { _id: true })
+
+const ClassImportSchema = new Schema<IClassImport>(
+  {
+    createdBy:      { type: Schema.Types.ObjectId, ref: 'User', required: true },
+    actor: {
+      id:             { type: String, required: true },
+      role:           { type: String, required: true },
+      organizationId: { type: String },
+      categoryScope:  { type: String },
+    },
+    organizationId: { type: Schema.Types.ObjectId, ref: 'Organization', index: true },
+    courseId:       { type: Schema.Types.ObjectId, ref: 'Course', required: true },
+    fileName:       { type: String, maxlength: 255 },
+    settings: {
+      startDate:       { type: String, required: true },
+      weeks:           { type: Number, required: true, min: 1, max: 52 },
+      capacity:        { type: Number, required: true, min: 1, max: 500 },
+      language:        { type: String, required: true },
+      titleLabel:      { type: String, maxlength: 60 },
+      location:        { type: String, maxlength: 500 },
+      room:            { type: String, maxlength: 100 },
+      defaultPlatform: { type: String, enum: ['meet', 'inapp'], required: true },
+    },
+    status:         { type: String, enum: ['running', 'completed', 'interrupted', 'undone'], default: 'running', index: true },
+    total:          { type: Number, default: 0 },
+    created:        { type: Number, default: 0 },
+    skipped:        { type: Number, default: 0 },
+    failed:         { type: Number, default: 0 },
+    items:          { type: [ClassImportItemSchema], default: [] },
+    startedAt:      { type: Date, default: () => new Date() },
+    finishedAt:     { type: Date },
+    undoneAt:       { type: Date },
+    undoneBy:       { type: Schema.Types.ObjectId, ref: 'User' },
+    summariesSentAt: { type: Date },
+  },
+  baseSchemaOptions,
+)
+ClassImportSchema.index({ createdAt: -1 })
+
+export const ClassImportModel = mongoose.model<IClassImport>('ClassImport', ClassImportSchema)

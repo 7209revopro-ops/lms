@@ -321,6 +321,14 @@ export class LiveClassService {
     room?:            string
     organizationId?:  string
     seriesId?:        string
+    /* Timetable import only (classImport.service.ts). Stamped at insert, in
+       the same write, so a crash can never leave an imported class without the
+       ref that stops a resume from creating it again. */
+    importJobId?:     string
+    importRef?:       string
+    /* Defaults to true. A timetable import creates dozens of classes at once;
+       one notification per class would flood every enrolled student. */
+    notifyStudents?:  boolean
     /* Guest academies this class also serves. Authoring only in this phase —
        nothing reads them for entitlement until CROSS_ORG_CLASSES is on. */
     guestCohorts?:    Array<{ organizationId: string; courseId: string; sectionId?: string; seatFloor: number }>
@@ -479,6 +487,11 @@ export class LiveClassService {
       doc.seriesId = new Types.ObjectId(input.seriesId)
     }
 
+    if (input.importJobId && Types.ObjectId.isValid(input.importJobId)) {
+      ;(doc as any).importJobId = new Types.ObjectId(input.importJobId)
+    }
+    if (input.importRef) (doc as any).importRef = input.importRef
+
     if (input.sectionId && Types.ObjectId.isValid(input.sectionId)) {
       await this.#assertSectionBelongsToCourse(input.sectionId, input.courseId)
       doc.sectionId = new Types.ObjectId(input.sectionId)
@@ -530,8 +543,9 @@ export class LiveClassService {
       }
     }
 
-    /* Fire-and-forget notification to enrolled students */
-    void this.#notifyEnrolledStudents(created, course.title, course.slug).catch(err =>
+    /* Fire-and-forget notification to enrolled students — skipped for a bulk
+       timetable import (see input.notifyStudents). */
+    if (input.notifyStudents !== false) void this.#notifyEnrolledStudents(created, course.title, course.slug).catch(err =>
       logger.warn({ err, liveClassId: created.id }, 'live-class notification failed'),
     )
 

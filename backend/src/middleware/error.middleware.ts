@@ -29,6 +29,7 @@ import { SupportError } from '@/services/support.service.ts'
 import { TotpError } from '@/services/totp.service.ts'
 import { TranscriptError } from '@/services/transcript.service.ts'
 import { PortalError } from '@/services/portal.service.ts'
+import { ClassImportError } from '@/services/classImport.service.ts'
 
 /* ─────────────────────────────────────────────────────
    Global error handler
@@ -78,6 +79,10 @@ export function errorMiddleware(
   }
 
   /* ── Domain errors (auth, business logic) ──────── */
+  if (err instanceof ClassImportError) {
+    sendError(res, err.code, err.message, err.statusCode)
+    return
+  }
   if (err instanceof PortalError) {
     sendError(res, err.code, err.message, err.statusCode)
     return

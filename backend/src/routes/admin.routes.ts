@@ -19,6 +19,7 @@ import { AssignmentService } from '@/services/assignment.service.ts'
 import { SectionService } from '@/services/section.service.ts'
 import { OrderService } from '@/services/order.service.ts'
 import { CouponService } from '@/services/coupon.service.ts'
+import { ClassImportService } from '@/services/classImport.service.ts'
 import { AnnouncementService } from '@/services/announcement.service.ts'
 import {
   requireSameOrgUser, requireImpersonableStudent, requireBorrowedInstructorUnchanged,
@@ -1667,6 +1668,75 @@ router.get('/live-classes/no-shows', requireAnyAdmin, async (req: Request, res: 
     })), undefined, 200, buildPaginationMeta(totalCount, page, per_page))
   } catch (err) { next(err) }
 })
+/* ─── Timetable import (services/classImport.service.ts) ─────────────────
+   Upload a weekly timetable → preview every class it would create → import.
+   Registered BEFORE '/live-classes/:id' so "import" is never read as a class id.
+   Admin-side roles only — an instructor schedules their own classes from the form. */
+const classImportSvc = new ClassImportService()
+const IMPORT_ROLES = requireRole('super_admin', 'admin', 'sub_admin')
+const importBodySchema = z.object({
+  settings: z.object({
+    courseId:        z.string().min(1),
+    startDate:       z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Pick a start date'),
+    weeks:           z.coerce.number().int().min(1).max(52),
+    capacity:        z.coerce.number().int().min(1).max(500),
+    language:        z.enum(LIVE_LANGUAGES),
+    titleLabel:      z.string().max(60).optional(),
+    location:        z.string().max(500).optional(),
+    room:            z.string().max(100).optional(),
+    defaultPlatform: z.enum(['meet', 'inapp']),
+  }),
+  /* header → cell text, exactly as the spreadsheet had it */
+  rows:      z.array(z.record(z.string().max(100), z.string().max(500).optional())).min(1).max(500),
+  overrides: z.record(z.string(), z.object({
+    include:      z.boolean().optional(),
+    platform:     z.enum(['meet', 'inapp']).optional(),
+    instructorId: z.string().max(40).optional(),
+  })).optional(),
+  fileName:  z.string().max(255).optional(),
+})
+const importActor = (req: Request) => ({
+  id: req.user!.id, role: req.user!.role,
+  organizationId: req.user!.organizationId ? String(req.user!.organizationId) : undefined,
+  categoryScope:  req.user!.categoryScope ? String(req.user!.categoryScope) : undefined,
+})
+const importOverrides = (o?: Record<string, { include?: boolean; platform?: 'meet' | 'inapp'; instructorId?: string }>) =>
+  Object.fromEntries(Object.entries(o ?? {}).map(([k, v]) => [Number(k), v]))
+
+router.post('/live-classes/import/preview', IMPORT_ROLES, requirePermission('live-classes', 'create'), validate(importBodySchema), async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const b = req.body as z.infer<typeof importBodySchema>
+    sendSuccess(res, await classImportSvc.preview(b.settings, b.rows, importActor(req), importOverrides(b.overrides)))
+  } catch (err) { next(err) }
+})
+router.post('/live-classes/import', IMPORT_ROLES, requirePermission('live-classes', 'create'), validate(importBodySchema),
+  audit('liveclass.import', 'ClassImport', undefined, r => ({ rows: r.body.rows?.length, fileName: r.body.fileName, courseId: r.body.settings?.courseId })),
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const b = req.body as z.infer<typeof importBodySchema>
+      const data = await classImportSvc.start(b.settings, b.rows, importActor(req), importOverrides(b.overrides), b.fileName)
+      sendSuccess(res, data, 'Import started', 202)
+    } catch (err) { next(err) }
+  })
+router.get('/live-classes/import', IMPORT_ROLES, async (req: Request, res: Response, next: NextFunction) => {
+  try { sendSuccess(res, await classImportSvc.list(importActor(req))) } catch (err) { next(err) }
+})
+router.get('/live-classes/import/:jobId', IMPORT_ROLES, async (req: Request, res: Response, next: NextFunction) => {
+  try { sendSuccess(res, await classImportSvc.status(String(req.params['jobId'] ?? ''), importActor(req))) } catch (err) { next(err) }
+})
+router.post('/live-classes/import/:jobId/resume', IMPORT_ROLES, requirePermission('live-classes', 'create'), async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const id = String(req.params['jobId'] ?? '')
+    await classImportSvc.resume(id, importActor(req))
+    sendSuccess(res, await classImportSvc.status(id, importActor(req)), 'Import resumed')
+  } catch (err) { next(err) }
+})
+router.post('/live-classes/import/:jobId/undo', IMPORT_ROLES, requirePermission('live-classes', 'delete'),
+  audit('liveclass.import.undo', 'ClassImport', r => String(r.params['jobId'] ?? '')),
+  async (req: Request, res: Response, next: NextFunction) => {
+    try { sendSuccess(res, await classImportSvc.undo(String(req.params['jobId'] ?? ''), importActor(req)), 'Import undone') } catch (err) { next(err) }
+  })
+
 router.get   ('/live-classes/:id',                        live.adminGetById)
 router.post  ('/live-classes', requirePermission('live-classes','create'),                            validate(liveCreateSchema), audit('liveclass.create', 'LiveClass', undefined, r => ({ title: r.body.title, scheduledStart: r.body.scheduledStart })), live.adminCreate)
 const liveRepeatSchema = z.object({ weeks: z.coerce.number().int().min(1).max(52) })

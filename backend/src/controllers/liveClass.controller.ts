@@ -1116,6 +1116,9 @@ export class LiveClassController {
     },
     req: Request,
     seriesId?: string,
+    /* Every existing caller omits this, so their behaviour is unchanged. Only
+       the timetable import sets it — see createForImport below. */
+    opts: { notifyInstructor?: boolean; notifyStudents?: boolean; importJobId?: string; importRef?: string } = {},
   ): Promise<{ live: Awaited<ReturnType<LiveClassService['create']>>; meetingUrl?: string }> => {
     /* Category scope check — a programme-scoped sub_admin can only create for their program */
     const scope = req.user?.categoryScope as string | undefined
@@ -1255,6 +1258,9 @@ export class LiveClassController {
          academy". A copy belongs to whoever owned the original. */
       organizationId:  dto.organizationId ?? req.user?.organizationId,
       seriesId,
+      importJobId:     opts.importJobId,
+      importRef:       opts.importRef,
+      notifyStudents:  opts.notifyStudents,
       /* Omitted entirely when absent, so a class with no cohorts takes the
          byte-for-byte path it took before this feature existed. */
       ...(wantsCohorts ? { guestCohorts: dto.guestCohorts } : {}),
@@ -1268,7 +1274,7 @@ export class LiveClassController {
     })
 
     /* Notify assigned instructor — fire-and-forget, only for Google Meet sessions */
-    if (meetingUrl && live.instructorId) {
+    if (opts.notifyInstructor !== false && meetingUrl && live.instructorId) {
       void (async () => {
         try {
           const { UserModel, CourseModel } = await import('@/models/schema.ts')
@@ -1298,6 +1304,37 @@ export class LiveClassController {
 
     return { live, meetingUrl }
   }
+
+  /* ── Timetable import ──────────────────────────────────
+     The SAME create path as the admin form — scope, instructor validity,
+     academy, Meet link — run in the background by classImport.service.ts
+     against a snapshot of the admin who started the import. The per-class
+     "you've been scheduled" email and the per-class student notification are
+     off: an import creates dozens of classes at once, and the importer sends
+     each mentor one summary instead. */
+  createForImport = (
+    dto: {
+      courseId:         string
+      title:            string
+      scheduledStart:   Date
+      durationMins:     number
+      type:             'external' | 'internal'
+      provider?:        'mux' | 'livekit'
+      instructorId:     string
+      sessionCapacity?: number
+      language?:        string
+      isOnline?:        boolean
+      location?:        string
+      room?:            string
+      organizationId?:  string
+    },
+    actor: { id: string; role: string; organizationId?: string; categoryScope?: string },
+    seriesId: string,
+    meta: { importJobId: string; importRef: string },
+  ): Promise<{ live: Awaited<ReturnType<LiveClassService['create']>>; meetingUrl?: string }> =>
+    this.#createOne(dto, { user: actor } as unknown as Request, seriesId, {
+      notifyInstructor: false, notifyStudents: false, ...meta,
+    })
 
   adminCreate = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     try {

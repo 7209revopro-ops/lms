@@ -1892,3 +1892,56 @@ export async function sendMentorMeetingUpdate(
         ].join("\n"),
   })
 }
+
+/* ── Instructor: one summary of a timetable import ──────────────────────────
+   A timetable import creates many classes at once, so the per-class
+   "you've been scheduled" email is suppressed for it (classImport.service.ts)
+   and each mentor gets this instead: one line per WEEKLY session. */
+export async function sendInstructorImportSummary(
+  to:          string,
+  name:        string,
+  courseTitle: string,
+  sessions:    Array<{ title: string; start: Date; durationMins: number; platform: 'meet' | 'inapp'; room?: string; weeks: number }>,
+  firstDate:   string,   // YYYY-MM-DD
+  lastDate:    string,
+  total:       number,
+  academySlug?: string | null,
+): Promise<void> {
+  const adminUrl  = process.env['ADMIN_URL'] ?? 'http://localhost:3001'
+  const timetable = `${adminUrl}/live-classes/timetable`
+  const zone      = academyClock(new Date(), academySlug).zone
+  const fmtKey    = (k: string) => new Date(`${k}T12:00:00Z`).toLocaleDateString('en-US', {
+    weekday: 'short', month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC',
+  })
+  const subject = `Your new teaching schedule — ${total} class${total === 1 ? '' : 'es'}${courseTitle ? ` · ${courseTitle}` : ''}`
+
+  const lines = sessions.map((s) => {
+    const day = s.start.toLocaleDateString('en-US', { weekday: 'long', timeZone: zone })
+    const where = s.platform === 'meet' ? 'Google Meet (link in each class)' : 'In-app meeting room'
+    return `
+      <tr><td style="padding:10px 0;border-bottom:1px solid #EEF0F4">
+        <p style="margin:0;font-size:13px;font-weight:700;color:#0057b8">Every ${escapeHtml(day)} · ${escapeHtml(scheduleRange(s.start, s.durationMins, academySlug))}</p>
+        <p style="margin:2px 0 0;font-size:14px;font-weight:600;color:#0D0F1A">${escapeHtml(s.title)}</p>
+        <p style="margin:2px 0 0;font-size:12px;color:#6B7280">${escapeHtml(where)}${s.room ? ` · Room ${escapeHtml(s.room)}` : ''} · ${s.weeks} week${s.weeks === 1 ? '' : 's'}</p>
+      </td></tr>`
+  }).join('')
+
+  const html = wrap(subject, `
+    <h2 style="margin:0 0 16px;font-size:20px;font-weight:700;color:#0D0F1A">Your new teaching schedule</h2>
+    <p>Hi ${escapeHtml(name)},</p>
+    <p><strong>${total} class${total === 1 ? '' : 'es'}</strong>${courseTitle ? ` for <strong>${escapeHtml(courseTitle)}</strong>` : ''} ${total === 1 ? 'has' : 'have'} been scheduled for you,
+       from <strong>${escapeHtml(fmtKey(firstDate))}</strong> to <strong>${escapeHtml(fmtKey(lastDate))}</strong>:</p>
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:8px 0 0">${lines}</table>
+    <p style="margin:24px 0 8px">
+      <a href="${escapeHtml(sanitiseUrl(timetable))}" style="display:inline-block;background:linear-gradient(135deg,#0057b8,#2F6BFF);color:#fff;font-weight:600;padding:12px 24px;border-radius:12px;text-decoration:none;font-size:14px">
+        Open my timetable →
+      </a>
+    </p>
+  `)
+  const text = [
+    `Hi ${name}, ${total} classes${courseTitle ? ` for ${courseTitle}` : ''} have been scheduled for you, ${fmtKey(firstDate)} – ${fmtKey(lastDate)}:`,
+    ...sessions.map(s => `• Every ${s.start.toLocaleDateString('en-US', { weekday: 'long', timeZone: zone })} ${scheduleRange(s.start, s.durationMins, academySlug)} — ${s.title} (${s.platform === 'meet' ? 'Google Meet' : 'In-app'}${s.room ? `, Room ${s.room}` : ''})`),
+    `Timetable: ${timetable}`,
+  ].join('\n')
+  await sender.send({ to, subject, html, text })
+}

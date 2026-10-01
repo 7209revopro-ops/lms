@@ -8,6 +8,7 @@ import { startReminderJobs } from '@/jobs/reminders.job.ts'
 import { startDigestJob } from '@/jobs/digest.job.ts'
 import { startCriticalMailJob } from '@/jobs/criticalmail.job.ts'
 import { startInstructorScheduleJob } from '@/jobs/instructorSchedule.job.ts'
+import { ClassImportService } from '@/services/classImport.service.ts'
 import { startEmailOutboxJob } from '@/jobs/emailOutbox.job.ts'
 import { startWhatsAppOutboxJob } from '@/jobs/whatsappOutbox.job.ts'
 import { startCommissionStudentsJob } from '@/jobs/commissionStudents.job.ts'
@@ -302,6 +303,11 @@ async function bootstrap() {
     : (process.env.NODE_APP_INSTANCE ?? '0') === '0'
 
   if (cronEnabled) {
+    /* An import's classes are created in-process; a restart stops it mid-run.
+       Mark such jobs 'interrupted' so the admin sees Resume rather than a job
+       stuck at "running" for ever. Primary instance only, like the scheduler. */
+    await ClassImportService.markInterruptedOnBoot().catch(err =>
+      logger.error({ err }, '[ClassImport] could not mark interrupted imports'))
     startReminderJobs()
     startEmailOutboxJob()
     startWhatsAppOutboxJob()

@@ -10,7 +10,7 @@ import {
   ChevronRight, PlayCircle, CalendarDays, Pencil, Search, X, Plus,
   LayoutList, CalendarRange, ChevronLeft, GraduationCap,
   UserCheck, LayoutGrid, Building2, MapPin, UserPlus,
-  ChevronDown, User, Globe, Share2, Check,
+  ChevronDown, User, Globe, Share2, Check, FileSpreadsheet,
 } from 'lucide-react'
 import { useAllLiveClasses, useCreateLiveClass, useMyMeetings, markInstructorJoined, type LiveClass, type LiveClassType, type MentorMeeting } from '@/lib/api/liveClasses'
 import { CLASS_LANGUAGES, withFlagAndNative } from '@/lib/languages'
@@ -1979,6 +1979,20 @@ export default function LiveClassesPage() {
         </div>
 
         <div className="ml-auto flex items-center gap-3">
+          {/* Import a weekly timetable (.xlsx) — admin-side roles only */}
+          {!isInstructor && (
+            <Link href="/live-classes/import">
+              <MotionButton
+                variant="ghost"
+                whileHover={{ y: -1 }}
+                whileTap={{ scale: 0.97 }}
+                className="flex items-center gap-1.5 rounded-xl px-4 py-2 text-sm font-semibold"
+                style={{ background: 'rgba(255,255,255,0.05)', color: 'rgba(255,255,255,0.8)', border: '1px solid rgba(255,255,255,0.1)' }}>
+                <FileSpreadsheet size={14} />Import timetable
+              </MotionButton>
+            </Link>
+          )}
+
           {/* Add Offline Class */}
           <MotionButton
             variant="ghost"
