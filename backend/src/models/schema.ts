@@ -726,6 +726,24 @@ export type EnrollmentSource = typeof ENROLLMENT_SOURCES[number]
 export const PAYMENT_ACCESS_STATUSES = ['unpaid', 'partial', 'paid'] as const
 export type PaymentAccessStatus = typeof PAYMENT_ACCESS_STATUSES[number]
 
+/* An enrolment's money as Delta Finance approved it: the course fee, what was
+   paid, the balance, whether a bonus was given at the close, and the receipt
+   the counsellor took. Minor units (cents / fils) like every amount here.
+   For information — staff see what was agreed without a login to finance —
+   and a snapshot at approval: finance stays the record of what is paid. The
+   bonus is beside the money, never in it. */
+export interface EnrollmentFeeSummary {
+  invoiceId:     string
+  invoiceNumber?: string
+  currency:      string
+  feeMinor:      number
+  paidMinor:     number
+  balanceMinor:  number
+  bonus?:        { given: boolean; amountMinor: number } | null
+  receipt?:      { url: string; name?: string; mimeType?: string } | null
+  recordedAt:    Date
+}
+
 export interface IEnrollment extends Document {
   id:              string
   userId:          Types.ObjectId
@@ -739,6 +757,7 @@ export interface IEnrollment extends Document {
   certificateId?:  string   // generated cert UUID
   blockedLessons:  Types.ObjectId[]  // lessons blocked by admin/instructor
   paymentAccess?:  { status?: PaymentAccessStatus; invoiceId?: string; updatedAt?: Date }
+  feeSummary?:     EnrollmentFeeSummary
   organizationId?: Types.ObjectId
   createdAt:       Date
   updatedAt:       Date
@@ -765,6 +784,31 @@ const EnrollmentSchema = new Schema<IEnrollment>(
       status:    { type: String, enum: PAYMENT_ACCESS_STATUSES },
       invoiceId: { type: String },
       updatedAt: { type: Date },
+    },
+    /* Set only by finance provisioning: what the enrolment cost and what was
+       paid, as finance approved it. See EnrollmentFeeSummary. */
+    feeSummary: {
+      type: new Schema(
+        {
+          invoiceId:     { type: String, required: true },
+          invoiceNumber: { type: String },
+          currency:      { type: String, required: true, maxlength: 3 },
+          feeMinor:      { type: Number, required: true, min: 0 },
+          paidMinor:     { type: Number, required: true, min: 0 },
+          balanceMinor:  { type: Number, required: true, min: 0 },
+          bonus: {
+            type: new Schema({ given: { type: Boolean, required: true }, amountMinor: { type: Number, default: 0, min: 0 } }, { _id: false }),
+            default: null,
+          },
+          receipt: {
+            type: new Schema({ url: { type: String, required: true, maxlength: 2048 }, name: { type: String }, mimeType: { type: String } }, { _id: false }),
+            default: null,
+          },
+          recordedAt: { type: Date, default: Date.now },
+        },
+        { _id: false },
+      ),
+      default: undefined,
     },
     organizationId:  { type: Schema.Types.ObjectId, ref: 'Organization' },
   },
@@ -1807,7 +1851,7 @@ export interface IOrder extends Document {
    * same invoice arriving twice finds its own row rather than writing a second
    * one and doubling the revenue it reports.
    */
-  externalRef?: { source: string; id: string }
+  externalRef?: { source: string; id: string; minorUnits?: boolean }
   amount:                   number    // charged amount in smallest unit (cents / fils)
   currency:                 string
   status:                   OrderStatus
@@ -1841,6 +1885,12 @@ const OrderSchema = new Schema<IOrder>(
     externalRef: {
       source: { type: String },
       id:     { type: String },
+      /* True on a finance order whose amount is in minor units, like every
+         other order. Finance orders written before it was set held whole units
+         — AED 5,200 stored as 5200 and shown as AED 52.00 — and
+         scripts/fix-finance-order-amounts.ts converts exactly the unmarked ones,
+         so it can be run any number of times. */
+      minorUnits: { type: Boolean },
     },
     amount:                  { type: Number, required: true, min: 0 },
     currency:                { type: String, required: true, default: 'usd', maxlength: 3 },

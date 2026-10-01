@@ -16,6 +16,20 @@ export interface StudentEnrollment {
   progressPercent?: number
   enrolledAt?:      string
   createdAt:        string
+  /* The enrolment's money as Delta Finance approved it — fee, paid, balance,
+     the bonus given at the close and the receipt. Minor units. Only on
+     enrolments finance created, and only sent to full admins. */
+  feeSummary?: {
+    invoiceId:      string
+    invoiceNumber?: string
+    currency:       string
+    feeMinor:       number
+    paidMinor:      number
+    balanceMinor:   number
+    bonus?:         { given: boolean; amountMinor: number } | null
+    receipt?:       { url: string; name?: string; mimeType?: string } | null
+    recordedAt?:    string
+  }
 }
 
 const enrollmentKeys = {

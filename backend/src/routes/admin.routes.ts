@@ -992,7 +992,11 @@ router.get('/users/:id/enrollments', requireAnyAdmin, requireSameOrgUser('id'),
       const enrollments = await EnrollmentModel.find({ userId: new Types.ObjectId(studentId) })
         .populate('courseId', 'id title thumbnailUrl')
         .lean({ virtuals: true })
-      sendSuccess(res, enrollments)
+      /* What an enrolment cost, what was paid and the receipt are money, and
+         money here is for the people who may see a student's orders
+         (requireAdmin on /users/:id/orders) — not for every admin role that can
+         see which courses somebody is on. */
+      sendSuccess(res, isFullAdmin(req.user!.role) ? enrollments : enrollments.map(({ feeSummary: _fees, ...rest }) => rest))
     } catch (err) { next(err) }
   },
 )

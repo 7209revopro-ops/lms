@@ -193,11 +193,30 @@ const financeEnrolmentSchema = z.object({
      somebody asks why a student has access. */
   invoiceId:     z.string().min(1).max(200),
   invoiceNumber: z.string().max(60).optional(),
+  /* The fee in whole units — all an older finance sends — and in minor units,
+     which is what an order holds and what is used when both arrive. */
   amount:        z.coerce.number().min(0).optional(),
+  amountMinor:   z.number().int().min(0).optional(),
+  currency:      z.string().trim().min(3).max(3).optional(),
   /* How much of the fee is paid: paid opens every module, partial the first
      half, unpaid none. Absent from an older finance, which means full access
      exactly as before. */
   paymentStatus: z.enum(PAYMENT_ACCESS_STATUSES).optional(),
+  /* The enrolment's money as finance approved it — fee, paid, balance, the
+     bonus given at the close and the receipt — kept on the enrolment for
+     staff to see. Information only: nothing here opens or locks a module. */
+  feeSummary: z.object({
+    currency:     z.string().trim().min(3).max(3),
+    feeMinor:     z.number().int().min(0),
+    paidMinor:    z.number().int().min(0),
+    balanceMinor: z.number().int().min(0),
+    bonus: z.object({ given: z.boolean(), amountMinor: z.number().int().min(0) }).nullable().optional(),
+    receipt: z.object({
+      url:      z.string().url().max(2048),
+      name:     z.string().max(200).optional(),
+      mimeType: z.string().max(100).optional(),
+    }).nullable().optional(),
+  }).optional(),
 })
 
 router.post('/finance/enrolment', validate(financeEnrolmentSchema), async (req: Request, res: Response, next: NextFunction) => {
@@ -213,19 +232,24 @@ router.post('/finance/enrolment', validate(financeEnrolmentSchema), async (req: 
       return
     }
 
-    const { email, name, phone, courseSlug, invoiceId, invoiceNumber, amount, paymentStatus } = req.body as {
+    const { email, name, phone, courseSlug, invoiceId, invoiceNumber, amount, amountMinor, currency, paymentStatus, feeSummary } = req.body as {
       email: string; name?: string; phone?: string; courseSlug: string
-      invoiceId: string; invoiceNumber?: string; amount?: number
+      invoiceId: string; invoiceNumber?: string; amount?: number; amountMinor?: number; currency?: string
       paymentStatus?: PaymentAccessStatus
+      feeSummary?: Parameters<typeof orderSvc.provisionFinanceEnrolment>[0]['feeSummary']
     }
 
     let result
     try {
       result = await orderSvc.provisionFinanceEnrolment({
         email, courseSlug, externalId: invoiceId,
+        ...(invoiceNumber ? { invoiceNumber } : {}),
         ...(name ? { name } : {}), ...(phone ? { phone } : {}),
         ...(amount !== undefined ? { amount } : {}),
+        ...(amountMinor !== undefined ? { amountMinor } : {}),
+        ...(currency ? { currency } : {}),
         ...(paymentStatus ? { paymentStatus } : {}),
+        ...(feeSummary ? { feeSummary } : {}),
       })
     } catch (err) {
       /* An unmapped or renamed slug is the caller's mistake and will fail the

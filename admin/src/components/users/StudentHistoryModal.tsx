@@ -4,7 +4,7 @@ import { createPortal } from 'react-dom'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
   X, Mail, CheckCircle2, XCircle, BookOpen, Calendar, Clock,
-  ShoppingBag, Video, GraduationCap,
+  ShoppingBag, Video, GraduationCap, Receipt, Gift,
 } from 'lucide-react'
 import type { AdminUser } from '@/lib/api/users'
 import { useStudentEnrollments, useStudentOrders } from '@/lib/api/users'
@@ -25,6 +25,12 @@ const BOOKING_STATUS_STYLE: Record<string, { bg: string; color: string; label: s
 // Normalize both shapes to a single string key for matching.
 function courseKey(courseId?: { _id?: string; id?: string }): string {
   return String(courseId?.id ?? courseId?._id ?? '')
+}
+
+/* Orders and finance summaries hold the smallest unit (cents / fils). */
+function fmtMoney(minor: number, currency: string) {
+  const amount = (minor / 100).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+  return `${currency.toUpperCase()} ${amount}`
 }
 
 function fmtDate(d?: string) {
@@ -182,12 +188,39 @@ export function StudentHistoryModal({ user, onClose }: Props) {
                             )}
                             {o && (
                               <span>
-                                {o.currency} {o.amount.toFixed(2)} · {o.gateway} · {fmtDate(o.createdAt)}
+                                {fmtMoney(o.amount, o.currency)} · {o.gateway} · {fmtDate(o.createdAt)}
                               </span>
                             )}
                           </div>
                         </div>
                       </div>
+                      {/* The enrolment's money as finance approved it — shown
+                          for information; finance is the record of payments. */}
+                      {e.feeSummary && (
+                        <div className="mt-2 rounded-lg px-2.5 py-2 text-[10px]"
+                          style={{ background: 'rgba(96,165,250,0.06)', border: '1px solid rgba(96,165,250,0.15)', color: 'rgba(255,255,255,0.55)' }}>
+                          <div className="flex flex-wrap gap-x-3 gap-y-0.5">
+                            <span>Fee <b className="text-white">{fmtMoney(e.feeSummary.feeMinor, e.feeSummary.currency)}</b></span>
+                            <span>Paid <b style={{ color: '#4ADE80' }}>{fmtMoney(e.feeSummary.paidMinor, e.feeSummary.currency)}</b></span>
+                            <span>Balance <b style={{ color: e.feeSummary.balanceMinor > 0 ? '#FCD34D' : '#4ADE80' }}>{fmtMoney(e.feeSummary.balanceMinor, e.feeSummary.currency)}</b></span>
+                          </div>
+                          <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-0.5">
+                            {e.feeSummary.bonus && (
+                              <span className="inline-flex items-center gap-1">
+                                <Gift size={10} />
+                                Bonus {e.feeSummary.bonus.given ? <b className="text-white">{fmtMoney(e.feeSummary.bonus.amountMinor, e.feeSummary.currency)}</b> : 'none'}
+                              </span>
+                            )}
+                            {e.feeSummary.receipt?.url && (
+                              <a href={e.feeSummary.receipt.url} target="_blank" rel="noopener noreferrer"
+                                className="inline-flex items-center gap-1 hover:underline" style={{ color: '#60A5FA' }}>
+                                <Receipt size={10} />Receipt
+                              </a>
+                            )}
+                            <span>From finance{e.feeSummary.invoiceNumber ? ` · ${e.feeSummary.invoiceNumber}` : ''}, at approval</span>
+                          </div>
+                        </div>
+                      )}
                     </div>
                   ))}
                   {ordersWithoutEnrollment.map(o => (
@@ -203,7 +236,7 @@ export function StudentHistoryModal({ user, onClose }: Props) {
                         <div className="min-w-0 flex-1">
                           <p className="truncate text-xs font-semibold text-white">{o.courseId?.title ?? '—'}</p>
                           <div className="mt-0.5 text-[10px]" style={{ color: 'rgba(255,255,255,0.4)' }}>
-                            {o.currency} {o.amount.toFixed(2)} · {o.gateway} · {fmtDate(o.createdAt)}
+                            {fmtMoney(o.amount, o.currency)} · {o.gateway} · {fmtDate(o.createdAt)}
                             {' · '}
                             <span style={{ color: o.status === 'paid' ? '#4ADE80' : 'rgba(255,255,255,0.4)' }}>{o.status}</span>
                           </div>

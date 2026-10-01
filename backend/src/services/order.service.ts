@@ -17,7 +17,7 @@ import { NotificationService } from '@/services/notification.service.ts'
 import { sendEnrollmentConfirmation } from '@/services/email.service.ts'
 import { CourseModel, UserModel } from '@/models/schema.ts'
 import { env } from '@/config/env.ts'
-import type { OrderGateway, IOrder, PaymentAccessStatus } from '@/models/schema.ts'
+import type { OrderGateway, IOrder, PaymentAccessStatus, EnrollmentFeeSummary } from '@/models/schema.ts'
 import { applyInitialPaymentAccess, raisePaymentAccess, type AccessSummary } from '@/services/paymentAccess.service.ts'
 import { logger } from '@/utils/logger.ts'
 
@@ -1771,6 +1771,10 @@ export class OrderService {
     phone?: string
     courseSlug: string
     amount?: number
+    /** The amount already in minor units — what an order holds. Preferred over `amount` where given. */
+    amountMinor?: number
+    /** The order's currency, where the caller knows it; otherwise the academy's. */
+    currency?: string
   }): Promise<{
     userId: string
     created: boolean
@@ -1841,8 +1845,8 @@ export class OrderService {
     await OrderModel.create({
       userId, courseId,
       gateway: 'razorpay', status: 'paid',
-      amount: input.amount ?? 0,
-      currency: ((org as { currency?: string })?.currency ?? 'AED').toLowerCase().slice(0, 3),
+      amount: input.amountMinor ?? input.amount ?? 0,
+      currency: (input.currency?.trim() || (org as { currency?: string })?.currency || 'AED').toLowerCase().slice(0, 3),
     })
 
     logger.info({ userId, courseSlug: input.courseSlug, created }, '✅ Manual course purchase provisioned')
@@ -1878,9 +1882,16 @@ export class OrderService {
     courseSlug: string
     /** The finance invoice this came from — the idempotency key. */
     externalId: string
+    invoiceNumber?: string
+    /** The fee in whole units — all an older finance sends. */
     amount?: number
+    /** The fee in minor units, which is what an order holds. */
+    amountMinor?: number
+    currency?: string
     /** How much of the fee is paid. Absent from an older finance: full access, as before. */
     paymentStatus?: PaymentAccessStatus
+    /** The enrolment's money as finance approved it, for staff to see. Absent from an older finance. */
+    feeSummary?: Omit<EnrollmentFeeSummary, 'invoiceId' | 'invoiceNumber' | 'recordedAt'>
   }): Promise<{
     userId: string
     created: boolean
@@ -1928,7 +1939,18 @@ export class OrderService {
       ? await EnrollmentModel.exists({ userId: userForRule._id, courseId: courseForRule._id })
       : null
 
-    const result = await this.provisionManualPurchase(input)
+    /* The order in minor units, like every other order here. An older finance
+       sends only `amount`, in whole units — stored as it came, that showed
+       AED 5,200 as AED 52.00 and counted it a hundredth in revenue. */
+    const amountMinor = input.amountMinor ?? Math.round((input.amount ?? 0) * 100)
+    const result = await this.provisionManualPurchase({
+      email: input.email,
+      courseSlug: input.courseSlug,
+      amountMinor,
+      ...(input.name ? { name: input.name } : {}),
+      ...(input.phone ? { phone: input.phone } : {}),
+      ...(input.currency ? { currency: input.currency } : {}),
+    })
 
     let access: AccessSummary | undefined
     if (input.paymentStatus && courseForRule && !enrolledBefore) {
@@ -1944,9 +1966,31 @@ export class OrderService {
        should not be made to invent one. */
     await OrderModel.findOneAndUpdate(
       { userId: result.userId, 'externalRef.id': { $exists: false } },
-      { $set: { externalRef: { source: 'finance', id: input.externalId } } },
+      { $set: { externalRef: { source: 'finance', id: input.externalId, minorUnits: true } } },
       { sort: { createdAt: -1 } },
     )
+
+    /* What the enrolment cost and what was paid, beside the enrolment it paid
+       for — so whoever looks the student up here sees the fee, the balance, the
+       bonus and the receipt without a login to finance. Recorded once, with the
+       first arrival of the invoice: a retry finds the order above and stops
+       before this, and finance sends payments after approval as access updates. */
+    if (input.feeSummary && courseForRule) {
+      await EnrollmentModel.updateOne(
+        { userId: result.userId, courseId: courseForRule._id },
+        {
+          $set: {
+            feeSummary: {
+              ...input.feeSummary,
+              invoiceId: input.externalId,
+              ...(input.invoiceNumber ? { invoiceNumber: input.invoiceNumber } : {}),
+              currency: input.feeSummary.currency.trim().toUpperCase().slice(0, 3),
+              recordedAt: new Date(),
+            },
+          },
+        },
+      )
+    }
 
     return { ...result, alreadyProcessed: false, ...(access ? { access } : {}) }
   }
