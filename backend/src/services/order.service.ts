@@ -1780,6 +1780,8 @@ export class OrderService {
     created: boolean
     courseSlug: string
     courseTitle: string
+    /** The course's programme (`4x-trading` is FOREX Trading), or null where none is set. */
+    courseProgram: string | null
     organizationSlug: string | null
   }> {
     const { OrderModel, OrganizationModel } = await import('@/models/schema.ts')
@@ -1855,6 +1857,7 @@ export class OrderService {
       created,
       courseSlug: (course as { slug: string }).slug,
       courseTitle: (course as { title: string }).title,
+      courseProgram: (course as { program?: string }).program || null,
       organizationSlug: (org as { slug?: string })?.slug ?? null,
     }
   }
@@ -1898,6 +1901,8 @@ export class OrderService {
     alreadyProcessed: boolean
     courseSlug: string
     courseTitle: string
+    /** The course's programme. Finance sends only FOREX Trading (`4x-trading`) students on to Tetra Commission. */
+    courseProgram: string | null
     organizationSlug: string | null
     access?: AccessSummary
   }> {
@@ -1910,7 +1915,7 @@ export class OrderService {
 
     if (prior) {
       const course = await CourseModel.findById((prior as { courseId: unknown }).courseId)
-        .select('slug title organizationId').lean()
+        .select('slug title organizationId program').lean()
       const { OrganizationModel } = await import('@/models/schema.ts')
       const orgId = (course as unknown as { organizationId?: unknown } | null)?.organizationId
       const org = orgId
@@ -1923,6 +1928,7 @@ export class OrderService {
         alreadyProcessed: true,
         courseSlug: (course as { slug?: string })?.slug ?? input.courseSlug,
         courseTitle: (course as { title?: string })?.title ?? '',
+        courseProgram: (course as { program?: string } | null)?.program || null,
         organizationSlug: (org as { slug?: string })?.slug ?? null,
       }
     }

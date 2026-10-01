@@ -1,23 +1,31 @@
 /* ─────────────────────────────────────────────────────
-   New students → Tetra Commission
+   Forex students → Tetra Commission
    ─────────────────────────────────────────────────────
-   Tetra Commission (the commission portal) keeps its own list of Delta
-   students, each given to one of its teams in turn. Students enrolled through
-   finance already reach it from finance, with their invoice. This sends every
-   other new student: website sign-ups, invited students, store and manual
-   purchases, admin enrolments.
+   Tetra Commission (the commission portal) keeps its own list of Delta's
+   Forex students, each given to one of its teams in turn. Only Forex students
+   go there: somebody put on a course whose programme is FOREX Trading
+   (`program: '4x-trading'`, the FOREX Trading filter on the admin Courses
+   page) — by the website checkout, an admin or a script. A sign-up with no
+   course, or a student only on another programme's course, is not sent.
+   Students enrolled through finance reach it from finance instead, with their
+   invoice (and finance, too, sends only its Forex closes).
 
-   A student is sent once they are a real student — approved by an admin, or
-   given a course — and only if they were created after sending was first
-   switched on (the moment is kept in SystemSetting "commission_students_since"),
-   so nobody from before is ever sent. Both academies.
+   Only a course given after sending was first switched on counts (the moment
+   is kept in SystemSetting "commission_students_since"), so nobody enrolled
+   before is ever sent. Both academies.
 
-   A sweep rather than a call at each place a student is made: there are seven
-   such places and five more that approve, and a hook missed at any one of them
-   would drop students silently. Tetra Commission is idempotent on the LMS user
-   id and leaves an email it already has alone, so a retry never makes a second
-   student. Sending never holds up a sign-up or an enrolment. The sweep runs
-   every 15 seconds, so a student is there within half a minute of counting.
+   This job used to send every new student once approved, most of them before
+   they had any course. A student it sent then counts as sent here only once
+   they have been sent with a Forex course — so one sent with none, and taken
+   out of Tetra Commission since, goes back when they are given one. Tetra
+   Commission is idempotent on the LMS user id and leaves an email it already
+   has alone, so sending somebody it still has changes nothing there, and a
+   retry never makes a second student.
+
+   A sweep rather than a call at each place a course is given: there are seven
+   such places, and a hook missed at any one of them would drop students
+   silently. Sending never holds up an enrolment. The sweep runs every 15
+   seconds, so a student is there within half a minute of counting.
 
    An outage is waited out however long it lasts; only a refusal that cannot
    come right (a bad secret, a malformed student) stops.
@@ -25,8 +33,11 @@
    Off unless COMMISSION_API_URL and COMMISSION_S2S_SECRET are set (the secret
    equals LMS_S2S_SECRET on the Tetra Commission server).
 ───────────────────────────────────────────────────── */
-import { EnrollmentModel, UserModel, OrganizationModel, CourseModel, SystemSettingModel } from '@/models/schema.ts'
+import { EnrollmentModel, UserModel, OrganizationModel, CourseModel, OrderModel, SystemSettingModel } from '@/models/schema.ts'
 import { logger } from '@/utils/logger.ts'
+
+/* The programme Tetra Commission is for — "FOREX Trading" in the admin. */
+export const FOREX_PROGRAMME = '4x-trading'
 
 const BATCH = 20
 const TIMEOUT_MS = 20_000
@@ -110,21 +121,29 @@ export async function drainCommissionStudentsOnce(now = new Date()): Promise<{ s
   const since   = await sendingSince(now)
   const settled = new Date(now.getTime() - SETTLE_MS)
 
-  // Given a course since sending began (a student cannot be enrolled before they exist).
-  const enrolled = await EnrollmentModel.distinct('userId', { createdAt: { $gte: since, $lte: settled } })
+  const forex = await CourseModel.find({ program: FOREX_PROGRAMME }).select('_id title').lean() as unknown as { _id: unknown; title?: string }[]
+  if (!forex.length) return tally
+  const titles = new Map(forex.map(c => [String(c._id), c.title ?? '']))
+
+  // Put on a Forex course since sending began, oldest first — each student goes with the first of them.
+  const given = await EnrollmentModel.find({ courseId: { $in: forex.map(c => c._id) }, createdAt: { $gte: since, $lte: settled } })
+    .select('userId courseId')
+    .sort({ createdAt: 1 })
+    .lean() as unknown as { userId: unknown; courseId: unknown }[]
+  if (!given.length) return tally
+  const courseOf = new Map<string, string>()
+  for (const e of given) if (!courseOf.has(String(e.userId))) courseOf.set(String(e.userId), titles.get(String(e.courseId)) ?? '')
 
   const due = await UserModel.find({
-    role:      'student',
-    isActive:  { $ne: false },
-    createdAt: { $gte: since, $lte: settled },
-    $and: [
+    _id:      { $in: given.map(e => e.userId) },
+    role:     'student',
+    isActive: { $ne: false },
+    $or: [
       // Never sent, or waiting for its next try.
-      { $or: [
-        { 'commissionSync.state': { $exists: false } },
-        { 'commissionSync.state': 'pending', 'commissionSync.nextAttemptAt': { $lte: now } },
-      ] },
-      // A real student: approved by an admin, or given a course.
-      { $or: [{ enrollmentStatus: 'approved' }, { _id: { $in: enrolled } }] },
+      { 'commissionSync.state': { $exists: false } },
+      { 'commissionSync.state': 'pending', 'commissionSync.nextAttemptAt': { $lte: now } },
+      // Sent by this job before it was Forex only, with no Forex course (see the top).
+      { 'commissionSync.state': 'sent', 'commissionSync.course': { $exists: false } },
     ],
   })
     .select('name email organizationId enrollmentApplication commissionSync')
@@ -133,20 +152,21 @@ export async function drainCommissionStudentsOnce(now = new Date()): Promise<{ s
     .lean() as unknown as Student[]
 
   for (const student of due) {
-    // Finance enrolled them, so finance sends them — with the invoice, and once.
-    const viaFinance = await EnrollmentModel.exists({ userId: student._id, 'paymentAccess.invoiceId': { $exists: true, $nin: [null, ''] } })
+    // Finance enrolled them, so finance sends them — with the invoice, and once. Its
+    // older enrolments carry no invoice on the enrolment, only on the order.
+    const viaFinance = (await EnrollmentModel.exists({ userId: student._id, 'paymentAccess.invoiceId': { $exists: true, $nin: [null, ''] } }))
+      || (await OrderModel.exists({ userId: student._id, 'externalRef.source': 'finance' }))
     if (viaFinance) {
-      await UserModel.updateOne({ _id: student._id }, { $set: { commissionSync: { state: 'skipped', reason: 'Enrolled through finance, which sends them itself' } } })
+      await UserModel.updateOne({ _id: student._id }, { $set: { 'commissionSync.state': 'skipped', 'commissionSync.reason': 'Enrolled through finance, which sends them itself' } })
       tally.skipped++
       continue
     }
 
+    const course = courseOf.get(String(student._id)) ?? ''
     try {
-      const first = await EnrollmentModel.findOne({ userId: student._id }).sort({ createdAt: 1 }).select('courseId').lean() as { courseId?: unknown } | null
-      const [course, org] = await Promise.all([
-        first?.courseId ? CourseModel.findById(first.courseId).select('title').lean() as Promise<{ title?: string } | null> : null,
-        student.organizationId ? OrganizationModel.findById(student.organizationId).select('name').lean() as Promise<{ name?: string } | null> : null,
-      ])
+      const org = student.organizationId
+        ? await OrganizationModel.findById(student.organizationId).select('name').lean() as { name?: string } | null
+        : null
       const app = student.enrollmentApplication ?? {}
       const answer = await sendToCommission({
         lmsUserId: String(student._id),
@@ -155,11 +175,12 @@ export async function drainCommissionStudentsOnce(now = new Date()): Promise<{ s
         phone:     app.phone ?? '',
         country:   app.homeCountry || app.addressCountry || app.nationality || '',
         academy:   org?.name ?? '',
-        course:    course?.title ?? '',
+        course,
       })
       await UserModel.updateOne({ _id: student._id }, {
         $set: {
           'commissionSync.state':        'sent',
+          'commissionSync.course':       course,
           'commissionSync.studentCode':  answer.studentCode,
           'commissionSync.mentorName':   answer.mentorName,
           'commissionSync.alreadyThere': answer.existing === 'email',
@@ -170,8 +191,8 @@ export async function drainCommissionStudentsOnce(now = new Date()): Promise<{ s
         $unset: { 'commissionSync.lastError': 1, 'commissionSync.nextAttemptAt': 1 },
       })
       tally.sent++
-      logger.info({ userId: String(student._id), student: answer.studentCode, team: answer.teamName, existing: answer.existing },
-        answer.existing === 'email' ? 'Student already in Tetra Commission — left as they are' : 'Student sent to Tetra Commission')
+      logger.info({ userId: String(student._id), course, student: answer.studentCode, team: answer.teamName, existing: answer.existing },
+        answer.existing ? 'Forex student already in Tetra Commission — left as they are' : 'Forex student sent to Tetra Commission')
     } catch (err) {
       const permanent = err instanceof CommissionPermanentError
       const notReady  = err instanceof CommissionNotReadyError

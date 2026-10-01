@@ -190,6 +190,7 @@ export interface IUser extends Document {
     alreadyThere?:  boolean
     reason?:        string
     sentAt?:        Date
+    course?:        string
   }
   /* Meta */
   lastLoginAt?:  Date
@@ -301,8 +302,11 @@ const UserSchema = new Schema<IUser>(
       default: undefined,
     },
     /* Where this student stands with Tetra Commission, the commission portal.
-       Written only by the job that sends new students there; `skipped` is a
-       student finance enrolled, whom finance sends itself. */
+       Written only by the job that sends Forex students there; `skipped` is a
+       student finance enrolled, whom finance sends itself. `course` is the
+       Forex course they were sent with — absent on a student the job sent
+       before it was Forex only, which is why such a student is sent again
+       once given a Forex course. */
     commissionSync: {
       state:         { type: String, enum: ['pending', 'sent', 'failed', 'skipped'] },
       attempts:      { type: Number },
@@ -314,6 +318,7 @@ const UserSchema = new Schema<IUser>(
       alreadyThere:  { type: Boolean },
       reason:        { type: String },
       sentAt:        { type: Date },
+      course:        { type: String },
     },
   },
   baseSchemaOptions,

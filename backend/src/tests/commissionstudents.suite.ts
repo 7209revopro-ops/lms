@@ -1,17 +1,26 @@
 /* ─────────────────────────────────────────────────────────────
-   New students → Tetra Commission: who is sent, when, and what is kept.
+   Forex students → Tetra Commission: who is sent, when, and what is kept.
 
    Pinned here, against a real database and a stand-in Tetra Commission:
 
      A. switched off, nothing happens — not even the go-live mark;
-     B. only real students (approved, or given a course) created since it was
-        switched on; never blocked accounts, other roles, or anybody older;
-     C. students finance enrolled are left to finance;
-     D. a student made a moment ago waits a few seconds (their request may
-        still be running);
-     E. what is sent: name, phone, country, academy, the first course;
-     F. what comes back is kept, and a sent student is never sent again;
-     G. not deployed, not configured there, or down: waited out, never given
+     B. only Forex students: put on a FOREX Trading course since it was
+        switched on — by the website, an admin or a script, however old the
+        account; never a sign-up with no course, a student only on another
+        programme's course, a course given before, a blocked account or
+        another role;
+     C. students finance enrolled are left to finance — known by the invoice
+        on the enrolment, or on an older finance order;
+     D. a course given a moment ago waits a few seconds (the request giving
+        it may still be running);
+     E. what is sent: name, phone, country, academy, and the Forex course —
+        not an earlier course of another programme;
+     F. what comes back is kept, the course with it, and a sent student is
+        never sent again;
+     G. sent before this was Forex only, with no course: sent again once given
+        a Forex course — the same student where Tetra Commission still has
+        them, made again where they were taken out;
+     H. not deployed, not configured there, or down: waited out, never given
         up; a bad secret: stopped.
 
    The Tetra Commission half is proven on its side
@@ -79,8 +88,8 @@ await new Promise<void>(resolve => tc.listen(0, '127.0.0.1', resolve))
 const TC_URL = `http://127.0.0.1:${(tc.address() as { port: number }).port}`
 
 const mongoose = (await import('mongoose')).default
-const { UserModel, EnrollmentModel, CourseModel, OrganizationModel, SystemSettingModel } = await import('@/models/schema.ts')
-const { drainCommissionStudentsOnce, SINCE_KEY } = await import('@/services/commissionStudents.service.ts')
+const { UserModel, EnrollmentModel, CourseModel, OrderModel, OrganizationModel, SystemSettingModel } = await import('@/models/schema.ts')
+const { drainCommissionStudentsOnce, SINCE_KEY, FOREX_PROGRAMME } = await import('@/services/commissionStudents.service.ts')
 
 await mongoose.connect(process.env.DATABASE_URL!)
 if (!['127.0.0.1', 'localhost'].includes(mongoose.connection.host) || mongoose.connection.db!.databaseName !== 'lms_commissionstudents') {
@@ -91,24 +100,29 @@ await mongoose.connection.dropDatabase()
 
 const now = Date.now()
 const at = (msAgo: number) => new Date(now - msAgo)
-const MIN = 60_000, HOUR = 60 * MIN, DAY = 24 * HOUR
+const SEC = 1000, MIN = 60 * SEC, HOUR = 60 * MIN, DAY = 24 * HOUR
 
 // Raw rows: this is about who is sent, not about what makes a valid course or student.
 const dubai = (await OrganizationModel.collection.insertOne({ name: 'Delta Dubai', slug: 'dubai', currency: 'AED', countryFilter: null, createdAt: at(DAY), updatedAt: at(DAY) })).insertedId
 const bangalore = (await OrganizationModel.collection.insertOne({ name: 'Delta Bangalore', slug: 'bangalore', currency: 'INR', countryFilter: 'India', createdAt: at(DAY), updatedAt: at(DAY) })).insertedId
-const dwt = (await CourseModel.collection.insertOne({ title: 'Delta Wave Theory Trading Programme', slug: 'dwt-cs', createdAt: at(DAY), updatedAt: at(DAY) })).insertedId
-const mbt = (await CourseModel.collection.insertOne({ title: 'Market Break-Out Trading', slug: 'mbt-cs', createdAt: at(DAY), updatedAt: at(DAY) })).insertedId
+const course = async (title: string, slug: string, program: string) =>
+  (await CourseModel.collection.insertOne({ title, slug, program, createdAt: at(DAY), updatedAt: at(DAY) })).insertedId
+const dwt = await course('Delta Wave Theory Trading Programme', 'dwt-cs', FOREX_PROGRAMME)
+const mbt = await course('Market Break-Out Trading', 'mbt-cs', FOREX_PROGRAMME)
+const dm  = await course('Digital Marketing', 'dm-cs', 'digital-marketing')
 
-type Opts = { createdAgo: number; status?: string; role?: string; isActive?: boolean; org?: unknown; app?: Record<string, string> }
+type Opts = { createdAgo: number; status?: string; role?: string; isActive?: boolean; org?: unknown; app?: Record<string, string>; sync?: Record<string, unknown> }
 const person = async (email: string, o: Opts) => (await UserModel.collection.insertOne({
   name: email.split('@')[0], email, role: o.role ?? 'student', enrollmentStatus: o.status ?? 'pending',
   isActive: o.isActive ?? true, ...(o.org ? { organizationId: o.org } : {}),
-  ...(o.app ? { enrollmentApplication: o.app } : {}), createdAt: at(o.createdAgo), updatedAt: at(o.createdAgo),
+  ...(o.app ? { enrollmentApplication: o.app } : {}), ...(o.sync ? { commissionSync: o.sync } : {}),
+  createdAt: at(o.createdAgo), updatedAt: at(o.createdAgo),
 })).insertedId
 const enrol = async (userId: unknown, courseId: unknown, createdAgo: number, extra: Record<string, unknown> = {}) =>
   EnrollmentModel.collection.insertOne({ userId, courseId, status: 'active', source: 'purchase', createdAt: at(createdAgo), updatedAt: at(createdAgo), ...extra })
 const sync = async (id: unknown) => ((await UserModel.findById(id).lean()) as { commissionSync?: Record<string, unknown> } | null)?.commissionSync
 const sentEmails = () => received.map(r => String(r.email)).sort().join(',')
+const sentTo = (email: string) => received.filter(r => r.email === email)
 
 step('A. Switched off')
 let t = await drainCommissionStudentsOnce()
@@ -120,62 +134,102 @@ process.env.COMMISSION_S2S_SECRET = SECRET
 await SystemSettingModel.collection.insertOne({ key: SINCE_KEY, value: at(HOUR).toISOString(), createdAt: at(HOUR), updatedAt: at(HOUR) })
 
 step('B. Who counts')
-const older     = await person('older@lms.test', { createdAgo: 2 * DAY, status: 'approved' })
-await enrol(older, dwt, 2 * DAY)
-const waiting   = await person('waiting@lms.test', { createdAgo: 50 * MIN })
-const approved  = await person('approved@lms.test', { createdAgo: 50 * MIN, status: 'approved', org: bangalore, app: { phone: '+91 90000 00001', nationality: 'Indian' } })
-const buyer     = await person('buyer@lms.test', { createdAgo: 40 * MIN, org: dubai, app: { phone: '+971 50 000 0002', homeCountry: 'United Arab Emirates', nationality: 'Indian' } })
-await enrol(buyer, mbt, 30 * MIN)
-await enrol(buyer, dwt, 35 * MIN)                        // the first course is the earliest
-const finance   = await person('finance@lms.test', { createdAgo: 45 * MIN, org: dubai })
+const older      = await person('older@lms.test', { createdAgo: 2 * DAY, status: 'approved' })
+await enrol(older, dwt, 2 * DAY)                           // a Forex course, but from before
+const signup     = await person('signup@lms.test', { createdAgo: 50 * MIN, status: 'approved' })
+const buyer      = await person('buyer@lms.test', { createdAgo: 40 * MIN, org: dubai, app: { phone: '+971 50 000 0002', homeCountry: 'United Arab Emirates', nationality: 'Indian' } })
+await enrol(buyer, dm, 35 * MIN)                           // another programme's course first
+await enrol(buyer, mbt, 30 * MIN)                          // then a Forex one, from the website
+const adminGiven = await person('admingiven@lms.test', { createdAgo: 45 * MIN, status: 'approved', org: bangalore, app: { phone: '+91 90000 00001', nationality: 'Indian' } })
+await enrol(adminGiven, dwt, 20 * MIN, { source: 'admin' })
+const scripted   = await person('scripted@lms.test', { createdAgo: 3 * DAY, status: 'approved' })
+await enrol(scripted, mbt, 15 * MIN, { source: 'script' }) // an older account, a Forex course since
+const dmOnly     = await person('dmonly@lms.test', { createdAgo: 30 * MIN, status: 'approved' })
+await enrol(dmOnly, dm, 25 * MIN)
+const finance    = await person('finance@lms.test', { createdAgo: 45 * MIN, org: dubai })
 await enrol(finance, dwt, 45 * MIN, { paymentAccess: { status: 'partial', invoiceId: 'inv-123' } })
-const blocked   = await person('blocked@lms.test', { createdAgo: 40 * MIN, status: 'approved', isActive: false })
-const teacher   = await person('teacher@lms.test', { createdAgo: 40 * MIN, status: 'approved', role: 'instructor' })
-const fresh     = await person('fresh@lms.test', { createdAgo: 10_000, status: 'approved' })
-const handAdded = await person('hand.added@commission.test', { createdAgo: 30 * MIN, status: 'approved' })
+const financeOld = await person('financeold@lms.test', { createdAgo: 44 * MIN, org: dubai })
+await enrol(financeOld, dwt, 44 * MIN)
+await OrderModel.collection.insertOne({ userId: financeOld, courseId: dwt, gateway: 'razorpay', status: 'paid', amount: 520_000, currency: 'aed',
+  externalRef: { source: 'finance', id: 'inv-old' }, createdAt: at(44 * MIN), updatedAt: at(44 * MIN) })
+const blocked    = await person('blocked@lms.test', { createdAgo: 40 * MIN, status: 'approved', isActive: false })
+await enrol(blocked, mbt, 30 * MIN)
+const teacher    = await person('teacher@lms.test', { createdAgo: 40 * MIN, status: 'approved', role: 'instructor' })
+await enrol(teacher, mbt, 30 * MIN)
+const fresh      = await person('fresh@lms.test', { createdAgo: 5 * MIN, status: 'approved' })
+await enrol(fresh, mbt, 10 * SEC)
+const handAdded  = await person('hand.added@commission.test', { createdAgo: 30 * MIN, status: 'approved' })
+await enrol(handAdded, mbt, 30 * MIN, { source: 'admin' })
 
 t = await drainCommissionStudentsOnce()
-check('sent: the approved student, the one given a course, and one Tetra Commission already has',
-  sentEmails() === 'approved@lms.test,buyer@lms.test,hand.added@commission.test', sentEmails())
-check('not sent: somebody signed up but not yet a student', !received.some(r => r.email === 'waiting@lms.test') && !(await sync(waiting)))
-check('not sent: an account from before it was switched on', !(await sync(older)))
+check('sent: the website buyer, the one an admin gave a Forex course, the older account a script gave one, and one Tetra Commission already has',
+  sentEmails() === 'admingiven@lms.test,buyer@lms.test,hand.added@commission.test,scripted@lms.test', sentEmails())
+check('not sent: an approved sign-up with no course', !sentTo('signup@lms.test').length && !(await sync(signup)))
+check('not sent: a student only on another programme\'s course', !sentTo('dmonly@lms.test').length && !(await sync(dmOnly)))
+check('not sent: a Forex course given before it was switched on', !(await sync(older)))
 check('not sent: a blocked account, or an instructor', !(await sync(blocked)) && !(await sync(teacher)))
 
 step('C. Finance enrolled them')
-const f = await sync(finance)
-check('left to finance, and marked so it is not looked at again', f?.state === 'skipped' && !received.some(r => r.email === 'finance@lms.test') && t.skipped === 1, JSON.stringify(f))
+const f = await sync(finance), fo = await sync(financeOld)
+check('left to finance, and marked so they are not looked at again', f?.state === 'skipped' && !sentTo('finance@lms.test').length, JSON.stringify(f))
+check('...known by an older finance order too', fo?.state === 'skipped' && !sentTo('financeold@lms.test').length && t.skipped === 2, JSON.stringify(fo))
 
-step('D. Made a moment ago')
+step('D. Given a moment ago')
 check('waits a few seconds', !(await sync(fresh)))
-await UserModel.collection.updateOne({ _id: fresh }, { $set: { createdAt: at(2 * MIN) } })
-await UserModel.collection.updateOne({ _id: waiting }, { $set: { enrollmentStatus: 'approved' } })
+await EnrollmentModel.collection.updateOne({ userId: fresh }, { $set: { createdAt: at(2 * MIN) } })
+await enrol(signup, dwt, 2 * MIN, { source: 'admin' })
 await drainCommissionStudentsOnce()
 check('...then goes', (await sync(fresh))?.state === 'sent')
-check('and the sign-up goes once an admin approves them', (await sync(waiting))?.state === 'sent')
+check('and the sign-up goes once they are given a Forex course', (await sync(signup))?.state === 'sent' && sentTo('signup@lms.test').length === 1)
 
 step('E. What is sent')
-const b = received.find(r => r.email === 'buyer@lms.test')!
+const b = sentTo('buyer@lms.test')[0]!
 check('who they are, and where', b.lmsUserId === String(buyer) && b.name === 'buyer' && b.phone === '+971 50 000 0002' && b.academy === 'Delta Dubai', JSON.stringify(b))
 check('their country: home country first', b.country === 'United Arab Emirates', String(b.country))
-check('their first course', b.course === 'Delta Wave Theory Trading Programme', String(b.course))
-const a = received.find(r => r.email === 'approved@lms.test')!
-check('approved with no course yet: sent without one, nationality standing in for country', a.course === '' && a.country === 'Indian' && a.academy === 'Delta Bangalore', JSON.stringify(a))
+check('their Forex course — not the other programme\'s course they had first', b.course === 'Market Break-Out Trading', String(b.course))
+const a = sentTo('admingiven@lms.test')[0]!
+check('given by an admin: the course an admin gave, nationality standing in for country', a.course === 'Delta Wave Theory Trading Programme' && a.country === 'Indian' && a.academy === 'Delta Bangalore', JSON.stringify(a))
 
 step('F. What is kept')
 const bs = await sync(buyer)
-check('the student code, team and mentor', bs?.state === 'sent' && /^STU-0\d+$/.test(String(bs?.studentCode)) && !!bs?.team && bs?.mentorName === `${bs?.team} Lead` && bs?.alreadyThere === false, JSON.stringify(bs))
+check('the student code, team, mentor and course', bs?.state === 'sent' && /^STU-0\d+$/.test(String(bs?.studentCode)) && !!bs?.team &&
+  bs?.mentorName === `${bs?.team} Lead` && bs?.alreadyThere === false && bs?.course === 'Market Break-Out Trading', JSON.stringify(bs))
 const hs = await sync(handAdded)
 check('somebody Tetra Commission already had: recorded as such', hs?.state === 'sent' && hs?.alreadyThere === true && hs?.studentCode === 'STU-0042', JSON.stringify(hs))
-const before = received.length
+let before = received.length
+await enrol(buyer, dwt, 2 * MIN)                           // a second Forex course
 await drainCommissionStudentsOnce()
-check('a sent student is never sent again', received.length === before)
+check('a sent student is never sent again — a second Forex course included', received.length === before)
 await UserModel.collection.updateOne({ _id: buyer }, { $set: { 'commissionSync.state': 'pending', 'commissionSync.nextAttemptAt': at(MIN) } })
 await drainCommissionStudentsOnce()
 const again = await sync(buyer)
 check('sent again by hand: the same student, and the team it was given is kept', again?.studentCode === bs?.studentCode && again?.team === bs?.team, JSON.stringify(again))
 
-step('G. Tetra Commission not ready, refusing, or down')
+step('G. Sent before this was Forex only, with no course')
+const oldSync = (studentCode: string) => ({ state: 'sent', studentCode, team: 'Falcons', mentorName: 'Falcons Lead', alreadyThere: false, sentAt: at(50 * MIN) })
+const stillThere = await person('stillthere@lms.test', { createdAgo: 55 * MIN, status: 'approved', sync: oldSync('STU-0900') })
+known.set(String(stillThere), 'STU-0900')
+const takenOut = await person('takenout@lms.test', { createdAgo: 55 * MIN, status: 'approved', sync: oldSync('STU-0901') })
+before = received.length
+await drainCommissionStudentsOnce()
+check('with still no course: left alone', received.length === before && (await sync(takenOut))?.studentCode === 'STU-0901')
+await enrol(stillThere, mbt, 2 * MIN, { source: 'admin' })
+await enrol(takenOut, dwt, 2 * MIN, { source: 'admin' })
+const made = code
+await drainCommissionStudentsOnce()
+const st = await sync(stillThere), to = await sync(takenOut)
+check('given a Forex course, and still in Tetra Commission: sent again, the same student, nothing new made there',
+  sentTo('stillthere@lms.test').length === 1 && st?.state === 'sent' && st?.studentCode === 'STU-0900' && st?.course === 'Market Break-Out Trading', JSON.stringify(st))
+check('given a Forex course after being taken out: made there again, and given a team',
+  sentTo('takenout@lms.test').length === 1 && to?.state === 'sent' && to?.studentCode !== 'STU-0901' && code === made + 1 &&
+  !!to?.team && to?.course === 'Delta Wave Theory Trading Programme', JSON.stringify(to))
+before = received.length
+await drainCommissionStudentsOnce()
+check('...and neither is sent a third time', received.length === before)
+
+step('H. Tetra Commission not ready, refusing, or down')
 const late = await person('late@lms.test', { createdAgo: 20 * MIN, status: 'approved' })
+await enrol(late, dwt, 20 * MIN)
 mode = 'notDeployed'
 await drainCommissionStudentsOnce()
 let l = await sync(late)
@@ -188,9 +242,10 @@ check('not configured there: still waiting, however many tries', l?.state === 'p
 mode = 'ok'
 await UserModel.collection.updateOne({ _id: late }, { $set: { 'commissionSync.nextAttemptAt': at(MIN) } })
 await drainCommissionStudentsOnce()
-check('...and sent once it is', (await sync(late))?.state === 'sent')
+check('...and sent once it is', (await sync(late))?.state === 'sent' && (await sync(late))?.course === 'Delta Wave Theory Trading Programme')
 
 const refused = await person('refused@lms.test', { createdAgo: 20 * MIN, status: 'approved' })
+await enrol(refused, mbt, 20 * MIN)
 process.env.COMMISSION_S2S_SECRET = 'not-the-secret'
 await drainCommissionStudentsOnce()
 const r = await sync(refused)
@@ -198,6 +253,7 @@ check('a wrong secret: stopped, with the reason', r?.state === 'failed' && /Bad 
 process.env.COMMISSION_S2S_SECRET = SECRET
 
 const outage = await person('outage@lms.test', { createdAgo: 20 * MIN, status: 'approved' })
+await enrol(outage, mbt, 20 * MIN)
 process.env.COMMISSION_API_URL = 'http://127.0.0.1:1'
 await drainCommissionStudentsOnce()
 let o = await sync(outage)
