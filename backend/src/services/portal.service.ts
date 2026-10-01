@@ -711,7 +711,7 @@ export async function createMentorMeetingForPortal(input: {
     email: wanted,
     role: 'instructor',
     $or: [{ organizationId: org._id }, { sharedAcrossOrgs: true }],
-  }).select('name email').lean()
+  }).select('name email meetEmail').lean()
   if (!mentor) throw httpError('No mentor here with that address', 404)
 
   const windowStart = new Date(start.getTime() - 12 * 3600e3)
@@ -758,6 +758,7 @@ export async function createMentorMeetingForPortal(input: {
         startISO: start.toISOString(),
         durationMins,
         instructorEmail: mentor.email,
+        instructorMeetEmail: mentor.meetEmail || mentor.email,
       })
       meetingUrl = made.meetingUrl
     } catch {

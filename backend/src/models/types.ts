@@ -62,6 +62,7 @@ const SAFE_USER_FIELDS = [
   'enrollmentStatus', 'enrollmentCancellationReason',
   'rejectionReason', 'approvedAt', 'rejectedAt',
   'fullRegistrationSubmittedAt', 'enrollmentApplication',
+  'meetEmail',
   'lastLoginAt', 'createdAt', 'updatedAt',
 ] as const
 

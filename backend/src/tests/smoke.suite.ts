@@ -302,10 +302,15 @@ try {
     const saved = {
       id: process.env.GOOGLE_CLIENT_ID, secret: process.env.GOOGLE_CLIENT_SECRET,
       refresh: process.env.GOOGLE_REFRESH_TOKEN,
+      host: process.env.GOOGLE_MEET_HOST_EMAIL, calendar: process.env.GOOGLE_CALENDAR_ID,
     }
     delete process.env.GOOGLE_CLIENT_ID
     delete process.env.GOOGLE_CLIENT_SECRET
     delete process.env.GOOGLE_REFRESH_TOKEN
+    /* The co-hosted path authenticates with the service-account key file, not
+       these — without a host mailbox it is skipped and the OAuth path fails. */
+    delete process.env.GOOGLE_MEET_HOST_EMAIL
+    delete process.env.GOOGLE_CALENDAR_ID
 
     const r = await call('POST', '/admin/live-classes', { jar: adminJar, body: {
       courseId, title: 'Online Session', scheduledStart: new Date(Date.now() + 172_800_000).toISOString(),
@@ -319,6 +324,8 @@ try {
     if (saved.id)      process.env.GOOGLE_CLIENT_ID     = saved.id
     if (saved.secret)  process.env.GOOGLE_CLIENT_SECRET = saved.secret
     if (saved.refresh) process.env.GOOGLE_REFRESH_TOKEN = saved.refresh
+    if (saved.host)     process.env.GOOGLE_MEET_HOST_EMAIL = saved.host
+    if (saved.calendar) process.env.GOOGLE_CALENDAR_ID     = saved.calendar
   }
 
   section('ADMIN — enrolment requests, orders, bookings, reviews, support')

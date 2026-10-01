@@ -294,6 +294,9 @@ const userUpdateSchema = z.object({
   isVerified: z.boolean().optional(),
   name:       z.string().min(2).max(100).trim().optional(),
   email:      z.string().trim().email().optional(),
+  /* The Google account they join Meet with, when not their login email —
+     see IUser.meetEmail. '' clears it. */
+  meetEmail:  z.string().trim().email().or(z.literal('')).optional(),
   category:   z.enum(['4x-trading', 'digital-marketing', 'ai', 'jura']).nullable().optional(),
   categories: z.array(z.enum(['4x-trading', 'digital-marketing', 'ai', 'jura'])).optional(),
   /* A SUB-ADMIN'S PROGRAMME. userCreateSchema has always carried this; this
@@ -323,6 +326,8 @@ const userCreateSchema = z.object({
      stores it lowercased and trimmed anyway, so accepting it here only makes
      the form agree with the database. */
   email:      z.string().trim().email(),
+  /* Google account for Meet, when not the login email — see userUpdateSchema. */
+  meetEmail:  z.string().trim().email().or(z.literal('')).optional(),
   password:   z.string().min(8, 'Password must be at least 8 characters'),
   role:       z.enum(['student', 'instructor', 'admin', 'sub_admin', 'support', 'super_admin']).default('instructor'),
   bio:        z.string().max(2000).optional(),

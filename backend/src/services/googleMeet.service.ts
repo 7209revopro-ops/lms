@@ -52,9 +52,70 @@ function makeServiceAccountAuth(impersonateEmail: string) {
          this service account in the Workspace admin console under domain-wide
          delegation, or the JWT comes back without it and the patch 403s. */
       'https://www.googleapis.com/auth/meetings.space.settings',
+      /* Creating a space through the Meet API and managing its members
+         (co-hosts). Same rule: it must be in the DWD entry too, and since
+         Google refuses the WHOLE token when any requested scope is missing,
+         a key whose DWD entry lacks it fails every call made with it. */
+      'https://www.googleapis.com/auth/meetings.space.created',
     ],
     subject: impersonateEmail,
   })
+}
+
+type ServiceAccountAuth = ReturnType<typeof makeServiceAccountAuth>
+
+const MEET_API = 'https://meet.googleapis.com/v2'
+
+/** The Workspace mailbox that owns meetings for instructors outside the
+    Workspace domain. Explicit setting first; else the fallback calendar when
+    that is a mailbox address (it is in every deployed .env). */
+function meetHostMailbox(): string | undefined {
+  const explicit = process.env['GOOGLE_MEET_HOST_EMAIL']?.trim()
+  if (explicit) return explicit.toLowerCase()
+  const cal = process.env['GOOGLE_CALENDAR_ID']?.trim()
+  return cal && cal.includes('@') ? cal.toLowerCase() : undefined
+}
+
+/** The address a person joins Meet with: their stored Google account when
+    they have one, else their login email. */
+export function effectiveMeetEmail(user: { email?: string | null; meetEmail?: string | null } | null | undefined): string | undefined {
+  const raw = (user?.meetEmail || user?.email || '').trim().toLowerCase()
+  return raw || undefined
+}
+
+function describeGoogleError(err: any): string {
+  const status = err?.response?.status ?? err?.status ?? '?'
+  const msg    = err?.response?.data?.error?.message ?? err?.response?.data?.error ?? err?.message ?? 'unknown'
+  return `${status} ${typeof msg === 'string' ? msg : JSON.stringify(msg)}`
+}
+
+/* ── Co-hosts ───────────────────────────────────────────────────────────
+   Members are added through the REST endpoint directly: the installed
+   googleapis client predates spaces.members. Both helpers are best-effort —
+   a meeting without a co-host is a degraded class, not a broken one. */
+async function addMeetCohost(auth: ServiceAccountAuth, spaceName: string, email: string): Promise<boolean> {
+  try {
+    await auth.request({ url: `${MEET_API}/${spaceName}/members`, method: 'POST', data: { email, role: 'COHOST' } })
+    return true
+  } catch (err) {
+    console.warn(`[googleMeet] could not make ${email} co-host of ${spaceName}: ${describeGoogleError(err)}`)
+    return false
+  }
+}
+
+async function removeMeetCohost(auth: ServiceAccountAuth, spaceName: string, email: string): Promise<void> {
+  try {
+    const res = await auth.request<{ members?: Array<{ name: string; email?: string }> }>({
+      url: `${MEET_API}/${spaceName}/members`, method: 'GET',
+    })
+    for (const m of res.data.members ?? []) {
+      if (m.email?.toLowerCase() === email.toLowerCase()) {
+        await auth.request({ url: `${MEET_API}/${m.name}`, method: 'DELETE' })
+      }
+    }
+  } catch (err) {
+    console.warn(`[googleMeet] could not remove co-host ${email} from ${spaceName}: ${describeGoogleError(err)}`)
+  }
 }
 
 /* ── Who may walk into the room ──────────────────────────────────────────
@@ -140,28 +201,216 @@ export async function setMeetAccessType(
   }
 }
 
+export interface MeetSpaceRecord {
+  name:             string
+  host:             string
+  cohost?:          string
+  calendarEventId?: string
+}
+
+export interface CreatedMeet {
+  meetingUrl:   string
+  meetingCode:  string
+  accessType:   MeetAccessType | null
+  /* The address invited as a calendar guest, or undefined when nobody was —
+     the instructor is the organizer (DWD), or has no address on file. */
+  invitedEmail?: string
+  /* Present only for a Meet-API-created meeting; persisted on the class so
+     later edits can keep the co-host and the calendar event in step. */
+  meetSpace?:    MeetSpaceRecord
+}
+
 /**
- * Creates a Google Calendar event and returns the attached Google Meet link + meeting code.
+ * A meeting the instructor co-hosts, for instructors OUTSIDE the Workspace.
+ *
+ * Their mailboxes (Zoho-hosted @deltainstitutions.com, or @gmail.com) are not
+ * users of any Google Workspace, so no service account can act as them and
+ * they cannot be the organizer. The Workspace host mailbox owns the meeting
+ * and the instructor is made COHOST — exactly what staff did by hand in Meet
+ * settings before this existed.
+ *
+ * Created through the Meet API, NOT by Calendar: spaces.members only accepts
+ * spaces the app itself created (scope meetings.space.created). Measured — on
+ * a Calendar-created space members.create answers 403. moderation ON is what
+ * turns host management on; chat, reactions and presenting stay unrestricted
+ * by default, so students lose nothing.
+ *
+ * The same meeting is then attached to an event on the host's calendar that
+ * invites the instructor, so the class lands on their Google Calendar with the
+ * normal Join button. Both that and the co-host step are best-effort: only a
+ * failure to create the space itself throws.
+ */
+async function createCoHostedMeeting(o: {
+  title: string; start: Date; end: Date; host: string; cohostEmail?: string
+}): Promise<CreatedMeet> {
+  const auth       = makeServiceAccountAuth(o.host)
+  const wantAccess = desiredMeetAccess()
+
+  const space = (await auth.request<{
+    name: string; meetingUri: string; meetingCode: string; config?: { accessType?: string }
+  }>({
+    url: `${MEET_API}/spaces`, method: 'POST',
+    data: { config: { moderation: 'ON', ...(wantAccess ? { accessType: wantAccess } : {}) } },
+  })).data
+
+  /* The host already owns the room — making it its own co-host is meaningless. */
+  const invitee = o.cohostEmail && o.cohostEmail !== o.host ? o.cohostEmail : undefined
+  const cohost  = invitee && await addMeetCohost(auth, space.name, invitee) ? invitee : undefined
+
+  let calendarEventId: string | undefined
+  try {
+    const calendar = google.calendar({ version: 'v3', auth })
+    const ev = await calendar.events.insert({
+      calendarId: o.host,
+      conferenceDataVersion: 1,
+      sendUpdates: invitee ? 'all' : 'none',
+      requestBody: {
+        summary: o.title,
+        start:   { dateTime: o.start.toISOString() },
+        end:     { dateTime: o.end.toISOString() },
+        ...(invitee ? { attendees: [{ email: invitee }] } : {}),
+        conferenceData: {
+          conferenceId:       space.meetingCode,
+          conferenceSolution: { key: { type: 'hangoutsMeet' } },
+          entryPoints:        [{ entryPointType: 'video', uri: space.meetingUri }],
+        },
+      },
+    })
+    calendarEventId = ev.data.id ?? undefined
+  } catch (err) {
+    console.warn(`[googleMeet] meeting ${space.meetingCode} created, but its calendar event was not: ${describeGoogleError(err)}`)
+  }
+
+  console.info(`[googleMeet] co-hosted meeting ${space.meetingCode} owned by ${o.host}` +
+    (cohost ? `, co-host ${cohost}` : invitee ? `, co-host ${invitee} NOT applied` : ', no co-host on file'))
+
+  const applied = space.config?.accessType
+  return {
+    meetingUrl:  space.meetingUri,
+    meetingCode: space.meetingCode,
+    accessType:  applied && (MEET_ACCESS_TYPES as readonly string[]).includes(applied) ? applied as MeetAccessType : null,
+    ...(invitee && calendarEventId ? { invitedEmail: invitee } : {}),
+    meetSpace: {
+      name: space.name,
+      host: o.host,
+      ...(cohost          ? { cohost }          : {}),
+      ...(calendarEventId ? { calendarEventId } : {}),
+    },
+  }
+}
+
+/**
+ * Keep an existing co-hosted meeting in step with its class. Every part is
+ * best-effort and logged; returns the co-host and event id that now hold, for
+ * the caller to persist.
+ *
+ *   cohost      undefined = leave as is; null/'' = remove; address = make it so
+ *   schedule    the class's CURRENT title/start/duration, when any changed
+ *   cancelled   removes the calendar event (Google tells the instructor)
+ */
+export async function syncMeetSpace(space: MeetSpaceRecord, change: {
+  cohost?:    string | null
+  schedule?:  { title: string; startISO: string; durationMins: number }
+  cancelled?: boolean
+}): Promise<{ cohost?: string; calendarEventId?: string }> {
+  let auth: ServiceAccountAuth
+  try {
+    auth = makeServiceAccountAuth(space.host)
+  } catch (err) {
+    console.warn(`[googleMeet] cannot sync ${space.name}: ${describeGoogleError(err)}`)
+    return { cohost: space.cohost, calendarEventId: space.calendarEventId }
+  }
+
+  let cohost  = space.cohost
+  let invitee: string | null | undefined           // undefined = attendee list untouched
+  if (change.cohost !== undefined) {
+    const next = change.cohost?.trim().toLowerCase() || null
+    if (next !== (cohost ?? null)) {
+      if (cohost) await removeMeetCohost(auth, space.name, cohost)
+      const usable = next && next !== space.host ? next : null
+      cohost  = usable && await addMeetCohost(auth, space.name, usable) ? usable : undefined
+      invitee = usable
+    }
+  }
+
+  let calendarEventId = space.calendarEventId
+  if (calendarEventId) {
+    const calendar = google.calendar({ version: 'v3', auth })
+    try {
+      if (change.cancelled) {
+        await calendar.events.delete({ calendarId: space.host, eventId: calendarEventId, sendUpdates: 'all' })
+        calendarEventId = undefined
+      } else {
+        const body: calendar_v3.Schema$Event = {}
+        if (change.schedule) {
+          const start = new Date(change.schedule.startISO)
+          body.summary = change.schedule.title
+          body.start   = { dateTime: start.toISOString() }
+          body.end     = { dateTime: new Date(start.getTime() + change.schedule.durationMins * 60_000).toISOString() }
+        }
+        if (invitee !== undefined) body.attendees = invitee ? [{ email: invitee }] : []
+        if (Object.keys(body).length > 0) {
+          await calendar.events.patch({ calendarId: space.host, eventId: calendarEventId, sendUpdates: 'all', requestBody: body })
+        }
+      }
+    } catch (err) {
+      console.warn(`[googleMeet] could not update calendar event ${calendarEventId}: ${describeGoogleError(err)}`)
+    }
+  }
+
+  return {
+    ...(cohost          ? { cohost }          : {}),
+    ...(calendarEventId ? { calendarEventId } : {}),
+  }
+}
+
+/**
+ * Creates the Google Meet link for a class and returns it with its meeting code.
  *
  * Required env vars:
  *   GOOGLE_CLIENT_ID        — OAuth2 Client ID from Google Cloud Console
  *   GOOGLE_CLIENT_SECRET    — OAuth2 Client Secret
- *   GOOGLE_REFRESH_TOKEN    — long-lived refresh token for support@deltagroups.ae (fallback)
+ *   GOOGLE_REFRESH_TOKEN    — long-lived refresh token for the fallback mailbox
  *   GOOGLE_CALENDAR_ID      — fallback calendar (default: "primary")
  *   GOOGLE_WORKSPACE_DOMAIN — domain for internal instructor check (default: "deltagroups.ae")
+ *   GOOGLE_MEET_HOST_EMAIL  — Workspace mailbox that owns co-hosted meetings
+ *                             (default: GOOGLE_CALENDAR_ID when it is an address)
  *
- * When instructorEmail is a @deltagroups.ae address, the event is created on the instructor's
- * own calendar via DWD (service account impersonation), making them the automatic Meet host.
- * External instructors fall back to the support@ calendar as the host.
+ * Three paths, chosen per instructor:
+ *   · Workspace instructor (GOOGLE_WORKSPACE_DOMAIN) — the event is created on their own
+ *     calendar via DWD, so they are the organizer and the Meet host.
+ *   · Anyone else — the host mailbox owns a Meet-API meeting and the instructor is made
+ *     co-host at `instructorMeetEmail` (see createCoHostedMeeting).
+ *   · If that fails (or no host mailbox is configured) — the original fallback: an event on
+ *     the fallback calendar via OAuth, with the instructor invited as a guest but no co-host.
  */
 export async function createGoogleMeetLink(opts: {
-  title:            string
-  startISO:         string
-  durationMins:     number
-  instructorEmail?: string
-}): Promise<{ meetingUrl: string; meetingCode: string; accessType: MeetAccessType | null }> {
+  title:                string
+  startISO:             string
+  durationMins:         number
+  instructorEmail?:     string
+  instructorMeetEmail?: string
+}): Promise<CreatedMeet> {
   const WORKSPACE_DOMAIN     = process.env.GOOGLE_WORKSPACE_DOMAIN ?? 'deltagroups.ae'
   const instructorIsInternal = opts.instructorEmail?.endsWith(`@${WORKSPACE_DOMAIN}`) ?? false
+
+  if (!instructorIsInternal) {
+    const host = meetHostMailbox()
+    if (host) {
+      const start = new Date(opts.startISO)
+      try {
+        return await createCoHostedMeeting({
+          title:       opts.title,
+          start,
+          end:         new Date(start.getTime() + opts.durationMins * 60_000),
+          host,
+          ...(opts.instructorMeetEmail ? { cohostEmail: opts.instructorMeetEmail.trim().toLowerCase() } : {}),
+        })
+      } catch (err) {
+        console.warn(`[googleMeet] co-hosted meeting failed, falling back to a calendar meeting without co-host: ${describeGoogleError(err)}`)
+      }
+    }
+  }
 
   const auth       = instructorIsInternal ? makeServiceAccountAuth(opts.instructorEmail!) : makeOAuth2Client()
   const calendarId = instructorIsInternal
@@ -172,6 +421,12 @@ export async function createGoogleMeetLink(opts: {
     console.info(`[googleMeet] Creating event on instructor calendar via DWD: ${opts.instructorEmail}`)
   }
 
+  /* Only on the fallback calendar: on the DWD path the instructor already owns
+     the event, and inviting the organizer to their own meeting is noise. */
+  const invitedEmail = !instructorIsInternal && opts.instructorMeetEmail
+    ? opts.instructorMeetEmail.trim().toLowerCase()
+    : undefined
+
   const calendar = google.calendar({ version: 'v3', auth })
   const start    = new Date(opts.startISO)
   const end      = new Date(start.getTime() + opts.durationMins * 60_000)
@@ -181,10 +436,15 @@ export async function createGoogleMeetLink(opts: {
     const res = await calendar.events.insert({
       calendarId,
       conferenceDataVersion: 1,
+      /* Google emails the invite, which is what puts the class on the
+         instructor's own Google Calendar. Students are never guests — they
+         get the link from the LMS — so this only ever reaches the instructor. */
+      ...(invitedEmail ? { sendUpdates: 'all' } : {}),
       requestBody: {
         summary: opts.title,
         start:   { dateTime: start.toISOString() },
         end:     { dateTime: end.toISOString() },
+        ...(invitedEmail ? { attendees: [{ email: invitedEmail }] } : {}),
         conferenceData: {
           createRequest: {
             requestId:             `lms-meet-${Date.now()}-${Math.random().toString(36).slice(2)}`,
@@ -229,7 +489,7 @@ export async function createGoogleMeetLink(opts: {
      its settings — the support@ token cannot patch a space it does not host. */
   const accessType = await setMeetAccessType(meetingCode, auth)
 
-  return { meetingUrl: meetLink, meetingCode, accessType }
+  return { meetingUrl: meetLink, meetingCode, accessType, ...(invitedEmail ? { invitedEmail } : {}) }
 }
 
 /**

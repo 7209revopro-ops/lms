@@ -13,6 +13,7 @@ import { api } from '@/lib/axios'
 import { useToast } from '@/store/ui.store'
 import { Button, MotionButton } from '@/components/ui/button'
 import { AvatarImg } from '@/components/ui/AvatarImg'
+import { meetEmailHint } from '@/components/users/MeetEmailField'
 
 /* ── Category options ───────────────────────────────── */
 const CATS = [
@@ -47,6 +48,7 @@ export function EditInstructorModal({ user, onClose, onSuccess }: Props) {
      who already existed meant deleting and recreating the account, losing
      their classes with it, and un-lending was impossible by any route. */
   const [shared,        setShared]        = useState(user.sharedAcrossOrgs === true)
+  const [meetEmail,     setMeetEmail]     = useState(user.meetEmail ?? '')
   const [error,         setError]         = useState<string | null>(null)
   const [categoryError, setCategoryError] = useState<string | null>(null)
 
@@ -102,6 +104,7 @@ export function EditInstructorModal({ user, onClose, onSuccess }: Props) {
     if (headline.trim()    !== (user.headline ?? '')) dto.headline = headline.trim() || undefined
     if (bio.trim()         !== (user.bio ?? ''))      dto.bio      = bio.trim() || undefined
     if (newAvatarUrl)                                 dto.avatarUrl = newAvatarUrl
+    if (meetEmail.trim()   !== (user.meetEmail ?? '')) dto.meetEmail = meetEmail.trim().toLowerCase()
     /* Sent only when it actually changed. The server compares values rather
        than keys for exactly this reason, but an unchanged field on the wire is
        still a field somebody has to reason about when a save is refused. */
@@ -225,6 +228,24 @@ export function EditInstructorModal({ user, onClose, onSuccess }: Props) {
                     type="email" required placeholder="email@example.com"
                     className={base} style={iStyle} onFocus={iFocus} onBlur={iBlur} />
                 </div>
+              </div>
+
+              {/* Gmail for Google Meet */}
+              <div>
+                <label className="mb-1.5 block text-[10px] font-semibold uppercase tracking-widest"
+                  style={{ color: 'rgba(255,255,255,0.32)' }}>
+                  Gmail for Google Meet <span className="normal-case tracking-normal" style={{ color: 'rgba(255,255,255,0.22)' }}>(optional)</span>
+                </label>
+                <div className="relative">
+                  <Mail size={13} className="absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none"
+                    style={{ color: 'rgba(255,255,255,0.25)' }} />
+                  <input value={meetEmail} onChange={e => setMeetEmail(e.target.value)}
+                    type="email" placeholder="name@gmail.com"
+                    className={base} style={iStyle} onFocus={iFocus} onBlur={iBlur} />
+                </div>
+                <p className="mt-1 text-[11px]" style={{ color: meetEmailHint(meetEmail, email).color }}>
+                  {meetEmailHint(meetEmail, email).text}
+                </p>
               </div>
 
               {/* Role toggle */}

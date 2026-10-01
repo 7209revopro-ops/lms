@@ -16,11 +16,14 @@ import { useCurrentUser } from '@/lib/api/user'
 import { useOrgStore } from '@/store/org.store'
 import Spinner from '@/components/ui/Spinner'
 import { api } from '@/lib/axios'
+import { meetEmailHint } from '@/components/users/MeetEmailField'
 
 /* ── Validation schema ──────────────────────────────── */
 const schema = z.object({
   name:     z.string().min(2, 'Name must be at least 2 characters').max(100),
   email:    z.string().email('Enter a valid email address'),
+  /* The Google account they join Meet with, when the login email is not one. */
+  meetEmail: z.string().trim().email('Enter a valid email address').or(z.literal('')).optional(),
   password: z.string().min(8, 'Password must be at least 8 characters'),
   headline: z.string().max(255).optional(),
   bio:      z.string().max(2000).optional(),
@@ -98,8 +101,10 @@ export function AddInstructorModal({ open, onClose }: AddInstructorModalProps) {
     defaultValues: { role: 'instructor' },
   })
 
-  const roleVal     = watch('role')
-  const categoryVal = watch('category') ?? ''
+  const roleVal      = watch('role')
+  const categoryVal  = watch('category') ?? ''
+  const emailVal     = watch('email') ?? ''
+  const meetEmailVal = watch('meetEmail') ?? ''
 
   const serverError = (() => {
     if (!apiError) return null
@@ -133,6 +138,7 @@ export function AddInstructorModal({ open, onClose }: AddInstructorModalProps) {
       bio:      values.bio      || undefined,
       category: values.category,
       avatarUrl,
+      ...(values.meetEmail ? { meetEmail: values.meetEmail.toLowerCase() } : {}),
       ...(values.sharedAcrossOrgs ? { sharedAcrossOrgs: true } : {}),
       ...(isSuper && orgId ? { organizationId: orgId } : {}),
     })
@@ -389,6 +395,19 @@ export function AddInstructorModal({ open, onClose }: AddInstructorModalProps) {
                     <input {...register('email')} type="email" placeholder="jane@example.com"
                       className={`${inpBase} pl-9`} style={inpStyle} />
                   </div>
+                </DField>
+
+                {/* Gmail for Google Meet */}
+                <DField label="Gmail for Google Meet (optional)" error={errors.meetEmail?.message}>
+                  <div className="relative">
+                    <Mail size={13} className="absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none"
+                      style={{ color: 'rgba(255,255,255,0.22)' }} />
+                    <input {...register('meetEmail')} type="email" placeholder="name@gmail.com"
+                      className={`${inpBase} pl-9`} style={inpStyle} />
+                  </div>
+                  <p className="mt-1 text-[11px]" style={{ color: meetEmailHint(meetEmailVal, emailVal).color }}>
+                    {meetEmailHint(meetEmailVal, emailVal).text}
+                  </p>
                 </DField>
 
                 {/* Password */}

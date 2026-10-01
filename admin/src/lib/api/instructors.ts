@@ -10,6 +10,8 @@ export interface CourseEnrollmentDto {
 export interface CreateInstructorDto {
   name:        string
   email:       string
+  /* The Google account they join Meet with, when not `email`. */
+  meetEmail?:  string
   password:    string
   role:        'student' | 'instructor' | 'admin'
   bio?:        string

@@ -1,6 +1,7 @@
 import { Types } from 'mongoose'
 import { UserRepository, RefreshTokenRepository } from '@/repositories/user.repository.ts'
 import { hashPassword } from '@/utils/hash.ts'
+import { logger } from '@/utils/logger.ts'
 import type { UserRole } from '@/types/index.ts'
 import type { IUser } from '@/models/schema.ts'
 
@@ -48,7 +49,7 @@ export class UserService {
   async adminUpdate(
     id: string,
     dto: {
-      sharedAcrossOrgs?: boolean; role?: UserRole; isActive?: boolean; isVerified?: boolean; name?: string; email?: string; category?: '4x-trading' | 'digital-marketing' | 'ai' | 'jura' | null; categories?: ('4x-trading' | 'digital-marketing' | 'ai' | 'jura')[]; avatarUrl?: string; headline?: string; bio?: string; program?: import('@/types/index.ts').ProgramType },
+      sharedAcrossOrgs?: boolean; meetEmail?: string; role?: UserRole; isActive?: boolean; isVerified?: boolean; name?: string; email?: string; category?: '4x-trading' | 'digital-marketing' | 'ai' | 'jura' | null; categories?: ('4x-trading' | 'digital-marketing' | 'ai' | 'jura')[]; avatarUrl?: string; headline?: string; bio?: string; program?: import('@/types/index.ts').ProgramType },
   ): Promise<IUser> {
     if (!Types.ObjectId.isValid(id)) {
       throw new UserError('INVALID_ID', 'Invalid user id', 400)
@@ -123,6 +124,10 @@ export class UserService {
       }
       update.email = dto.email.toLowerCase().trim()
     }
+    /* '' clears it back to "use the login email" — see IUser.meetEmail. */
+    if (dto.meetEmail !== undefined) {
+      update.meetEmail = dto.meetEmail ? dto.meetEmail.toLowerCase().trim() : null
+    }
 
     if (Object.keys(update).length === 0) {
       throw new UserError('NO_CHANGES', 'No fields to update', 400)
@@ -134,6 +139,17 @@ export class UserService {
     /* On deactivation, force the user to log out everywhere. */
     if (dto.isActive === false) {
       await this.refreshRepo.revokeAllForUser(id, 'security')
+    }
+
+    /* The address Meet knows this instructor by may have moved — typically
+       their Gmail arriving after classes were already scheduled. Re-point the
+       co-host on their upcoming classes; classes already right are skipped, so
+       a form re-saved unchanged costs one query. Never fails the save. */
+    if (updated.role === 'instructor' && (dto.meetEmail !== undefined || dto.email !== undefined)) {
+      void import('@/services/liveClass.service.ts')
+        .then(({ LiveClassService }) => new LiveClassService().resyncMeetCohostsFor(id))
+        .then(n => { if (n) logger.info({ instructorId: id, classes: n }, 'meet co-host re-pointed after address change') })
+        .catch(err => logger.warn({ err, instructorId: id }, 'meet co-host resync failed'))
     }
     return updated
   }
@@ -147,6 +163,8 @@ export class UserService {
   async adminCreateUser(dto: {
     name:            string
     email:           string
+    /* Google account for Meet, when not `email` — see IUser.meetEmail. */
+    meetEmail?:      string
     password:        string
     role:            UserRole
     bio?:            string
@@ -198,6 +216,7 @@ export class UserService {
       ;(patch as any).approvedBy       = new Types.ObjectId(dto.approvedBy)
       ;(patch as any).approvedAt       = new Date()
     }
+    if (dto.meetEmail) patch.meetEmail = dto.meetEmail.toLowerCase().trim()
     if (Object.keys(patch).length > 0) {
       await this.repo.updateById(user.id, patch)
       Object.assign(user, patch)

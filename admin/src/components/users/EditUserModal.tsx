@@ -9,6 +9,7 @@ import { useToast } from '@/store/ui.store'
 import { api } from '@/lib/axios'
 import type { CurrentAdmin } from '@/lib/api/user'
 import { AvatarImg } from '@/components/ui/AvatarImg'
+import { MeetEmailField } from '@/components/users/MeetEmailField'
 
 /* ── Custom dark select ──────────────────────────── */
 function SelectField<T extends string>({
@@ -195,6 +196,7 @@ export function EditUserModal({ user, me, onClose, onSuccess }: Props) {
   })
   const [isActive,      setIsActive]      = useState(user.isActive)
   const [isVerified,    setIsVerified]    = useState(user.isVerified)
+  const [meetEmail,     setMeetEmail]     = useState(user.meetEmail ?? '')
   const [avatarPreview, setAvatarPreview] = useState<string | null>(user.avatarUrl ?? null)
   const [avatarFile,    setAvatarFile]    = useState<File | null>(null)
   const [uploading,     setUploading]     = useState(false)
@@ -249,6 +251,7 @@ export function EditUserModal({ user, me, onClose, onSuccess }: Props) {
       } else if (!needsProgram(activeRole)) {
         dto.category = null
       }
+      if (meetEmail.trim() !== (user.meetEmail ?? '')) dto.meetEmail = meetEmail.trim()
 
       await updateUser.mutateAsync(dto)
       toast.success('User updated')
@@ -411,6 +414,17 @@ export function EditUserModal({ user, me, onClose, onSuccess }: Props) {
                   options={PROGRAM_OPTIONS}
                   onChange={v => { setProgram(v); setErrors(prev => ({ ...prev, program: '' })) }}
                   error={errors.program}
+                />
+              )}
+
+              {/* Google account for Meet — instructors only */}
+              {activeRole === 'instructor' && (
+                <MeetEmailField
+                  value={meetEmail}
+                  onChange={setMeetEmail}
+                  loginEmail={email}
+                  inputStyle={inputStyle}
+                  focusStyle={focusStyle}
                 />
               )}
 

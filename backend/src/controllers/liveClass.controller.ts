@@ -9,7 +9,7 @@ import { logger } from '@/utils/logger.ts'
 import { LiveClassService, LiveClassError } from '@/services/liveClass.service.ts'
 import { SectionService } from '@/services/section.service.ts'
 import { verifyWebhookSignature } from '@/services/mux.service.ts'
-import { createGoogleMeetLink } from '@/services/googleMeet.service.ts'
+import { createGoogleMeetLink, effectiveMeetEmail, syncMeetSpace, type MeetSpaceRecord } from '@/services/googleMeet.service.ts'
 import { sendSuccess } from '@/utils/response.ts'
 import { sendInstructorClassScheduled } from '@/services/email.service.ts'
 import { wantsStaffEmail } from '@/utils/emailPrefs.ts'
@@ -1155,11 +1155,15 @@ export class LiveClassController {
     /* Auto-generate a Google Meet link for online external sessions */
     let meetingUrl: string | undefined
     let googleMeetCode: string | undefined
+    let meetSpace: MeetSpaceRecord | undefined
     if (sessionType === 'external' && isOnline) {
       /* Look up instructor email so workspace users become the Meet host */
       const { UserModel } = await import('@/models/schema.ts')
-      const instructor = await UserModel.findById(instructorId).select('email').lean()
+      const instructor = await UserModel.findById(instructorId).select('email meetEmail').lean()
       const instructorEmail = (instructor as any)?.email as string | undefined
+      /* The Google account they sign in to Meet with, made co-host — falls
+         back to the login email, which is right for Gmail instructors. */
+      const instructorMeetEmail = effectiveMeetEmail(instructor as any)
 
       /* Google is a third party in the critical path of scheduling a class,
          and this call had no error handling: a rate limit, an expired token or
@@ -1182,9 +1186,15 @@ export class LiveClassController {
           startISO:         String(dto.scheduledStart),
           durationMins:     dto.durationMins,
           instructorEmail,
+          instructorMeetEmail,
         })
         meetingUrl     = meet.meetingUrl
         googleMeetCode = meet.meetingCode || undefined
+        meetSpace      = meet.meetSpace
+        if (meet.invitedEmail) {
+          logger.info({ title: dto.title, invitedEmail: meet.invitedEmail },
+            'Google Meet: instructor invited to the class event')
+        }
       } catch (err) {
         logger.error({ err, title: dto.title, instructorEmail },
           'Google Meet link generation failed — live class not created')
@@ -1230,6 +1240,7 @@ export class LiveClassController {
       provider:        dto.provider,
       meetingUrl,
       googleMeetCode,
+      ...(meetSpace ? { meetSpace } : {}),
       sectionId:       dto.sectionId,
       sessionCapacity: dto.sessionCapacity,
       language:        dto.language,
@@ -1248,6 +1259,12 @@ export class LiveClassController {
          byte-for-byte path it took before this feature existed. */
       ...(wantsCohorts ? { guestCohorts: dto.guestCohorts } : {}),
       ...(wantsCohorts && dto.overflowSeats != null ? { overflowSeats: dto.overflowSeats } : {}),
+    }).catch((err: unknown) => {
+      /* The meeting was made — and the instructor already invited — before the
+         class was validated. Withdraw the invite rather than leave them a
+         calendar entry for a class that does not exist. */
+      if (meetSpace?.calendarEventId) void syncMeetSpace(meetSpace, { cancelled: true })
+      throw err
     })
 
     /* Notify assigned instructor — fire-and-forget, only for Google Meet sessions */

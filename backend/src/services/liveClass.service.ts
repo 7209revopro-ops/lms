@@ -8,7 +8,7 @@ import { EnrollmentRepository } from '@/repositories/enrollment.repository.ts'
    is kept for any caller that genuinely needs a standalone announcement. */
 import { queueDigestItem } from '@/jobs/digest.job.ts'
 import * as muxSvc from '@/services/mux.service.ts'
-import { fetchMeetRecordingUrl } from '@/services/googleMeet.service.ts'
+import { fetchMeetRecordingUrl, syncMeetSpace, effectiveMeetEmail, type MeetSpaceRecord } from '@/services/googleMeet.service.ts'
 import { logger } from '@/utils/logger.ts'
 import { env } from '@/config/env.ts'
 import { EnrollmentModel, LiveClassModel, UserModel, type ILiveClass, type LiveClassType, type LiveClassProvider } from '@/models/schema.ts'
@@ -312,6 +312,7 @@ export class LiveClassService {
     provider?:        LiveClassProvider
     meetingUrl?:      string
     googleMeetCode?:  string
+    meetSpace?:       NonNullable<ILiveClass['meetSpace']>
     sectionId?:       string
     sessionCapacity?: number
     language?:        string
@@ -486,6 +487,7 @@ export class LiveClassService {
     if (input.type === 'external' && input.meetingUrl) {
       doc.meetingUrl = input.meetingUrl.trim()
       if (input.googleMeetCode) doc.googleMeetCode = input.googleMeetCode
+      if (input.meetSpace)      doc.meetSpace      = input.meetSpace
     }
 
     if (muxData) {
@@ -909,7 +911,8 @@ export class LiveClassService {
          looked like a change, which is the whole freeze. */
       .select('type status googleMeetCode recordingUrl scheduledStart organizationId '
             + 'courseId sectionId isOnline provider sessionCapacity bookedCount '
-            + 'instructorId hostSeatsLeft overflowSeatsLeft guestCohorts')
+            + 'instructorId hostSeatsLeft overflowSeatsLeft guestCohorts '
+            + 'title durationMins meetSpace')
       .lean()
 
     const patch: Partial<ILiveClass> = { ...(input as any) }
@@ -1369,7 +1372,99 @@ export class LiveClassService {
       void this.#pollForMeetRecording(id, (current as any).googleMeetCode)
     }
 
+    /* A co-hosted Meet carries Google-side state that has to follow the class:
+       who is co-host, and the calendar event that invites them. Only for
+       classes whose Meet the LMS created through the Meet API — a Calendar-
+       created one cannot take co-hosts at all. Fire-and-forget: Google being
+       slow or down must not fail an edit that has already been saved. */
+    const was = current as {
+      meetSpace?: MeetSpaceRecord; instructorId?: unknown; status?: string; googleMeetCode?: string
+      title?: string; scheduledStart?: Date; durationMins?: number
+    } | null
+    if (was?.meetSpace) {
+      const space = was.meetSpace
+      /* An admin pasted a different link over the generated one. The space no
+         longer IS this class's room, so its invite would send the instructor
+         to the wrong meeting: withdraw it and forget the space. */
+      const linkReplaced = input.meetingUrl != null && !!was.googleMeetCode
+        && !input.meetingUrl.includes(was.googleMeetCode)
+      const instructorChanged = input.instructorId != null
+        && String(input.instructorId) !== String(was.instructorId ?? '')
+      const scheduleChanged =
+           (input.title != null && input.title !== was.title)
+        || (input.durationMins != null && input.durationMins !== was.durationMins)
+        || (input.scheduledStart != null && was.scheduledStart != null
+            && new Date(input.scheduledStart).getTime() !== new Date(was.scheduledStart).getTime())
+      const nowCancelled = input.status === 'cancelled' && was.status !== 'cancelled'
+
+      if (linkReplaced) {
+        void (async () => {
+          await syncMeetSpace(space, { cancelled: true })
+          await LiveClassModel.updateOne({ _id: id }, { $unset: { meetSpace: '' } })
+        })().catch(err => logger.warn({ err, classId: id }, 'meet detach after link replace failed'))
+      } else if (instructorChanged || scheduleChanged || nowCancelled) {
+        void (async () => {
+          const change: Parameters<typeof syncMeetSpace>[1] = {}
+          if (nowCancelled) change.cancelled = true
+          if (instructorChanged) {
+            const next = await UserModel.findById(input.instructorId).select('email meetEmail').lean()
+            change.cohost = effectiveMeetEmail(next as never) ?? null
+          }
+          if (scheduleChanged && !nowCancelled) {
+            change.schedule = {
+              title:        updated.title,
+              startISO:     new Date(updated.scheduledStart).toISOString(),
+              durationMins: updated.durationMins,
+            }
+          }
+          await this.#applyMeetSync(id, space, change)
+        })().catch(err => logger.warn({ err, classId: id }, 'meet sync after class edit failed'))
+      }
+    }
+
     return updated
+  }
+
+  /* Push one change to a co-hosted Meet and record what now holds. */
+  async #applyMeetSync(id: string, space: MeetSpaceRecord, change: Parameters<typeof syncMeetSpace>[1]): Promise<void> {
+    const result = await syncMeetSpace(space, change)
+    const $set:   Record<string, string> = {}
+    const $unset: Record<string, ''>     = {}
+    if (result.cohost)          $set['meetSpace.cohost']          = result.cohost
+    else                        $unset['meetSpace.cohost']        = ''
+    if (result.calendarEventId) $set['meetSpace.calendarEventId'] = result.calendarEventId
+    else                        $unset['meetSpace.calendarEventId'] = ''
+    await LiveClassModel.updateOne({ _id: id }, {
+      ...(Object.keys($set).length   ? { $set }   : {}),
+      ...(Object.keys($unset).length ? { $unset } : {}),
+    })
+  }
+
+  /**
+   * An instructor's Meet address changed (their Gmail was added or edited, or
+   * their login email moved) — make the new address co-host of every co-hosted
+   * class of theirs that has not finished. This is what lets an instructor who
+   * shares their Gmail AFTER classes were scheduled still end up co-host.
+   * Returns how many classes were re-pointed.
+   */
+  async resyncMeetCohostsFor(instructorId: string): Promise<number> {
+    if (!Types.ObjectId.isValid(instructorId)) return 0
+    const user   = await UserModel.findById(instructorId).select('email meetEmail').lean()
+    const cohost = effectiveMeetEmail(user as never) ?? null
+    const classes = await LiveClassModel.find({
+      instructorId:     new Types.ObjectId(instructorId),
+      'meetSpace.name': { $exists: true },
+      status:           { $in: ['scheduled', 'live'] },
+    }).select('meetSpace').lean()
+
+    let changed = 0
+    for (const c of classes) {
+      const space = (c as { meetSpace?: MeetSpaceRecord }).meetSpace
+      if (!space || (space.cohost ?? null) === cohost) continue
+      await this.#applyMeetSync(String(c._id), space, { cohost })
+      changed++
+    }
+    return changed
   }
 
   /* Polls Google Meet API for the recording of an external class.
@@ -1411,6 +1506,13 @@ export class LiveClassService {
     /* Cleanup Mux stream if internal */
     if (live.type === 'internal' && live.muxLiveStreamId) {
       await muxSvc.deleteLiveStream(live.muxLiveStreamId)
+    }
+
+    /* Withdraw the co-host's calendar invite — the class is gone. */
+    const space = (live as { meetSpace?: MeetSpaceRecord }).meetSpace
+    if (space?.calendarEventId) {
+      void syncMeetSpace(space, { cancelled: true })
+        .catch(err => logger.warn({ err, classId: id }, 'meet calendar cleanup on delete failed'))
     }
 
     await this.liveRepo.hardDelete(id)

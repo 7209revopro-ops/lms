@@ -149,6 +149,12 @@ export interface IUser extends Document {
   organizationId?: Types.ObjectId
   /** Instructor lent to the other academy — see the schema comment. */
   sharedAcrossOrgs?: boolean
+  /* The Google account this person signs in to Meet with, when it differs
+     from their login email. Most instructors log in with a Zoho-hosted
+     @deltainstitutions.com address that is not a Google account, so they
+     are invited to (and made co-host of) auto-generated Meet links through
+     this address instead — usually a Gmail. Unset/null means "use `email`". */
+  meetEmail?:    string | null
   /* sub_admin program scope */
   program?: ProgramType
   /* Student program categories (multi) */
@@ -248,6 +254,7 @@ const UserSchema = new Schema<IUser>(
        the class of leak N-07 was, so it is made unpersistable rather than left
        to every write path to remember. */
     sharedAcrossOrgs: { type: Boolean, default: false, index: true },
+    meetEmail:      { type: String, trim: true, lowercase: true, maxlength: 255 },
     program:        { type: String, enum: ['ai', 'digital_marketing', 'forex', 'jura'] },
     lastLoginAt:    { type: Date },
     category:         { type: String, enum: ['4x-trading', 'digital-marketing', 'ai', 'jura'] },
@@ -1002,6 +1009,18 @@ export interface ILiveClass extends Document {
   /* External-only */
   meetingUrl?:    string           // required when type=external
   googleMeetCode?: string          // e.g. "abc-def-ghij"
+  /* Set only when the Meet was created through the Meet API on behalf of a
+     non-Workspace instructor (see googleMeet.service.ts createCoHostedMeeting).
+     Everything needed to keep Google in step when the class changes later:
+     the space to swap co-hosts on, the mailbox that owns it (impersonated —
+     the configured host can change, this class's cannot), the address
+     currently made co-host, and the host's Calendar event that invites them. */
+  meetSpace?: {
+    name:             string      // "spaces/abc123"
+    host:             string      // owning Workspace mailbox
+    cohost?:          string      // address currently COHOST, if any
+    calendarEventId?: string      // event on the host's calendar
+  }
 
   /* Which engine backs an `internal` class.
      `type` says external-vs-in-app; `provider` says WHICH in-app engine, so
@@ -1148,6 +1167,15 @@ const LiveClassSchema = new Schema<ILiveClass>(
 
     meetingUrl:        { type: String, maxlength: 2048 },
     googleMeetCode:    { type: String, maxlength: 20 },
+    meetSpace: {
+      type: new Schema({
+        name:            { type: String, maxlength: 64,  required: true },
+        host:            { type: String, maxlength: 255, required: true },
+        cohost:          { type: String, maxlength: 255 },
+        calendarEventId: { type: String, maxlength: 1024 },
+      }, { _id: false }),
+      default: undefined,
+    },
     /* Defaults to 'mux' so every existing row keeps its current behaviour
        without a migration — the whole point of adding a provider rather than
        repurposing `type`. */
