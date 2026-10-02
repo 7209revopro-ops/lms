@@ -38,6 +38,7 @@ import instructorRoutes   from './instructors.routes.ts'
 import documentRoutes    from './documents.routes.ts'
 import classAssignmentRoutes from './classAssignments.routes.ts'
 import portalRoutes        from './portal.routes.ts'
+import portalActivityRoutes from './portalActivity.routes.ts'
 
 const router = Router()
 
@@ -77,6 +78,9 @@ router.get('/ready', async (_req: Request, res: Response) => {
 router.use('/auth',        authRoutes)
 /* Server-to-server, from the Root portal. A shared secret, not a session. */
 router.use('/service',     portalRoutes)
+/* The help desk and class assignments, for the commission portal — after
+   portalRoutes, whose secret check has already let the caller in. */
+router.use('/service',     portalActivityRoutes)
 router.use('/courses',     courseRoutes)
 router.use('/categories',  categoryRoutes)
 router.use('/enrollments', enrollmentRoutes)

@@ -19,6 +19,7 @@
     "test:tamara": "bun src/tests/tamara.suite.ts",
     "test:paymentaccess": "bun --no-env-file src/tests/paymentaccess.suite.ts",
     "test:commissionstudents": "bun --no-env-file src/tests/commissionstudents.suite.ts",
+    "test:portalactivity": "bun --no-env-file src/tests/portalactivity.suite.ts",
     "check:seats": "bun src/scripts/check-seat-writes.ts",
     "check:languages": "bun src/scripts/check-languages.ts",
     "test:crossorgclass:concurrency": "bun src/tests/crossorgclass.concurrency.suite.ts",
