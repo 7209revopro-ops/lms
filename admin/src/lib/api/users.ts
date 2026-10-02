@@ -5,6 +5,10 @@ import type { PaginationMeta } from '@/types/index'
 import type { EnrollmentApplication } from './enrollmentRequests'
 
 /* ── Enrollment (student course access) ─────────────── */
+/* Which sales CRM sold an enrolment finance created: Delta's Sales CRM, the
+   Remote CRM or Draw. Same codes as finance and the Root portal. */
+export type SalesCrm = 'delta' | 'remote' | 'draw'
+
 export interface StudentEnrollment {
   _id:              string
   id:               string
@@ -30,6 +34,8 @@ export interface StudentEnrollment {
     receipt?:       { url: string; name?: string; mimeType?: string } | null
     recordedAt?:    string
   }
+  /* Which sales CRM sold it, where finance enrolled them. Every admin role sees it. */
+  salesCrm?: SalesCrm
 }
 
 const enrollmentKeys = {

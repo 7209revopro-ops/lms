@@ -11,6 +11,7 @@ import { useStudentEnrollments, useStudentOrders } from '@/lib/api/users'
 import { useAdminBookings } from '@/lib/api/liveClasses'
 import Spinner from '@/components/ui/Spinner'
 import { AvatarImg } from '@/components/ui/AvatarImg'
+import { SalesCrmBadge } from '@/components/ui/SalesCrmBadge'
 
 const BOOKING_STATUS_STYLE: Record<string, { bg: string; color: string; label: string }> = {
   booked:    { bg: 'rgba(16,185,129,0.12)',  color: '#34D399', label: 'Upcoming' },
@@ -180,6 +181,8 @@ export function StudentHistoryModal({ user, onClose }: Props) {
                           <p className="truncate text-xs font-semibold text-white">{e.courseId?.title ?? '—'}</p>
                           <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[10px]"
                             style={{ color: 'rgba(255,255,255,0.4)' }}>
+                            {/* Which sales CRM sold it, where finance enrolled them. */}
+                            <SalesCrmBadge crm={e.salesCrm} />
                             {typeof e.progressPercent === 'number' && <span>{e.progressPercent}% complete</span>}
                             {e.blockedLessons.length > 0 && (
                               <span style={{ color: '#F87171' }}>

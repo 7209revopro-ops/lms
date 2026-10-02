@@ -738,6 +738,16 @@ export type EnrollmentSource = typeof ENROLLMENT_SOURCES[number]
 export const PAYMENT_ACCESS_STATUSES = ['unpaid', 'partial', 'paid'] as const
 export type PaymentAccessStatus = typeof PAYMENT_ACCESS_STATUSES[number]
 
+/* Which sales CRM sold an enrolment finance created, by the codes the Root
+   portal and finance use:
+     delta   Delta's Sales CRM
+     remote  the Remote CRM
+     draw    Draw
+   A tag for staff, not a source: `source` above says how somebody was enrolled
+   ('purchase' for all of these). Absent on enrolments made any other way. */
+export const SALES_CRMS = ['delta', 'remote', 'draw'] as const
+export type SalesCrm = typeof SALES_CRMS[number]
+
 /* An enrolment's money as Delta Finance approved it: the course fee, what was
    paid, the balance, whether a bonus was given at the close, and the receipt
    the counsellor took. Minor units (cents / fils) like every amount here.
@@ -770,6 +780,7 @@ export interface IEnrollment extends Document {
   blockedLessons:  Types.ObjectId[]  // lessons blocked by admin/instructor
   paymentAccess?:  { status?: PaymentAccessStatus; invoiceId?: string; updatedAt?: Date }
   feeSummary?:     EnrollmentFeeSummary
+  salesCrm?:       SalesCrm
   organizationId?: Types.ObjectId
   createdAt:       Date
   updatedAt:       Date
@@ -822,6 +833,9 @@ const EnrollmentSchema = new Schema<IEnrollment>(
       ),
       default: undefined,
     },
+    /* Set only by finance provisioning: the sales CRM that sold it. On every
+       course of a bundle, unlike feeSummary, which only the first carries. */
+    salesCrm:        { type: String, enum: SALES_CRMS },
     organizationId:  { type: Schema.Types.ObjectId, ref: 'Organization' },
   },
   baseSchemaOptions,

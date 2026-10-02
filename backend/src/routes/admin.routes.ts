@@ -1088,6 +1088,8 @@ router.get('/courses/:id/students', requireAnyAdmin,
             { $limit: perPage },
             { $project: {
               _id: 1, source: 1, status: 1, enrolledAt: 1,
+              /* The sales CRM that sold it, where finance enrolled them. */
+              salesCrm: 1,
               /* Older rows pre-date the field and would otherwise reach the
                  UI as undefined. */
               progressPercent: { $ifNull: ['$progressPercent', 0] },

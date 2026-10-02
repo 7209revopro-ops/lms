@@ -14,7 +14,7 @@ import { validate } from '@/middleware/validate.middleware.ts'
 import { OrderService } from '@/services/order.service.ts'
 import { AuthService } from '@/services/auth.service.ts'
 import { logger } from '@/utils/logger.ts'
-import { PAYMENT_ACCESS_STATUSES, type PaymentAccessStatus } from '@/models/schema.ts'
+import { PAYMENT_ACCESS_STATUSES, SALES_CRMS, type PaymentAccessStatus, type SalesCrm } from '@/models/schema.ts'
 
 const router = Router()
 const orderSvc = new OrderService()
@@ -217,6 +217,9 @@ const financeEnrolmentSchema = z.object({
       mimeType: z.string().max(100).optional(),
     }).nullable().optional(),
   }).optional(),
+  /* Which sales CRM sold it — Delta's Sales CRM, the Remote CRM or Draw — kept
+     on the enrolment as a tag for staff. Absent from an older finance. */
+  crm: z.enum(SALES_CRMS).optional(),
 })
 
 router.post('/finance/enrolment', validate(financeEnrolmentSchema), async (req: Request, res: Response, next: NextFunction) => {
@@ -232,11 +235,12 @@ router.post('/finance/enrolment', validate(financeEnrolmentSchema), async (req: 
       return
     }
 
-    const { email, name, phone, courseSlug, invoiceId, invoiceNumber, amount, amountMinor, currency, paymentStatus, feeSummary } = req.body as {
+    const { email, name, phone, courseSlug, invoiceId, invoiceNumber, amount, amountMinor, currency, paymentStatus, feeSummary, crm } = req.body as {
       email: string; name?: string; phone?: string; courseSlug: string
       invoiceId: string; invoiceNumber?: string; amount?: number; amountMinor?: number; currency?: string
       paymentStatus?: PaymentAccessStatus
       feeSummary?: Parameters<typeof orderSvc.provisionFinanceEnrolment>[0]['feeSummary']
+      crm?: SalesCrm
     }
 
     let result
@@ -250,6 +254,7 @@ router.post('/finance/enrolment', validate(financeEnrolmentSchema), async (req: 
         ...(currency ? { currency } : {}),
         ...(paymentStatus ? { paymentStatus } : {}),
         ...(feeSummary ? { feeSummary } : {}),
+        ...(crm ? { salesCrm: crm } : {}),
       })
     } catch (err) {
       /* An unmapped or renamed slug is the caller's mistake and will fail the

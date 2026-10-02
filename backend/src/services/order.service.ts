@@ -17,7 +17,7 @@ import { NotificationService } from '@/services/notification.service.ts'
 import { sendEnrollmentConfirmation } from '@/services/email.service.ts'
 import { CourseModel, UserModel } from '@/models/schema.ts'
 import { env } from '@/config/env.ts'
-import type { OrderGateway, IOrder, PaymentAccessStatus, EnrollmentFeeSummary } from '@/models/schema.ts'
+import type { OrderGateway, IOrder, PaymentAccessStatus, EnrollmentFeeSummary, SalesCrm } from '@/models/schema.ts'
 import { applyInitialPaymentAccess, raisePaymentAccess, type AccessSummary } from '@/services/paymentAccess.service.ts'
 import { logger } from '@/utils/logger.ts'
 
@@ -1895,6 +1895,8 @@ export class OrderService {
     paymentStatus?: PaymentAccessStatus
     /** The enrolment's money as finance approved it, for staff to see. Absent from an older finance. */
     feeSummary?: Omit<EnrollmentFeeSummary, 'invoiceId' | 'invoiceNumber' | 'recordedAt'>
+    /** Which sales CRM sold it, as a tag for staff. Absent from an older finance. */
+    salesCrm?: SalesCrm
   }): Promise<{
     userId: string
     created: boolean
@@ -1995,6 +1997,16 @@ export class OrderService {
             },
           },
         },
+      )
+    }
+
+    /* Which sales CRM sold it, as a tag beside the enrolment. On every course of
+       a sale — finance sends a bundle's courses as one call each, all with it —
+       and, like the fee, recorded once with the first arrival. */
+    if (input.salesCrm && courseForRule) {
+      await EnrollmentModel.updateOne(
+        { userId: result.userId, courseId: courseForRule._id },
+        { $set: { salesCrm: input.salesCrm } },
       )
     }
 

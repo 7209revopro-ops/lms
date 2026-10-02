@@ -2,6 +2,7 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { api } from '@/lib/axios'
 import type { Course, CourseFormValues, PaginationMeta } from '@/types/index'
+import type { SalesCrm } from '@/lib/api/users'
 
 /* Strip null / undefined / empty-string / explicit `false` so the backend
    Zod query schema doesn't reject e.g. `level=` when the user picks "All". */
@@ -146,6 +147,8 @@ export type EnrollmentSource = 'purchase' | 'free' | 'admin' | 'script' | 'unkno
 export interface CourseStudentRow {
   _id:             string
   source:          EnrollmentSource
+  /** Which sales CRM sold it, where finance enrolled them. */
+  salesCrm?:       SalesCrm
   status:          'active' | 'completed' | 'dropped'
   progressPercent: number
   enrolledAt:      string

@@ -8,6 +8,7 @@ import {
 } from 'lucide-react'
 import { useCourseStudents, type EnrollmentSource } from '@/lib/api/courses'
 import Spinner from '@/components/ui/Spinner'
+import { SalesCrmBadge } from '@/components/ui/SalesCrmBadge'
 
 /* ─────────────────────────────────────────────────────
    Who is on this course, and how they got here.
@@ -213,7 +214,13 @@ export function CourseStudentsPanel({ courseId, onClose }: {
                         {r.student.email}
                       </p>
                     </td>
-                    <td className="px-3 py-3"><SourceBadge source={r.source} /></td>
+                    <td className="px-3 py-3">
+                      {/* How they got in, and — for a sale finance enrolled — which CRM sold it. */}
+                      <div className="flex flex-wrap items-center gap-1">
+                        <SourceBadge source={r.source} />
+                        <SalesCrmBadge crm={r.salesCrm} />
+                      </div>
+                    </td>
                     <td className="px-3 py-3">
                       <div className="flex items-center gap-2">
                         <div className="h-1.5 w-16 overflow-hidden rounded-full"
