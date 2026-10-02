@@ -63,11 +63,19 @@ await Promise.all([LiveClassModel.createIndexes(), ClassImportModel.createIndexe
 
 const svc = new ClassImportService()
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms))
-async function waitDone(jobId: string, ms = 30_000) {
+/* Wait on the service's in-process `running` flag, not the stored status: a run
+   saves 'completed' BEFORE it sends the mentor summaries, and a resume flips the
+   stored status back to 'running' only after it has loaded the job — polling
+   the stored field alone raced both (one cold-cache run in seven saw it). The
+   flag is set synchronously inside start()/resume() and cleared only after the
+   summaries are out, which is exactly what the script and the admin page wait on. */
+async function waitDone(jobId: string, actor: { id: string; role: string; organizationId?: string }, ms = 30_000) {
   const t0 = Date.now()
   while (Date.now() - t0 < ms) {
-    const j = await ClassImportModel.findById(jobId).select('status items.status').lean()
-    if (j && j.status !== 'running') return j
+    const s = await svc.status(jobId, actor)
+    if (!s.running && s.status !== 'running') {
+      return (await ClassImportModel.findById(jobId).select('status items.status').lean())!
+    }
     await sleep(100)
   }
   throw new Error('import did not finish')
@@ -231,7 +239,7 @@ let jobId = ''
   const r = await svc.start(SETTINGS, SMALL, ACTOR, {}, 'english.xlsx')
   jobId = r.jobId
   check('G1 12 classes planned', r.total === 12, String(r.total))
-  const job = await waitDone(jobId)
+  const job = await waitDone(jobId, ACTOR)
   check('G2 import completed', job.status === 'completed', job.status)
   const classes = await LiveClassModel.find({ importJobId: new mongoose.Types.ObjectId(jobId) }).lean()
   check('G3 12 classes created', classes.length === 12, String(classes.length))
@@ -275,13 +283,13 @@ section('I  failure + resume (Google Meet rows, stubbed creator)')
     return { live: { id: String(doc._id) } }
   }
   const r = await svc.start(SETTINGS, MEET, ACTOR, {}, 'meet.xlsx', flaky)
-  const j1 = await waitDone(r.jobId)
+  const j1 = await waitDone(r.jobId, ACTOR)
   const s1 = await svc.status(r.jobId, ACTOR)
   check('I1 two failed, six created', s1.failed === 2 && s1.created === 6, JSON.stringify({ c: s1.created, f: s1.failed }))
   check('I2 failures carry the reason', s1.failures.every(f => f.error.includes('Google Meet')))
   check('I3 no summary while classes are missing', !(await ClassImportModel.findById(r.jobId).lean())!.summariesSentAt)
   await svc.resume(r.jobId, ACTOR, flaky)
-  await sleep(50); await waitDone(r.jobId)
+  await sleep(50); await waitDone(r.jobId, ACTOR)
   const s2 = await svc.status(r.jobId, ACTOR)
   check('I4 resume creates the two missing', s2.created === 8 && s2.failed === 0, JSON.stringify({ c: s2.created, f: s2.failed }))
   check('I5 no duplicates', (await LiveClassModel.countDocuments({ importJobId: new mongoose.Types.ObjectId(r.jobId) })) === 8)
