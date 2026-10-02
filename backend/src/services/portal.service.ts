@@ -1154,3 +1154,147 @@ export async function getClassForPortal(input: {
     timezone: AVAILABILITY_TIMEZONE,
   }
 }
+
+/* ─── Classes for the Tetra Commission portal ──────────────────────────────── */
+
+export type PortalClassStatus = 'attended' | 'missed' | 'upcoming' | 'booked' | 'cancelled'
+
+export interface PortalStudentClass {
+  bookingId:    string
+  classId:      string
+  title:        string
+  course:       string
+  academy:      string
+  mentor:       string
+  startsAt:     string
+  durationMins: number
+  status:       PortalClassStatus
+  attendedAt:   string
+}
+
+export interface PortalStudentClasses {
+  email:          string
+  exists:         boolean
+  attended:       number
+  missed:         number
+  upcoming:       number
+  booked:         number
+  cancelled:      number
+  lastAttendedAt: string
+  classes?:       PortalStudentClass[]
+}
+
+/**
+ * Which live classes these students booked, and whether they came.
+ *
+ * Asked by the commission portal: its Students table wants the counts for
+ * everybody (at most MAX_EMAILS a call, like /accounts), and a student's page
+ * the classes themselves (`detail`). By email, and across both academies — a
+ * student can book the other academy's shared classes, and the portal wants
+ * to see all of them, each labelled with the academy that runs it.
+ *
+ * A booking says 'booked' until attendance is settled after the class, so a
+ * 'booked' class still ahead is upcoming and one already past is just booked
+ * (not settled yet). attendedAt means they came, whatever the status says.
+ *
+ * Every address asked about comes back, with zeros when there is no account
+ * or no booking — "asked, and nothing" must read differently from "never
+ * answered" on the portal's side, as with /accounts.
+ */
+export async function classAttendanceForPortal(input: {
+  emails: unknown
+  detail?: boolean
+}): Promise<{ students: PortalStudentClasses[] }> {
+  const { ClassBookingModel, LiveClassModel, CourseModel } = await import('@/models/schema.ts')
+
+  if (!Array.isArray(input.emails)) {
+    throw httpError('emails must be a list of addresses', 400)
+  }
+  const wanted: string[] = []
+  const seen = new Set<string>()
+  for (const raw of input.emails) {
+    if (typeof raw !== 'string') continue
+    const email = raw.toLowerCase().trim()
+    if (!email || seen.has(email)) continue
+    seen.add(email)
+    wanted.push(email)
+  }
+  if (wanted.length === 0) return { students: [] }
+  if (wanted.length > MAX_EMAILS) {
+    throw httpError(`At most ${MAX_EMAILS} addresses at a time, and ${wanted.length} were asked for`, 400)
+  }
+
+  const users = await UserModel.find({ email: { $in: wanted } }).select('email').lean()
+  const emailOfUser = new Map(users.map((u) => [String(u._id), String(u.email).toLowerCase()]))
+  const bookings = users.length
+    ? await ClassBookingModel.find({ userId: { $in: users.map((u) => u._id) } })
+      .select('userId liveClassId status attendedAt')
+      .lean()
+    : []
+
+  const classIds = [...new Set(bookings.map((b) => String(b.liveClassId)))]
+  const classes = classIds.length
+    ? await LiveClassModel.find({ _id: { $in: classIds } })
+      .select('title scheduledStart durationMins courseId instructorId organizationId')
+      .lean()
+    : []
+  const classById = new Map(classes.map((c) => [String(c._id), c]))
+
+  // Names only when the classes themselves are asked for.
+  const courseTitle = new Map<string, string>()
+  const mentorName = new Map<string, string>()
+  const academyName = new Map<string, string>()
+  if (input.detail && classes.length) {
+    const [courses, mentors, orgs] = await Promise.all([
+      CourseModel.find({ _id: { $in: [...new Set(classes.map((c) => String(c.courseId ?? '')).filter(Boolean))] } }).select('title').lean(),
+      UserModel.find({ _id: { $in: [...new Set(classes.map((c) => String(c.instructorId ?? '')).filter(Boolean))] } }).select('name').lean(),
+      OrganizationModel.find({}).select('name').lean(),
+    ])
+    for (const c of courses) courseTitle.set(String(c._id), String((c as { title?: string }).title ?? ''))
+    for (const m of mentors) mentorName.set(String(m._id), String(m.name ?? ''))
+    for (const o of orgs) academyName.set(String(o._id), String(o.name ?? ''))
+  }
+
+  const now = Date.now()
+  const statusOf = (b: { status?: string; attendedAt?: Date | null }, startsAt: number): PortalClassStatus => {
+    if (b.status === 'cancelled') return 'cancelled'
+    if (b.attendedAt || b.status === 'attended') return 'attended'
+    if (b.status === 'missed') return 'missed'
+    return startsAt > now ? 'upcoming' : 'booked'
+  }
+
+  const byEmail = new Map<string, PortalStudentClasses>(wanted.map((email) => [email, {
+    email, exists: false, attended: 0, missed: 0, upcoming: 0, booked: 0, cancelled: 0, lastAttendedAt: '',
+    ...(input.detail ? { classes: [] as PortalStudentClass[] } : {}),
+  }]))
+  for (const email of emailOfUser.values()) {
+    const entry = byEmail.get(email)
+    if (entry) entry.exists = true
+  }
+  for (const b of bookings) {
+    const entry = byEmail.get(emailOfUser.get(String(b.userId)) ?? '')
+    if (!entry) continue
+    const live = classById.get(String(b.liveClassId))
+    const startsAt = live?.scheduledStart ? new Date(live.scheduledStart).getTime() : 0
+    const status = statusOf(b, startsAt)
+    entry[status]++
+    const attendedAt = b.attendedAt ? new Date(b.attendedAt).toISOString() : status === 'attended' && startsAt ? new Date(startsAt).toISOString() : ''
+    if (attendedAt && attendedAt > entry.lastAttendedAt) entry.lastAttendedAt = attendedAt
+    if (entry.classes) {
+      entry.classes.push({
+        bookingId:    String(b._id),
+        classId:      String(b.liveClassId),
+        title:        live?.title ?? '',
+        course:       courseTitle.get(String(live?.courseId ?? '')) ?? '',
+        academy:      academyName.get(String(live?.organizationId ?? '')) ?? '',
+        mentor:       mentorName.get(String(live?.instructorId ?? '')) ?? '',
+        startsAt:     startsAt ? new Date(startsAt).toISOString() : '',
+        durationMins: live?.durationMins ?? 0,
+        status,
+        attendedAt,
+      })
+    }
+  }
+  for (const entry of byEmail.values()) entry.classes?.sort((a, b) => (a.startsAt < b.startsAt ? 1 : a.startsAt > b.startsAt ? -1 : 0))
+  return { students: [...byEmail.values()] }
+}

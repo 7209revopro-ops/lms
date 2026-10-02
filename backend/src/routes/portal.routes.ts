@@ -6,6 +6,7 @@ import {
   listRolesForPortal,
   describeUserForPortal,
   describeManyForPortal,
+  classAttendanceForPortal,
   listMentorsForPortal,
   createMentorMeetingForPortal,
   getMentorMeetingForPortal,
@@ -133,6 +134,17 @@ router.post('/accounts', wrap(async (req, res) => {
   sendSuccess(res, await describeManyForPortal({
     emails, remoteOrgId: remoteOrgId ?? orgOf(req),
   }), 'Accounts')
+}))
+
+/**
+ * Which live classes students booked and whether they came — for the Tetra
+ * Commission portal, by email, at most 500 at a time: only the counts, or the
+ * classes themselves with `detail: true`. POST for the same reason as
+ * /accounts: addresses do not belong in a query string.
+ */
+router.post('/class-attendance', wrap(async (req, res) => {
+  const { emails, detail } = (req.body ?? {}) as { emails?: unknown; detail?: unknown }
+  sendSuccess(res, await classAttendanceForPortal({ emails, detail: detail === true }), 'Classes')
 }))
 
 /**
