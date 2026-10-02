@@ -5,13 +5,14 @@ import { motion, AnimatePresence } from 'framer-motion'
 import {
   ClipboardList, CheckCircle2, XCircle, Clock, AlertTriangle, FileText,
   Image as ImageIcon, Search, User, BookOpen, Layers, Calendar, RotateCcw,
-  Timer, Hourglass, Users,
+  Timer, Hourglass, Users, GraduationCap,
 } from 'lucide-react'
 import {
   useReviewQueue, useReviewAssignment, useReviewStats,
   type ReviewAssignment, type ClassAssignmentStatus,
   type InstructorPerformance, type ReviewStats,
 } from '@/lib/api/classAssignments'
+import { useCurrentUser } from '@/lib/api/user'
 import { useToast } from '@/store/ui.store'
 
 function fmtSize(b: number) {
@@ -252,6 +253,11 @@ function ReviewCard({ a }: { a: ReviewAssignment }) {
           <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px]" style={{ color: '#6B7280' }}>
             <span className="flex items-center gap-1"><User size={10} />{a.studentId?.name ?? 'Student'}</span>
             <span className="flex items-center gap-1"><Calendar size={10} />{a.liveClassId?.title ?? 'Class'}</span>
+            {a.instructorId?.name && (
+              <span className="flex items-center gap-1 font-semibold" style={{ color: '#0057b8' }} title="Mentor who teaches this class">
+                <GraduationCap size={11} />Mentor: {a.instructorId.name}
+              </span>
+            )}
             {a.courseId?.title && <span className="flex items-center gap-1"><BookOpen size={10} />{a.courseId.title}</span>}
             {a.sectionId?.title && <span className="flex items-center gap-1"><Layers size={10} />{a.sectionId.title}</span>}
             <span>Sent {fmtDateTime(a.submittedAt)}</span>
@@ -366,6 +372,19 @@ export default function AdminAssignmentsPage() {
   const stats = useReviewStats(instructorId || undefined)
   const { data, isLoading, isError, error } = useReviewQueue(tab, instructorId || undefined)
 
+  /* The mentor dropdown lists EVERY mentor, so it reads the unfiltered figures:
+     the filtered stats above shrink to the one mentor picked, which would leave
+     no way to switch to another without clearing first. With no mentor picked
+     this is the same query as `stats` — one request, from the cache. */
+  const allStats = useReviewStats()
+  const mentors = useMemo(
+    () => [...(allStats.data?.instructors ?? [])].sort((x, y) => x.name.localeCompare(y.name)),
+    [allStats.data],
+  )
+  /* An instructor only ever sees their own submissions — nothing to choose. */
+  const { data: me } = useCurrentUser()
+  const showMentorFilter = me?.role !== 'instructor' && mentors.length > 0
+
   const list = useMemo(() => {
     const rows = data ?? []
     const q = search.trim().toLowerCase()
@@ -374,6 +393,7 @@ export default function AdminAssignmentsPage() {
       a.title.toLowerCase().includes(q) ||
       (a.studentId?.name ?? '').toLowerCase().includes(q) ||
       (a.studentId?.email ?? '').toLowerCase().includes(q) ||
+      (a.instructorId?.name ?? '').toLowerCase().includes(q) ||
       (a.liveClassId?.title ?? '').toLowerCase().includes(q) ||
       (a.courseId?.title ?? '').toLowerCase().includes(q),
     )
@@ -415,9 +435,32 @@ export default function AdminAssignmentsPage() {
           </button>
         ))}
 
-        <div className="relative ml-auto min-w-[200px] flex-1 sm:max-w-xs">
+        {/* Mentor filter — the same filter as the "By instructor" panel above,
+            so picking here or clicking a row there keeps both in step. */}
+        {showMentorFilter && (
+          <div className="relative ml-auto">
+            <GraduationCap size={13} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2"
+              style={{ color: instructorId ? '#0057b8' : '#9CA3AF' }} />
+            <select value={instructorId} onChange={e => setInstructorId(e.target.value)}
+              aria-label="Filter by mentor"
+              className="max-w-[220px] cursor-pointer appearance-none rounded-xl py-2 pl-8 pr-7 text-xs font-semibold outline-none"
+              style={instructorId
+                ? { border: '1px solid #0057b8', background: 'rgba(0,87,184,0.06)', color: '#0057b8' }
+                : { border: '1px solid #E4E7ED', background: '#fff', color: '#4B5563' }}>
+              <option value="">All mentors</option>
+              {mentors.map(m => (
+                <option key={m.id} value={m.id}>
+                  {m.name}{m.pending > 0 ? ` · ${m.pending} waiting` : ''}
+                </option>
+              ))}
+            </select>
+            <span className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-[9px]" style={{ color: '#9CA3AF' }}>▼</span>
+          </div>
+        )}
+
+        <div className={`relative ${showMentorFilter ? '' : 'ml-auto '}min-w-[200px] flex-1 sm:max-w-xs`}>
           <Search size={13} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2" style={{ color: '#9CA3AF' }} />
-          <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search student, class or title…"
+          <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search student, mentor, class or title…"
             className="w-full rounded-xl py-2 pl-8 pr-3 text-xs outline-none"
             style={{ border: '1px solid #E4E7ED', background: '#fff', color: '#0D0F1A' }} />
         </div>
