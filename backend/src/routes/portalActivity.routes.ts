@@ -5,10 +5,12 @@ import {
   supportTicketsForPortal,
   classAssignmentsForPortal,
 } from '@/services/portalActivity.service.ts'
+import { enrolmentsForPortal } from '@/services/portalEnrolments.service.ts'
 
 /* ─────────────────────────────────────────────────────
-   /service — the help desk and class assignments, for the commission portal
-   (services/portalActivity.service.ts).
+   /service — the help desk, class assignments and students' courses, for the
+   commission portal (services/portalActivity.service.ts,
+   services/portalEnrolments.service.ts).
 
    Mounted at /service after portal.routes.ts, whose secret check runs first for
    every /service request and lets through only a caller it knows — the Root
@@ -53,6 +55,18 @@ router.post('/support-tickets', checkedCaller, wrap(async (req, res) => {
 router.post('/class-assignments', checkedCaller, wrap(async (req, res) => {
   const { email } = (req.body ?? {}) as { email?: unknown }
   sendSuccess(res, await classAssignmentsForPortal({ email }), 'Assignments')
+}))
+
+/**
+ * The LMS courses students are on, by email, at most 500 at a time: each
+ * course with its academy and programme, how they were put on it, how much of
+ * it the fee has opened, their progress and whether they finished or dropped
+ * it. POST for the same reason as /accounts: addresses do not belong in a
+ * query string.
+ */
+router.post('/enrolments', checkedCaller, wrap(async (req, res) => {
+  const { emails } = (req.body ?? {}) as { emails?: unknown }
+  sendSuccess(res, await enrolmentsForPortal({ emails }), 'Courses')
 }))
 
 export default router

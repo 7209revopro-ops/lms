@@ -1,6 +1,7 @@
 /* ─────────────────────────────────────────────────────────────
-   The help desk and class assignments, for the commission portal
-   (services/portalActivity.service.ts, routes/portalActivity.routes.ts).
+   The help desk, class assignments and students' courses, for the commission
+   portal (services/portalActivity.service.ts, services/portalEnrolments.service.ts,
+   routes/portalActivity.routes.ts).
 
    Pinned here, against a real database:
 
@@ -15,7 +16,11 @@
      C. one student's tickets, with who said what; one student's class
         assignments, with the class, the course, the mentor and the reviews —
         the files by name only;
-     D. over HTTP, only behind the /service secret check — and refused, not
+     D. students' courses, by email: each with its academy and programme, how
+        they were put on it (a finance invoice told apart from a purchase), how
+        much the fee has opened, progress, finished with the certificate, or
+        dropped; somebody with no account said so; at most 500 at a time;
+     E. over HTTP, only behind the /service secret check — and refused, not
         answered, if mounted where that check has not run.
 
    Run: bun --no-env-file src/tests/portalactivity.suite.ts
@@ -47,7 +52,8 @@ const step = (s: string) => console.log(`\n\x1b[1m${s}\x1b[0m`)
 
 const mongoose = (await import('mongoose')).default
 const { Types } = mongoose
-const { UserModel, CourseModel, LiveClassModel, SupportTicketModel, ClassAssignmentModel } = await import('@/models/schema.ts')
+const { UserModel, CourseModel, LiveClassModel, SupportTicketModel, ClassAssignmentModel, EnrollmentModel, OrganizationModel } = await import('@/models/schema.ts')
+const { enrolmentsForPortal } = await import('@/services/portalEnrolments.service.ts')
 const { studentActivityForPortal, supportTicketsForPortal, classAssignmentsForPortal } = await import('@/services/portalActivity.service.ts')
 const { PortalError } = await import('@/services/portal.service.ts')
 
@@ -179,7 +185,34 @@ check('the class, course and mentor; waiting again after a rejection, so no reas
   first.reviews.length === 1 && first.reviews[0]!.status === 'rejected' && first.reviews[0]!.reason === 'Add the chart for wave 3', JSON.stringify(first))
 check('the files by name only — no link to them', JSON.stringify(first.files) === JSON.stringify(['chart.png']) && !JSON.stringify(a).includes('r2://'))
 
-step('D. Over HTTP, behind the /service secret')
+step('D. Students\' courses')
+const dubai = (await OrganizationModel.collection.insertOne({ name: 'Delta Dubai', slug: 'dubai-pa', createdAt: at(DAY), updatedAt: at(DAY) })).insertedId
+const mbo = (await CourseModel.collection.insertOne({ title: 'Market Break-Out Trading', slug: 'mbo-pa', program: '4x-trading', organizationId: dubai, createdAt: at(DAY), updatedAt: at(DAY) })).insertedId
+const oldCourse = (await CourseModel.collection.insertOne({ title: 'Old Course', slug: 'old-pa', createdAt: at(DAY), updatedAt: at(DAY) })).insertedId
+const enrol = (courseId: unknown, enrolledAgo: number, extra: Record<string, unknown>) =>
+  EnrollmentModel.collection.insertOne({ userId: student, courseId, status: 'active', source: 'admin', progressPercent: 0, blockedLessons: [], enrolledAt: at(enrolledAgo), createdAt: at(enrolledAgo), updatedAt: at(enrolledAgo), ...extra })
+await enrol(course, 10 * DAY, { source: 'purchase', progressPercent: 35, paymentAccess: { status: 'partial', invoiceId: 'inv-9' } })
+await enrol(mbo, 30 * DAY, { status: 'completed', progressPercent: 100, completedAt: at(2 * DAY), certificateId: 'cert-1' })
+await enrol(oldCourse, 20 * DAY, { status: 'dropped', progressPercent: 12 })
+const asked = await enrolmentsForPortal({ emails: [' LEARNER@lms.test', 'other@lms.test', 'nobody@lms.test'] })
+check('every address asked, in order, whatever its case', asked.students.map(s => `${s.email}:${s.exists}`).join(' ') === 'learner@lms.test:true other@lms.test:true nobody@lms.test:false',
+  asked.students.map(s => `${s.email}:${s.exists}`).join(' '))
+const theirs = asked.students[0]!.courses
+check('their courses, oldest first — dropped ones too', theirs.map(c => `${c.title}:${c.status}`).join(' | ') === 'Market Break-Out Trading:completed | Old Course:dropped | Delta Wave Theory Trading Programme:active',
+  theirs.map(c => `${c.title}:${c.status}`).join(' | '))
+const fin = theirs.find(c => c.slug === 'dwt-pa')!
+check('from a finance invoice: said so, with part of the fee paid and their progress',
+  fin.how === 'finance' && fin.access === 'partial' && fin.progress === 35 && fin.program === '4x-trading' && fin.enrolledAt === iso(at(10 * DAY)), JSON.stringify(fin))
+const done = theirs.find(c => c.slug === 'mbo-pa')!
+check('finished: completed, when, the certificate, and the academy that runs it',
+  done.status === 'completed' && done.completedAt === iso(at(2 * DAY)) && done.certificate && done.academy === 'Delta Dubai' && done.how === 'admin' && done.access === '', JSON.stringify(done))
+check('an account with no course: there, with none', asked.students[1]!.courses.length === 0)
+let badList: unknown = null, tooMany: unknown = null
+try { await enrolmentsForPortal({ emails: 'learner@lms.test' }) } catch (err) { badList = err }
+try { await enrolmentsForPortal({ emails: Array.from({ length: 501 }, (_, i) => `x${i}@lms.test`) }) } catch (err) { tooMany = err }
+check('not a list, or more than 500: refused', badList instanceof PortalError && tooMany instanceof PortalError)
+
+step('E. Over HTTP, behind the /service secret')
 const express = (await import('express')).default
 const portalRoutes = (await import('@/routes/portal.routes.ts')).default
 const portalActivityRoutes = (await import('@/routes/portalActivity.routes.ts')).default
@@ -212,6 +245,9 @@ check('no `since`: a 400 with the reason, not a server fault', noSince.status ==
 const tix = await ask(live.url, '/service/support-tickets', CRM_SECRET, { email: 'learner@lms.test' })
 const asg = await ask(live.url, '/service/class-assignments', CRM_SECRET, { email: 'learner@lms.test' })
 check('tickets and assignments by POST', tix.status === 200 && tix.body.data?.tickets?.length === 2 && asg.status === 200 && asg.body.data?.assignments?.length === 2)
+const courses = await ask(live.url, '/service/enrolments', CRM_SECRET, { emails: ['learner@lms.test'] })
+check('courses by POST, and not without the secret', courses.status === 200 && courses.body.data?.students?.[0]?.courses?.length === 3 &&
+  (await ask(live.url, '/service/enrolments', undefined, { emails: ['learner@lms.test'] })).status === 401, JSON.stringify(courses.body).slice(0, 200))
 live.close()
 const unguarded = await serve(app => { app.use('/service', portalActivityRoutes) })
 check('mounted where the secret check has not run: refused even with the right secret',
