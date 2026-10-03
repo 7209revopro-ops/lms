@@ -16,7 +16,7 @@ import {
 } from '@/lib/api/expressMembers'
 import {
   useEnrollmentRequests, useApproveEnrollment, useRejectEnrollment, useRemoveEnrollmentCategory,
-  useRevokeToViewer, useToggleBlock,
+  useRevokeToViewer, useToggleBlock, useFinanceCheck,
   type EnrollmentRequest, type EnrollmentRequestStatus, type ProgramCategory,
 } from '@/lib/api/enrollmentRequests'
 import { useCurrentUser } from '@/lib/api/user'
@@ -213,6 +213,42 @@ function CategorySelect({ value, onChange, disabled }: {
   )
 }
 
+/* ── Finance's answer, in the Approve dialog ──────────── */
+/* A student is approved only when finance has a customer with their email.
+   Shown before anybody clicks; when finance cannot be asked, Approve stays on
+   and the server — which asks again — decides. */
+function FinanceStatus({ email, check }: { email: string; check: ReturnType<typeof useFinanceCheck> }) {
+  const box = (color: string, bg: string, Icon: React.ComponentType<{ size?: number; style?: React.CSSProperties }>, children: React.ReactNode) => (
+    <div className="flex items-start gap-2 rounded-xl px-3 py-2.5 text-xs" style={{ background: bg, border: `1px solid ${color}33`, color }}>
+      <Icon size={14} style={{ marginTop: 1, flexShrink: 0 }} />
+      <div>{children}</div>
+    </div>
+  )
+  if (check.isLoading) {
+    return (
+      <div className="flex items-center gap-2 text-xs" style={{ color: 'rgba(255,255,255,0.45)' }}>
+        <Spinner size={12} />Checking finance…
+      </div>
+    )
+  }
+  if (check.data?.exists) {
+    return box('#4ADE80', 'rgba(74,222,128,0.08)', ShieldCheck, <>
+      <span className="font-semibold">In finance</span>
+      {check.data.organizations.length > 0 && <> — {check.data.organizations.join(', ')}</>}
+    </>)
+  }
+  if (check.data && !check.data.exists) {
+    return box('#F87171', 'rgba(248,113,113,0.08)', XCircle, <>
+      <span className="font-semibold">Not in finance</span> — {email} has no customer in finance, so they can&apos;t be approved.
+      Check the email, or enrol them through the sales CRM so the sale reaches finance first.
+    </>)
+  }
+  const message = (check.error as { response?: { data?: { error?: { message?: string } } } } | null)?.response?.data?.error?.message
+  return box('#FBBF24', 'rgba(251,191,36,0.08)', AlertTriangle, <>
+    <span className="font-semibold">Couldn&apos;t check finance</span> — {message || 'approving will ask finance again.'}
+  </>)
+}
+
 /* ── Approve dialog ─────────────────────────────────── */
 function ApproveDialog({ user, scopeCategory, onClose, onConfirm, loading }: {
   user:          EnrollmentRequest
@@ -224,6 +260,8 @@ function ApproveDialog({ user, scopeCategory, onClose, onConfirm, loading }: {
   const [cats, setCats] = useState<ProgramCategory[]>(
     scopeCategory ? [scopeCategory] : (user.categories.length ? user.categories : []),
   )
+  const finance = useFinanceCheck(user.id)
+  const notInFinance = finance.data?.exists === false
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
@@ -245,6 +283,7 @@ function ApproveDialog({ user, scopeCategory, onClose, onConfirm, loading }: {
           <p className="text-xs" style={{ color: 'rgba(255,255,255,0.4)' }}>{user.email}</p>
         </div>
         <div className="p-5 space-y-4">
+          <FinanceStatus email={user.email} check={finance} />
           <div>
             <label className="mb-1.5 block text-xs font-medium" style={{ color: 'rgba(255,255,255,0.45)' }}>
               Assign program category {scopeCategory ? '(auto-set for your role)' : '(select one or more)'}
@@ -264,8 +303,9 @@ function ApproveDialog({ user, scopeCategory, onClose, onConfirm, loading }: {
               className="rounded-xl px-4 py-2 text-sm font-medium transition-colors hover:bg-white/[0.07]"
               style={{ color: 'rgba(255,255,255,0.5)' }}>Cancel</button>
             <button
-              onClick={() => cats.length > 0 && onConfirm(cats)}
-              disabled={loading || cats.length === 0}
+              onClick={() => cats.length > 0 && !notInFinance && onConfirm(cats)}
+              disabled={loading || cats.length === 0 || notInFinance}
+              title={notInFinance ? 'Not in finance — this student cannot be approved' : undefined}
               className="flex items-center gap-1.5 rounded-xl px-5 py-2 text-sm font-semibold text-white transition-all hover:opacity-90 disabled:opacity-40"
               style={{ background: 'linear-gradient(135deg,#4ADE80,#22c55e)', boxShadow: '0 4px 14px rgba(74,222,128,0.3)' }}>
               {loading && <Spinner size={13} />}

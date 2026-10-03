@@ -95,6 +95,27 @@ export function useEnrollmentRequests(
   })
 }
 
+/* What finance says about a student. Approving is refused unless finance has a
+   customer with their email; this lets the Approve dialog say so before anybody
+   clicks. Only a preview — approving asks finance again. */
+export interface FinanceCheck {
+  exists:        boolean
+  organizations: string[]
+}
+
+export function useFinanceCheck(userId: string | null | undefined) {
+  return useQuery({
+    queryKey: ['admin', 'enrollment-requests', 'finance-check', userId],
+    queryFn: async () => {
+      const res = await api.get<{ success: true; data: FinanceCheck }>(`/admin/enrollment-requests/${userId}/finance-check`)
+      return res.data.data
+    },
+    enabled:   !!userId,
+    retry:     false,
+    staleTime: 0,
+  })
+}
+
 export function useApproveEnrollment() {
   const qc = useQueryClient()
   return useMutation({

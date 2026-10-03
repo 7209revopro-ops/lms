@@ -720,6 +720,15 @@ export class AdminController {
       const existing = await UserModel.findById(userId).select('email name categories category enrollmentStatus signupType enrollmentApplication.phone').lean()
       if (!existing) { res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'User not found' } }); return }
 
+      /* Let in by hand only somebody finance knows — their sale reached finance.
+         Asked every time, a programme added to an approved student included;
+         when finance cannot be asked, nobody is approved. */
+      const { financeRefusal } = await import('@/services/financeCustomerCheck.service.ts')
+      const refusal = await financeRefusal(String(existing.email ?? ''))
+      if (refusal) {
+        res.status(refusal.status).json({ success: false, error: { code: refusal.code, message: refusal.message } }); return
+      }
+
       // Merge new categories with existing ones (avoid duplicates)
       const existingCats: string[] = (existing.categories as string[] | undefined) ?? (existing.category ? [existing.category as string] : [])
       const mergedCats  = [...new Set([...existingCats, ...assignCategories])]

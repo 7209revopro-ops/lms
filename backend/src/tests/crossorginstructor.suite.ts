@@ -24,6 +24,7 @@
    Run: bun run test:crossorg
 ───────────────────────────────────────────────────────────── */
 process.env.DATABASE_URL = 'mongodb://localhost:27017/lms_crossorg_suite'
+await import('./financeStandIn.ts')   // approving a student asks finance first; this one knows everybody
 process.env.NODE_ENV     = 'test'
 process.env.PORT         = '0'
 process.env.R2_ACCOUNT_ID = ''; process.env.R2_ACCESS_KEY_ID = ''

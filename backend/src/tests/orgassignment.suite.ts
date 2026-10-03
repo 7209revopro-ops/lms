@@ -20,6 +20,7 @@
    Run: bun run test:orgassignment
 ───────────────────────────────────────────────────────────── */
 process.env.DATABASE_URL = 'mongodb://localhost:27017/lms_orgassignment'
+await import('./financeStandIn.ts')   // approving a student asks finance first; this one knows everybody
 process.env.NODE_ENV     = 'test'
 process.env.PORT         = '0'
 process.env.SMTP_HOST    = ''

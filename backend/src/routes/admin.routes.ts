@@ -406,6 +406,17 @@ router.post ('/users', requirePermission('users','create'),          validate(us
         } }); return
       }
     }
+
+    /* A student made here is approved the moment they exist (approvedBy is set
+       below), so it is the same decision as Approve and the same rule holds:
+       finance must know them. */
+    if (targetRole === 'student') {
+      const { financeRefusal } = await import('@/services/financeCustomerCheck.service.ts')
+      const refusal = await financeRefusal(String((req.body as { email?: string }).email ?? ''))
+      if (refusal) {
+        res.status(refusal.status).json({ success: false, error: { code: refusal.code, message: refusal.message } }); return
+      }
+    }
     next()
   },
   async (req: Request, res: Response, next: NextFunction) => {
@@ -822,6 +833,27 @@ router.get ('/enrollment-requests',
   validate(enrollmentRequestQuerySchema, 'query'),
   ctrl.listEnrollmentRequests,
 )
+/* What finance says about a student, for the Approve dialog to show before
+   anybody clicks. Only a preview: approving asks finance again. */
+router.get('/enrollment-requests/:userId/finance-check', requireAnyAdmin, requireSameOrgUser('userId'), async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { UserModel } = await import('@/models/schema.ts')
+    const { Types } = await import('mongoose')
+    const userId = String(req.params['userId'] ?? '')
+    if (!Types.ObjectId.isValid(userId)) {
+      res.status(400).json({ success: false, error: { code: 'INVALID_ID', message: 'Invalid user ID' } }); return
+    }
+    const user = await UserModel.findById(userId).select('email').lean()
+    if (!user) { res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'User not found' } }); return }
+    const { checkFinanceCustomer, financeCheckFailure } = await import('@/services/financeCustomerCheck.service.ts')
+    try {
+      sendSuccess(res, await checkFinanceCustomer(String(user.email ?? '')))
+    } catch (err) {
+      const failure = financeCheckFailure(err)
+      res.status(failure.status).json({ success: false, error: { code: failure.code, message: failure.message } })
+    }
+  } catch (err) { next(err) }
+})
 router.patch('/enrollment-requests/:userId/approve',         requireAnyAdmin, requireSameOrgUser('userId'), validate(approveEnrollmentSchema), ctrl.approveEnrollment)
 router.patch('/enrollment-requests/:userId/reject',          requireAnyAdmin, requireSameOrgUser('userId'), validate(rejectEnrollmentSchema),  ctrl.rejectEnrollment)
 router.patch('/enrollment-requests/:userId/cancel',          requireAnyAdmin, requireSameOrgUser('userId'), validate(rejectEnrollmentSchema),  ctrl.rejectEnrollment)

@@ -32,6 +32,7 @@
    Run: bun src/tests/instructorlogin.suite.ts
 ───────────────────────────────────────────────────────────── */
 process.env.DATABASE_URL = 'mongodb://localhost:27017/lms_instructorlogin_suite'
+await import('./financeStandIn.ts')   // approving a student asks finance first; this one knows everybody
 process.env.NODE_ENV     = 'test'
 process.env.PORT         = '0'
 process.env.RATE_LIMIT_AUTH_MAX = '900'

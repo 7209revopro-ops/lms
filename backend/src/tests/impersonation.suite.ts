@@ -13,6 +13,7 @@
    Run: bun run test:impersonation
 ───────────────────────────────────────────────────────────── */
 process.env.DATABASE_URL = 'mongodb://localhost:27017/lms_imp_suite'
+await import('./financeStandIn.ts')   // approving a student asks finance first; this one knows everybody
 process.env.NODE_ENV     = 'test'
 process.env.PORT         = '0'
 

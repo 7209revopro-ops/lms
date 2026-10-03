@@ -19,6 +19,7 @@
    Run: bun run test:smoke
 ───────────────────────────────────────────────────────────── */
 process.env.DATABASE_URL = 'mongodb://localhost:27017/lms_smoke_suite'
+await import('./financeStandIn.ts')   // approving a student asks finance first; this one knows everybody
 process.env.NODE_ENV     = 'test'
 process.env.PORT         = '0'
 process.env.BACKEND_PUBLIC_URL = 'http://127.0.0.1:8000'

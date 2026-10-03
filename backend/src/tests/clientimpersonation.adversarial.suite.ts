@@ -11,6 +11,7 @@
    Run: bun run test:clientimp-adv
 ───────────────────────────────────────────────────────────── */
 process.env.DATABASE_URL = 'mongodb://localhost:27017/lms_clientimp_adv'
+await import('./financeStandIn.ts')   // approving a student asks finance first; this one knows everybody
 process.env.NODE_ENV     = 'test'
 process.env.PORT         = '0'
 /* This suite fires hundreds of requests in seconds, which the ordinary limits
