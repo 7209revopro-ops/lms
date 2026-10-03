@@ -69,6 +69,10 @@ export function EditLiveClassModal({ live, onClose, onSuccess }: Props) {
   const [isOnline,         setIsOnline]         = useState<boolean>((live as any).isOnline ?? true)
   const [type]                                  = useState<LiveClassType>(live.type)
   const [meetingUrl,       setMeetingUrl]       = useState(live.meetingUrl ?? '')
+  /* The link as this form opened with it. Sent back only when changed here:
+     re-sending it unchanged would undo a Backup link swapped in while this
+     form was open (BackupLinkModal), restoring the room that just failed. */
+  const [originalMeetingUrl]                    = useState(live.meetingUrl ?? '')
   const [location,         setLocation]         = useState<string>((live as any).location ?? '')
   const [room,             setRoom]             = useState<string>((live as any).room ?? '')
   const [rescheduleReason, setRescheduleReason] = useState<string>('')
@@ -173,7 +177,8 @@ export function EditLiveClassModal({ live, onClose, onSuccess }: Props) {
           scheduledStart:   datetimeLocalToISO(start, classZone),
           durationMins,
           isOnline,
-          meetingUrl:       isOnline && type === 'external' ? meetingUrl.trim() || undefined : undefined,
+          meetingUrl:       isOnline && type === 'external' && meetingUrl.trim() !== originalMeetingUrl.trim()
+                              ? meetingUrl.trim() || undefined : undefined,
           location:         !isOnline ? location.trim() || undefined : undefined,
           room:             !isOnline ? room.trim() || undefined : undefined,
           rescheduleReason: timeChanged ? rescheduleReason.trim() : undefined,

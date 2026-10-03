@@ -99,7 +99,15 @@ async function loadClass(liveClassId: string): Promise<ILiveClass> {
 
 /** Shared checks: the class must be a live-capable LiveKit class. */
 function assertJoinable(live: ILiveClass): void {
-  if ((live as { provider?: string }).provider !== 'livekit') {
+  /* Switched to a backup link (LiveClassService.switchToBackupLink): the
+     room's fields stay on the class, but the room is abandoned. No ticket
+     into it — for host, student or handoff — so nobody ends up in a room the
+     rest of the class has left. */
+  if (live.type !== 'internal' && live.backupLink) {
+    throw new JoinError('MOVED_TO_LINK',
+      'This class moved to a meeting link — open the class again to join it.', 409)
+  }
+  if (live.type !== 'internal' || (live as { provider?: string }).provider !== 'livekit') {
     throw new JoinError('NOT_A_LIVEKIT_CLASS',
       'This class does not use the interactive room.', 400)
   }

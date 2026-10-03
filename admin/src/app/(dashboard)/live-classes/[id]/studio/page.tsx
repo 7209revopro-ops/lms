@@ -15,6 +15,7 @@ import {
 } from '@/lib/api/liveClasses'
 import Spinner from '@/components/ui/Spinner'
 import { ClassEntryPanel } from '@/components/live-classes/ClassEntryPanel'
+import { MovedToLinkPanel } from '@/components/live-classes/BackupLinkModal'
 
 /* ── WebRTC quality stats ─────────────────────────────── */
 interface StreamStats {
@@ -141,8 +142,13 @@ export default function StudioPage({ params }: { params: Promise<{ id: string }>
   const prevStatsRef = useRef<Record<string, number>>({})
   const whipCleanup  = useRef<(() => void) | null>(null)
 
-  /* ── Load devices on mount ── */
+  /* ── Load devices once the class is known to be an in-app one ──
+     A class that runs on a meeting link — above all one switched to a backup
+     link — never uses this page's camera, and opening it here would hold the
+     camera the instructor is about to need in Google Meet. */
+  const usesStudioCamera = live?.type === 'internal'
   useEffect(() => {
+    if (!usesStudioCamera) return
     getDevices().then(devs => {
       const cams = devs.filter(d => d.kind === 'videoinput')
       const mics = devs.filter(d => d.kind === 'audioinput')
@@ -155,7 +161,7 @@ export default function StudioPage({ params }: { params: Promise<{ id: string }>
       setError('Could not access camera/microphone. Check browser permissions.')
       setState('error')
     })
-  }, [])
+  }, [usesStudioCamera])
 
   /* ── Start camera preview ── */
   const startPreview = useCallback(async (camId: string, micId: string) => {
@@ -303,6 +309,13 @@ export default function StudioPage({ params }: { params: Promise<{ id: string }>
         </Link>
       </div>
     )
+  }
+
+  /* ── A meeting-link class — above all one switched to a backup link ──
+     An instructor opening the studio from a reminder sent before the switch
+     goes to the class's room as it is NOW, never the abandoned one. */
+  if (live.type === 'external') {
+    return <MovedToLinkPanel live={live} backHref="/live-classes" backLabel="Back to live classes" />
   }
 
   /* ── Interactive room (LiveKit) ──────────────────────────────────────

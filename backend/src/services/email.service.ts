@@ -710,6 +710,46 @@ export async function sendInstructorClassScheduled(
   })
 }
 
+/* ── Instructor: the class moved to a backup link ───────────────────────────
+   Sent when an admin swaps in a backup room because the instructor could not
+   get into the class's own (LiveClassService.switchToBackupLink). They are
+   usually waiting to teach right now, so it is plain and the link is the
+   first thing in it. */
+export async function sendInstructorBackupLink(
+  to:           string,
+  name:         string,
+  liveTitle:    string,
+  startsAt:     Date,
+  link:         string,
+  /* The address made co-host of a generated Meet, when there is one. */
+  cohost?:      string,
+  academySlug?: string | null,
+): Promise<void> {
+  const subject = `New link for your class: ${liveTitle}`
+  const when = academyClock(startsAt, academySlug).full
+  const safe = sanitiseUrl(link)
+  const isMeet = /^https:\/\/meet\.google\.com\//i.test(safe)
+  const html = wrap(subject, `
+    <h2 style="margin:0 0 16px;font-size:20px;font-weight:700;color:#0D0F1A">Your class has a new link</h2>
+    <p>Hi ${escapeHtml(name)},</p>
+    <p><strong>${escapeHtml(liveTitle)}</strong> (${escapeHtml(when)}) now runs in a new room. Use this link to join — the old one no longer applies.</p>
+    <p style="margin:24px 0">
+      <a href="${escapeHtml(safe)}" style="display:inline-block;background:linear-gradient(135deg,#0057b8,#2F6BFF);color:#fff;font-weight:600;padding:12px 24px;border-radius:12px;text-decoration:none">
+        ${isMeet ? 'Open Google Meet' : 'Open the class link'}
+      </a>
+    </p>
+    <p style="font-size:13px;color:#374151;word-break:break-all">${escapeHtml(safe)}</p>
+    ${cohost ? `<p style="font-size:13px;color:#374151">You are co-host — join with <strong>${escapeHtml(cohost)}</strong> so Google gives you the host controls.</p>` : ''}
+    <p style="font-size:12px;color:#9CA3AF">Students who press Join in the LMS now go to this link.</p>
+  `)
+  await sender.send({
+    to,
+    subject,
+    html,
+    text: `"${liveTitle}" (${when}) now runs at a new link: ${safe}${cohost ? `\nYou are co-host — join with ${cohost}.` : ''}\nStudents who press Join in the LMS now go to this link.`,
+  })
+}
+
 export async function sendInstructor15MinReminder(
   to: string,
   name: string,

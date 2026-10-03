@@ -53,6 +53,13 @@ const STAFF_ONLY_FIELDS = [
   'mentorNotes',
   'meetingUrl',
   'googleMeetCode',
+  /* Who swapped in a backup link and when (LiveClassService
+     .switchToBackupLink) — staff bookkeeping. */
+  'backupLink',
+  /* The co-hosted Meet's Google-side record: the host mailbox, the calendar
+     event, and the instructor's own Google address as co-host — often a
+     personal Gmail. Spread onto every student's browse row until now. */
+  'meetSpace',
   /* Cross-academy bookkeeping. This list is built by spreading the raw
      document, so these arrived on a student's browse feed the moment the
      first class was shared: which OTHER academy the class serves, that

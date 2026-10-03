@@ -10,7 +10,7 @@ import {
   ChevronRight, PlayCircle, CalendarDays, Pencil, Search, X, Plus,
   LayoutList, CalendarRange, ChevronLeft, GraduationCap,
   UserCheck, LayoutGrid, Building2, MapPin, UserPlus,
-  ChevronDown, User, Globe, Share2, Check, FileSpreadsheet,
+  ChevronDown, User, Globe, Share2, Check, FileSpreadsheet, LifeBuoy,
 } from 'lucide-react'
 import { useAllLiveClasses, useCreateLiveClass, useMyMeetings, markInstructorJoined, type LiveClass, type LiveClassType, type MentorMeeting } from '@/lib/api/liveClasses'
 import { CLASS_LANGUAGES, withFlagAndNative } from '@/lib/languages'
@@ -29,6 +29,7 @@ import {
 } from '@/components/live-classes/CrossAcademy'
 import { CreateOfflineClassModal } from '@/components/live-classes/CreateOfflineClassModal'
 import { BookForStudentModal } from '@/components/live-classes/BookForStudentModal'
+import { BackupLinkModal, BACKUP_RED } from '@/components/live-classes/BackupLinkModal'
 import { DarkSelect, DarkDateTimePicker, PillToggle } from '@/components/live-classes/FormWidgets'
 import { Button, MotionButton } from '@/components/ui/button'
 import Spinner from '@/components/ui/Spinner'
@@ -565,7 +566,11 @@ function ShareLinkButton({ url, admissionUrl, title }: { url?: string; admission
 }
 
 /* ── Table row ───────────────────────────────────────── */
-function TableRow({ live, index, showInstructor }: { live: LiveClass; index: number; showInstructor: boolean }) {
+/* onBackup opens the page's one Backup dialog. It lives on the PAGE, not the
+   row: the list refetches every 15 s, and a class just switched to a link can
+   leave a filtered list (In-App), which would unmount a row-owned dialog and
+   take the new link and its Copy button with it. */
+function TableRow({ live, index, showInstructor, onBackup }: { live: LiveClass; index: number; showInstructor: boolean; onBackup: (l: LiveClass) => void }) {
   const router      = useRouter()
   const isLiveNow   = live.status === 'live'
   const isScheduled = live.status === 'scheduled'
@@ -599,10 +604,19 @@ function TableRow({ live, index, showInstructor }: { live: LiveClass; index: num
      were both shown the same half-full green bar. */
   const { isHost, mine, hostLabel } = useAcademyView(live)
 
+  /* Backup link (BackupLinkModal) — the instructor can't get into the room.
+     Any online class the owning academy runs, until it is over (end + the
+     students' 20-minute join grace). Loud from 15 min before the start, when
+     it is an emergency; a quiet icon before that, for switching early. */
+  const canBackup    = isHost && !isOffline && !isCancelled && !isEnded && now < endMs + 20 * 60 * 1000
+  const backupUrgent = canBackup && startMs - now <= 15 * 60 * 1000
+
   const fillPct = live.sessionCapacity > 0 ? Math.min(100, (live.bookedCount / live.sessionCapacity) * 100) : 0
   const barColor = seatBarColor(fillPct, mine)
 
-  const sectionTitle = typeof live.sectionId === 'object' ? live.sectionId?.title : undefined
+  /* The API sends the module as `section` (sectionId is its id); the object
+     form of sectionId is kept for older payloads. */
+  const sectionTitle = live.section?.title ?? (typeof live.sectionId === 'object' ? live.sectionId?.title : undefined)
 
   return (
     <>
@@ -655,6 +669,13 @@ function TableRow({ live, index, showInstructor }: { live: LiveClass; index: num
                     color:      isInternal ? '#0057b8' : '#818CF8',
                   }}>
                   {isInternal ? 'In-App' : 'External'}
+                </span>
+              )}
+              {live.backupLink && (
+                <span className="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-widest"
+                  style={{ background: 'rgba(244,63,94,0.14)', color: '#FDA4AF' }}
+                  title={`On a backup link (${live.backupLink.mode === 'generated' ? 'new Google Meet' : 'pasted link'})${live.backupLink.previousType === 'internal' ? ' — was the in-app room' : ''}`}>
+                  <LifeBuoy size={8} />Backup
                 </span>
               )}
               <SharedAcademiesChip live={live} />
@@ -791,6 +812,26 @@ function TableRow({ live, index, showInstructor }: { live: LiveClass; index: num
                 {isLiveNow ? <Radio size={13} /> : <PlayCircle size={13} />}
               </Button>
             )}
+
+            {/* Backup link — instructor can't get into the room */}
+            {canBackup && (backupUrgent ? (
+              <button type="button" onClick={() => onBackup(live)}
+                className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-[11px] font-bold text-white transition-all hover:opacity-90"
+                style={{ background: BACKUP_RED }}
+                title="Instructor can't join? Switch this class to a backup link">
+                <LifeBuoy size={11} />Backup
+              </button>
+            ) : (
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                onClick={() => onBackup(live)}
+                className="h-7 w-7 rounded-lg"
+                style={{ color: 'rgba(244,63,94,0.75)' }}
+                title="Backup link — switch this class to another room">
+                <LifeBuoy size={13} />
+              </Button>
+            ))}
 
             {/* Edit */}
             {isHost && (
@@ -1879,6 +1920,8 @@ export default function LiveClassesPage() {
   const rangeActive = !!(dateFrom || dateTo || timeFrom || timeTo)
   const [createOpen,         setCreateOpen]         = useState(false)
   const [offlineCreateOpen,  setOfflineCreateOpen]  = useState(false)
+  /* The one Backup dialog — see TableRow's onBackup. */
+  const [backupLive,         setBackupLive]         = useState<LiveClass | null>(null)
   const [view,               setView]               = useState<'table' | 'month' | 'grid'>('table')
 
   const { data: me } = useCurrentUser()
@@ -2395,6 +2438,7 @@ export default function LiveClassesPage() {
                               live={live}
                               index={i}
                               showInstructor={!isInstructor}
+                              onBackup={setBackupLive}
                             />
                           ))}
                         </React.Fragment>
@@ -2428,6 +2472,9 @@ export default function LiveClassesPage() {
             categoryProgram={categoryScopeOf(me)}
           />
         )}
+      </AnimatePresence>
+      <AnimatePresence>
+        {backupLive && <BackupLinkModal key={backupLive.id} live={backupLive} onClose={() => setBackupLive(null)} />}
       </AnimatePresence>
     </div>
   )

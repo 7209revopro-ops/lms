@@ -1781,6 +1781,17 @@ const liveRepeatSchema = z.object({ weeks: z.coerce.number().int().min(1).max(52
 router.post  ('/live-classes/:id/repeat',                 requirePermission('live-classes','create'), validate(liveRepeatSchema), audit('liveclass.repeat', 'LiveClass', r => String(r.params['id'] ?? ''), r => ({ weeks: r.body.weeks })), live.adminRepeat)
 router.patch ('/live-classes/:id', requirePermission('live-classes','update'),                        validate(liveUpdateSchema), audit('liveclass.update', 'LiveClass', r => String(r.params['id'] ?? '')), live.adminUpdate)
 router.delete('/live-classes/:id', requirePermission('live-classes','delete'),                        audit('liveclass.delete', 'LiveClass', r => String(r.params['id'] ?? '')), live.adminDelete)
+/* Backup link — the instructor cannot get into the class's room: swap in a
+   fresh Google Meet (instructor co-host) or a pasted link. Same permission as
+   editing the class. See LiveClassService.switchToBackupLink. */
+const backupLinkSchema = z.discriminatedUnion('mode', [
+  z.object({ mode: z.literal('generate') }),
+  z.object({ mode: z.literal('paste'), url: z.string().trim().min(1, 'Paste the meeting link').max(2048) }),
+])
+router.get ('/live-classes/:id/backup-link', requirePermission('live-classes','update'), live.adminBackupLinkInfo)
+router.post('/live-classes/:id/backup-link', requirePermission('live-classes','update'), validate(backupLinkSchema),
+  audit('liveclass.backup-link', 'LiveClass', r => String(r.params['id'] ?? ''),
+    r => ({ mode: r.body?.mode, ...(r.body?.url ? { url: String(r.body.url).slice(0, 500) } : {}) })), live.adminBackupLink)
 router.post  ('/live-classes/:id/start',                  live.adminStart)
 router.post  ('/live-classes/:id/end',                    live.adminEnd)
 router.post  ('/live-classes/:id/recreate',               live.adminRecreate)

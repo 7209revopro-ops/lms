@@ -80,6 +80,10 @@ async function onRecordingReady(evt: CltEvent): Promise<string> {
 async function onMeetingEnded(evt: CltEvent): Promise<string> {
   const live = await classForRoom(evt.roomName)
   if (live.status === 'ended' || live.status === 'cancelled') return 'already closed'
+  /* Switched to a backup link: everyone left THIS room for the new one, so
+     its ending is not the class ending — closing the class here would lock
+     every student out of the link it now runs on. */
+  if (live.type !== 'internal') return 'room abandoned for a backup link — class left open'
 
   const endedAt = evt.occurredAt ? new Date(evt.occurredAt) : new Date()
   const { LiveClassModel } = await import('@/models/schema.ts')

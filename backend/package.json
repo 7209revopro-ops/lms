@@ -91,6 +91,7 @@
     "test:attendance": "bun src/tests/attendance.suite.ts",
     "test:orgswitcherscope": "bun src/tests/orgswitcherscope.suite.ts",
     "test:meetlink": "bun src/tests/meetlinkchange.suite.ts",
+    "test:backuplink": "bun src/tests/backuplink.suite.ts",
     "test:newsessiongate": "bun src/tests/newsessiongate.suite.ts",
     "test:newsessiongate-prop": "bun src/tests/newsessiongate.property.suite.ts",
     "test:digest": "bun src/tests/digest.suite.ts",

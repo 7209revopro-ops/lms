@@ -236,6 +236,9 @@ export class LiveClassRepository extends BaseRepository<ILiveClass> {
       .limit(filter.limit ?? 1000)
       .populate('courseId',     'title slug thumbnailUrl')
       .populate('instructorId', 'name avatarUrl')
+      /* The module, for the console's Module column — without it every row
+         read "—", including the classes an import had put in a module. */
+      .populate('sectionId',    'title order')
       .exec()
 
     // Reflect the effective (clock-based) status. Not persisted.

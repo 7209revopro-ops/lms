@@ -22,6 +22,29 @@ export async function shareOrCopyLink(url: string, title?: string): Promise<Shar
       if ((err as { name?: string })?.name === 'AbortError') return 'cancelled'
     }
   }
-  await navigator.clipboard.writeText(url)
+  await copyText(url)
   return 'copied'
+}
+
+/* The clipboard, with the old hidden-textarea route for a browser that
+   refuses the API — embedded and in-app browsers, a page without clipboard
+   permission — so "Copy" works there too instead of failing outright.
+   Throws only when neither route copied anything. */
+export async function copyText(text: string): Promise<void> {
+  try {
+    await navigator.clipboard.writeText(text)
+  } catch (err) {
+    if (typeof document === 'undefined') throw err
+    const ta = document.createElement('textarea')
+    ta.value = text
+    ta.setAttribute('readonly', '')
+    ta.style.position = 'fixed'
+    ta.style.top = '-1000px'
+    ta.style.opacity = '0'
+    document.body.appendChild(ta)
+    ta.select()
+    const ok = document.execCommand('copy')
+    document.body.removeChild(ta)
+    if (!ok) throw err
+  }
 }

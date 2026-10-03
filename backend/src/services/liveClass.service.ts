@@ -8,7 +8,8 @@ import { EnrollmentRepository } from '@/repositories/enrollment.repository.ts'
    is kept for any caller that genuinely needs a standalone announcement. */
 import { queueDigestItem } from '@/jobs/digest.job.ts'
 import * as muxSvc from '@/services/mux.service.ts'
-import { fetchMeetRecordingUrl, syncMeetSpace, effectiveMeetEmail, type MeetSpaceRecord } from '@/services/googleMeet.service.ts'
+import { fetchMeetRecordingUrl, syncMeetSpace, effectiveMeetEmail, createGoogleMeetLink, staffMeetCohosts, type MeetSpaceRecord, type CreatedMeet } from '@/services/googleMeet.service.ts'
+import { STUDENT_JOIN_GRACE_MS } from '@/utils/liveStatus.ts'
 import { logger } from '@/utils/logger.ts'
 import { env } from '@/config/env.ts'
 import { EnrollmentModel, LiveClassModel, UserModel, type ILiveClass, type LiveClassType, type LiveClassProvider } from '@/models/schema.ts'
@@ -31,6 +32,53 @@ export class LiveClassError extends Error {
     super(message)
     this.name = 'LiveClassError'
   }
+}
+
+/* ── Backup link (LiveClassService.switchToBackupLink) ─────────────────── */
+export interface BackupLinkInfo {
+  current:    { type: LiveClassType; provider?: string; meetingUrl?: string }
+  /* Who a generated Meet makes co-host, and through which address. */
+  instructor: { name: string; email: string | null; meetEmail: string | null; via: 'meet-email' | 'login-email' | null; organizer: boolean } | null
+  backupLink?: NonNullable<ILiveClass['backupLink']>
+  canSwitch:  boolean
+  reason?:    string
+}
+export interface BackupLinkResult {
+  live:         ILiveClass
+  url:          string
+  mode:         'generated' | 'pasted'
+  previousType: LiveClassType
+  cohost?:      string
+  instructor:   { email: string; name: string } | null
+}
+type BackupSubject = Pick<ILiveClass, 'title' | 'type' | 'provider' | 'status' | 'scheduledStart' | 'durationMins'
+  | 'meetingUrl' | 'googleMeetCode' | 'meetSpace' | 'instructorId' | 'organizationId' | 'backupLink'> & { isOnline?: boolean }
+
+/* One swap at a time per class: a double click must not make two Meets. */
+const backupInFlight = new Set<string>()
+
+/* Why a class cannot take a backup link, or null. Over = past its end plus the
+   grace a student still has to join (STUDENT_JOIN_GRACE_MS) — the same instant
+   the Join button closes. */
+function backupBlocker(was: BackupSubject): LiveClassError | null {
+  if (was.isOnline === false) return new LiveClassError('NOT_ONLINE', 'This is an in-person class — it has no meeting link.', 400)
+  if (was.status === 'cancelled') return new LiveClassError('CLASS_CANCELLED', 'This class was cancelled.', 409)
+  const over = new Date(was.scheduledStart).getTime() + was.durationMins * 60_000 + STUDENT_JOIN_GRACE_MS
+  if (was.status === 'ended' || Date.now() > over) return new LiveClassError('CLASS_OVER', 'This class is already over.', 409)
+  return null
+}
+
+/* A pasted link: a full https URL, and its Meet code when it is a Meet. */
+function pastedMeetingLink(raw: string): { url: string; code?: string } {
+  let u: URL
+  try { u = new URL(raw.trim()) } catch {
+    throw new LiveClassError('INVALID_URL', 'Paste the full meeting link, starting with https://', 400)
+  }
+  if (u.protocol !== 'https:') throw new LiveClassError('INVALID_URL', 'The meeting link must start with https://', 400)
+  const code = u.hostname === 'meet.google.com'
+    ? /^\/([a-z0-9]{3}-[a-z0-9]{4}-[a-z0-9]{3})\/?$/i.exec(u.pathname)?.[1]?.toLowerCase()
+    : undefined
+  return { url: u.toString(), ...(code ? { code } : {}) }
 }
 
 export class LiveClassService {
@@ -792,8 +840,10 @@ export class LiveClassService {
       /* Stream went live — update status idempotently + kick off viewer count fetch */
       case 'video.live_stream.active': {
         if (!streamId) return
+        /* type: a class switched to a backup link keeps its stream id, but the
+           stream no longer drives it (switchToBackupLink). */
         await LiveClassModel.updateOne(
-          { muxLiveStreamId: streamId, status: { $in: ['scheduled', 'live'] } },
+          { muxLiveStreamId: streamId, type: 'internal', status: { $in: ['scheduled', 'live'] } },
           { $set: { status: 'live', startedAt: new Date() } },
         )
         /* Kick off viewer count refresh */
@@ -809,8 +859,10 @@ export class LiveClassService {
       /* Stream went idle — instructor stopped streaming */
       case 'video.live_stream.idle': {
         if (!streamId) return
+        /* Not a class on a backup link: its abandoned stream going idle must
+           not end the class everyone moved to. */
         await LiveClassModel.updateOne(
-          { muxLiveStreamId: streamId, status: 'live' },
+          { muxLiveStreamId: streamId, type: 'internal', status: 'live' },
           { $set: { status: 'ended', endedAt: new Date() } },
         )
         logger.info({ streamId }, 'mux webhook: stream idle → ended')
@@ -1479,6 +1531,182 @@ export class LiveClassService {
       changed++
     }
     return changed
+  }
+
+  /* ── Backup link ───────────────────────────────────────
+     The instructor cannot get into the room this class has — the in-app room
+     will not open, or the Meet will not let them in — and the class is about
+     to start or already running. An admin swaps in another room on the spot:
+     a fresh Google Meet made here (the instructor co-host, exactly as when a
+     Meet class is created), or a link they paste (their own Meet, a Zoom).
+
+     The class becomes a link class carrying the new link, and that one write
+     is what reaches everybody, because every way in reads the class at the
+     moment of use: a student's Join asks the server for the link at the click
+     (resolveMeetJoin) and gets this one; the in-app watch page re-reads the
+     class and, now that it is a link class, offers that Join instead of the
+     room; the admin panel's Join and every reminder still to come carry it.
+     A link already mailed before the swap is not recalled — the Join button
+     is the way in, and the caller tells the booked students so in-app.
+
+     The in-app room's own fields (provider, cltRoomName …) are left as they
+     were, so its history and webhooks still line up: `type` alone decides
+     how a student gets in, and every screen reads `type` first. */
+  async backupLinkInfo(id: string): Promise<BackupLinkInfo> {
+    const was = await this.#loadForBackup(id)
+    const instructor = was.instructorId
+      ? await UserModel.findById(was.instructorId).select('name email meetEmail').lean<{ name?: string; email?: string; meetEmail?: string | null }>()
+      : null
+    const blocker = backupBlocker(was)
+    const workspace = process.env['GOOGLE_WORKSPACE_DOMAIN'] ?? 'deltagroups.ae'
+    return {
+      current: {
+        type:       was.type ?? 'external',
+        ...(was.provider ? { provider: was.provider } : {}),
+        ...(was.type !== 'internal' && was.meetingUrl ? { meetingUrl: was.meetingUrl } : {}),
+      },
+      instructor: instructor ? {
+        name:      instructor.name ?? instructor.email ?? 'Instructor',
+        email:     instructor.email ?? null,
+        meetEmail: effectiveMeetEmail(instructor) ?? null,
+        via:       instructor.meetEmail ? 'meet-email' : instructor.email ? 'login-email' : null,
+        /* createGoogleMeetLink's own rule: a Workspace instructor owns the
+           meeting on their own calendar instead of being made co-host. */
+        organizer: !!instructor.email?.toLowerCase().endsWith(`@${workspace}`),
+      } : null,
+      ...(was.backupLink ? { backupLink: was.backupLink } : {}),
+      canSwitch: !blocker,
+      ...(blocker ? { reason: blocker.message } : {}),
+    }
+  }
+
+  async switchToBackupLink(
+    id: string,
+    input: { mode: 'generate' | 'paste'; url?: string; actorId: string },
+    /* Seams for the suite: Google is not reachable from a test run. */
+    deps: { makeMeet?: typeof createGoogleMeetLink; withdraw?: (space: MeetSpaceRecord) => Promise<unknown> } = {},
+  ): Promise<BackupLinkResult> {
+    if (backupInFlight.has(id)) {
+      throw new LiveClassError('BACKUP_IN_PROGRESS', 'A backup link is already being made for this class — give it a moment.', 409)
+    }
+    backupInFlight.add(id)
+    let made: CreatedMeet | undefined
+    try {
+      const was = await this.#loadForBackup(id)
+      const blocker = backupBlocker(was)
+      if (blocker) throw blocker
+      const instructor = was.instructorId
+        ? await UserModel.findById(was.instructorId).select('name email meetEmail').lean<{ name?: string; email?: string; meetEmail?: string | null }>()
+        : null
+
+      let url: string
+      let code: string | undefined
+      if (input.mode === 'generate') {
+        try {
+          made = await (deps.makeMeet ?? createGoogleMeetLink)({
+            title:               was.title,
+            startISO:            new Date(was.scheduledStart).toISOString(),
+            durationMins:        was.durationMins,
+            instructorEmail:     instructor?.email ?? undefined,
+            instructorMeetEmail: effectiveMeetEmail(instructor),
+            /* The staff account co-hosts the backup room too, as it does every
+               class room — somebody must be able to admit people even if the
+               instructor is still locked out. */
+            staffCohosts:        staffMeetCohosts(),
+          })
+        } catch (err) {
+          logger.error({ err, classId: id }, 'backup link: Google Meet creation failed')
+          throw new LiveClassError('MEET_LINK_UNAVAILABLE',
+            'Google did not make a new Meet link just now. Try again in a moment, or paste a link instead.', 503)
+        }
+        url  = made.meetingUrl
+        code = made.meetingCode || undefined
+      } else {
+        const pasted = pastedMeetingLink(input.url ?? '')
+        if (pasted.url === was.meetingUrl && was.type !== 'internal') {
+          throw new LiveClassError('SAME_LINK', 'That is already this class\'s link.', 400)
+        }
+        url  = pasted.url
+        code = pasted.code
+      }
+
+      const space = made?.meetSpace
+      const backupLink = {
+        mode:         input.mode === 'generate' ? 'generated' as const : 'pasted' as const,
+        at:           new Date(),
+        by:           new Types.ObjectId(input.actorId),
+        /* What the class was before the FIRST swap, so a second swap still
+           says "was the in-app room". */
+        previousType: was.backupLink?.previousType ?? was.type ?? 'external',
+      }
+      const $unset: Record<string, ''> = {}
+      if (!code)  $unset['googleMeetCode'] = ''
+      if (!space) $unset['meetSpace'] = ''
+      /* Near class time the instructor joins through the link they were sent,
+         which nothing records — so the automatic "mentor didn't join" alert
+         would fire for a class the admin is already rescuing. */
+      const nearClassTime = Date.now() >= new Date(was.scheduledStart).getTime() - 15 * 60_000
+      /* Written only if the class is still as it was read: still on, and its
+         room unchanged. A second switch (another admin, another server) or an
+         edit of the link in between makes this one stand down instead of
+         silently overwriting it — and the Meet just made is withdrawn below. */
+      const live = await LiveClassModel.findOneAndUpdate(
+        {
+          _id: id,
+          status: { $nin: ['cancelled', 'ended'] },
+          type: was.type ?? { $in: [null, 'external'] },
+          meetingUrl: was.meetingUrl ? was.meetingUrl : { $in: [null, ''] },
+          'backupLink.at': was.backupLink?.at ?? null,
+        },
+        {
+          $set: {
+            type: 'external', meetingUrl: url, backupLink,
+            ...(code ? { googleMeetCode: code } : {}), ...(space ? { meetSpace: space } : {}),
+            ...(nearClassTime ? { mentorNoShowAlertSent: true } : {}),
+          },
+          ...(Object.keys($unset).length ? { $unset } : {}),
+        },
+        { new: true },
+      )
+      if (!live) {
+        const now = await LiveClassModel.findById(id).select('status').lean<{ status?: string }>()
+        throw now?.status === 'cancelled' || now?.status === 'ended'
+          ? new LiveClassError('CLASS_OVER', 'This class was cancelled or ended a moment ago.', 409)
+          : new LiveClassError('CLASS_CHANGED', 'Someone changed this class\'s link at the same moment — check it and try again.', 409)
+      }
+      made = undefined   // kept — nothing to withdraw on the way out
+
+      /* The old co-hosted Meet's invite now points the instructor at the room
+         that failed them: withdraw it (Google tells them). The new Meet sent
+         its own invite when it was made. */
+      if (was.meetSpace) {
+        void (deps.withdraw ?? (s => syncMeetSpace(s, { cancelled: true })))(was.meetSpace)
+          .catch(err => logger.warn({ err, classId: id }, 'backup link: old Meet invite not withdrawn'))
+      }
+      logger.info({ classId: id, mode: backupLink.mode, previousType: was.type, by: input.actorId }, 'backup link switched in')
+
+      return {
+        live, url, mode: backupLink.mode, previousType: was.type ?? 'external',
+        ...(space?.cohost ? { cohost: space.cohost } : {}),
+        instructor: instructor?.email ? { email: instructor.email, name: instructor.name ?? 'Instructor' } : null,
+      }
+    } finally {
+      backupInFlight.delete(id)
+      /* A Meet made for a class that could not take it: withdraw its invite. */
+      if (made?.meetSpace) {
+        void (deps.withdraw ?? (s => syncMeetSpace(s, { cancelled: true })))(made.meetSpace)
+          .catch(err => logger.warn({ err, classId: id }, 'backup link: unused Meet invite not withdrawn'))
+      }
+    }
+  }
+
+  async #loadForBackup(id: string): Promise<BackupSubject> {
+    if (!Types.ObjectId.isValid(id)) throw new LiveClassError('INVALID_ID', 'Invalid id', 400)
+    const was = await LiveClassModel.findById(id)
+      .select('title type provider isOnline status scheduledStart durationMins meetingUrl googleMeetCode meetSpace instructorId organizationId backupLink')
+      .lean<BackupSubject>()
+    if (!was) throw new LiveClassError('LIVE_CLASS_NOT_FOUND', 'Live class not found', 404)
+    return was
   }
 
   /* Polls Google Meet API for the recording of an external class.

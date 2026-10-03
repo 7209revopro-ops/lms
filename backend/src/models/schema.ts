@@ -1040,6 +1040,17 @@ export interface ILiveClass extends Document {
     cohost?:          string      // address currently COHOST, if any
     calendarEventId?: string      // event on the host's calendar
   }
+  /* Set when an admin swapped in a backup room because the instructor could
+     not get into the class's own (LiveClassService.switchToBackupLink). The
+     link itself is meetingUrl; this records how, when and by whom, and what
+     the class was before the first swap. Never a URL, so no payload that
+     forgets to strip it can leak one. */
+  backupLink?: {
+    mode:         'generated' | 'pasted'
+    at:           Date
+    by?:          Types.ObjectId
+    previousType: LiveClassType
+  }
 
   /* Which engine backs an `internal` class.
      `type` says external-vs-in-app; `provider` says WHICH in-app engine, so
@@ -1198,6 +1209,15 @@ const LiveClassSchema = new Schema<ILiveClass>(
         host:            { type: String, maxlength: 255, required: true },
         cohost:          { type: String, maxlength: 255 },
         calendarEventId: { type: String, maxlength: 1024 },
+      }, { _id: false }),
+      default: undefined,
+    },
+    backupLink: {
+      type: new Schema({
+        mode:         { type: String, enum: ['generated', 'pasted'], required: true },
+        at:           { type: Date, required: true },
+        by:           { type: Schema.Types.ObjectId, ref: 'User' },
+        previousType: { type: String, enum: ['external', 'internal'], required: true },
       }, { _id: false }),
       default: undefined,
     },
@@ -2387,7 +2407,7 @@ export type AuditAction =
   | 'bulk.publish'    | 'bulk.archive'    | 'bulk.delete'
   | 'course.import'   | 'course.export'
   | 'liveclass.create' | 'liveclass.update' | 'liveclass.delete' | 'liveclass.repeat'
-  | 'liveclass.import' | 'liveclass.import.undo'
+  | 'liveclass.import' | 'liveclass.import.undo' | 'liveclass.backup-link'
   | 'exam.upsert'      | 'exam.delete'      | 'exam.grade'       | 'exam.reset'
   /* Operator switches. `settings.device-limit` disables a security control
      for every academy at once, so it is audited like an impersonation. */

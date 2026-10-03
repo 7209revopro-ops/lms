@@ -276,6 +276,13 @@ function toDTO(doc: any, entitled = true, staff = true, door?: LabelledDoor | un
        in-app "Join" button does. */
     shareUrl:       staff ? (j.meetingUrl || liveClassWatchUrl(j.id ?? String(doc._id))) : undefined,
 
+    /* STAFF ONLY — the class was switched to a backup link because the
+       instructor could not get into its room (LiveClassService
+       .switchToBackupLink): how, when, and what it was before. */
+    backupLink:     staff && j.backupLink
+                      ? { mode: j.backupLink.mode, at: j.backupLink.at, previousType: j.backupLink.previousType }
+                      : undefined,
+
     /* STAFF + INTERNAL ONLY — CLT's own no-login "join by code" link, for
        people who were never going to have an LMS account: an admissions
        prospect, a guest sitting in before they enrol. Deliberately NOT the
@@ -1470,7 +1477,10 @@ export class LiveClassController {
           description:     source.description,
           scheduledStart,
           durationMins:    source.durationMins,
-          type:            source.type,
+          /* A backup link rescued ONE class (switchToBackupLink); the weeks
+             after it repeat as the class was planned — an in-app class as an
+             in-app class, its room fields being still on the source. */
+          type:            (source as { backupLink?: { previousType?: 'external' | 'internal' } }).backupLink?.previousType ?? source.type,
           /* An In-App Stream class repeats as an In-App Stream class. */
           provider:        (source as { provider?: 'mux' | 'livekit' }).provider,
           instructorId:    String(source.instructorId),
@@ -1519,20 +1529,29 @@ export class LiveClassController {
     }
   }
 
+  /* A programme-scoped caller (a sub_admin's programme, an instructor's
+     category) manages only sessions of their own programme's courses.
+     #canManage answers academy and ownership but not this, so every write
+     path runs both. Answers 403 itself and returns false when outside. */
+  #withinProgramme = async (req: Request, res: Response, id: string): Promise<boolean> => {
+    const scope = req.user?.categoryScope as string | undefined
+    if (!scope) return true
+    const existing = await this.service.getById(id)
+    const { CourseModel } = await import('@/models/schema.ts')
+    const courseIdStr = isPopulated(existing.courseId as any) ? (existing.courseId as any).id : String(existing.courseId)
+    const course = await CourseModel.findById(courseIdStr).select('program').lean()
+    if (!course || (course as any).program !== scope) {
+      res.status(403).json({ success: false, error: { code: 'FORBIDDEN', message: 'You can only edit sessions for your category courses.' } })
+      return false
+    }
+    return true
+  }
+
   adminUpdate = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     try {
       const id    = String(req.params['id'] ?? '')
       if (!(await this.#canManage(req, res, id))) return
-      const scope = req.user?.categoryScope as string | undefined
-      if (scope) {
-        const existing = await this.service.getById(id)
-        const { CourseModel } = await import('@/models/schema.ts')
-        const courseIdStr = isPopulated(existing.courseId as any) ? (existing.courseId as any).id : String(existing.courseId)
-        const course = await CourseModel.findById(courseIdStr).select('program').lean()
-        if (!course || (course as any).program !== scope) {
-          res.status(403).json({ success: false, error: { code: 'FORBIDDEN', message: 'You can only edit sessions for your category courses.' } }); return
-        }
-      }
+      if (!(await this.#withinProgramme(req, res, id))) return
       const dto = req.body as Record<string, unknown>
       const data: Parameters<LiveClassService['update']>[1] = {}
       /* Read once, up here, because the cohort gate below has to compare the
@@ -1751,6 +1770,55 @@ export class LiveClassController {
       if (!(await this.#canManage(req, res, id))) return
       const live = await this.service.recreateStream(id)
       sendSuccess(res, toDTO(live), 'Stream credentials recreated')
+    } catch (err) { next(err) }
+  }
+
+  /* ── Backup link — the instructor cannot get into the class's room ──────
+     GET  what the Backup dialog shows first: the room the class has now and
+          who a generated Meet would make co-host.
+     POST { mode: 'generate' } | { mode: 'paste', url } — swap it in.
+     Exactly the gate of editing the class (#canManage + #withinProgramme):
+     its academy's staff within their programme, and the instructor it names.
+     See LiveClassService.switchToBackupLink. */
+  adminBackupLinkInfo = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    try {
+      const id = String(req.params['id'] ?? '')
+      if (!(await this.#canManage(req, res, id))) return
+      if (!(await this.#withinProgramme(req, res, id))) return
+      sendSuccess(res, await this.service.backupLinkInfo(id))
+    } catch (err) { next(err) }
+  }
+
+  adminBackupLink = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    try {
+      const id = String(req.params['id'] ?? '')
+      if (!(await this.#canManage(req, res, id))) return
+      if (!(await this.#withinProgramme(req, res, id))) return
+      const body = req.body as { mode: 'generate' | 'paste'; url?: string }
+      const r = await this.service.switchToBackupLink(id, { mode: body.mode, url: body.url, actorId: req.user!.id })
+
+      /* Booked students: the same in-app notice as a link changed in Edit. It
+         opens the class, whose Join now leads to the new room. */
+      void notifySessionEdited({ liveClassId: id, title: r.live.title, linkChanged: true, minorChanges: [] })
+        .catch(err => logger.error({ err, liveClassId: id }, 'backup link: student notice failed'))
+
+      /* The instructor is the one who could not get in, and is waiting to teach
+         now — so the link goes to their inbox whatever their schedule-mail
+         preference says. */
+      if (r.instructor) {
+        const instructor = r.instructor
+        void (async () => {
+          await ensureOrgSlugs().catch(() => {})
+          const { sendInstructorBackupLink } = await import('@/services/email.service.ts')
+          await sendInstructorBackupLink(instructor.email, instructor.name, r.live.title, r.live.scheduledStart, r.url,
+            r.cohost, orgSlugFor((r.live as { organizationId?: unknown }).organizationId))
+        })().catch(err => logger.error({ err, liveClassId: id }, 'backup link: instructor email failed'))
+      }
+
+      sendSuccess(res, {
+        id, url: r.url, mode: r.mode, previousType: r.previousType,
+        cohost: r.cohost ?? null, instructorEmailed: !!r.instructor,
+      }, 'Backup link is live')
     } catch (err) { next(err) }
   }
 }

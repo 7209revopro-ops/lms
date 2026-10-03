@@ -162,9 +162,12 @@ export interface WatchAccess {
  * so it cannot produce a false positive. Either signal is enough.
  */
 export function isInteractiveRoom(
-  l: { provider?: string; cltRoomName?: string } | null | undefined,
+  l: { provider?: string; cltRoomName?: string; type?: string } | null | undefined,
 ): boolean {
   if (!l) return false
+  /* A class switched to a backup link keeps its room's fields, but the room
+     is abandoned — it is a link class now, joined through the Meet button. */
+  if (l.type === 'external') return false
   return l.provider === 'livekit' || !!l.cltRoomName
 }
 

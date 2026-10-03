@@ -16,6 +16,7 @@ import {
   useStreamCredentials, useRecreateLiveStream, isInteractiveRoom,
 } from '@/lib/api/liveClasses'
 import { ClassEntryPanel } from '@/components/live-classes/ClassEntryPanel'
+import { MovedToLinkPanel } from '@/components/live-classes/BackupLinkModal'
 
 /* ── Inline OBS credentials panel ─────────────────────── */
 function ObsCredsInline({ liveId }: { liveId: string }) {
@@ -223,6 +224,11 @@ export default function MonitorPage({ params }: { params: Promise<{ id: string }
      Branched AFTER the ended/cancelled state on purpose: a finished class is
      better served by the recording screen below than by a join button that
      can only refuse. */
+  /* Moved to a backup link: the room and stream below are abandoned. */
+  if (!isEnded && !isCancelled && live.type === 'external') {
+    return <MovedToLinkPanel live={live} backHref={courseHref} backLabel="Back to course" />
+  }
+
   if (!isEnded && !isCancelled && isInteractiveRoom(live)) {
     return (
       <div className="mx-auto max-w-6xl">

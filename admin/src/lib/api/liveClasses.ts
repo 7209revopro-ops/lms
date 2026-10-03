@@ -57,6 +57,9 @@ export interface LiveClass {
      for admissions prospects and other non-students, never the default share
      link. See the backend DTO comment for the full reasoning. */
   admissionJoinUrl?: string
+  /* Set once the class was switched to a backup link because the instructor
+     could not get into its room — see BackupLinkModal. */
+  backupLink?:    { mode: 'generated' | 'pasted'; at: string; previousType: LiveClassType }
 
   /* Internal-only (Mux) */
   muxPlaybackId?: string
@@ -78,6 +81,8 @@ export interface LiveClass {
 
   /* Module link */
   sectionId?:      string | { id: string; title: string }
+  /* The module itself, when the list populated it (sectionId is then its id). */
+  section?:        { id: string; title: string }
   sessionCapacity: number
 
   /* Cross-academy. Empty on every class that is not shared. */
@@ -293,6 +298,41 @@ export function useUpdateLiveClass(courseId: string | undefined) {
       if (courseId) qc.invalidateQueries({ queryKey: liveClassKeys.forCourse(courseId) })
       qc.invalidateQueries({ queryKey: liveClassKeys.byId(vars.id) })
       qc.invalidateQueries({ queryKey: ['admin', 'live-classes', 'all'] })
+    },
+  })
+}
+
+/* ── Backup link — the instructor cannot get into the class's room ──────
+   Mirrors LiveClassService.backupLinkInfo / switchToBackupLink. */
+export interface BackupLinkInfo {
+  current:    { type: LiveClassType; provider?: string; meetingUrl?: string }
+  instructor: { name: string; email: string | null; meetEmail: string | null; via: 'meet-email' | 'login-email' | null; organizer: boolean } | null
+  backupLink?: { mode: 'generated' | 'pasted'; at: string; previousType: LiveClassType }
+  canSwitch:  boolean
+  reason?:    string
+}
+export interface BackupLinkSwitched {
+  id: string; url: string; mode: 'generated' | 'pasted'; previousType: LiveClassType
+  cohost: string | null; instructorEmailed: boolean
+}
+
+export function useBackupLinkInfo(id: string) {
+  return useQuery({
+    queryKey: ['admin', 'live-classes', 'backup-link', id],
+    queryFn:  () => apiGet<BackupLinkInfo>(`/admin/live-classes/${id}/backup-link`),
+    staleTime: 0,
+  })
+}
+
+export function useSwitchBackupLink() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ id, ...body }: { id: string } & ({ mode: 'generate' } | { mode: 'paste'; url: string })) =>
+      apiPost<BackupLinkSwitched>(`/admin/live-classes/${id}/backup-link`, body),
+    onSuccess: (_, vars) => {
+      /* Every list that shows this class: the row, the course page, the day panel. */
+      qc.invalidateQueries({ queryKey: ['admin', 'live-classes'] })
+      qc.invalidateQueries({ queryKey: liveClassKeys.byId(vars.id) })
     },
   })
 }
@@ -605,9 +645,12 @@ export function useCancelBooking() {
  * so it cannot produce a false positive. Either signal is enough.
  */
 export function isInteractiveRoom(
-  l: { provider?: string; cltRoomName?: string } | null | undefined,
+  l: { provider?: string; cltRoomName?: string; type?: string } | null | undefined,
 ): boolean {
   if (!l) return false
+  /* A class switched to a backup link keeps its room's fields, but its room
+     is abandoned — it is a link class now (BackupLinkModal). */
+  if (l.type === 'external') return false
   return l.provider === 'livekit' || !!l.cltRoomName
 }
 
