@@ -814,7 +814,9 @@ export class LiveClassController {
         ;(dto as any).isEntitled   = isEntitled
         /* A seat AND a live enrolment — the click requires both. */
         ;(dto as any).isBooked     = isEnrolled && bookedIds.has(String((d as any)._id ?? (d as any).id))
-        const w = (d as any).scheduledStart ? studentJoinWindow((d as any).scheduledStart) : null
+        const w = (d as any).scheduledStart
+          ? studentJoinWindow((d as any).scheduledStart, (d as any).durationMins ?? 0)
+          : null
         ;(dto as any).joinOpensAt  = w ? w.opensAt.toISOString()  : undefined
         ;(dto as any).joinClosesAt = w ? w.closesAt.toISOString() : undefined
         return dto

@@ -8,7 +8,12 @@
    /live-classes/:id/join — which checks the booking and the window at the
    moment of the click.
 
-   The window: from the class start to STUDENT_JOIN_GRACE (20) minutes after.
+   The window: from the class start to STUDENT_JOIN_GRACE (20) minutes after
+   its SCHEDULED END (start + durationMins) — not a flat 20 minutes off the
+   start regardless of how long the class runs, which is what this used to be
+   and is exactly the bug real students hit ("the class is live but I can't
+   join") on anything longer than about twenty minutes. Every session() below
+   is durationMins: 60, so the boundary in this suite is start + 80 minutes.
    The admin panel's own Join button (15 min before → end) is a different rule
    on a different payload and is not touched here.
 
@@ -16,7 +21,7 @@
      B  a student who did not book gets NOT_BOOKED — and the URL is in none of
         the five payloads they can reach (the requirement that matters most)
      C  before the start: TOO_EARLY with a Retry-After the page can count down
-     D  after start + 20 min: JOIN_WINDOW_CLOSED — and the boundaries are exact
+     D  after start + duration + 20 min: JOIN_WINDOW_CLOSED — boundaries exact
      E  a cancelled seat is no seat; a seat marked attended still is
      F  a cancelled or ended class refuses everyone
      G  not a Meet class (internal room, or in-person) → NOT_A_MEET_CLASS
@@ -101,6 +106,11 @@ async function call(method: string, p: string, jar?: Jar, body?: unknown) {
 
 const PW   = 'JoinMe1234'
 const MIN  = 60_000
+/* Every session() below is durationMins: 60, so the window closes at
+   start + 60m + STUDENT_JOIN_GRACE(20m) = start + 80m — not a flat 20m
+   regardless of duration, which is exactly the bug this window used to have
+   (see liveStatus.ts's studentJoinWindow). */
+const CLOSE_MIN = 60 + 20
 const MEET = 'https://meet.google.com/join-test-abc'
 const MEET_CODE = 'join-test-abc'
 const code = (r: any) => String(r.body?.error?.code ?? '')
@@ -175,7 +185,7 @@ section('A. A booked student inside the window gets the link')
   })).headers.get('cache-control'))
   check('A2b and forbids caching it', /no-store/.test(noStore), noStore)
   check('A3 with when the link closes',
-    Math.abs(new Date(r.body?.data?.closesAt).getTime() - (lc.scheduledStart.getTime() + 20 * MIN)) < 2000,
+    Math.abs(new Date(r.body?.data?.closesAt).getTime() - (lc.scheduledStart.getTime() + CLOSE_MIN * MIN)) < 2000,
     String(r.body?.data?.closesAt))
 }
 
@@ -256,9 +266,9 @@ section('C. Before the start the link is not released, and the page can count do
 }
 
 /* ═══════════ D — too late, and the boundaries ═══════════ */
-section('D. After start + 20 minutes the link closes — at exactly twenty')
+section('D. After start + duration + 20 minutes the link closes — at exactly that boundary')
 {
-  const late = await session(-25 * MIN)
+  const late = await session(-(CLOSE_MIN + 5) * MIN)
   await seat(booked, late)
   const r = await join(bookedJar, late)
   check('D1 refused with 409', r.status === 409, String(r.status))
@@ -270,15 +280,15 @@ section('D. After start + 20 minutes the link closes — at exactly twenty')
      machine those can take seconds. The exact millisecond edges are proven
      on the pure helper in joinclass.property.suite with an injected clock;
      these only need to sit clearly on one side. */
-  const justInside = await session(-(20 * MIN - 15_000))
+  const justInside = await session(-(CLOSE_MIN * MIN - 15_000))
   await seat(booked, justInside)
   const a = await join(bookedJar, justInside)
-  check('D4 19m45s after start is still open', a.status === 200, `${a.status} ${code(a)}`)
+  check('D4 (duration+grace) minus 15s after start is still open', a.status === 200, `${a.status} ${code(a)}`)
 
-  const justOutside = await session(-(20 * MIN + 15_000))
+  const justOutside = await session(-(CLOSE_MIN * MIN + 15_000))
   await seat(booked, justOutside)
   const b = await join(bookedJar, justOutside)
-  check('D5 20m15s after start is closed', b.status === 409 && code(b) === 'JOIN_WINDOW_CLOSED',
+  check('D5 (duration+grace) plus 15s after start is closed', b.status === 409 && code(b) === 'JOIN_WINDOW_CLOSED',
     `${b.status} ${code(b)}`)
 
   const atStart = await session(8_000)             // starts in eight seconds
@@ -436,7 +446,7 @@ section('J. The booked student’s payloads carry the window and the seat — ne
   check('J1 the schedule row says they hold a seat', row?.isBooked === true, String(row?.isBooked))
   check('J2 and gives the window from the server clock',
     row?.joinOpensAt === lc.scheduledStart.toISOString()
-      && new Date(row?.joinClosesAt).getTime() === lc.scheduledStart.getTime() + 20 * MIN,
+      && new Date(row?.joinClosesAt).getTime() === lc.scheduledStart.getTime() + CLOSE_MIN * MIN,
     `${row?.joinOpensAt} .. ${row?.joinClosesAt}`)
   check('J3 but not the URL — even to the seat holder', !JSON.stringify(row).includes('meet.google.com') && !('meetingUrl' in (row ?? {})),
     Object.keys(row ?? {}).join(','))

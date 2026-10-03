@@ -196,8 +196,8 @@ router.get('/', authenticate, async (req: Request, res: Response, next: NextFunc
            button the click will refuse; `isEnrolled` above already excludes
            dropped enrolments. */
         isBooked:     isEnrolled && bookedIds.has(String(c._id)),
-        joinOpensAt:  c.scheduledStart ? studentJoinWindow(c.scheduledStart).opensAt.toISOString()  : undefined,
-        joinClosesAt: c.scheduledStart ? studentJoinWindow(c.scheduledStart).closesAt.toISOString() : undefined,
+        joinOpensAt:  c.scheduledStart ? studentJoinWindow(c.scheduledStart, c.durationMins ?? 0).opensAt.toISOString()  : undefined,
+        joinClosesAt: c.scheduledStart ? studentJoinWindow(c.scheduledStart, c.durationMins ?? 0).closesAt.toISOString() : undefined,
 
         /* THIS ROW IS THE CALLER'S DOOR'S TRUTH, NOT THE ROOM'S. Both fields
            are derived on the server and sent as ONE resolved value each,

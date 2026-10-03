@@ -120,6 +120,10 @@ async function call(method: string, p: string, jar?: Jar, body?: unknown) {
 
 const PW   = 'Regress1234'
 const MIN  = 60_000
+/* meetClass()/roomClass() below are always durationMins: 60, so the window
+   closes at start + 60m + STUDENT_JOIN_GRACE(20m) = start + 80m — see
+   liveStatus.ts's studentJoinWindow, which used to ignore duration entirely. */
+const CLOSE_MIN = 60 + 20
 const MEET = 'https://meet.google.com/regress-abc-def'
 const code = (r: any) => String(r.body?.error?.code ?? '')
 
@@ -385,8 +389,8 @@ section('D. Upcoming rows carry what getJoinPhase reads')
     on?.isBooked === true && on?.type === 'external'
       && !Number.isNaN(new Date(on?.joinOpensAt).getTime()) && !Number.isNaN(new Date(on?.joinClosesAt).getTime()),
     JSON.stringify({ isBooked: on?.isBooked, type: on?.type, o: on?.joinOpensAt, c: on?.joinClosesAt }))
-  check('D3 online Meet row: closesAt − opensAt is the 20-minute default',
-    new Date(on?.joinClosesAt).getTime() - new Date(on?.joinOpensAt).getTime() === 20 * MIN)
+  check('D3 online Meet row: closesAt − opensAt is duration(60m) + the 20-minute grace',
+    new Date(on?.joinClosesAt).getTime() - new Date(on?.joinOpensAt).getTime() === CLOSE_MIN * MIN)
   check('D4 online Meet row: status is a string the phase helper can compare', typeof on?.status === 'string', String(on?.status))
 
   const off = await upRowOf(jar, inRoom)
@@ -463,7 +467,7 @@ section('F. The refusals the client surfaces verbatim carry what the toast needs
   const sf = await student('toasted'); await enrol(sf)
   const jar = await login(sf)
 
-  const closed = await meetClass(-25 * MIN); await seat(sf, closed)
+  const closed = await meetClass(-(CLOSE_MIN + 5) * MIN); await seat(sf, closed)
   const c = await join(jar, closed)
   check('F1 JOIN_WINDOW_CLOSED 409', c.status === 409 && code(c) === 'JOIN_WINDOW_CLOSED', `${c.status} ${code(c)}`)
   check('F2 its message names the grace in minutes (the client toasts it as-is)',

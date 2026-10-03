@@ -184,6 +184,7 @@ interface Props {
 export function EditUserModal({ user, me, onClose, onSuccess }: Props) {
   const [name,          setName]          = useState(user.name)
   const [email,         setEmail]         = useState(user.email)
+  const [phone,         setPhone]         = useState(user.phone ?? '')
   const [role,          setRole]          = useState<AdminUserRole>(user.role)
   const [program,       setProgram]       = useState<'ai' | 'digital_marketing' | 'forex' | 'jura' | ''>(() => {
     if (user.role === 'instructor' && user.category) {
@@ -240,6 +241,7 @@ export function EditUserModal({ user, me, onClose, onSuccess }: Props) {
       }
       if (canEditRole && role !== user.role) dto.role = role
       if (avatarUrl) (dto as any).avatarUrl = avatarUrl
+      if (phone.trim() !== (user.phone ?? '')) dto.phone = phone.trim()
 
       /* Program / category mapping */
       if (needsProgram(activeRole) && program) {
@@ -384,6 +386,19 @@ export function EditUserModal({ user, me, onClose, onSuccess }: Props) {
                 <input
                   type="email" value={email} onChange={e => setEmail(e.target.value)} required
                   className="w-full rounded-xl px-3 py-2.5 text-sm text-white transition-all"
+                  style={inputStyle} {...focusStyle}
+                />
+              </div>
+
+              {/* Phone / WhatsApp — optional, same number doubles as WhatsApp */}
+              <div>
+                <label className="mb-1.5 block text-xs font-medium" style={{ color: 'rgba(255,255,255,0.45)' }}>
+                  Phone / WhatsApp number <span style={{ color: 'rgba(255,255,255,0.3)' }}>(optional)</span>
+                </label>
+                <input
+                  type="tel" value={phone} onChange={e => setPhone(e.target.value)}
+                  placeholder="e.g. +971 50 123 4567"
+                  className="w-full rounded-xl px-3 py-2.5 text-sm text-white transition-all placeholder:text-white/20"
                   style={inputStyle} {...focusStyle}
                 />
               </div>

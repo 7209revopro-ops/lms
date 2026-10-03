@@ -226,14 +226,14 @@ try {
   check('sendBookingConfirmedWhatsApp queues its own template', !!booking)
 
   await sendClassStartingSoonWhatsApp('919876543210', 'Live Q&A', '5')
-  const starting = await WhatsAppOutboxModel.findOne({ templateName: 'class_starting_soon_v4' }).lean() as any
-  check('sendClassStartingSoonWhatsApp queues the 2 BODY params v4 expects',
+  const starting = await WhatsAppOutboxModel.findOne({ templateName: 'class_starting_soon_v5' }).lean() as any
+  check('sendClassStartingSoonWhatsApp queues the 2 BODY params v5 expects',
     JSON.stringify(starting?.params) === JSON.stringify(['Live Q&A', '5']), JSON.stringify(starting?.params))
-  /* v4's URL button is STATIC — configured once on the Meta template itself,
+  /* v5's URL button is STATIC — configured once on the Meta template itself,
      not sent per-message — so this call carries no buttonParam, the same as
-     v3. That is the whole point of going static: nothing here can reproduce
-     the v1/v2 "button silently dropped when the id was falsy" bug, because
-     there is no per-send button component to drop. */
+     v3/v4. That is the whole point of going static: nothing here can
+     reproduce the v1/v2 "button silently dropped when the id was falsy"
+     bug, because there is no per-send button component to drop. */
   check('and does not set a buttonParam — the button is static, not per-message',
     starting?.buttonParam === undefined, starting?.buttonParam)
 

@@ -311,7 +311,7 @@ const LIVEKIT_WINDOW = (live: ILiveClass): StudentJoinWindow => {
 }
 
 export const MEET_WINDOW = (live: ILiveClass): StudentJoinWindow => {
-  const { opensAt, closesAt } = studentJoinWindow(live.scheduledStart)
+  const { opensAt, closesAt } = studentJoinWindow(live.scheduledStart, live.durationMins)
   const graceMin = Math.round(STUDENT_JOIN_GRACE_MS / 60_000)
   return {
     opensAt:  opensAt.getTime(),
@@ -321,7 +321,7 @@ export const MEET_WINDOW = (live: ILiveClass): StudentJoinWindow => {
     seatStatuses: ['booked', 'attended'],
     tooEarly: 'The join link opens when the class starts.',
     closed:   { code: 'JOIN_WINDOW_CLOSED',
-                message: `The join link closes ${graceMin} minutes after the class starts.` },
+                message: `The join link closes ${graceMin} minutes after the class ends.` },
   }
 }
 

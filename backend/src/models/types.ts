@@ -52,7 +52,7 @@ import { toAssetUrl } from '@/utils/assetUrl.ts'
 const SAFE_USER_FIELDS = [
   'id', 'name', 'email', 'pendingEmail', 'avatarUrl', 'role',
   'isVerified', 'isActive',
-  'bio', 'headline', 'websiteUrl',
+  'bio', 'headline', 'websiteUrl', 'phone',
   'twoFactorEnabled',
   'emailPrefs',
   'aiUsage',

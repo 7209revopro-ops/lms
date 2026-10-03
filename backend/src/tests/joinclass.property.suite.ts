@@ -87,18 +87,23 @@ section('PART 1. studentJoinWindow — the two instants everything else is drawn
   const broke: string[] = []
   for (let i = 0; i < 2000; i++) {
     const start = Date.UTC(2026, 9, 1, 6, 0, 0) + Math.floor(rand() * 365 * 24) * 3600_000
-    const w = studentJoinWindow(new Date(start))
+    /* Fuzzed, not fixed — this is exactly the axis the old flat-20-minute
+       window ignored, which is what let it close on a class still genuinely
+       running. 0-180 covers "no duration on record" through a long session. */
+    const durationMins = Math.floor(rand() * 180)
+    const w = studentJoinWindow(new Date(start), durationMins)
     if (w.opensAt.getTime() !== start) broke.push(`opensAt != start for ${start}`)
-    if (w.closesAt.getTime() !== start + 20 * MIN) broke.push(`closesAt != start+20m for ${start}`)
+    const wantClose = start + durationMins * MIN + 20 * MIN
+    if (w.closesAt.getTime() !== wantClose) broke.push(`closesAt != start+duration+20m for ${start}/${durationMins}m`)
 
     /* A string start must produce the same instants as a Date start. */
-    const ws = studentJoinWindow(new Date(start).toISOString())
+    const ws = studentJoinWindow(new Date(start).toISOString(), durationMins)
     if (ws.opensAt.getTime() !== w.opensAt.getTime() || ws.closesAt.getTime() !== w.closesAt.getTime()) {
       broke.push('ISO string start disagrees with Date start')
     }
   }
-  check('P1 2000 random starts: opensAt is the start, closesAt is start+20m, Date or ISO', broke.length === 0,
-    broke.slice(0, 3).join(' | '))
+  check('P1 2000 random starts/durations: opensAt is the start, closesAt is start+duration+20m, Date or ISO',
+    broke.length === 0, broke.slice(0, 3).join(' | '))
 }
 
 /* ═══════════════ PART 2 — the whole gate against real rows ═══════════════ */
@@ -121,13 +126,19 @@ section('PART 2. The gate against real rows — every refusal in the right order
   /* A seat can outlive its enrolment (an admin deletes the enrolment; the
      booking row stays). The gate must refuse that seat. */
   const ENROLLED = [true, true, true, false] as const
+  /* Every generated class below is durationMins: 60, so the window now closes
+     at start + 60m + 20m grace = start + 80m (studentJoinWindow's whole point
+     is that this boundary moves with the class's own scheduled length, not a
+     flat 20m regardless of it — see liveStatus.ts). */
+  const CLOSE_MIN = 60 + 20
+
   /* Where the click lands relative to the start, in ms. Kept ≥ 5 s away from
      both edges: the gate reads the wall clock, so an offset ON an edge could
      flip during the call and prove nothing either way. */
   const OFFSETS  = [
     -3 * 3600_000, -30 * MIN, -14 * MIN, -90_000, -5_000,
-    +5_000, +30_000, +5 * MIN, +19 * MIN, +(20 * MIN - 5_000),
-    +(20 * MIN + 5_000), +25 * MIN, +3 * 3600_000,
+    +5_000, +30_000, +5 * MIN, +45 * MIN, +(CLOSE_MIN * MIN - 5_000),
+    +(CLOSE_MIN * MIN + 5_000), +90 * MIN, +3 * 3600_000,
   ] as const
 
   const broke: string[] = []
@@ -152,8 +163,8 @@ section('PART 2. The gate against real rows — every refusal in the right order
          so the happy path is actually reached, with the two clock refusals
          still drawn often enough to matter. */
       offset = rand() < 0.7
-        ? pick(rand, [+5_000, +30_000, +5 * MIN, +19 * MIN, +(20 * MIN - 5_000)] as const)
-        : pick(rand, [-90_000, -5_000, +(20 * MIN + 5_000), -3 * 3600_000, +25 * MIN] as const)
+        ? pick(rand, [+5_000, +30_000, +5 * MIN, +45 * MIN, +(CLOSE_MIN * MIN - 5_000)] as const)
+        : pick(rand, [-90_000, -5_000, +(CLOSE_MIN * MIN + 5_000), -3 * 3600_000, +90 * MIN] as const)
       switch (Math.floor(rand() * 13)) {
         case 9: enrolled = false; break
         case 0: type = 'internal'; break
@@ -218,7 +229,7 @@ section('PART 2. The gate against real rows — every refusal in the right order
     else if (!enrolled || enrolStatus === 'dropped') expect = 'NOT_ENROLLED'
     else if (blocked)                 expect = 'MODULE_BLOCKED'
     else if (offset < 0)              expect = 'TOO_EARLY'
-    else if (offset > 20 * MIN)       expect = 'JOIN_WINDOW_CLOSED'
+    else if (offset > CLOSE_MIN * MIN) expect = 'JOIN_WINDOW_CLOSED'
     else                              expect = 'OK'
 
     /* ── the gate ── */
@@ -227,7 +238,7 @@ section('PART 2. The gate against real rows — every refusal in the right order
       const r = await resolveMeetJoin(String(lc._id), ctx)
       got = 'OK'
       if (r.url !== MEET) { got = 'OK-but-wrong-url'; detail = r.url }
-      if (Math.abs(r.closesAt.getTime() - (lc.scheduledStart.getTime() + 20 * MIN)) > 1) { got = 'OK-but-wrong-closesAt' }
+      if (Math.abs(r.closesAt.getTime() - (lc.scheduledStart.getTime() + CLOSE_MIN * MIN)) > 1) { got = 'OK-but-wrong-closesAt' }
     } catch (e) {
       if (!(e instanceof JoinError)) { got = 'THREW:' + (e as Error).message; }
       else {

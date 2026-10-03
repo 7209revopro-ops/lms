@@ -107,6 +107,13 @@ export interface IUser extends Document {
   bio?:          string
   headline?:     string
   websiteUrl?:   string
+  /* Staff-only contact number (super_admin/admin/sub_admin), captured at
+     account creation. Same number doubles as the WhatsApp number — this
+     codebase has no separate WhatsApp identity anywhere, students included
+     (see normalizeWhatsAppNumber.ts). Used to reach the right staff member
+     when something needs their attention outside the app, e.g. a new
+     support ticket — see SupportService#create. */
+  phone?:        string
   /* Account safety */
   failedLoginAttempts: number
   lockedUntil?:  Date
@@ -222,6 +229,7 @@ const UserSchema = new Schema<IUser>(
     bio:          { type: String },
     headline:     { type: String, maxlength: 255 },
     websiteUrl:   { type: String },
+    phone:        { type: String, trim: true, maxlength: 30 },
     failedLoginAttempts: { type: Number, default: 0 },
     lockedUntil:  { type: Date },
     lastFailedLoginAt: { type: Date },
@@ -923,6 +931,68 @@ ReviewSchema.index({ isReported: 1 })
 export const ReviewModel = mongoose.model<IReview>('Review', ReviewSchema)
 
 /* ─────────────────────────────────────────────────────
+   INSTRUCTOR REVIEW — one per (student, live class), never per course.
+   ─────────────────────────────────────────────────────
+   Review above rates a COURSE, and instructors only ever appear on it as the
+   one replying — nothing in this codebase rates an instructor's actual
+   teaching before this. Deliberately a separate model rather than widening
+   Review: a course review is written once, any time, about the course as a
+   whole; this is written (at most once) per SESSION, only by a student who
+   actually attended it, about that specific class — different entitlement
+   rule, different cardinality, different trigger (a WhatsApp/email request
+   sent after the class ends, see reminders.job.ts's review-request cron).
+
+   `instructorId`, `courseId` and `organizationId` are resolved from the
+   LiveClass document SERVER-SIDE at submission time, never taken from the
+   request — the same rule class-assignments and bookings already follow,
+   for the same reason: a forged instructorId would let a student's rating
+   land on the wrong teacher's record. */
+export interface IInstructorReview extends Document {
+  id:              string
+  liveClassId:     Types.ObjectId
+  studentId:        Types.ObjectId
+  instructorId:     Types.ObjectId
+  courseId:        Types.ObjectId
+  organizationId?: Types.ObjectId
+  /* Student-facing programme vocabulary ('4x-trading' | 'digital-marketing' |
+     'ai' | 'jura'), copied from the course at submission time so the admin
+     list can scope by programme without a join on every query — the same
+     denormalisation ClassAssignment and SupportTicket already carry their
+     own `program` for. */
+  program?:        string
+  rating:          number
+  comment?:        string
+  createdAt:       Date
+  updatedAt:       Date
+}
+
+const InstructorReviewSchema = new Schema<IInstructorReview>(
+  {
+    liveClassId:    { type: Schema.Types.ObjectId, ref: 'LiveClass', required: true },
+    studentId:      { type: Schema.Types.ObjectId, ref: 'User',      required: true },
+    instructorId:   { type: Schema.Types.ObjectId, ref: 'User',      required: true },
+    courseId:       { type: Schema.Types.ObjectId, ref: 'Course',    required: true },
+    organizationId: { type: Schema.Types.ObjectId, ref: 'Organization' },
+    program:        { type: String },
+    rating:         { type: Number, required: true, min: 1, max: 5 },
+    comment:        { type: String, maxlength: 2000, trim: true },
+  },
+  baseSchemaOptions,
+)
+
+/* One review per student per SESSION — not per course, since a course runs
+   many sessions and a student may reasonably rate each one differently. */
+InstructorReviewSchema.index({ studentId: 1, liveClassId: 1 }, { unique: true })
+/* The admin leaderboard's two real queries: "this instructor's reviews" and
+   "this academy's reviews" (optionally narrowed by programme in app code,
+   same as every other categoryScope-filtered list in this codebase). */
+InstructorReviewSchema.index({ instructorId: 1, createdAt: -1 })
+InstructorReviewSchema.index({ organizationId: 1, createdAt: -1 })
+
+export const InstructorReviewModel =
+  mongoose.model<IInstructorReview>('InstructorReview', InstructorReviewSchema)
+
+/* ─────────────────────────────────────────────────────
    NOTIFICATION — in-app activity feed for the bell icon
 ───────────────────────────────────────────────────── */
 export type NotificationKind =
@@ -936,6 +1006,8 @@ export type NotificationKind =
   | 'booking-cancelled'
   | 'class-reminder'
   | 'mentor-no-show'
+  | 'support-ticket-raised'
+  | 'instructor-review-requested'
   | 'system'
 
 export interface INotification extends Document {
@@ -953,7 +1025,7 @@ export interface INotification extends Document {
 const NotificationSchema = new Schema<INotification>(
   {
     userId: { type: Schema.Types.ObjectId, ref: 'User', required: true },
-    kind:   { type: String, enum: ['enrollment','lesson-complete','course-complete','review-posted','live-class-scheduled','achievement','booking-confirmed','booking-cancelled','class-reminder','mentor-no-show','system'], required: true },
+    kind:   { type: String, enum: ['enrollment','lesson-complete','course-complete','review-posted','live-class-scheduled','achievement','booking-confirmed','booking-cancelled','class-reminder','mentor-no-show','support-ticket-raised','instructor-review-requested','system'], required: true },
     title:  { type: String, required: true, maxlength: 255 },
     body:   { type: String, maxlength: 1000 },
     link:   { type: String, maxlength: 1024 },
@@ -1139,6 +1211,14 @@ export interface ILiveClass extends Document {
      hand. Set once per class so the job never re-scans it. */
   attendanceFinalized: boolean
 
+  /* Instructor-review request dispatch (reminders.job.ts
+     runReviewRequestDispatch). Same shape as attendanceFinalized above, and
+     deliberately runs AFTER it rather than off the same pass: it needs
+     attendance already decided, because only a student whose seat finalized
+     to 'attended' gets asked to rate the class — set once per class so the
+     job never re-sends it. */
+  reviewRequestSent: boolean
+
   /* Multi-org */
   organizationId?: Types.ObjectId
 
@@ -1259,6 +1339,7 @@ const LiveClassSchema = new Schema<ILiveClass>(
     mentorReminderSent:          { type: Boolean, default: false },
     mentorNoShowAlertSent:       { type: Boolean, default: false },
     attendanceFinalized:         { type: Boolean, default: false },
+    reviewRequestSent:           { type: Boolean, default: false },
     organizationId:              { type: Schema.Types.ObjectId, ref: 'Organization' },
     guestCohorts:                { type: [GuestCohortSchema], default: [] },
     hostSeatsLeft:               { type: Number, min: 0 },

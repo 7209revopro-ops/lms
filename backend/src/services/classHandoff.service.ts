@@ -19,6 +19,7 @@ import { Types } from 'mongoose'
 import { ClassHandoffModel, type ClassHandoffKind } from '@/models/schema.ts'
 import { JoinError, mintHostTicket, mintStudentTicket, type JoinContext } from '@/services/liveClassJoin.service.ts'
 import { meetingDisplayName } from '@/utils/meetingIdentity.ts'
+import { toStudentProgram } from '@/utils/programVocabulary.ts'
 import { logger } from '@/utils/logger.ts'
 
 /* Long enough that guessing is hopeless, short enough to sit in a URL. */
@@ -128,10 +129,7 @@ export async function exchangeHandoff(code: string): Promise<ExchangedHandoff> {
   if (ctx.role === 'sub_admin') {
     const { UserModel: UM } = await import('@/models/schema.ts')
     const withProgram = await UM.findById(row.userId).select('program').lean() as { program?: string } | null
-    const map: Record<string, string> = {
-      ai: 'ai', digital_marketing: 'digital-marketing', forex: '4x-trading', jura: 'jura',
-    }
-    const scope = withProgram?.program ? map[withProgram.program] : undefined
+    const scope = toStudentProgram(withProgram?.program)
     if (scope) ctx.categoryScope = scope
   }
 

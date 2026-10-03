@@ -797,7 +797,7 @@ export class LiveClassService {
         liveClassId: live._id,
         status: { $in: ['booked', 'attended'] },
       })
-      const w = studentJoinWindow(live.scheduledStart)
+      const w = studentJoinWindow(live.scheduledStart, live.durationMins)
       return {
         type:         'external',
         title:        live.title,

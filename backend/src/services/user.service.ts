@@ -49,7 +49,7 @@ export class UserService {
   async adminUpdate(
     id: string,
     dto: {
-      sharedAcrossOrgs?: boolean; meetEmail?: string; role?: UserRole; isActive?: boolean; isVerified?: boolean; name?: string; email?: string; category?: '4x-trading' | 'digital-marketing' | 'ai' | 'jura' | null; categories?: ('4x-trading' | 'digital-marketing' | 'ai' | 'jura')[]; avatarUrl?: string; headline?: string; bio?: string; program?: import('@/types/index.ts').ProgramType },
+      sharedAcrossOrgs?: boolean; meetEmail?: string; role?: UserRole; isActive?: boolean; isVerified?: boolean; name?: string; email?: string; category?: '4x-trading' | 'digital-marketing' | 'ai' | 'jura' | null; categories?: ('4x-trading' | 'digital-marketing' | 'ai' | 'jura')[]; avatarUrl?: string; headline?: string; bio?: string; phone?: string; program?: import('@/types/index.ts').ProgramType },
   ): Promise<IUser> {
     if (!Types.ObjectId.isValid(id)) {
       throw new UserError('INVALID_ID', 'Invalid user id', 400)
@@ -62,6 +62,7 @@ export class UserService {
     if (dto.avatarUrl  !== undefined) update.avatarUrl  = dto.avatarUrl || undefined
     if (dto.headline   !== undefined) update.headline   = dto.headline || undefined
     if (dto.bio        !== undefined) update.bio        = dto.bio || undefined
+    if (dto.phone      !== undefined) update.phone      = dto.phone || undefined
     if (dto.program    !== undefined) update.program    = dto.program || undefined
     /* Lending an instructor to the other academy. WHO may set this is gated in
        the route (admin / super_admin only); the schema validator refuses it on
@@ -175,6 +176,10 @@ export class UserService {
     approvedBy?:     string
     organizationId?: string
     program?:        import('@/types/index.ts').ProgramType
+    /* Contact number for a staff account (super_admin/admin/sub_admin) —
+       also doubles as their WhatsApp number, e.g. for a new-support-ticket
+       alert. Meaningless-but-harmless on a student account. */
+    phone?:          string
     /* Lend this instructor to the other academy. Gated to admin/super_admin in
        the route; the schema validator refuses it on any non-instructor. */
     sharedAcrossOrgs?: boolean
@@ -204,6 +209,7 @@ export class UserService {
     if (dto.bio)       patch.bio       = dto.bio
     if (dto.headline)  patch.headline  = dto.headline
     if (dto.avatarUrl) patch.avatarUrl = dto.avatarUrl
+    if (dto.phone)     patch.phone     = dto.phone
     /* Only ever set on an instructor — the schema validator enforces the same
        rule, so a mistaken payload fails loudly rather than silently widening
        who can see a student. */

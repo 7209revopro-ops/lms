@@ -286,34 +286,38 @@ export async function sendClassReminderTomorrowWhatsApp(
   await sendTemplate(to, 'class_reminder_tomorrow', [sessionTitle, whenStr], { category: 'utility' })
 }
 
-/* v3 → v4: brings the URL button BACK, but not the way v1/v2 had it. v1/v2's
-   button carried a DYNAMIC suffix (the live class id), sent per-message as
-   `buttonParam` — Meta validates that as its own component, separate from
-   the body's {{1}}/{{2}}, and that split is exactly what produced every bug
-   this template has had: the #132000 param-count mismatch, and the button
-   silently vanishing whenever the id was falsy (`buttonParam ? [...] : []`
-   → an empty components array → Meta rejects the whole send for a missing
-   required component). v3 dropped the button entirely rather than fight
-   that a third time.
+/* v3 → v4 → v5: brings the URL button back, but not the way v1/v2 had it.
+   v1/v2's button carried a DYNAMIC suffix (the live class id), sent
+   per-message as `buttonParam` — Meta validates that as its own component,
+   separate from the body's {{1}}/{{2}}, and that split is exactly what
+   produced every bug this template has had: the #132000 param-count
+   mismatch, and the button silently vanishing whenever the id was falsy
+   (`buttonParam ? [...] : []` → an empty components array → Meta rejects
+   the whole send for a missing required component). v3 dropped the button
+   entirely rather than fight that a third time. v4 designed a static
+   replacement pointed at /live-classes; v5 is the same static design,
+   retargeted at /my-bookings before the template was ever submitted (the
+   schedule mixes in classes the student hasn't booked yet, rendered with an
+   "Enroll" CTA instead of Join — /my-bookings is only their own bookings, so
+   there's nothing to search past and no unrelated class to confuse the one
+   they're being reminded about).
 
-   v4's button has NO dynamic suffix at all — it points at the same static
-   `{CLIENT_URL}/live-classes` URL for every student and every class, entered
+   v5's button has NO dynamic suffix at all — it points at the same static
+   `{CLIENT_URL}/my-bookings` URL for every student and every class, entered
    directly into the Meta template definition (via Creatyvot) rather than
    sent per-message. Structurally this cannot reproduce either v1/v2 bug:
    there is no `buttonParam`, no per-send button component, nothing whose
    presence depends on a live class id being truthy. sendTemplate() below is
-   called exactly as v3 was — 2 body params, no `buttonParam` — the button is
-   just part of the approved template now, the same way the logo or a fixed
-   footer line would be.
+   called exactly as v3/v4 were — 2 body params, no `buttonParam` — the
+   button is just part of the approved template now, the same way the logo
+   or a fixed footer line would be.
 
-   Why a static "My Bookings" link and not a deep link straight into the
-   class: /live-classes already has everything a deep link would need to
-   duplicate — the student's booked/live sessions, the Join button that
-   fires auto-attendance the instant it's tapped, and (via the client's
-   `?from=` bounce-back) a return trip here after login if the session had
-   expired. A static button reaches all of that in one tap for an
-   already-logged-in student, without reopening the per-message component
-   validation that broke this template twice.
+   Both /my-bookings and /live-classes fire the identical join/attendance
+   mechanism (JoinMeetButton → POST /live-classes/:id/join), so auto-
+   attendance works the same regardless of which one the button points at —
+   /my-bookings was chosen purely for how much less there is to wade through.
+   It also carries the same `?from=` login bounce-back as /live-classes, so
+   an expired session still lands back here after signing in.
 
    MUST be approved in Meta Business Manager (via Creatyvot) under this exact
    name, WITH the static URL button configured on the template itself,
@@ -323,5 +327,51 @@ export async function sendClassReminderTomorrowWhatsApp(
 export async function sendClassStartingSoonWhatsApp(
   to: string | null | undefined, sessionTitle: string, minutesLeft: string,
 ): Promise<void> {
-  await sendTemplate(to, 'class_starting_soon_v4', [sessionTitle, minutesLeft], { category: 'utility' })
+  await sendTemplate(to, 'class_starting_soon_v5', [sessionTitle, minutesLeft], { category: 'utility' })
+}
+
+/* First WhatsApp template aimed at STAFF rather than students — every other
+   function in this file notifies a student. Sent to a support ticket's
+   org admin(s), programme sub_admin(s), and every super_admin (see
+   SupportService#create), ONLY for a recipient who has a phone number on
+   file — the field this feature adds to staff accounts. Every other
+   recipient still gets the email/in-app alert regardless.
+
+   Button is STATIC, same reasoning as class_starting_soon_v5: a fixed
+   "Open Support Inbox" link to {ADMIN_URL}/support, configured once on the
+   Meta template itself, no per-message buttonParam — so this can't reproduce
+   the v1/v2 class_starting_soon bugs (a dynamic per-message button component
+   Meta validates separately from the body, and silently drops on a falsy id).
+
+   MUST be approved in Meta Business Manager (via Creatyvot) under this exact
+   name, WITH the static URL button configured on the template itself, before
+   sendTemplate() will deliver anything — see the file header. Unverified
+   against the real Graph API; the template does not exist yet. */
+export async function sendSupportTicketRaisedWhatsApp(
+  to: string | null | undefined, studentName: string, ticketSubject: string,
+): Promise<void> {
+  await sendTemplate(to, 'support_ticket_raised_v1', [studentName, ticketSubject], { category: 'utility' })
+}
+
+/* Sent once a student's attendance finalizes to 'attended' (see
+   reminders.job.ts#runReviewRequestDispatch), asking them to rate the class.
+
+   Button is STATIC, same design as class_starting_soon_v5 and
+   support_ticket_raised_v1: a fixed "Rate This Class" link to
+   {CLIENT_URL}/reviews, configured once on the Meta template itself. No
+   buttonParam — deliberately not a per-class deep link, which would need a
+   dynamic per-message button component and reopen the exact Meta validation
+   bug class that broke class_starting_soon twice (a falsy id silently
+   dropping the whole button). /reviews lists THAT student's own pending
+   reviews once they're logged in — reached via the `?from=` bounce-back on
+   an expired session, same as every other static-button template here.
+
+   MUST be approved in Meta Business Manager (via Creatyvot) under this exact
+   name, WITH the static URL button configured on the template itself, before
+   sendTemplate() will deliver anything — see the file header. The template
+   does not exist yet. */
+export async function sendInstructorReviewRequestWhatsApp(
+  to: string | null | undefined, studentName: string, sessionTitle: string,
+): Promise<void> {
+  await sendTemplate(to, 'instructor_review_request_v1', [studentName, sessionTitle], { category: 'utility' })
 }

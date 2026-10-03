@@ -121,6 +121,11 @@ async function call(method: string, p: string, jar?: Jar, body?: unknown) {
 
 const PW   = 'RaceMe1234'
 const MIN  = 60_000
+/* session() below is durationMins: 60, so the window closes at
+   start + 60m + STUDENT_JOIN_GRACE(20m) = start + 80m — see liveStatus.ts's
+   studentJoinWindow, which used to ignore duration and close at a flat 20m
+   regardless of how long the class actually ran. */
+const CLOSE_MIN = 60 + 20
 const MEET = 'https://meet.google.com/race-test-qrs'
 const MEET_CODE = 'race-test-qrs'
 const code = (r: any) => String(r.body?.error?.code ?? '')
@@ -270,7 +275,7 @@ section('1. 25 simultaneous joins by one booked student')
   check('1 one identical URL across all 25', urls.size === 1 && urls.has(MEET), [...urls].join(','))
   const closes = new Set(results.map(r => r.body?.data?.closesAt))
   check('1 one identical closesAt across all 25', closes.size === 1
-    && new Date([...closes][0]).getTime() === lc.scheduledStart.getTime() + 20 * MIN, [...closes].join(','))
+    && new Date([...closes][0]).getTime() === lc.scheduledStart.getTime() + CLOSE_MIN * MIN, [...closes].join(','))
   check('1 every response forbids caching', results.every(r => /no-store/.test(String(r.cacheControl))))
 
   const after = await counts()
@@ -389,10 +394,10 @@ section('5. A booker and a non-booker, 20 interleaved clicks each')
 /* ═══════════ 6 — straddling the close ═══════════ */
 section('6. 40 clicks 100 ms apart across joinClosesAt')
 {
-  /* The window closes ~1.5 s from now: start = now − 20 min + 1.5 s. */
-  const lc = await session(-(20 * MIN) + 1_500)
+  /* The window closes ~1.5 s from now: start = now − (duration+grace) + 1.5 s. */
+  const lc = await session(-(CLOSE_MIN * MIN) + 1_500)
   await seat(booked, lc)
-  const closesAt = lc.scheduledStart.getTime() + 20 * MIN
+  const closesAt = lc.scheduledStart.getTime() + CLOSE_MIN * MIN
   note(`6 closesAt is ${closesAt - Date.now()} ms away at scenario start`)
 
   /* Serial, one every 100 ms: each click's check happens strictly after the

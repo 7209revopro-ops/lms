@@ -16,6 +16,7 @@ import { QuizError } from '@/services/quiz.service.ts'
 import { ExamError } from '@/services/exam.service.ts'
 import { AssignmentError } from '@/services/assignment.service.ts'
 import { ClassAssignmentError } from '@/services/classAssignment.service.ts'
+import { InstructorReviewError } from '@/services/instructorReview.service.ts'
 import { CertificateError } from '@/services/certificate.service.ts'
 import { OrderError } from '@/services/order.service.ts'
 import { CouponError } from '@/services/coupon.service.ts'
@@ -144,6 +145,10 @@ export function errorMiddleware(
     return
   }
   if (err instanceof ClassAssignmentError) {
+    sendError(res, err.code, err.message, err.statusCode)
+    return
+  }
+  if (err instanceof InstructorReviewError) {
     sendError(res, err.code, err.message, err.statusCode)
     return
   }

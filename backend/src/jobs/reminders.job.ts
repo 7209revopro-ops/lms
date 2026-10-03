@@ -31,11 +31,16 @@ import {
   sendMentorJoinReminder,
   sendMentorNoShowAlert,
   sendMentorNoShowSelfAlert,
+  sendInstructorReviewRequestEmail,
 } from '@/services/email.service.ts'
-import { sendClassReminderTomorrowWhatsApp, sendClassStartingSoonWhatsApp } from '@/services/whatsapp.service.ts'
+import {
+  sendClassReminderTomorrowWhatsApp, sendClassStartingSoonWhatsApp,
+  sendInstructorReviewRequestWhatsApp,
+} from '@/services/whatsapp.service.ts'
 import { wantsStaffEmail } from '@/utils/emailPrefs.ts'
 import { SCHEDULE_LINK } from '@/utils/clientLinks.ts'
 import { UserRepository } from '@/repositories/user.repository.ts'
+import { toSubAdminProgram } from '@/utils/programVocabulary.ts'
 import { env } from '@/config/env.ts'
 
 const notifSvc = new NotificationService()
@@ -48,13 +53,9 @@ const userRepo = new UserRepository()
    uses a DIFFERENT vocabulary: 'forex'/'digital_marketing'/'ai'/'jura'. This
    maps a class's course into the vocabulary its sub_admins are actually
    stored under — querying UserModel with the course's raw value would match
-   nobody, silently. */
-const SUB_ADMIN_PROGRAM_OF: Record<string, string> = {
-  'ai':               'ai',
-  'digital-marketing':'digital_marketing',
-  '4x-trading':       'forex',
-  'jura':             'jura',
-}
+   nobody, silently. See utils/programVocabulary.ts — this used to be its own
+   copy of that table, independent of the same mapping in classHandoff.service.ts
+   and auth.middleware.ts's injectCategoryScope. */
 
 /* ── Types ──────────────────────────────────────────── */
 /* Bookings whose class starts inside [from, to].
@@ -636,7 +637,7 @@ export async function runMentorJoinReminder(): Promise<void> {
 /* ── Mentor no-show detection — stage 2: escalate at start+5min ─────────────
    Still not joined 5 minutes after the reminder's own window ended. Notifies,
    in order: the class's academy admin(s), its course programme's sub_admin(s)
-   (mapped through SUB_ADMIN_PROGRAM_OF), every super_admin platform-wide, and
+   (mapped through toSubAdminProgram()), every super_admin platform-wide, and
    the mentor themselves — matching what the product asked for exactly: admin,
    org admin, org+programme sub-admin, and the mentor.
 
@@ -673,7 +674,7 @@ export async function runMentorNoShowEscalation(): Promise<void> {
          still gets their own copy below regardless of org. */
       try {
         const courseProgram = (cls.courseId as { program?: string } | undefined)?.program
-        const subAdminProgram = courseProgram ? SUB_ADMIN_PROGRAM_OF[courseProgram] : undefined
+        const subAdminProgram = toSubAdminProgram(courseProgram)
         const slug = orgSlugFor(orgId)
         const when = new Date(cls.scheduledStart)
         const mentorName = instructor?.name ?? 'The instructor'
@@ -899,6 +900,97 @@ export async function runAttendanceFinalization(): Promise<void> {
   }
 }
 
+/* ── Instructor-review request dispatch ──────────────────────────────────
+   Runs strictly downstream of runAttendanceFinalization: it only considers
+   classes whose attendance has ALREADY been decided (attendanceFinalized),
+   so it never has to guess who attended — it reads the same 'attended'
+   status the finalization job just wrote. A class with zero attended seats
+   (everyone missed it) is still marked reviewRequestSent — there is nobody
+   to ask, and the alternative is rescanning the same empty class forever.
+
+   One request per (class, attended student), fire-and-forget per channel —
+   same shape as SupportService#notifyStaffOfNewTicket: a mail/WhatsApp
+   outage must never block the next recipient, let alone the class being
+   marked done. WhatsApp only fires for a student with a phone number on
+   file; email and the in-app notification always fire. */
+export async function runReviewRequestDispatch(): Promise<void> {
+  try {
+    const { LiveClassModel, ClassBookingModel, UserModel } = await import('@/models/schema.ts')
+    const now      = new Date()
+    const earliest = new Date(now.getTime() - 48 * 60 * 60 * 1000)   // don't rescan classes older than 48h
+
+    const candidates = await LiveClassModel.find({
+      status: { $ne: 'cancelled' },
+      attendanceFinalized: true,
+      /* $ne: true, not `false` — see the identical guard on attendanceFinalized
+         above; a class from before this field existed must still match. */
+      reviewRequestSent: { $ne: true },
+      scheduledStart: { $gte: earliest, $lt: now },
+    }).select('_id title instructorId courseId').lean()
+
+    if (candidates.length === 0) return
+
+    let requestedCount = 0
+    for (const cls of candidates) {
+      try {
+        const attended = await ClassBookingModel.find({
+          liveClassId: cls._id, status: 'attended',
+        }).select('userId').lean()
+
+        if (attended.length > 0) {
+          const instructor = await UserModel.findById(cls.instructorId).select('name').lean()
+          const instructorName = (instructor as { name?: string } | null)?.name ?? 'the instructor'
+
+          for (const b of attended) {
+            const student = await UserModel.findById(b.userId).select('name email phone').lean() as
+              { name?: string; email?: string; phone?: string } | null
+            if (!student) continue
+            const studentName = student.name ?? 'there'
+
+            try {
+              await notifSvc.create(String(b.userId), {
+                kind:  'instructor-review-requested',
+                title: `How was "${cls.title}"?`,
+                body:  `Rate your class with ${instructorName}`,
+                link:  '/reviews',
+              })
+            } catch (err) {
+              logger.error({ err, userId: b.userId, classId: cls._id }, 'in-app review-request notification failed')
+            }
+
+            if (student.email) {
+              try {
+                await sendInstructorReviewRequestEmail(student.email, studentName, instructorName, cls.title)
+              } catch (err) {
+                logger.error({ err, userId: b.userId, classId: cls._id }, 'review-request email failed')
+              }
+            }
+
+            if (student.phone) {
+              try {
+                await sendInstructorReviewRequestWhatsApp(student.phone, studentName, cls.title)
+              } catch (err) {
+                logger.error({ err, userId: b.userId, classId: cls._id }, 'review-request WhatsApp failed')
+              }
+            }
+          }
+          requestedCount += attended.length
+        }
+
+        await LiveClassModel.findByIdAndUpdate(cls._id, { reviewRequestSent: true })
+      } catch (err) {
+        logger.error({ err, classId: cls._id }, '[ReviewRequest] Dispatch failed for one class')
+      }
+    }
+
+    if (candidates.length) {
+      logger.info(`[ReviewRequest] Processed ${candidates.length} classes — ${requestedCount} students asked to rate`)
+    }
+  } catch (err) {
+    logger.error({ err }, '[ReviewRequest] Dispatch job error')
+  }
+}
+
 /* ── Entry point ─────────────────────────────────────── */
 /* Each run* function above is exported for one reason: so a test can call it.
 
@@ -969,6 +1061,10 @@ export function startReminderJobs(): void {
 
   // Every 15 min — finalize attendance (booked -> attended/missed) for online classes ended 15+ min ago
   cron.schedule('*/15 * * * *', exclusive('attendance-finalization', runAttendanceFinalization))
+  /* Downstream of attendance-finalization — same tick rate is fine since it
+     only picks up classes the OTHER job already finalized; it is never the
+     bottleneck. */
+  cron.schedule('*/15 * * * *', exclusive('review-request-dispatch', runReviewRequestDispatch))
 
   // Every 5 min — a Meet class past its timetable end: has Google Meet recorded it ending?
   cron.schedule('*/5 * * * *', exclusive('meet-class-end', () => runMeetClassEnd()))

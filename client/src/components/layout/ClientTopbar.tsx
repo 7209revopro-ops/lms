@@ -31,6 +31,7 @@ const SIDEBAR_TABS = [
   { label: 'My Learning', href: '/my-learning',    icon: GraduationCap },
   { label: 'Schedule',    href: '/class-bookings', icon: CalendarDays },
   { label: 'My Bookings', href: '/my-bookings',    icon: Ticket },
+  { label: 'Rate Classes', href: '/reviews',       icon: Star },
   { label: 'Assignments', href: '/assignments',     icon: ClipboardList },
   { label: 'Catalog',     href: '/courses',         icon: BookOpen },
   { label: 'Learning Paths', href: '/learning-paths', icon: Map },
@@ -47,6 +48,7 @@ const TOPBAR_TABS = [
      `lg:hidden` - so a page missing from here is a page reachable only by
      typing its URL, which is what /my-bookings was. */
   { label: 'My Bookings',    href: '/my-bookings',     icon: Ticket },
+  { label: 'Rate Classes',   href: '/reviews',         icon: Star },
   { label: 'Assignments',    href: '/assignments',     icon: ClipboardList },
   { label: 'Catalog',        href: '/courses',         icon: BookOpen },
   { label: 'Learning Paths', href: '/learning-paths',  icon: Map },

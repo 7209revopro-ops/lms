@@ -313,6 +313,10 @@ const userUpdateSchema = z.object({
   avatarUrl:  z.string().url().or(z.literal('')).optional(),
   headline:   z.string().max(255).optional(),
   bio:        z.string().max(2000).optional(),
+  /* Staff contact number — same one doubles as their WhatsApp number, e.g.
+     for a new-support-ticket alert. '' clears it, same convention as
+     avatarUrl above. */
+  phone:      z.string().trim().max(30).or(z.literal('')).optional(),
   /* Lend this instructor to the other academy. Who may SET it is enforced in
      the route, not here — a schema cannot see the caller's role. */
   sharedAcrossOrgs: z.boolean().optional(),
@@ -337,6 +341,8 @@ const userCreateSchema = z.object({
   categories: z.array(z.enum(['4x-trading', 'digital-marketing', 'ai', 'jura'])).optional(),
   avatarUrl:  z.string().url().or(z.literal('')).optional(),
   program:    z.enum(['ai', 'digital_marketing', 'forex', 'jura']).optional(),
+  /* Staff contact number — see userUpdateSchema. */
+  phone:      z.string().trim().max(30).optional(),
   /* Lend this instructor to the other academy — see userUpdateSchema. */
   sharedAcrossOrgs: z.boolean().optional(),
   courses:    z.array(z.object({

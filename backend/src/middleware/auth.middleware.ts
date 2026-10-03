@@ -3,6 +3,7 @@ import { verifyAccessToken } from '@/utils/jwt.ts'
 import { sendError } from '@/utils/response.ts'
 import { ACCESS_COOKIE, ADMIN_ACCESS_COOKIE, IMPERSONATION_COOKIE } from '@/utils/authCookies.ts'
 import { logger } from '@/utils/logger.ts'
+import { toStudentProgram } from '@/utils/programVocabulary.ts'
 import type { UserRole, ProgramType } from '@/types/index.ts'
 
 /* ─────────────────────────────────────────────────────
@@ -556,10 +557,8 @@ export async function injectCategoryScope(req: Request, _res: Response, next: Ne
   if (!req.user) { next(); return }
   if (req.user.role === 'sub_admin') {
     // sub_admin program → categoryScope
-    if      (req.user.program === 'ai')                 req.user.categoryScope = 'ai'
-    else if (req.user.program === 'digital_marketing')  req.user.categoryScope = 'digital-marketing'
-    else if (req.user.program === 'forex')              req.user.categoryScope = '4x-trading'
-    else if (req.user.program === 'jura')               req.user.categoryScope = 'jura'
+    const scope = toStudentProgram(req.user.program)
+    if (scope) req.user.categoryScope = scope
   } else if (req.user.role === 'instructor') {
     const { UserModel } = await import('@/models/schema.ts')
     const user = await UserModel.findById(req.user.id).select('category').lean()

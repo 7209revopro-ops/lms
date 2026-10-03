@@ -79,12 +79,21 @@ export function resolveLiveStatus(
 }
 
 /* ── When a BOOKED student may open the Meet link ────────────────────────
-   From the moment the class starts until STUDENT_JOIN_GRACE minutes after it.
-   Not before: the link is not a preview, and a room that fills up fifteen
-   minutes early is a room the instructor has to manage before they meant to
-   start. Not long after: twenty minutes late is still a student who can catch
-   up; forty is somebody joining a class that is half over, and a link that
-   stays live until the end is a link that can be shared into the class.
+   From the moment the class starts until STUDENT_JOIN_GRACE minutes after
+   its SCHEDULED END. Not before the start: the link is not a preview, and a
+   room that fills up early is a room the instructor has to manage before
+   they meant to start.
+
+   THIS USED TO BE A FLAT WINDOW OFF THE START TIME ALONE (start .. start +
+   20min), with no regard for how long the class was actually scheduled to
+   run. That is exactly backwards for anything longer than twenty minutes —
+   which is nearly every real class (most run 60-90 minutes) — because it
+   closed the join link while the class was still genuinely live, instructor
+   present and running normally. Reported directly by students as "the class
+   is live but I can't join." Now keyed off `durationMins`, matching how
+   LIVEKIT_WINDOW (liveClassJoin.service.ts) has always computed the same
+   thing for internal classes: the window covers the FULL scheduled class,
+   plus a grace period after its end for a late or reconnecting student.
 
    Deliberately NOT the same window as `resolveLiveStatus`. That one calls a
    class "live" from fifteen minutes before, and drives tab counts, card
@@ -105,8 +114,17 @@ export const STUDENT_JOIN_GRACE_MS = STUDENT_JOIN_GRACE_MINUTES * 60_000
  *  inclusive, which is how the gate (assertStudentMayJoin) reads it: refused
  *  while now < opensAt, refused while now > closesAt, released between. This
  *  is the ONLY place the two instants are computed; the gate, every student
- *  DTO and the button the student sees all take them from here. */
-export function studentJoinWindow(scheduledStart: Date | string): { opensAt: Date; closesAt: Date } {
+ *  DTO and the button the student sees all take them from here.
+ *
+ *  `durationMins` is required, not optional with a fallback — a caller that
+ *  forgets to pass it is exactly how this closed early for a live class the
+ *  first time; better a type error at the call site than a silent flat 20
+ *  minutes again. */
+export function studentJoinWindow(
+  scheduledStart: Date | string,
+  durationMins: number,
+): { opensAt: Date; closesAt: Date } {
   const start = new Date(scheduledStart).getTime()
-  return { opensAt: new Date(start), closesAt: new Date(start + STUDENT_JOIN_GRACE_MS) }
+  const end   = start + Math.max(0, durationMins) * 60_000
+  return { opensAt: new Date(start), closesAt: new Date(end + STUDENT_JOIN_GRACE_MS) }
 }

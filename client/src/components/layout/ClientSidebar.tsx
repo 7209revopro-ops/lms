@@ -7,7 +7,7 @@ import { usePathname } from 'next/navigation'
 import {
   BookOpen, GraduationCap, Trophy,
   Settings, LogOut, Flame, Map, X, Video, CalendarDays, LifeBuoy, ClipboardList,
-  Ticket, Receipt, Sparkles, Sun, Moon, Monitor,
+  Ticket, Receipt, Sparkles, Sun, Moon, Monitor, Star,
 } from 'lucide-react'
 import { useUIStore } from '@/store/ui.store'
 import { useThemeStore } from '@/store/theme.store'
@@ -18,6 +18,7 @@ const navItems = [
   { label: 'My Learning',    href: '/my-learning',    icon: GraduationCap },
   { label: 'Class Schedule', href: '/class-bookings', icon: CalendarDays },
   { label: 'My Bookings',    href: '/my-bookings',    icon: Ticket },
+  { label: 'Rate Classes',   href: '/reviews',        icon: Star },
   { label: 'Assignments',    href: '/assignments',     icon: ClipboardList },
   { label: 'Catalog',        href: '/courses',         icon: BookOpen },
   { label: 'Orders',         href: '/orders',          icon: Receipt },

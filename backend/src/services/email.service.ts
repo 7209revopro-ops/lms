@@ -860,6 +860,66 @@ export async function sendMentorNoShowSelfAlert(
   })
 }
 
+/** A student just opened a support ticket. Sent to the org's admin(s), the
+    ticket's programme sub_admin(s), and every super_admin — see
+    SupportService#create and utils/programVocabulary.ts for how those
+    recipients are resolved. One call per recipient, same shape as
+    sendMentorNoShowAlert. */
+export async function sendSupportTicketRaisedAlert(
+  to: string,
+  recipientName: string,
+  studentName: string,
+  ticketSubject: string,
+  category: string,
+): Promise<void> {
+  /* Just /support, not a ticket-specific deep link — the admin inbox has no
+     ?ticket= route to select one, so a link that implied it would land on
+     the plain list anyway. */
+  const adminUrl  = process.env['ADMIN_URL'] ?? 'http://localhost:3001'
+  const ticketUrl = `${adminUrl}/support`
+  const subject   = `🆘 New support ticket: ${ticketSubject}`
+  const html = wrap(subject, `
+    <h2 style="margin:0 0 16px;font-size:20px;font-weight:700;color:#0D0F1A">A student needs help</h2>
+    <p>Hi ${escapeHtml(recipientName)},</p>
+    <p><strong>${escapeHtml(studentName)}</strong> just opened a support ticket — <strong>${escapeHtml(ticketSubject)}</strong> (${escapeHtml(category)}).</p>
+    <p style="margin:20px 0"><a href="${ticketUrl}" style="display:inline-block;background:#0057b8;color:#fff;text-decoration:none;padding:10px 20px;border-radius:8px;font-weight:600">Open ticket</a></p>
+    <p style="color:#6B7280;font-size:13px">This is an automated alert — you're receiving it as this student's org admin, program coordinator, or platform super admin.</p>
+  `)
+  await sender.send({
+    to, subject, html,
+    text: `Hi ${recipientName},\n\n${studentName} just opened a support ticket — "${ticketSubject}" (${category}).\n\nOpen it here: ${ticketUrl}\n\nThis is an automated alert — you're receiving it as this student's org admin, program coordinator, or platform super admin.`,
+  })
+}
+
+/** Sent to a student once their attendance finalizes to 'attended' — see
+    reminders.job.ts#runReviewRequestDispatch. Points at the client's
+    /reviews page (a student's own pending-review list), not a per-class deep
+    link — same reasoning as class_starting_soon_v5's WhatsApp button: a
+    static destination the student reaches whether or not their session has
+    expired, via the existing `?from=` login bounce-back, with nothing
+    per-message to get wrong. */
+export async function sendInstructorReviewRequestEmail(
+  to: string,
+  studentName: string,
+  instructorName: string,
+  sessionTitle: string,
+): Promise<void> {
+  const clientUrl = process.env['CLIENT_URL'] ?? 'http://localhost:3000'
+  const reviewUrl = `${clientUrl}/reviews`
+  const subject   = `How was "${sessionTitle}"?`
+  const html = wrap(subject, `
+    <h2 style="margin:0 0 16px;font-size:20px;font-weight:700;color:#0D0F1A">Rate your class</h2>
+    <p>Hi ${escapeHtml(studentName)},</p>
+    <p>You attended <strong>${escapeHtml(sessionTitle)}</strong> with <strong>${escapeHtml(instructorName)}</strong>. Got a minute to rate it?</p>
+    <p style="margin:20px 0"><a href="${reviewUrl}" style="display:inline-block;background:#0057b8;color:#fff;text-decoration:none;padding:10px 20px;border-radius:8px;font-weight:600">Rate this class</a></p>
+    <p style="color:#6B7280;font-size:13px">Your feedback helps us support instructors and improve future sessions.</p>
+  `)
+  await sender.send({
+    to, subject, html,
+    text: `Hi ${studentName},\n\nYou attended "${sessionTitle}" with ${instructorName}. Got a minute to rate it?\n\nRate it here: ${reviewUrl}\n\nYour feedback helps us support instructors and improve future sessions.`,
+  })
+}
+
 /* ── Instructor: tomorrow's schedule (9 PM the evening before) ───────────── */
 
 /** One entry on an instructor's day — a class they teach or a meeting they host. */

@@ -1,11 +1,16 @@
 import { Types } from 'mongoose'
 import {
   SupportTicketModel,
+  UserModel,
   type ISupportTicket,
   type SupportTicketStatus,
   type SupportCategory,
 } from '@/models/schema.ts'
 import { NotificationService } from '@/services/notification.service.ts'
+import { UserRepository } from '@/repositories/user.repository.ts'
+import { sendSupportTicketRaisedAlert } from '@/services/email.service.ts'
+import { sendSupportTicketRaisedWhatsApp } from '@/services/whatsapp.service.ts'
+import { toSubAdminProgram } from '@/utils/programVocabulary.ts'
 import { logger } from '@/utils/logger.ts'
 
 export interface ProgramStat {
@@ -63,6 +68,7 @@ const MAX_SEARCH_LEN = 100
 const MAX_MESSAGES   = 200
 
 const notifSvc = new NotificationService()
+const userRepo = new UserRepository()
 
 export class SupportService {
   /* ── Client opens a new ticket ─────────────────────── */
@@ -96,7 +102,78 @@ export class SupportService {
       ticketData['organizationId'] = new Types.ObjectId(requester.organizationId)
     }
     const ticket = await SupportTicketModel.create(ticketData)
+
+    /* Fire-and-forget, same reasoning as every other staff-alert path this
+       codebase has (mentor no-show escalation, class reminders): a mail/
+       WhatsApp outage must never fail the student's own ticket creation. */
+    void this.#notifyStaffOfNewTicket(ticket, requester, input.subject.trim(), input.category ?? 'other')
+      .catch(err => logger.error({ err, ticketId: ticket.id }, 'support-ticket staff notification failed'))
+
     return this.populate(ticket.id)
+  }
+
+  /* ── Notify the org admin(s), the ticket's programme sub_admin(s), and
+     every super_admin that a student needs help ────────────────────────
+     "Programme" here is the student's OWN category, not `input.program` —
+     the client's ticket form never actually sends that field (confirmed:
+     no reference to it anywhere in client/src), so trusting it would notify
+     nobody's sub_admin for every real ticket. The student's account already
+     carries the ground truth. */
+  async #notifyStaffOfNewTicket(
+    ticket: ISupportTicket,
+    requester: Requester,
+    subject: string,
+    category: string,
+  ): Promise<void> {
+    const student = await UserModel.findById(requester.id)
+      .select('name email category categories organizationId').lean()
+    if (!student) return
+
+    const orgId = requester.organizationId
+      ?? (student.organizationId ? String(student.organizationId) : undefined)
+    const studentProgram = student.category ?? student.categories?.[0]
+    const subAdminProgram = toSubAdminProgram(studentProgram)
+
+    const staff = orgId ? await userRepo.findOrgStaffForProgram(orgId, subAdminProgram) : []
+    const superAdmins = await UserModel.find({ role: 'super_admin', isActive: true })
+      .select('name email phone').lean()
+    /* No de-dupe needed — findOrgStaffForProgram only ever returns
+       admin/sub_admin rows, never a super_admin (same guarantee the mentor
+       no-show escalation already relies on). */
+    const recipients = [...staff, ...superAdmins]
+
+    const studentName = student.name ?? 'A student'
+    for (const r of recipients) {
+      const recipientId = String((r as { id?: string; _id?: unknown }).id ?? (r as { _id?: unknown })._id)
+      if (recipientId === requester.id) continue   // a student is never their own staff recipient
+
+      try {
+        await notifSvc.create(recipientId, {
+          kind:  'support-ticket-raised',
+          title: `New support ticket: ${subject}`,
+          body:  `${studentName} needs help — ${category}`,
+          link:  '/support',
+        })
+      } catch (err) {
+        logger.error({ err, recipientId, ticketId: ticket.id }, 'in-app support-ticket notification failed')
+      }
+
+      if (r.email) {
+        try {
+          await sendSupportTicketRaisedAlert(r.email, r.name ?? 'there', studentName, subject, category)
+        } catch (err) {
+          logger.error({ err, recipientId, ticketId: ticket.id }, 'support-ticket email alert failed')
+        }
+      }
+
+      if (r.phone) {
+        try {
+          await sendSupportTicketRaisedWhatsApp(r.phone, studentName, subject)
+        } catch (err) {
+          logger.error({ err, recipientId, ticketId: ticket.id }, 'support-ticket WhatsApp alert failed')
+        }
+      }
+    }
   }
 
   /* ── Client: list my tickets ───────────────────────── */

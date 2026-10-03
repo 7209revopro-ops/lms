@@ -175,6 +175,7 @@ export function AddUserModal({ me, open, onClose }: Props) {
 
   const [name,          setName]          = useState('')
   const [email,         setEmail]         = useState('')
+  const [phone,         setPhone]         = useState('')
   const [password,      setPassword]      = useState('')
   const [showPass,      setShowPass]      = useState(false)
   const [role,          setRole]          = useState<AdminUserRole>(defaultRole)
@@ -191,7 +192,7 @@ export function AddUserModal({ me, open, onClose }: Props) {
 
   useEffect(() => {
     if (open) {
-      setName(''); setEmail(''); setPassword(''); setShowPass(false)
+      setName(''); setEmail(''); setPhone(''); setPassword(''); setShowPass(false)
       setRole(defaultRole); setProgram('')
       setOrgId(activeOrgId ?? '')
       setAvatarFile(null); setAvatarPreview(null)
@@ -231,6 +232,7 @@ export function AddUserModal({ me, open, onClose }: Props) {
       const body: Record<string, unknown> = {
         name: name.trim(), email: email.trim(), password, role,
       }
+      if (phone.trim()) body.phone = phone.trim()
       if (avatarUrl) body.avatarUrl = avatarUrl
       if (needsProgram(role) && program) body.program = program
       if (needsOrg && orgId) body.organizationId = orgId
@@ -388,6 +390,21 @@ export function AddUserModal({ me, open, onClose }: Props) {
               <input
                 type="email" value={email} onChange={e => setEmail(e.target.value)}
                 required placeholder="user@example.com"
+                className="w-full rounded-xl px-3 py-2.5 text-sm text-white transition-all placeholder:text-white/20"
+                style={inputStyle} {...focusStyle}
+              />
+            </div>
+
+            {/* Phone / WhatsApp — optional. Same number doubles as their
+                WhatsApp number (e.g. a new-support-ticket alert); there is no
+                separate WhatsApp identity anywhere else in this app either. */}
+            <div>
+              <label className="mb-1.5 block text-xs font-medium" style={{ color: 'rgba(255,255,255,0.45)' }}>
+                Phone / WhatsApp number <span style={{ color: 'rgba(255,255,255,0.3)' }}>(optional)</span>
+              </label>
+              <input
+                type="tel" value={phone} onChange={e => setPhone(e.target.value)}
+                placeholder="e.g. +971 50 123 4567"
                 className="w-full rounded-xl px-3 py-2.5 text-sm text-white transition-all placeholder:text-white/20"
                 style={inputStyle} {...focusStyle}
               />

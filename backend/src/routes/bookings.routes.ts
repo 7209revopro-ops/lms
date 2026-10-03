@@ -476,7 +476,7 @@ router.get('/me', authenticate, validate(bookingQuerySchema, 'query'), async (re
     const rows = (docs as any[]).map((b, i) => {
       const lc = b.liveClassId
       if (!lc?.scheduledStart) return b
-      const w = studentJoinWindow(lc.scheduledStart)
+      const w = studentJoinWindow(lc.scheduledStart, lc.durationMins ?? 0)
       /* Never serialised — see the note on the projection above. */
       const { organizationId: _org, guestCohorts: _cohorts, ...classRow } = lc as Record<string, unknown>
       return {
