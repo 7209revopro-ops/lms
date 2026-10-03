@@ -3,6 +3,9 @@ import { sendSuccess, sendError } from '@/utils/response.ts'
 import {
   studentActivityForPortal,
   supportTicketsForPortal,
+  supportTicketsForManyForPortal,
+  replyToTicketForPortal,
+  resolveTicketForPortal,
   classAssignmentsForPortal,
 } from '@/services/portalActivity.service.ts'
 import { enrolmentsForPortal } from '@/services/portalEnrolments.service.ts'
@@ -45,10 +48,29 @@ router.get('/student-activity', checkedCaller, wrap(async (req, res) => {
   sendSuccess(res, await studentActivityForPortal({ since: req.query['since'] }), 'Activity')
 }))
 
-/** One student's tickets, with the conversation. By email, so a POST, as /accounts is. */
+/**
+ * One student's tickets ({ email }), or many students' ({ emails }, at most 500
+ * at a time), with the conversation. By email, so a POST, as /accounts is.
+ */
 router.post('/support-tickets', checkedCaller, wrap(async (req, res) => {
-  const { email } = (req.body ?? {}) as { email?: unknown }
-  sendSuccess(res, await supportTicketsForPortal({ email }), 'Tickets')
+  const { email, emails } = (req.body ?? {}) as { email?: unknown; emails?: unknown }
+  sendSuccess(res, emails !== undefined ? await supportTicketsForManyForPortal({ emails }) : await supportTicketsForPortal({ email }), 'Tickets')
+}))
+
+/**
+ * Answer a ticket, as the help desk does: from the portal's support account
+ * (PORTAL_SUPPORT_USER_EMAIL), signed byName. Only that student's ticket:
+ * { email } names them, and a ticket that is not theirs is "not found".
+ */
+router.post('/support-tickets/:id/reply', checkedCaller, wrap(async (req, res) => {
+  const { email, body, byName, byEmail } = (req.body ?? {}) as Record<string, unknown>
+  sendSuccess(res, await replyToTicketForPortal({ ticketId: req.params['id'], email, body, byName, byEmail }), 'Answered')
+}))
+
+/** Mark that student's ticket resolved, as the help desk does. */
+router.post('/support-tickets/:id/resolve', checkedCaller, wrap(async (req, res) => {
+  const { email, byName, byEmail } = (req.body ?? {}) as Record<string, unknown>
+  sendSuccess(res, await resolveTicketForPortal({ ticketId: req.params['id'], email, byName, byEmail }), 'Resolved')
 }))
 
 /** One student's class assignments: what they sent for which class, and how it was reviewed. */

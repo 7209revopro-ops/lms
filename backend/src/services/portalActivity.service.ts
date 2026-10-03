@@ -4,24 +4,39 @@
    Tetra Commission (the commission portal) tells each student's CS when the
    student opens a Help & Support ticket or writes on one, sends a class
    assignment, or has one approved or rejected — and shows the student's
-   tickets and assignments on their page there. It asks; nothing here changes
-   how a ticket or an assignment works.
+   tickets and assignments on their page there, and on a page of its own
+   where a CS answers a ticket or marks it resolved.
 
      GET  /service/student-activity?since=…    what happened after `since`
      POST /service/support-tickets { email }   one student's tickets, in full
+     POST /service/support-tickets { emails }  many students' (at most MAX_EMAILS)
+     POST /service/support-tickets/:id/reply   answer one, as support answers
+     POST /service/support-tickets/:id/resolve mark one resolved
      POST /service/class-assignments { email } one student's class assignments
 
-   Both academies: the portal's students may be in either. Read-only.
+   Both academies: the portal's students may be in either. Answering and
+   resolving go through the help desk's own SupportService, from the one
+   support account PORTAL_SUPPORT_USER_EMAIL; nothing else here writes.
 ───────────────────────────────────────────────────── */
 import { SupportTicketModel, ClassAssignmentModel, UserModel, CourseModel, LiveClassModel } from '@/models/schema.ts'
 import { PortalError } from '@/services/portal.service.ts'
+import { SupportService, SupportError } from '@/services/support.service.ts'
+import { env } from '@/config/env.ts'
+import { logger } from '@/utils/logger.ts'
 
 /* How far back a portal that has been away may ask: past this, what it missed stays missed. */
 const MAX_LOOKBACK_MS = 31 * 24 * 60 * 60_000
 /* At most this many events in one answer, oldest first — `until` then says where they stop. */
 const MAX_EVENTS = 1000
 const MAX_TICKETS = 50
+/* Many students' tickets in one answer: addresses per call, and tickets in all. */
+const MAX_EMAILS = 500
+const MAX_MANY_TICKETS = 2000
 const MAX_ASSIGNMENTS = 100
+/* Who on the LMS may be the portal's support account: whoever the help desk counts as staff. */
+const STAFF_ROLES = ['support', 'admin', 'sub_admin', 'super_admin']
+/* An answer, signed, within a help-desk message's own limit. */
+const MAX_ANSWER = 4800
 /* The student's words in an event: enough for an email, not a whole essay. */
 const EXCERPT = 1000
 
@@ -63,6 +78,42 @@ function oneEmail(raw: unknown): string {
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw bad('email must be one address')
   return email
 }
+
+/** A list of addresses, as /enrolments takes them: strings only, lower-cased, each once. */
+function manyEmails(raw: unknown): string[] {
+  if (!Array.isArray(raw)) throw bad('emails must be a list of addresses')
+  const wanted = [...new Set(raw.filter((e): e is string => typeof e === 'string').map(e => e.toLowerCase().trim()).filter(Boolean))]
+  if (wanted.length > MAX_EMAILS) throw bad(`At most ${MAX_EMAILS} addresses at a time, and ${wanted.length} were asked for`)
+  return wanted
+}
+
+type StudentRow = { _id: unknown; email?: string; name?: string; enrollmentApplication?: { phone?: string; emergencyContact?: string; city?: string } }
+const STUDENT_FIELDS = 'email name enrollmentApplication.phone enrollmentApplication.emergencyContact enrollmentApplication.city'
+
+/* What the student gave on their registration form to be reached by: the portal shows it beside its own numbers. */
+const contactOf = (u: StudentRow) => ({
+  name: u.name ?? '',
+  phone: String(u.enrollmentApplication?.phone ?? '').trim(),
+  emergencyContact: String(u.enrollmentApplication?.emergencyContact ?? '').trim(),
+  city: String(u.enrollmentApplication?.city ?? '').trim(),
+})
+
+/* A ticket as the portal shows it. Support's people are "support" here: who on the desk answered is the LMS's business. */
+const ticketForPortal = (t: TicketRow) => ({
+  id: idOf(t._id),
+  subject: t.subject,
+  category: t.category,
+  status: t.status,
+  openedAt: iso(t.createdAt),
+  lastMessageAt: iso(t.lastMessageAt),
+  lastFrom: t.lastSenderRole === 'student' ? 'student' : 'support',
+  messages: (t.messages ?? []).map(m => ({
+    from: m.senderRole === 'student' ? 'student' : m.senderId ? 'support' : 'automatic',
+    body: m.body,
+    at: iso(m.createdAt),
+  })),
+})
+const TICKET_FIELDS = 'userId subject category status messages createdAt lastMessageAt lastSenderRole'
 
 /** Names for the ids an answer mentions — people, courses, classes — each looked up once. */
 async function lookups(rows: { users?: unknown[]; courses?: unknown[]; classes?: unknown[] }) {
@@ -164,30 +215,109 @@ export async function studentActivityForPortal(input: { since: unknown; now?: Da
 /** One student's Help & Support tickets, newest first, with the conversation. */
 export async function supportTicketsForPortal(input: { email: unknown }) {
   const email = oneEmail(input.email)
-  const user = await UserModel.findOne({ email }).select('_id').lean() as { _id: unknown } | null
+  const user = await UserModel.findOne({ email }).select(STUDENT_FIELDS).lean() as StudentRow | null
   if (!user) return { email, exists: false, tickets: [] }
   const rows = await SupportTicketModel.find({ userId: user._id })
     .sort({ lastMessageAt: -1 }).limit(MAX_TICKETS)
-    .select('subject category status messages createdAt lastMessageAt lastSenderRole').lean() as unknown as TicketRow[]
+    .select(TICKET_FIELDS).lean() as unknown as TicketRow[]
+  return { email, exists: true, student: contactOf(user), tickets: rows.map(ticketForPortal) }
+}
+
+/**
+ * Many students' tickets at once, newest activity first — for the portal's
+ * page of every ticket a CS's students have opened. Each ticket names its
+ * student's address; each student comes with what they gave to be reached by.
+ */
+export async function supportTicketsForManyForPortal(input: { emails: unknown }) {
+  const wanted = manyEmails(input.emails)
+  if (!wanted.length) return { students: [], tickets: [] }
+  const users = await UserModel.find({ email: { $in: wanted } }).select(STUDENT_FIELDS).lean() as unknown as StudentRow[]
+  const emailOf = new Map(users.map(u => [idOf(u._id), String(u.email ?? '').toLowerCase()]))
+  const rows = users.length
+    ? await SupportTicketModel.find({ userId: { $in: users.map(u => u._id) } })
+      .sort({ lastMessageAt: -1 }).limit(MAX_MANY_TICKETS)
+      .select(TICKET_FIELDS).lean() as unknown as TicketRow[]
+    : []
+  // The students the tickets are from — nobody else's details travel.
+  const asking = new Set(rows.map(t => idOf(t.userId)))
   return {
-    email,
-    exists: true,
-    tickets: rows.map(t => ({
-      id: idOf(t._id),
-      subject: t.subject,
-      category: t.category,
-      status: t.status,
-      openedAt: iso(t.createdAt),
-      lastMessageAt: iso(t.lastMessageAt),
-      lastFrom: t.lastSenderRole === 'student' ? 'student' : 'support',
-      // Support's people are "support" here: who on the desk answered is the LMS's business.
-      messages: (t.messages ?? []).map(m => ({
-        from: m.senderRole === 'student' ? 'student' : m.senderId ? 'support' : 'automatic',
-        body: m.body,
-        at: iso(m.createdAt),
-      })),
-    })),
+    students: users.filter(u => asking.has(idOf(u._id))).map(u => ({ email: emailOf.get(idOf(u._id)) ?? '', ...contactOf(u) })),
+    tickets: rows.map(t => ({ ...ticketForPortal(t), email: emailOf.get(idOf(t.userId)) ?? '' })),
   }
+}
+
+/* The portal's support account: whose name the help desk shows on an answer from the portal. */
+async function portalSupportAccount() {
+  const email = env.PORTAL_SUPPORT_USER_EMAIL.toLowerCase().trim()
+  const account = email
+    ? await UserModel.findOne({ email, role: { $in: STAFF_ROLES }, isActive: true }).select('_id role').lean() as { _id: unknown; role: string } | null
+    : null
+  if (!account) {
+    throw new PortalError('NOT_CONFIGURED', 'Answering tickets from the portal needs PORTAL_SUPPORT_USER_EMAIL set to an active LMS support account', 503)
+  }
+  /* No academy and no programme scope: the portal decides which students' tickets
+     somebody may answer, and its students are in both academies. */
+  return { id: idOf(account._id), role: account.role as 'support' | 'admin' | 'sub_admin' | 'super_admin' }
+}
+
+/**
+ * The ticket, if it is this student's — the portal names the student it means,
+ * and a ticket that is somebody else's is answered as one that does not exist.
+ */
+async function studentsTicket(ticketId: unknown, email: unknown) {
+  const address = oneEmail(email)
+  const id = typeof ticketId === 'string' ? ticketId : ''
+  const ticket = /^[a-f\d]{24}$/i.test(id) ? await SupportTicketModel.findById(id).select('userId status subject').lean() as { _id: unknown; userId: unknown; status: string } | null : null
+  const owner = ticket ? await UserModel.findById(ticket.userId).select('email').lean() as { email?: string } | null : null
+  if (!ticket || String(owner?.email ?? '').toLowerCase() !== address) throw new PortalError('NOT_FOUND', 'No such ticket for this student', 404)
+  return ticket
+}
+
+/** Who did it, from the portal: kept in the log, and an answer is signed with the name. */
+const actorOf = (byName: unknown, byEmail: unknown) => ({
+  name: (typeof byName === 'string' ? byName.trim() : '').slice(0, 100),
+  email: (typeof byEmail === 'string' ? byEmail.trim() : '').slice(0, 200),
+})
+
+async function asDesk<T>(run: () => Promise<T>): Promise<T> {
+  try {
+    return await run()
+  } catch (err) {
+    if (err instanceof SupportError) throw new PortalError(err.code, err.message, err.statusCode)
+    throw err
+  }
+}
+
+/**
+ * Answer a ticket from the portal, exactly as the help desk answers one: from
+ * the portal's support account, signed by the CS who wrote it. The ticket then
+ * waits on the student, and the student is told "Support replied".
+ */
+export async function replyToTicketForPortal(input: { ticketId: unknown; email: unknown; body: unknown; byName: unknown; byEmail: unknown }) {
+  const ticket = await studentsTicket(input.ticketId, input.email)
+  const text = typeof input.body === 'string' ? input.body.trim() : ''
+  if (!text) throw bad('Write an answer first')
+  const by = actorOf(input.byName, input.byEmail)
+  const signed = `${text}\n\n— ${by.name || 'Delta Institutions'}${by.name ? ', Delta Institutions' : ''}`
+  if (signed.length > MAX_ANSWER) throw bad(`An answer can be at most about ${MAX_ANSWER - 100} characters`)
+  const account = await portalSupportAccount()
+  await asDesk(() => new SupportService().addMessage(idOf(ticket._id), account, signed))
+  logger.info({ ticketId: idOf(ticket._id), by }, '[support] answered from the commission portal')
+  const fresh = await SupportTicketModel.findById(ticket._id).select(TICKET_FIELDS).lean() as unknown as TicketRow
+  return { ticket: ticketForPortal(fresh) }
+}
+
+/** Mark a ticket resolved from the portal, as the help desk does — the student is not messaged. */
+export async function resolveTicketForPortal(input: { ticketId: unknown; email: unknown; byName: unknown; byEmail: unknown }) {
+  const ticket = await studentsTicket(input.ticketId, input.email)
+  if (ticket.status === 'closed') throw new PortalError('TICKET_CLOSED', 'This ticket is closed', 400)
+  if (ticket.status !== 'resolved') {
+    const account = await portalSupportAccount()
+    await asDesk(() => new SupportService().setStatus(idOf(ticket._id), 'resolved', account))
+    logger.info({ ticketId: idOf(ticket._id), by: actorOf(input.byName, input.byEmail) }, '[support] resolved from the commission portal')
+  }
+  const fresh = await SupportTicketModel.findById(ticket._id).select(TICKET_FIELDS).lean() as unknown as TicketRow
+  return { ticket: ticketForPortal(fresh) }
 }
 
 /** One student's class assignments, newest first: what they sent for which class, and how it was reviewed. */
