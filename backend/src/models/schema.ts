@@ -1089,6 +1089,9 @@ export interface ILiveClass extends Document {
   viewerCount:    number          // updated by Mux Real-Time API
   startedAt?:     Date
   endedAt?:       Date
+  /* Who said the class ended, when it wasn't the LMS's own room or stream: 'meet' — Google Meet's
+     conference record (reminders.job.ts runMeetClassEnd; Meet sends no webhook). */
+  endSource?:     'meet'
 
   /* Module (section) link — optional, associates session with a course section */
   sectionId?:        Types.ObjectId
@@ -1241,6 +1244,7 @@ const LiveClassSchema = new Schema<ILiveClass>(
     viewerCount:       { type: Number, default: 0 },
     startedAt:         { type: Date },
     endedAt:           { type: Date },
+    endSource:         { type: String, enum: ['meet'] },
     // Module link
     sectionId:         { type: Schema.Types.ObjectId, ref: 'Section' },
     sessionCapacity:   { type: Number, default: 30, min: 1, max: 500 },

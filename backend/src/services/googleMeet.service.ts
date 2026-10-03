@@ -580,6 +580,44 @@ export async function createGoogleMeetLink(opts: {
   return { meetingUrl: meetLink, meetingCode, accessType, ...(invitedEmail ? { invitedEmail } : {}) }
 }
 
+/* ── When a Meet meeting started and ended ─────────────
+   Google sends no webhook when a meeting ends, so the LMS asks for the
+   meeting's conference records (reminders.job.ts runMeetClassEnd). A room
+   the LMS made through the Meet API (meetSpace) is read as its host mailbox:
+   meetings.space.created, already granted for making it, covers the app's
+   own conferences. Any other Meet link is asked by its code with the OAuth
+   client the recording poller uses — that account only sees meetings it can. */
+export interface MeetConference { startTime: Date; endTime?: Date }
+
+type ConferenceRow = { startTime?: string | null; endTime?: string | null }
+const conferencesOf = (rows: ConferenceRow[] | null | undefined): MeetConference[] =>
+  (rows ?? []).filter(r => r.startTime).map(r => ({ startTime: new Date(r.startTime!), ...(r.endTime ? { endTime: new Date(r.endTime) } : {}) }))
+
+/**
+ * Every conference held in the class's Meet room, as Google records them — [] when there was none (nobody has
+ * joined, or the room is one this LMS can't see) — or undefined when Google couldn't be asked: try again later.
+ */
+export async function fetchMeetConferences(cls: { meetSpace?: MeetSpaceRecord | null; googleMeetCode?: string | null }): Promise<MeetConference[] | undefined> {
+  try {
+    if (cls.meetSpace?.name && cls.meetSpace.host) {
+      const auth = makeServiceAccountAuth(cls.meetSpace.host)
+      const filter = encodeURIComponent(`space.name = "${cls.meetSpace.name}"`)
+      const res = await auth.request<{ conferenceRecords?: ConferenceRow[] }>({ url: `${MEET_API}/conferenceRecords?filter=${filter}`, method: 'GET' })
+      return conferencesOf(res.data.conferenceRecords)
+    }
+    if (cls.googleMeetCode) {
+      const meet = google.meet({ version: 'v2', auth: makeOAuth2Client() })
+      const res = await meet.conferenceRecords.list({ filter: `space.meeting_code = "${cls.googleMeetCode}"` })
+      return conferencesOf(res.data.conferenceRecords)
+    }
+    return []
+  } catch (err: any) {
+    const status = err?.response?.status ?? err?.status
+    console.warn(`[googleMeet] fetchMeetConferences: ${status ?? ''} ${err?.message ?? err}`.trim())
+    return undefined
+  }
+}
+
 /**
  * Polls the Google Meet REST API v2 to find the recording for a given meeting code.
  * Returns the Google Drive shareable URL of the first completed recording, or null if not ready.

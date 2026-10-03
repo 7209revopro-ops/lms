@@ -3,7 +3,8 @@
    ─────────────────────────────────────────────────────
    Tetra Commission (the commission portal) tells each student's CS when the
    student opens a Help & Support ticket or writes on one, sends a class
-   assignment, or has one approved or rejected — and shows the student's
+   assignment, or has one approved or rejected, or attended a live class that
+   is now over (for the CS to call them) — and shows the student's
    tickets and assignments on their page there, and on a page of its own
    where a CS answers a ticket or marks it resolved.
 
@@ -19,7 +20,7 @@
    own LMS staff account when they have one, else from the shared support
    account PORTAL_SUPPORT_USER_EMAIL; nothing else here writes.
 ───────────────────────────────────────────────────── */
-import { SupportTicketModel, ClassAssignmentModel, UserModel, CourseModel, LiveClassModel } from '@/models/schema.ts'
+import { SupportTicketModel, ClassAssignmentModel, UserModel, CourseModel, LiveClassModel, ClassBookingModel, OrganizationModel } from '@/models/schema.ts'
 import { PortalError } from '@/services/portal.service.ts'
 import { SupportService, SupportError } from '@/services/support.service.ts'
 import { env } from '@/config/env.ts'
@@ -41,7 +42,7 @@ const MAX_ANSWER = 4800
 /* The student's words in an event: enough for an email, not a whole essay. */
 const EXCERPT = 1000
 
-export type PortalActivityType = 'ticket_opened' | 'ticket_reply' | 'assignment_submitted' | 'assignment_reviewed'
+export type PortalActivityType = 'ticket_opened' | 'ticket_reply' | 'assignment_submitted' | 'assignment_reviewed' | 'class_attended'
 
 export interface PortalActivity {
   /** Never changes for the same happening, so a caller can ask with an overlap and drop what it has seen. */
@@ -54,6 +55,16 @@ export interface PortalActivity {
     id: string; title: string; note: string; files: number
     course: string; className: string; classAt: string; mentor: string
     attempt: number; status: string; decision?: 'approved' | 'rejected'; reason?: string
+  }
+  /** A live class the student attended, now over (classAttendedEvents). */
+  class?: {
+    id: string; title: string; course: string; mentor: string; academy: string
+    startsAt: string; durationMins: number
+    /** When it was over, and who said so: Google Meet, the LMS's own room or stream, or only the timetable. */
+    endedAt: string; endSource: 'google_meet' | 'lms_room' | 'timetable'
+    heldIn: 'lms_room' | 'google_meet' | 'classroom' | 'link'
+    /** Joined the LMS room, joined through the class's link, or marked attended by hand. */
+    attendance: 'joined_room' | 'joined_link' | 'marked'; attendedAt: string
   }
 }
 
@@ -135,13 +146,127 @@ async function lookups(rows: { users?: unknown[]; courses?: unknown[]; classes?:
   }
 }
 
+/* ── A class a student attended, once it is over ─────────
+   Over: when the meeting said so — Google Meet (endSource 'meet', from
+   reminders.job.ts runMeetClassEnd) or the LMS's own room or stream (endedAt)
+   — else, with no word from the meeting, at the timetable end plus a margin:
+   TIMETABLE_GRACE for the LMS's rooms and classroom sessions (the attendance
+   job waits as long), MEET_GRACE for a Meet class, so Google's word can come
+   first. Attended: joined the LMS room (livekit) or through the class's link
+   (click) — attendedAt — or marked attended by hand (status 'attended', known
+   when the booking last changed). Told at the later of the two, once, under
+   the booking's key; a seat cancelled or marked missed is never told. */
+const TIMETABLE_GRACE_MS = 15 * 60_000
+const MEET_GRACE_MS = 60 * 60_000
+const LONGEST_CLASS_MS = 600 * 60_000
+
+type ClassRow = {
+  _id: unknown; title?: string; courseId?: unknown; instructorId?: unknown; organizationId?: unknown
+  scheduledStart: Date; durationMins: number; status?: string; endedAt?: Date; endSource?: string
+  type?: string; isOnline?: boolean; googleMeetCode?: string; meetingUrl?: string
+}
+type BookingRow = {
+  _id: unknown; userId: unknown; liveClassId: unknown; status: string; attendedAt?: Date; attendanceSource?: string
+  updatedAt?: Date; seatCourseId?: unknown; seatOrganizationId?: unknown
+}
+const CLASS_FIELDS = 'title courseId instructorId organizationId scheduledStart durationMins status endedAt endSource type isOnline googleMeetCode meetingUrl'
+const BOOKING_FIELDS = 'userId liveClassId status attendedAt attendanceSource updatedAt seatCourseId seatOrganizationId'
+
+const isMeet = (c: ClassRow) => c.type === 'external' && c.isOnline !== false && (!!c.googleMeetCode || /meet\.google\./i.test(c.meetingUrl ?? ''))
+const heldIn = (c: ClassRow): NonNullable<PortalActivity['class']>['heldIn'] =>
+  c.isOnline === false ? 'classroom' : c.type === 'internal' ? 'lms_room' : isMeet(c) ? 'google_meet' : 'link'
+/** When it was over, who said so, and from when that may be told. */
+function overAt(c: ClassRow): { endedAt: number; source: NonNullable<PortalActivity['class']>['endSource']; knownAt: number } {
+  if (c.endedAt) {
+    const t = new Date(c.endedAt).getTime()
+    return { endedAt: t, source: c.endSource === 'meet' ? 'google_meet' : 'lms_room', knownAt: t }
+  }
+  const end = new Date(c.scheduledStart).getTime() + c.durationMins * 60_000
+  return { endedAt: end, source: 'timetable', knownAt: end + (isMeet(c) ? MEET_GRACE_MS : TIMETABLE_GRACE_MS) }
+}
+/** How they attended, and from when that is known. */
+const attendedHow = (b: BookingRow): { how: NonNullable<PortalActivity['class']>['attendance']; knownAt: number } =>
+  b.attendedAt
+    ? { how: b.attendanceSource === 'livekit' ? 'joined_room' : 'joined_link', knownAt: new Date(b.attendedAt).getTime() }
+    : { how: 'marked', knownAt: new Date(b.updatedAt ?? 0).getTime() }
+
+async function classAttendedEvents(from: Date, now: Date): Promise<PortalActivity[]> {
+  const f = from.getTime(), n = now.getTime()
+  const attended = { $or: [{ status: 'attended' }, { status: 'booked', attendedAt: { $exists: true } }] }
+  // Classes whose end may be told in the window, and seats whose attendance became known in it.
+  const [classes, late] = await Promise.all([
+    LiveClassModel.find({
+      status: { $ne: 'cancelled' },
+      $or: [
+        { endedAt: { $gt: from, $lte: now } },
+        { endedAt: { $exists: false }, scheduledStart: { $gte: new Date(f - LONGEST_CLASS_MS - MEET_GRACE_MS), $lte: now } },
+      ],
+    }).select(CLASS_FIELDS).lean(),
+    ClassBookingModel.find({
+      $and: [attended, { $or: [{ attendedAt: { $gt: from, $lte: now } }, { status: 'attended', updatedAt: { $gt: from, $lte: now } }] }],
+    }).select(BOOKING_FIELDS).lean(),
+  ]) as unknown as [ClassRow[], BookingRow[]]
+
+  const classById = new Map(classes.map(c => [idOf(c._id), c]))
+  const missing = [...new Set(late.map(b => idOf(b.liveClassId)).filter(id => !classById.has(id)))]
+  if (missing.length) {
+    for (const c of await LiveClassModel.find({ _id: { $in: missing }, status: { $ne: 'cancelled' } }).select(CLASS_FIELDS).lean() as unknown as ClassRow[]) {
+      classById.set(idOf(c._id), c)
+    }
+  }
+  const atEnd = classes.length
+    ? await ClassBookingModel.find({ $and: [attended, { liveClassId: { $in: classes.map(c => c._id) } }] }).select(BOOKING_FIELDS).lean() as unknown as BookingRow[]
+    : []
+  const seats = new Map([...atEnd, ...late].map(b => [idOf(b._id), b]))
+
+  const due: { b: BookingRow; c: ClassRow; over: ReturnType<typeof overAt>; att: ReturnType<typeof attendedHow>; at: number }[] = []
+  for (const b of seats.values()) {
+    const c = classById.get(idOf(b.liveClassId))
+    if (!c) continue
+    const over = overAt(c)
+    if (over.knownAt > n) continue   // not over yet
+    const att = attendedHow(b)
+    const at = Math.max(over.knownAt, att.knownAt)
+    if (at > f && at <= n) due.push({ b, c, over, att, at })
+  }
+  if (!due.length) return []
+
+  const courseOf = (d: (typeof due)[number]) => idOf(d.b.seatCourseId ?? d.c.courseId)
+  const academyOf = (d: (typeof due)[number]) => idOf(d.b.seatOrganizationId ?? d.c.organizationId)
+  const [names, orgs] = await Promise.all([
+    lookups({ users: due.flatMap(d => [d.b.userId, d.c.instructorId]), courses: due.map(courseOf) }),
+    OrganizationModel.find({ _id: { $in: [...new Set(due.map(academyOf).filter(Boolean))] } }).select('name').lean() as unknown as Promise<{ _id: unknown; name?: string }[]>,
+  ])
+  const academy = new Map(orgs.map(o => [idOf(o._id), o.name ?? '']))
+
+  const events: PortalActivity[] = []
+  for (const d of due) {
+    const who = names.user.get(idOf(d.b.userId))
+    if (!who?.email) continue
+    events.push({
+      key: `class-attended:${idOf(d.b._id)}`,
+      type: 'class_attended',
+      at: new Date(d.at).toISOString(),
+      student: { lmsUserId: idOf(d.b.userId), email: who.email, name: who.name },
+      class: {
+        id: idOf(d.c._id), title: d.c.title ?? '', course: names.course.get(courseOf(d)) ?? '',
+        mentor: names.user.get(idOf(d.c.instructorId))?.name ?? '', academy: academy.get(academyOf(d)) ?? '',
+        startsAt: iso(d.c.scheduledStart), durationMins: d.c.durationMins,
+        endedAt: new Date(d.over.endedAt).toISOString(), endSource: d.over.source, heldIn: heldIn(d.c),
+        attendance: d.att.how, attendedAt: iso(d.b.attendedAt),
+      },
+    })
+  }
+  return events
+}
+
 /**
  * What students did after `since` — opened or wrote on a ticket, sent a class
  * assignment, had one approved or rejected — every student, oldest first. The
  * student's own words only: support's replies and the automatic welcome are
  * not something the student did.
  */
-export async function studentActivityForPortal(input: { since: unknown; now?: Date }): Promise<{ events: PortalActivity[]; until: string }> {
+export async function studentActivityForPortal(input: { since: unknown; now?: Date; classes?: boolean }): Promise<{ events: PortalActivity[]; until: string }> {
   const now = input.now ?? new Date()
   const since = typeof input.since === 'string' ? new Date(input.since) : new Date(NaN)
   if (Number.isNaN(since.getTime())) throw bad('since must be a date and time (ISO 8601)')
@@ -204,6 +329,9 @@ export async function studentActivityForPortal(input: { since: unknown; now?: Da
       }, a.studentId)
     }
   }
+
+  // Only for a caller that asks (include=classes): one that doesn't know them yet would take them for something else.
+  if (input.classes) events.push(...await classAttendedEvents(from, now))
 
   events.sort((x, y) => x.at.localeCompare(y.at) || x.key.localeCompare(y.key))
   if (events.length > MAX_EVENTS) {

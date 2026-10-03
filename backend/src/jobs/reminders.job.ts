@@ -771,6 +771,56 @@ async function runRecordingPoller(): Promise<void> {
   }
 }
 
+/* ── When a Meet class really ended ───────────────────────
+   Google sends no webhook when a meeting ends, so a Meet class stayed
+   'scheduled' for ever and only its timetable slot said when it was over.
+   Every 5 minutes, each online Meet class past its timetable end — for up to
+   MEET_END_WINDOW after it, then it is left alone — is looked up in Google's
+   conference records (googleMeet.service.ts fetchMeetConferences). The
+   conference that began around the class (from an hour before it to its
+   timetable end) is the class's; once Google says that one ended, the class
+   is 'ended' then (endSource 'meet') and started when it began. Still going
+   → asked again next time. None at all (nobody joined), a room this LMS
+   can't see, or Google not answering → left as it is: the commission portal
+   then goes by the timetable. */
+const MEET_END_WINDOW_MS = 12 * 60 * 60 * 1000
+
+export async function runMeetClassEnd(fetchConferences?: (cls: { meetSpace?: unknown; googleMeetCode?: string | null }) => Promise<{ startTime: Date; endTime?: Date }[] | undefined>): Promise<void> {
+  try {
+    const { LiveClassModel } = await import('@/models/schema.ts')
+    const fetch = fetchConferences ?? (await import('@/services/googleMeet.service.ts')).fetchMeetConferences as NonNullable<typeof fetchConferences>
+    const now = Date.now()
+    const candidates = await LiveClassModel.find({
+      type: 'external',
+      isOnline: { $ne: false },
+      status: { $in: ['scheduled', 'live'] },
+      googleMeetCode: { $exists: true, $ne: '' },
+      // The longest class (600 min) plus the window: older than this can't be due.
+      scheduledStart: { $gte: new Date(now - 600 * 60_000 - MEET_END_WINDOW_MS), $lt: new Date(now) },
+    }).select('_id scheduledStart durationMins googleMeetCode meetSpace').lean()
+
+    let ended = 0
+    for (const cls of candidates) {
+      const start = new Date(cls.scheduledStart).getTime()
+      const end = start + cls.durationMins * 60_000
+      if (end > now || end < now - MEET_END_WINDOW_MS) continue
+      const conferences = await fetch(cls)
+      const theirs = (conferences ?? [])
+        .filter(c => c.startTime.getTime() >= start - 60 * 60_000 && c.startTime.getTime() <= end)
+        .sort((a, b) => b.startTime.getTime() - a.startTime.getTime())[0]
+      if (!theirs?.endTime) continue
+      const res = await LiveClassModel.updateOne(
+        { _id: cls._id, status: { $in: ['scheduled', 'live'] } },
+        { $set: { status: 'ended', endedAt: theirs.endTime, startedAt: theirs.startTime, endSource: 'meet' } },
+      )
+      ended += res.modifiedCount ?? 0
+    }
+    if (ended) logger.info(`[Meet] ${ended} class${ended === 1 ? '' : 'es'} ended, as Google Meet recorded`)
+  } catch (err) {
+    logger.error({ err }, '[Meet] Class-end job error')
+  }
+}
+
 /* ── Auto-attendance finalization ─────────────────────────
    attendedAt (set by the CLT participant.joined webhook for internal/LiveKit
    classes, or by the gated join-link hand-off in resolveMeetJoin for
@@ -919,6 +969,9 @@ export function startReminderJobs(): void {
 
   // Every 15 min — finalize attendance (booked -> attended/missed) for online classes ended 15+ min ago
   cron.schedule('*/15 * * * *', exclusive('attendance-finalization', runAttendanceFinalization))
+
+  // Every 5 min — a Meet class past its timetable end: has Google Meet recorded it ending?
+  cron.schedule('*/5 * * * *', exclusive('meet-class-end', () => runMeetClassEnd()))
 
   logger.info('[Reminders] Cron jobs scheduled')
 }

@@ -40,12 +40,14 @@ const wrap =
 
 /**
  * What students did after `since` — opened or wrote on a Help & Support
- * ticket, sent a class assignment, had one approved or rejected — oldest
- * first, each with a key that never changes, so the portal can ask with an
- * overlap and drop what it has already told.
+ * ticket, sent a class assignment, had one approved or rejected, and with
+ * `include=classes` attended a live class that is now over — oldest first,
+ * each with a key that never changes, so the portal can ask with an overlap
+ * and drop what it has already told.
  */
 router.get('/student-activity', checkedCaller, wrap(async (req, res) => {
-  sendSuccess(res, await studentActivityForPortal({ since: req.query['since'] }), 'Activity')
+  const include = String(req.query['include'] ?? '').split(',').map(s => s.trim())
+  sendSuccess(res, await studentActivityForPortal({ since: req.query['since'], classes: include.includes('classes') }), 'Activity')
 }))
 
 /**
