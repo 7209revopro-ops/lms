@@ -186,6 +186,11 @@ try {
       ids(bList.body).length === 0, `${why(bList)} got ${ids(bList.body).length} rows`)
   }
 
+  /* Attendance is taken once a class has started (attendanceRefusal in
+     admin.routes.ts), so the room opens for the two attendance sections and
+     goes back to scheduled before the edits at the end. */
+  await LiveClassModel.updateOne({ _id: shared._id }, { $set: { status: 'live' } })
+
   /* ═══════════════════════════════════════════════════════ */
   section('Seats may be managed by their own academy — and only their own')
   {
@@ -234,6 +239,7 @@ try {
     check('and the response does not confirm the foreign id exists',
       bulk.status === 200, why(bulk))
   }
+  await LiveClassModel.updateOne({ _id: shared._id }, { $set: { status: 'scheduled' } })
 
   /* ═══════════════════════════════════════════════════════ */
   section('The class itself is still the owner-s — sharing widens reads, not writes')

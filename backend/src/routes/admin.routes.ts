@@ -3161,6 +3161,41 @@ const attendanceUpdateSchema = z.object({
   status: z.enum(['attended', 'missed']),
 })
 
+/* ── Has this class happened yet? ───────────────────────
+   Attendance records a class that took place. Before its start time there is
+   nothing to record, and a cancelled class never took place at all — yet both
+   could be marked, and both reached students. A seat marked 'attended' the day
+   before its class showed "Attended" on a class still on their calendar; one
+   marked on a class that was later cancelled kept saying "Attended" instead of
+   "Class cancelled", because cancelling a class leaves its seats alone. Found
+   in production: five seats across four classes, Sep–Oct 2026.
+
+   'live' and 'ended' count as started whatever the clock says — a mentor can
+   open the room a few minutes early, and that class has begun. */
+function attendanceRefusal(
+  live: { scheduledStart?: Date | string; status?: string } | null,
+  now = Date.now(),
+): { code: string; message: string } | null {
+  if (!live) return { code: 'CLASS_NOT_FOUND', message: 'This class no longer exists.' }
+  if (live.status === 'cancelled') {
+    return { code: 'CLASS_CANCELLED', message: 'This class was cancelled, so there is no attendance to mark.' }
+  }
+  const started = live.status === 'live' || live.status === 'ended'
+    || (live.scheduledStart != null && new Date(live.scheduledStart).getTime() <= now)
+  if (!started) {
+    return { code: 'CLASS_NOT_STARTED', message: 'This class has not started yet. Attendance can be marked once it starts.' }
+  }
+  return null
+}
+
+/* Who marked which seat. Both attendance routes log under the one action, so
+   "who marked this seat?" is a single query on meta.bookingIds — single marks
+   used to leave no trace at all, which is why the five seats above could not be
+   traced to anyone. The handler stashes what it actually wrote; the audit
+   middleware reads it once the response is sent. */
+const attendanceAuditMeta = (r: Request) =>
+  (r.res?.locals['attendanceMarked'] ?? {}) as Record<string, unknown>
+
 /* ── Mark a whole selection at once ─────────────────────
    Attendance could only be set one seat at a time, so a session that ran with
    thirty students meant thirty clicks — which is why so many past sessions were
@@ -3178,10 +3213,10 @@ const bulkAttendanceSchema = z.object({
 
 router.patch('/bookings/bulk-attendance', requireInstructor, requirePermission('bookings', 'update'),
   validate(bulkAttendanceSchema),
-  audit('booking.bulkAttendance', 'ClassBooking', () => 'bulk'),
+  audit('booking.bulkAttendance', 'ClassBooking', () => 'bulk', attendanceAuditMeta),
   async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { ClassBookingModel } = await import('@/models/schema.ts')
+    const { ClassBookingModel, LiveClassModel } = await import('@/models/schema.ts')
     const { Types } = await import('mongoose')
     const { ids, status } = req.body as { ids: string[]; status: 'attended' | 'missed' }
 
@@ -3213,10 +3248,21 @@ router.patch('/bookings/bulk-attendance', requireInstructor, requirePermission('
        cap, so it can lock them out of a class they never took. Out-of-scope ids
        are skipped rather than refused, matching the 404-not-403 rule: the
        response must not confirm that an id exists in another academy. */
+    /* Nor a class that has not started or was cancelled (attendanceRefusal).
+       Skipped, not refused, like every other seat this route cannot touch: a
+       selection can span classes, and one still on the calendar must not stop
+       the rest being marked. */
+    const classIds = [...new Set(docs.map(d => String((d as any).liveClassId ?? '')))]
+      .filter(i => Types.ObjectId.isValid(i))
+    const classes = await LiveClassModel.find({ _id: { $in: classIds } })
+      .select('scheduledStart status').lean()
+    const markable = new Set(classes.filter(c => !attendanceRefusal(c)).map(c => String(c._id)))
+
     const allowed = docs
       .filter(d => bySeatScope.get(
         `${String((d as any).liveClassId ?? '')}:${String((d as any).seatOrganizationId ?? '')}`,
-      ) === true && (d as any).status === 'booked')
+      ) === true && (d as any).status === 'booked'
+        && markable.has(String((d as any).liveClassId ?? '')))
       .map(d => (d as any)._id)
 
     /* `status: 'booked'` repeated in the filter, so a seat cancelled between
@@ -3225,15 +3271,18 @@ router.patch('/bookings/bulk-attendance', requireInstructor, requirePermission('
       ? await ClassBookingModel.updateMany({ _id: { $in: allowed }, status: 'booked' }, { status })
       : { modifiedCount: 0 }
     const updated = result.modifiedCount ?? 0
+    res.locals['attendanceMarked'] = { status, from: 'booked', bookingIds: allowed.map(String) }
 
     sendSuccess(res, { updated, skipped: ids.length - updated },
       updated === 0 ? 'Nothing to update' : `Marked ${updated} ${status}`)
   } catch (err) { next(err) }
 })
 
-router.patch('/bookings/:id/attendance', requireInstructor, requirePermission('bookings','update'), validate(attendanceUpdateSchema), async (req: Request, res: Response, next: NextFunction) => {
+router.patch('/bookings/:id/attendance', requireInstructor, requirePermission('bookings','update'), validate(attendanceUpdateSchema),
+  audit('booking.bulkAttendance', 'ClassBooking', r => String(r.params['id'] ?? ''), attendanceAuditMeta),
+  async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { ClassBookingModel } = await import('@/models/schema.ts')
+    const { ClassBookingModel, LiveClassModel } = await import('@/models/schema.ts')
     const id = String(req.params['id'] ?? '')
     const { status } = req.body as { status: 'attended' | 'missed' }
 
@@ -3243,11 +3292,16 @@ router.patch('/bookings/:id/attendance', requireInstructor, requirePermission('b
        response carries their name and email. Answers 404 across an academy
        boundary so the endpoint never confirms the id exists elsewhere. */
     const existing = await ClassBookingModel.findById(id)
-      .select('liveClassId seatOrganizationId').lean()
+      .select('liveClassId seatOrganizationId status').lean()
     /* The seat guard: a guest academy marks its own students present. */
     if (!existing || !(await callerMayManageSeat(req, existing))) {
       res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Booking not found' } }); return
     }
+
+    /* Not before the class starts, and never on a cancelled one. */
+    const live = await LiveClassModel.findById(existing.liveClassId).select('scheduledStart status').lean()
+    const refusal = attendanceRefusal(live)
+    if (refusal) { res.status(400).json({ success: false, error: refusal }); return }
 
     /* status: 'booked' IN THE FILTER, the guard the bulk sibling already has.
        Without it, marking a CANCELLED seat 'attended' resurrects a booking the
@@ -3280,6 +3334,7 @@ router.patch('/bookings/:id/attendance', requireInstructor, requirePermission('b
         error: { code: 'CANNOT_MARK', message: 'Only a live booking can be marked. This seat was cancelled.' },
       }); return
     }
+    res.locals['attendanceMarked'] = { status, from: existing.status, bookingIds: [id] }
     sendSuccess(res, { ...(booking as any), id: (booking as any).id ?? String((booking as any)._id) }, 'Attendance updated')
   } catch (err) { next(err) }
 })

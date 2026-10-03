@@ -251,7 +251,8 @@ section('E. /bookings/stats reports the whole filtered set, never just the loade
 
   /* Attendance rate is over DECIDED seats, so it does not collapse as future
      bookings pile up. */
-  const lc = await mkClass('Attendance Math')
+  /* Already ran — attendance is only taken once a class has started (M). */
+  const lc = await mkClass('Attendance Math', { scheduledStart: new Date(Date.now() - 2 * 24 * 60 * MIN) })
   const a1 = await seat(await mk('att1@ba.test', 'student', orgA), lc)
   await seat(await mk('att2@ba.test', 'student', orgA), lc)
   await seat(await mk('att3@ba.test', 'student', orgA), lc)   // still just booked
@@ -582,6 +583,53 @@ section('L. An instructor sees their own class even when its course is outside t
      0/0 for the assigned instructor). */
   const stats = await call('GET', `/admin/bookings/stats?liveClassId=${crossCategoryClass._id}`, juraTeacherJar)
   check('L3 the stats endpoint agrees — total is 1, not 0', stats.body?.data?.total === 1, JSON.stringify(stats.body))
+}
+
+/* ═══════════ M — attendance waits for the class, and says who marked it ═══════════ */
+section('M. attendance is taken once a class has started, and every mark is logged')
+{
+  /* Found in production: seats marked "attended" the day before their class,
+     and on a class later cancelled — the student saw "Attended" for a class
+     that never ran, and single marks left no trace of who made them. */
+  const { AuditLogModel } = await import('@/models/schema.ts')
+  const ahead  = await mkClass('M Not Yet')                                   // starts in two days
+  const called = await mkClass('M Called Off', { scheduledStart: new Date(Date.now() - 60 * MIN), status: 'cancelled' })
+  const early  = await mkClass('M Opened Early', { status: 'live' })          // started before its slot
+  const ran    = await mkClass('M Ran', { scheduledStart: new Date(Date.now() - 2 * 60 * MIN) })
+  const sAhead  = await seat(await mk('m1@ba.test', 'student', orgA), ahead)
+  const sAhead2 = await seat(await mk('m2@ba.test', 'student', orgA), ahead)
+  const sCalled = await seat(await mk('m3@ba.test', 'student', orgA), called)
+  const sEarly  = await seat(await mk('m4@ba.test', 'student', orgA), early)
+  const sRan    = await seat(await mk('m5@ba.test', 'student', orgA), ran)
+  const st = async (id: any) => ((await ClassBookingModel.findById(id).select('status').lean()) as any)?.status
+
+  const r1 = await call('PATCH', `/admin/bookings/${sAhead._id}/attendance`, adminJar, { status: 'attended' })
+  check('M1 a class still to come cannot be marked', r1.status === 400 && r1.code === 'CLASS_NOT_STARTED', `${r1.status} ${r1.code}`)
+  const r2 = await call('PATCH', `/admin/bookings/${sCalled._id}/attendance`, adminJar, { status: 'attended' })
+  check('M2 nor a cancelled one', r2.status === 400 && r2.code === 'CLASS_CANCELLED', `${r2.status} ${r2.code}`)
+  check('M3 both seats are untouched', (await st(sAhead._id)) === 'booked' && (await st(sCalled._id)) === 'booked')
+  const r3 = await call('PATCH', `/admin/bookings/${sEarly._id}/attendance`, adminJar, { status: 'attended' })
+  check('M4 a class the mentor opened early counts as started', r3.status === 200, `${r3.status} ${r3.code}`)
+
+  const bulk = await call('PATCH', '/admin/bookings/bulk-attendance', adminJar,
+    { ids: [String(sAhead2._id), String(sRan._id)], status: 'attended' })
+  check('M5 bulk marks the class that ran and skips the one still to come',
+    bulk.status === 200 && bulk.body?.data?.updated === 1
+      && (await st(sRan._id)) === 'attended' && (await st(sAhead2._id)) === 'booked',
+    JSON.stringify(bulk.body?.data))
+
+  /* The audit entry is written once the response has gone — give it a moment. */
+  let single: any = null, many: any = null
+  for (let i = 0; i < 30 && !(single && many); i++) {
+    single = await AuditLogModel.findOne({ action: 'booking.bulkAttendance', 'meta.bookingIds': String(sEarly._id) }).lean()
+    many   = await AuditLogModel.findOne({ action: 'booking.bulkAttendance', 'meta.bookingIds': String(sRan._id) }).lean()
+    if (!(single && many)) await new Promise(r => setTimeout(r, 100))
+  }
+  check('M6 a single mark is logged — who, which seat, and from what',
+    !!single && single.actorEmail === 'admin@ba.test' && single.meta?.status === 'attended' && single.meta?.from === 'booked',
+    JSON.stringify(single))
+  check('M7 a bulk mark logs the seats it marked, not the one it skipped',
+    !!many && !(many.meta?.bookingIds ?? []).includes(String(sAhead2._id)), JSON.stringify(many?.meta))
 }
 
 } catch (err) {
