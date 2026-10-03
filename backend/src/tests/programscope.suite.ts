@@ -475,6 +475,42 @@ try {
       a.size === b.size && [...a].every(id => b.has(id)), `${a.size} vs ${b.size}`)
   }
 
+  section('I · searching by every word of a name, in any order')
+  {
+    /* 29% of real students carry a middle name or an initial, and the search
+       matched the whole phrase as typed — "Aswanth Appari" found nothing for
+       "Aswanth K Appari". Each word must now appear somewhere, in any order. */
+    const mkApproved = (name: string) => UserModel.create({
+      name, email: `${name.toLowerCase().replace(/\s+/g, '.')}-${n++}@ps.local`, passwordHash: hash,
+      role: 'student', isActive: true, organizationId: org._id, enrollmentStatus: 'approved',
+    })
+    await mkApproved('Aswanth K Appari')
+    await mkApproved('Megha Menon')
+    await mkApproved('Megha Raj')
+    const find = async (q: string) => ((await call('GET',
+      `/admin/users?role=student&per_page=100&search=${encodeURIComponent(q)}`, { jar: superJar })).body?.data ?? [])
+      .map((u: any) => u.name as string).sort()
+    const is = async (q: string, want: string[]) => { const got = await find(q); return { ok: JSON.stringify(got) === JSON.stringify(want), got: JSON.stringify(got) } }
+
+    let r = await is('aswanth appari', ['Aswanth K Appari'])
+    check('first + last name finds a student with a middle initial', r.ok, r.got)
+    r = await is('appari aswanth', ['Aswanth K Appari'])
+    check('in either order', r.ok, r.got)
+    r = await is('  aswanth   appari ', ['Aswanth K Appari'])
+    check('extra spaces do not matter', r.ok, r.got)
+    r = await is('megha zzz', [])
+    check('every word has to match — one stray word finds nobody', r.ok, r.got)
+    r = await is('megha', ['Megha Menon', 'Megha Raj'])
+    check('a single word finds exactly what it did before', r.ok, r.got)
+    r = await is('menon megha', ['Megha Menon'])
+    check('a second word narrows it to one', r.ok, r.got)
+    const dot = await find('a.ari'), star = await find('.*')
+    check('punctuation is matched literally, never as a pattern', dot.length === 0 && star.length === 0, JSON.stringify([dot, star]))
+    const scoped = (await call('GET', '/admin/users?role=student&search=subdm%20S&per_page=100', { jar: aiJar })).body?.data ?? []
+    check('words in any order still narrow within the programme filter',
+      scoped.length === 1 && scoped[0].name === 'S-subdm', JSON.stringify(scoped.map((u: any) => u.name)))
+  }
+
 } catch (err) {
   fail++
   lines.push(`  FAIL  suite threw — ${(err as Error).message}\n${(err as Error).stack}`)

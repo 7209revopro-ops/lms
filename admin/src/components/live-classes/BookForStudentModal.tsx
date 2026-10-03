@@ -3,6 +3,8 @@ import { zoneOf, foreignZoneTag } from '@/lib/timezone'
 
 import React, { useState, useEffect, useRef } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
+import { useQuery } from '@tanstack/react-query'
+import { api } from '@/lib/axios'
 import { X, Search, UserPlus, Check, AlertCircle, Building2 } from 'lucide-react'
 import { useUsers } from '@/lib/api/users'
 import Spinner from '@/components/ui/Spinner'
@@ -43,6 +45,31 @@ export function BookForStudentModal({ live, onClose, onSuccess }: Props) {
   })
 
   const students = data?.docs ?? []
+  const total    = data?.meta?.total_count ?? students.length
+
+  /* A search that finds nobody says WHY. The list holds only students who can
+     be booked — approved and active — so a student waiting for approval, or
+     blocked, simply vanished, and that read as "the search is broken". Asked
+     only when the search came up empty. */
+  const emptySearch = !!debouncedSearch && !searching && !!data && students.length === 0
+  const { data: unbookable } = useQuery({
+    queryKey: ['admin', 'users', 'unbookable', debouncedSearch],
+    enabled:  emptySearch,
+    staleTime: 30_000,
+    queryFn: async () => {
+      const find = (params: Record<string, string | number>) =>
+        api.get<{ data: AdminUser[] }>('/admin/users', { params: { role: 'student', search: debouncedSearch, per_page: 5, ...params } })
+          .then(r => r.data.data ?? [])
+      const [pending, blocked] = await Promise.all([
+        find({ enrollmentStatus: 'pending' }),
+        find({ enrollmentStatus: 'approved', status: 'inactive' }),
+      ])
+      return [
+        ...pending.map(user => ({ user, why: 'waiting for approval', fix: 'approve them first' })),
+        ...blocked.map(user => ({ user, why: 'blocked', fix: 'unblock them first' })),
+      ]
+    },
+  })
 
   function handleBook() {
     if (!selectedStudent) return
@@ -157,6 +184,24 @@ export function BookForStudentModal({ live, onClose, onSuccess }: Props) {
                     <p className="text-[11px] truncate" style={{ color: 'rgba(255,255,255,0.4)' }}>{s.email}</p>
                   </div>
                 </button>
+              ))}
+              {total > students.length && (
+                <p className="px-3 py-2 text-[11px]" style={{ color: 'rgba(255,255,255,0.35)' }}>
+                  Showing {students.length} of {total} — type more of the name to narrow it down.
+                </p>
+              )}
+            </div>
+          )}
+
+          {/* Nothing bookable matched — say so, and why */}
+          {emptySearch && !selectedStudent && (
+            <div className="rounded-xl px-3 py-2.5 text-xs"
+              style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.08)', color: 'rgba(255,255,255,0.55)' }}>
+              <p>No approved student matches “{debouncedSearch}”.</p>
+              {(unbookable ?? []).map(({ user, why, fix }) => (
+                <p key={user.id} className="mt-1">
+                  <span className="font-semibold text-white">{user.name}</span> ({user.email}) is {why} — {fix}.
+                </p>
               ))}
             </div>
           )}

@@ -210,23 +210,28 @@ export class UserRepository extends BaseRepository<IUser> {
       if (enrolled.length) categoryOr.push({ _id: { $in: enrolled } })
     }
 
-    const searchTerm = params.search
-      ? params.search.slice(0, MAX_SEARCH_LEN).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-      : null
+    /* EVERY WORD, IN ANY ORDER. The search used to match the whole phrase as
+       typed, so "Aswanth Appari" found nothing for "Aswanth K Appari" — and 29%
+       of students carry a middle name or an initial, which is what made the
+       Book Seat search "go empty". Each word must now appear in the name or the
+       email, wherever it sits. A one-word search matches exactly as before; a
+       longer one only ever finds more. Capped at six words, each escaped. */
+    const words = params.search
+      ? params.search.slice(0, MAX_SEARCH_LEN).trim().split(/\s+/).filter(Boolean).slice(0, 6)
+          .map(w => w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+      : []
 
-    const searchOr = searchTerm
-      ? [
-          { name:  { $regex: searchTerm, $options: 'i' } },
-          { email: { $regex: searchTerm, $options: 'i' } },
-        ]
-      : null
+    const searchAnd = words.map(w => ({ $or: [
+      { name:  { $regex: w, $options: 'i' } },
+      { email: { $regex: w, $options: 'i' } },
+    ] }))
 
-    if (categoryOr && searchOr) {
-      filter['$and'] = [{ $or: categoryOr }, { $or: searchOr }]
+    if (categoryOr && searchAnd.length) {
+      filter['$and'] = [{ $or: categoryOr }, ...searchAnd]
     } else if (categoryOr) {
       filter['$or'] = categoryOr
-    } else if (searchOr) {
-      filter['$or'] = searchOr
+    } else if (searchAnd.length) {
+      filter['$and'] = searchAnd
     }
 
     if (params.organizationId && Types.ObjectId.isValid(params.organizationId)) {
