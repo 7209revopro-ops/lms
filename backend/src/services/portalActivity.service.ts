@@ -15,8 +15,9 @@
      POST /service/class-assignments { email } one student's class assignments
 
    Both academies: the portal's students may be in either. Answering and
-   resolving go through the help desk's own SupportService, from the one
-   support account PORTAL_SUPPORT_USER_EMAIL; nothing else here writes.
+   resolving go through the help desk's own SupportService — from the CS's
+   own LMS staff account when they have one, else from the shared support
+   account PORTAL_SUPPORT_USER_EMAIL; nothing else here writes.
 ───────────────────────────────────────────────────── */
 import { SupportTicketModel, ClassAssignmentModel, UserModel, CourseModel, LiveClassModel } from '@/models/schema.ts'
 import { PortalError } from '@/services/portal.service.ts'
@@ -246,18 +247,29 @@ export async function supportTicketsForManyForPortal(input: { emails: unknown })
   }
 }
 
-/* The portal's support account: whose name the help desk shows on an answer from the portal. */
-async function portalSupportAccount() {
-  const email = env.PORTAL_SUPPORT_USER_EMAIL.toLowerCase().trim()
-  const account = email
-    ? await UserModel.findOne({ email, role: { $in: STAFF_ROLES }, isActive: true }).select('_id role').lean() as { _id: unknown; role: string } | null
-    : null
-  if (!account) {
-    throw new PortalError('NOT_CONFIGURED', 'Answering tickets from the portal needs PORTAL_SUPPORT_USER_EMAIL set to an active LMS support account', 503)
-  }
-  /* No academy and no programme scope: the portal decides which students' tickets
-     somebody may answer, and its students are in both academies. */
-  return { id: idOf(account._id), role: account.role as 'support' | 'admin' | 'sub_admin' | 'super_admin' }
+type DeskRole = 'support' | 'admin' | 'sub_admin' | 'super_admin'
+
+/* An active LMS staff account by address, as the help desk's requester. No academy and no programme
+   scope: the portal decides which students' tickets somebody may answer, and its students are in both. */
+async function staffAccount(email: string): Promise<{ id: string; role: DeskRole } | null> {
+  if (!email) return null
+  const account = await UserModel.findOne({ email, role: { $in: STAFF_ROLES }, isActive: true }).select('_id role').lean() as { _id: unknown; role: string } | null
+  return account ? { id: idOf(account._id), role: account.role as DeskRole } : null
+}
+
+/**
+ * Who an answer from the portal comes from: the answering CS's own LMS account, when they have one as
+ * staff under the address they use in the portal — the student then sees their CS's name, as on any
+ * help-desk answer. Otherwise the shared support account, PORTAL_SUPPORT_USER_EMAIL, and the answer is
+ * signed with the CS's name.
+ */
+async function deskAccountFor(byEmail: string): Promise<{ id: string; role: DeskRole; own: boolean }> {
+  const own = await staffAccount(byEmail.toLowerCase())
+  if (own) return { ...own, own: true }
+  const shared = await staffAccount(env.PORTAL_SUPPORT_USER_EMAIL.toLowerCase().trim())
+  if (shared) return { ...shared, own: false }
+  throw new PortalError('NOT_CONFIGURED',
+    `${byEmail || 'Whoever is answering'} has no active LMS support account of their own, and PORTAL_SUPPORT_USER_EMAIL (the shared one) is not set`, 503)
 }
 
 /**
@@ -273,7 +285,7 @@ async function studentsTicket(ticketId: unknown, email: unknown) {
   return ticket
 }
 
-/** Who did it, from the portal: kept in the log, and an answer is signed with the name. */
+/** Who did it, from the portal: their own account is found by the address, and the name signs an answer from the shared one. */
 const actorOf = (byName: unknown, byEmail: unknown) => ({
   name: (typeof byName === 'string' ? byName.trim() : '').slice(0, 100),
   email: (typeof byEmail === 'string' ? byEmail.trim() : '').slice(0, 200),
@@ -289,22 +301,23 @@ async function asDesk<T>(run: () => Promise<T>): Promise<T> {
 }
 
 /**
- * Answer a ticket from the portal, exactly as the help desk answers one: from
- * the portal's support account, signed by the CS who wrote it. The ticket then
- * waits on the student, and the student is told "Support replied".
+ * Answer a ticket from the portal, exactly as the help desk answers one: from the CS's own LMS account,
+ * or from the shared support account signed with their name (deskAccountFor). The ticket then waits on
+ * the student, and the student is told "Support replied". `from` says which account it went from.
  */
 export async function replyToTicketForPortal(input: { ticketId: unknown; email: unknown; body: unknown; byName: unknown; byEmail: unknown }) {
   const ticket = await studentsTicket(input.ticketId, input.email)
   const text = typeof input.body === 'string' ? input.body.trim() : ''
   if (!text) throw bad('Write an answer first')
   const by = actorOf(input.byName, input.byEmail)
-  const signed = `${text}\n\n— ${by.name || 'Delta Institutions'}${by.name ? ', Delta Institutions' : ''}`
-  if (signed.length > MAX_ANSWER) throw bad(`An answer can be at most about ${MAX_ANSWER - 100} characters`)
-  const account = await portalSupportAccount()
-  await asDesk(() => new SupportService().addMessage(idOf(ticket._id), account, signed))
-  logger.info({ ticketId: idOf(ticket._id), by }, '[support] answered from the commission portal')
+  const account = await deskAccountFor(by.email)
+  // From their own account their name is on it already; from the shared one it is signed.
+  const body = account.own ? text : `${text}\n\n— ${by.name || 'Delta Institutions'}${by.name ? ', Delta Institutions' : ''}`
+  if (body.length > MAX_ANSWER) throw bad(`An answer can be at most about ${MAX_ANSWER - 100} characters`)
+  await asDesk(() => new SupportService().addMessage(idOf(ticket._id), account, body))
+  logger.info({ ticketId: idOf(ticket._id), by, from: account.own ? 'their own account' : 'the shared account' }, '[support] answered from the commission portal')
   const fresh = await SupportTicketModel.findById(ticket._id).select(TICKET_FIELDS).lean() as unknown as TicketRow
-  return { ticket: ticketForPortal(fresh) }
+  return { ticket: ticketForPortal(fresh), from: account.own ? 'own' : 'shared' }
 }
 
 /** Mark a ticket resolved from the portal, as the help desk does — the student is not messaged. */
@@ -312,9 +325,10 @@ export async function resolveTicketForPortal(input: { ticketId: unknown; email: 
   const ticket = await studentsTicket(input.ticketId, input.email)
   if (ticket.status === 'closed') throw new PortalError('TICKET_CLOSED', 'This ticket is closed', 400)
   if (ticket.status !== 'resolved') {
-    const account = await portalSupportAccount()
+    const by = actorOf(input.byName, input.byEmail)
+    const account = await deskAccountFor(by.email)
     await asDesk(() => new SupportService().setStatus(idOf(ticket._id), 'resolved', account))
-    logger.info({ ticketId: idOf(ticket._id), by: actorOf(input.byName, input.byEmail) }, '[support] resolved from the commission portal')
+    logger.info({ ticketId: idOf(ticket._id), by, from: account.own ? 'their own account' : 'the shared account' }, '[support] resolved from the commission portal')
   }
   const fresh = await SupportTicketModel.findById(ticket._id).select(TICKET_FIELDS).lean() as unknown as TicketRow
   return { ticket: ticketForPortal(fresh) }

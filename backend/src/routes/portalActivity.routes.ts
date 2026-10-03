@@ -58,9 +58,10 @@ router.post('/support-tickets', checkedCaller, wrap(async (req, res) => {
 }))
 
 /**
- * Answer a ticket, as the help desk does: from the portal's support account
- * (PORTAL_SUPPORT_USER_EMAIL), signed byName. Only that student's ticket:
- * { email } names them, and a ticket that is not theirs is "not found".
+ * Answer a ticket, as the help desk does: from the answering CS's own LMS
+ * account (byEmail), else the shared support account (PORTAL_SUPPORT_USER_EMAIL)
+ * signed byName. Only that student's ticket: { email } names them, and a
+ * ticket that is not theirs is "not found".
  */
 router.post('/support-tickets/:id/reply', checkedCaller, wrap(async (req, res) => {
   const { email, body, byName, byEmail } = (req.body ?? {}) as Record<string, unknown>

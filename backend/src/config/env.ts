@@ -51,10 +51,12 @@ const envSchema = z.object({
      cannot reach these endpoints at all; it does not fall back to anything. */
   SALES_CRM_SECRET: z.string().default(''),
 
-  /* The LMS account the commission portal's answers on Help & Support tickets
-     come from: one support account (role support, admin, sub_admin or
-     super_admin) shared by every CS — the CS who wrote an answer signs it.
-     Unset means the portal can read tickets but not answer or resolve them. */
+  /* An answer on a Help & Support ticket from the commission portal comes
+     from the answering CS's own LMS account — staff (role support, admin,
+     sub_admin or super_admin) under the address they use in the portal — so
+     the student sees their name. A CS with no such account answers from this
+     one, a support account shared by all of them, and signs the answer.
+     Unset, only CSs with their own account can answer or resolve from there. */
   PORTAL_SUPPORT_USER_EMAIL: z.string().default(''),
 
   /* Bcrypt */
