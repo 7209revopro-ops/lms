@@ -21,6 +21,17 @@
    email per class and one student notification per class would flood both
    inboxes. Each mentor gets a single summary at the end instead.
 
+   Course + module per row: a class is only module-locked (blocked or unpaid
+   modules, booking gates) when it carries its module, and one timetable spans
+   several courses — "MBT 4" lives in one course, "IM 1" and "ADVANCE 4" in
+   others. Each row therefore finds its module: the file's module column (a
+   pick in the preview fills it), else its session code (batch + session
+   number, matchModule), looked up first in the chosen course and then in the
+   academy's other published courses of the same programme — an optional
+   course column narrows it to one. The row goes to the course that owns its
+   module. A row of a course with modules never goes in without one: no match,
+   or two equally good ones, blocks it until a module (or "No module") is picked.
+
    Duplicate-proof: every class carries importRef = course + session id + date,
    unique in the database. A resume, a retry, or importing the same file twice
    cannot create the same class twice.
@@ -93,9 +104,12 @@ export interface PreviewRow {
   durationMins:  number
   mentorName:    string
   instructor:    { id: string; name: string } | null
-  matchedBy:     'email' | 'exact' | 'first-name' | 'manual' | null
+  /* 'staff': matched a staff account that is not an instructor — always flagged. */
+  matchedBy:     'email' | 'exact' | 'first-name' | 'staff' | 'manual' | null
   /** Batch + session number, e.g. "MBT 7" — what the module is matched on. */
   code:          string
+  /** The course the classes go into: the one owning the module, else the chosen one. */
+  course:        { id: string; title: string }
   /** The course module the classes go into. null = none (General sessions). */
   module:        { id: string; title: string } | null
   /** 'sheet' = the row's module column (or a pick in the preview, which fills
@@ -114,17 +128,20 @@ export interface PreviewRow {
 }
 
 export interface PreviewResult {
-  course:      { id: string; title: string }
+  course:      { id: string; title: string }          // the chosen (default) course
+  /* Every course a row may go to — the chosen one first — with its modules in
+     course order: what the preview's module picker offers. */
+  courses:     Array<{ id: string; title: string; modules: Array<{ id: string; title: string }> }>
   academy:     { slug: string | null; zone: string; tag: string }
   instructors: Array<{ id: string; name: string; email: string; role: string }>
-  /** The course's modules in course order — what the preview's picker offers. */
+  /** The chosen course's modules in course order (courses[0].modules). */
   modules:     Array<{ id: string; title: string }>
   rows:        PreviewRow[]
   settingsErrors: string[]
   summary: {
     rows: number; ready: number; warnings: number; errors: number
     classes: number; meet: number; inapp: number; offline: number
-    mentors: number; firstDate: string | null; lastDate: string | null
+    mentors: number; courses: number; firstDate: string | null; lastDate: string | null
   }
 }
 
@@ -148,7 +165,8 @@ const ALIASES: Record<string, string[]> = {
   platform:      ['platform', 'meeting_platform', 'meeting', 'link_type'],
   room:          ['room'],
   notes:         ['notes', 'note', 'remarks'],
-  module:        ['module', 'module_name', 'section'],
+  module:        ['module', 'module_name', 'module_title', 'section'],
+  course:        ['course', 'course_name', 'course_title'],
 }
 
 /* ── Which module a row's classes go into ──────────────
@@ -162,19 +180,23 @@ const ALIASES: Record<string, string[]> = {
    "MBT 10". "IM 4 (1)" is also tried as "IM 4 PART 1". Only a single match
    counts — two candidates is a question for the person importing, not a guess. */
 const squash = (s: string) => s.toUpperCase().replace(/[^A-Z0-9]+/g, '')
-export function matchModule<T extends { title: string }>(code: string, modules: T[]): T | null {
+/* Every module the first form that names any names — so two can be reported. */
+function moduleHits<T extends { title: string }>(code: string, modules: T[]): T[] {
   const forms = [code.replace(/\(\s*(\d+)\s*\)\s*$/, ' PART $1'), code]
   for (const form of [...new Set(forms)]) {
     const k = squash(form)
     if (!k) continue
     const hits = modules.filter(m => { const t = squash(m.title); return t.startsWith(k) && !/^\d/.test(t.slice(k.length)) })
-    if (hits.length === 1) return hits[0]!
-    if (hits.length > 1) return null
+    if (hits.length) return hits
   }
-  return null
+  return []
+}
+export function matchModule<T extends { title: string }>(code: string, modules: T[]): T | null {
+  const hits = moduleHits(code, modules)
+  return hits.length === 1 ? hits[0]! : null
 }
 /* A module column (or a preview pick) saying "no module" on purpose. */
-const NO_MODULE = /^(none|no module|-|—|general|general sessions?)$/i
+const NO_MODULE = /^(none|no module|n\/?a|-+|—|–|general|general sessions?)$/i
 
 function pick(row: RawRow, field: keyof typeof ALIASES): string {
   const byNorm = new Map(Object.entries(row).map(([k, v]) => [norm(k), v]))
@@ -233,6 +255,59 @@ function parsePlatform(raw: string): ClassImportPlatform | null | undefined {
 
 const slug = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
 
+/* ── Which course a row's classes go into ──────────────
+   One timetable spans several courses: in the Dubai academy "MBT 4" is a
+   module of MARKET BREAK-OUT TRADING PROGRAM, "IM 1" of DELTA WAVE THEORY
+   TRADING PROGRAMME and "ADVANCE 4" of MMC. A row whose module the chosen
+   course does not have looks in the academy's other published courses of the
+   same programme, and goes to the course that owns it. */
+interface ModuleRef { id: string; title: string; courseId: string }
+interface CourseRef { id: string; title: string; slug: string; words: string[]; modules: ModuleRef[] }
+
+/* A module named by text — a module cell or a session code — tier by tier:
+   the row's own course first, then the programme's other courses together, so
+   a module the chosen course has is never lost to a namesake elsewhere. The
+   exact title first ("IM 4" when there are "IM 4" and "IM 4 - PART 1"), then
+   matchModule's rule. Two equally good answers in a tier are a question for
+   the person importing, never a guess. */
+function findModule(text: string, tiers: ModuleRef[][]): { hit: ModuleRef | null; ambiguous: ModuleRef[] } {
+  const k = squash(text)
+  if (!k) return { hit: null, ambiguous: [] }
+  for (const tier of tiers) {
+    for (const found of [tier.filter(m => squash(m.title) === k), moduleHits(text, tier)]) {
+      if (found.length === 1) return { hit: found[0]!, ambiguous: [] }
+      if (found.length > 1) return { hit: null, ambiguous: found }
+    }
+  }
+  return { hit: null, ambiguous: [] }
+}
+
+/* A course column, compared as whole words ("MMC" is "MMC (MARKET MAKING
+   CYCLE)") or by slug. Letters outside a–z are not words here, so a name
+   written only in them matches nothing rather than everything. */
+function words(s: string): string[] {
+  return s.toLowerCase().replace(/([a-z])(\d)/g, '$1 $2').replace(/(\d)([a-z])/g, '$1 $2')
+    .match(/\d+(?:\.\d+)+|[a-z0-9]+/g) ?? []
+}
+const sameWords  = (have: string[], want: string[]) => have.length === want.length && want.every((w, i) => have[i] === w)
+const startsWith = (have: string[], want: string[]) => want.length > 0 && want.length <= have.length && want.every((w, i) => have[i] === w)
+
+function findCourse(text: string, courses: CourseRef[]): { hit: CourseRef | null; ambiguous: CourseRef[] } {
+  const want = words(text), asSlug = slug(text)
+  /* Nothing comparable (only punctuation, or letters outside a–z): no match,
+     never "every course with an equally empty title". */
+  if (!want.length) return { hit: null, ambiguous: [] }
+  for (const test of [(c: CourseRef) => sameWords(c.words, want) || c.slug === asSlug, (c: CourseRef) => startsWith(c.words, want)]) {
+    const found = courses.filter(test)
+    if (found.length === 1) return { hit: found[0]!, ambiguous: [] }
+    if (found.length > 1) return { hit: null, ambiguous: found }
+  }
+  return { hit: null, ambiguous: [] }
+}
+
+const listTitles = (xs: Array<{ title: string }>) =>
+  xs.slice(0, 3).map(x => `"${x.title}"`).join(', ') + (xs.length > 3 ? ` and ${xs.length - 3} more` : '')
+
 /* ── Service ─────────────────────────────────────────── */
 
 type CreateFn = (
@@ -253,8 +328,9 @@ export class ClassImportService {
     const { LIVEKIT_MAX_PARTICIPANTS } = await import('@/services/liveClass.service.ts')
 
     if (!Types.ObjectId.isValid(settings.courseId)) throw new ClassImportError('INVALID_COURSE', 'Pick a course.')
+    type CourseRow = { _id: Types.ObjectId; title: string; slug?: string; organizationId?: Types.ObjectId; program?: string }
     const course = await CourseModel.findById(settings.courseId)
-      .select('title organizationId program').lean<{ _id: Types.ObjectId; title: string; organizationId?: Types.ObjectId; program?: string }>()
+      .select('title slug organizationId program').lean<CourseRow>()
     if (!course) throw new ClassImportError('COURSE_NOT_FOUND', 'Course not found.', 404)
 
     /* Tenancy: an academy's admin imports into their own academy's courses.
@@ -271,9 +347,33 @@ export class ClassImportService {
     const orgSlug = orgSlugFor(course.organizationId) ?? null
     const zone = zoneForAcademy(orgSlug)
 
-    const modules = (await SectionModel.find({ courseId: course._id }).select('title order')
-      .sort({ order: 1, createdAt: 1 }).lean<Array<{ _id: Types.ObjectId; title: string }>>())
-      .map(s => ({ id: String(s._id), title: s.title }))
+    /* The courses a row may go to: the chosen one first, then this academy's
+       other PUBLISHED courses of the same programme — where a timetable's
+       "IM 1" or "ADVANCE 4" actually lives. Same academy, so every class keeps
+       this import's clock; same programme, so a programme-scoped admin
+       (checked above) never reaches past their own; published, so a session
+       code never routes silently into a draft copy nobody is enrolled on (the
+       chosen course itself is the admin's own choice, whatever its status). */
+    const others = await CourseModel.find({
+      _id: { $ne: course._id },
+      organizationId: course.organizationId ?? { $exists: false },
+      program: course.program ? course.program : { $in: [null, ''] },
+      status: 'published',
+    }).select('title slug').sort({ title: 1 }).lean<CourseRow[]>()
+    const courseRows = [course, ...others]
+    const sections = await SectionModel.find({ courseId: { $in: courseRows.map(c => c._id) } })
+      .select('courseId title order').sort({ order: 1, createdAt: 1 })
+      .lean<Array<{ _id: Types.ObjectId; courseId: Types.ObjectId; title: string }>>()
+    const courses: CourseRef[] = courseRows.map(c => ({
+      id: String(c._id), title: c.title, slug: c.slug ?? '', words: words(c.title),
+      modules: sections.filter(s => String(s.courseId) === String(c._id))
+        .map(s => ({ id: String(s._id), title: s.title, courseId: String(c._id) })),
+    }))
+    const home = courses[0]!
+    const courseById = new Map(courses.map(c => [c.id, c]))
+    const moduleById = new Map(courses.flatMap(c => c.modules).map(m => [m.id, m]))
+    const elsewhere = courses.slice(1).flatMap(c => c.modules)
+    const modules = home.modules.map(m => ({ id: m.id, title: m.title }))
 
     const settingsErrors: string[] = []
     if (!/^\d{4}-\d{2}-\d{2}$/.test(settings.startDate)) settingsErrors.push('Pick a start date.')
@@ -298,10 +398,20 @@ export class ClassImportService {
       }
       const n = name.toLowerCase().trim()
       if (!n) return { inst: null, by: null }
-      const exact = instructors.filter(i => i.name.toLowerCase().trim() === n)
-      if (exact.length === 1) return { inst: exact[0]!, by: 'exact' }
-      const first = instructors.filter(i => i.name.toLowerCase().trim().split(/\s+/)[0] === n)
-      if (first.length === 1) return { inst: first[0]!, by: 'first-name' }
+      /* Instructors first, by full name and then by first name; only when no
+         instructor fits does any other staff account count. "Sara" in a
+         timetable is the instructor Sara Khan before it is a support agent
+         whose name is exactly "Sara" — matching all staff at once handed her
+         classes to the support agent, as a "ready" row nobody was asked to
+         check. A non-instructor match is always flagged ('staff'). */
+      const pools = [instructors.filter(i => i.role === 'instructor'), instructors.filter(i => i.role !== 'instructor')]
+      for (const [k, pool] of pools.entries()) {
+        const exact = pool.filter(i => i.name.toLowerCase().trim() === n)
+        if (exact.length === 1) return { inst: exact[0]!, by: k === 0 ? 'exact' : 'staff' }
+        const first = pool.filter(i => i.name.toLowerCase().trim().split(/\s+/)[0] === n)
+        if (first.length === 1) return { inst: first[0]!, by: k === 0 ? 'first-name' : 'staff' }
+        if (exact.length > 1 || first.length > 1) return { inst: null, by: null }   // two people fit: a human picks
+      }
       return { inst: null, by: null }
     }
 
@@ -352,24 +462,48 @@ export class ClassImportService {
       let title = `${code}${label ? ` · ${label}` : ''}`
       if (title.length < 3) title = `${title} session`
 
-      /* Module: the row's module column (a pick in the preview fills it) →
-         matched on the code. A course with modules never silently gets a class
-         with none: an unmatched row waits for a pick, or an explicit "none". */
-      const moduleRaw = pick(raw, 'module')
-      let module: PreviewRow['module'] = null
+      /* Course + module. The module: the row's module column (a pick in the
+         preview fills it with the module's id), else its session code — looked
+         up in the row's course (the course column's, else the chosen one) and,
+         failing that, in the programme's other courses; the row goes to the
+         course that owns it. A course with modules never silently gets a class
+         with none: no match, or two equally good ones, waits for a pick or an
+         explicit "none". A chosen course with no modules imports as it always did. */
+      const moduleRaw = pick(raw, 'module'), courseRaw = pick(raw, 'course')
+      let rowCourse = home
+      let mod: ModuleRef | null = null
       let moduleFrom: PreviewRow['moduleFrom'] = null
-      if (moduleRaw && NO_MODULE.test(moduleRaw)) {
-        moduleFrom = 'none'
-      } else if (moduleRaw) {
-        const hit = modules.find(m => m.id === moduleRaw)
-          ?? modules.find(m => squash(m.title) === squash(moduleRaw))
-          ?? matchModule(moduleRaw, modules)
-        if (hit) { module = hit; moduleFrom = 'sheet' }
-        else err(`Module "${moduleRaw}" is not a module of this course.`)
-      } else if (modules.length > 0 && code) {
-        const hit = matchModule(code, modules)
-        if (hit) { module = hit; moduleFrom = 'name' }
-        else err(`No module of this course is named like "${code}" — pick one.`)
+      const picked = moduleById.get(moduleRaw)
+      if (picked) {
+        mod = picked; rowCourse = courseById.get(picked.courseId)!; moduleFrom = 'sheet'
+      } else {
+        let fixed: CourseRef | null = null
+        if (courseRaw) {
+          const c = findCourse(courseRaw, courses)
+          if (c.hit) fixed = rowCourse = c.hit
+          else err(c.ambiguous.length
+            ? `Course "${courseRaw}" matches ${listTitles(c.ambiguous)} — pick the module.`
+            : `No course "${courseRaw}" in this academy's programme — pick the module.`)
+        }
+        const tiers = fixed ? [fixed.modules] : [home.modules, elsewhere]
+        const where = fixed ? fixed.title : `this course${elsewhere.length ? ' or its programme\'s other courses' : ''}`
+        if (courseRaw && !fixed) {
+          /* reported above — which course is the question */
+        } else if (moduleRaw && NO_MODULE.test(moduleRaw)) {
+          moduleFrom = 'none'
+        } else if (moduleRaw) {
+          const m = findModule(moduleRaw, tiers)
+          if (m.hit) { mod = m.hit; rowCourse = courseById.get(m.hit.courseId)!; moduleFrom = 'sheet' }
+          else err(m.ambiguous.length
+            ? `Module "${moduleRaw}" matches ${listTitles(m.ambiguous)} — pick one.`
+            : `Module "${moduleRaw}" is not a module of ${where}.`)
+        } else if (code && rowCourse.modules.length > 0) {
+          const m = findModule(code, tiers)
+          if (m.hit) { mod = m.hit; rowCourse = courseById.get(m.hit.courseId)!; moduleFrom = 'name' }
+          else err(m.ambiguous.length
+            ? `"${code}" could be ${listTitles(m.ambiguous)} — pick one.`
+            : `No module of ${where} is named like "${code}" — pick one.`)
+        }
       }
 
       const mode = parseMode(pick(raw, 'mode'))
@@ -415,7 +549,10 @@ export class ClassImportService {
         endLabel:   end != null ? fmtMinutes(end) : endRaw,
         durationMins: duration,
         mentorName: mentorRaw,
-        instructor, matchedBy, code, module, moduleFrom, title,
+        instructor, matchedBy, code,
+        course: { id: rowCourse.id, title: rowCourse.title },
+        module: mod ? { id: mod.id, title: mod.title } : null,
+        moduleFrom, title,
         mode: mode ?? 'online', platform,
         ...(mode !== 'online' ? { location, room } : {}),
         status: fatal ? 'error' : 'ready',
@@ -461,8 +598,17 @@ export class ClassImportService {
     }
 
     /* ── 3. What already exists / clashes ───────────── */
-    const refOf = (r: PreviewRow, dateKey: string) => `${settings.courseId}:${r.sessionKey}:${dateKey}`
-    const allRefs = rows.flatMap(r => r.occurrences.map(o => refOf(r, o.dateKey)))
+    /* The ROW's course: a row that stays in the chosen course keeps the ref it
+       always had, so files imported before rows had their own course still
+       come back "Already imported". */
+    const refOf = (r: PreviewRow, dateKey: string) => `${r.course.id}:${r.sessionKey}:${dateKey}`
+    /* The key the same row had before rows found their own course: the chosen
+       course's. A row now routed to another course must still find the class
+       an earlier import made of it, or re-importing that file makes it twice
+       — the mentor-clash check would miss it once that class was cancelled or
+       handed to another mentor. */
+    const legacyRefOf = (r: PreviewRow, dateKey: string) => `${settings.courseId}:${r.sessionKey}:${dateKey}`
+    const allRefs = rows.flatMap(r => r.occurrences.flatMap(o => [refOf(r, o.dateKey), legacyRefOf(r, o.dateKey)]))
     const existing = new Set(
       allRefs.length
         ? (await LiveClassModel.find({ importRef: { $in: allRefs } }).select('importRef').lean<Array<{ importRef: string }>>()).map(x => x.importRef)
@@ -482,10 +628,11 @@ export class ClassImportService {
     for (const r of rows) {
       for (const o of r.occurrences) {
         if (o.state === 'past') continue
-        if (existing.has(refOf(r, o.dateKey))) { o.state = 'exists'; o.note = 'Already imported'; continue }
+        if (existing.has(refOf(r, o.dateKey)) || existing.has(legacyRefOf(r, o.dateKey))) { o.state = 'exists'; o.note = 'Already imported'; continue }
         if (!r.instructor) continue
         const s = new Date(o.startISO).getTime(), e = s + r.durationMins * 60_000
-        const clash = busy.find(b => String(b.instructorId) === r.instructor!.id && !b.importRef?.startsWith(`${settings.courseId}:${r.sessionKey}:`)
+        const clash = busy.find(b => String(b.instructorId) === r.instructor!.id
+          && !b.importRef?.startsWith(`${r.course.id}:${r.sessionKey}:`) && !b.importRef?.startsWith(`${settings.courseId}:${r.sessionKey}:`)
           && b.scheduledStart.getTime() < e && b.scheduledStart.getTime() + b.durationMins * 60_000 > s)
         if (clash && settings.allowMentorClash) o.note = `Alongside "${clash.title}" — same mentor, same time (allowed)`
         else if (clash) { o.state = 'conflict'; o.note = `Mentor already has "${clash.title}"` }
@@ -501,7 +648,11 @@ export class ClassImportService {
         if (exists) r.messages.push(`${exists} date${exists > 1 ? 's' : ''} already imported — skipped.`)
         if (past) r.messages.push(`${past} date${past > 1 ? 's are' : ' is'} in the past — skipped.`)
         if (r.matchedBy === 'first-name') r.messages.push(`Mentor matched by first name to ${r.instructor!.name} — check it.`)
-        if (conflicts || r.matchedBy === 'first-name') r.status = 'warning'
+        if (r.matchedBy === 'staff') {
+          const role = byId.get(r.instructor!.id)?.role?.replace(/_/g, ' ') ?? 'staff'
+          r.messages.push(`Mentor matched ${r.instructor!.name}, ${/^[aeiou]/i.test(role) ? 'an' : 'a'} ${role} account — not an instructor. Check it.`)
+        }
+        if (conflicts || r.matchedBy === 'first-name' || r.matchedBy === 'staff') r.status = 'warning'
         if (r.newCount === 0 && settingsErrors.length === 0) r.status = r.status === 'ready' ? 'warning' : r.status
       }
       r.include = r.status !== 'error' && r.newCount > 0 && overrides[r.rowNumber]?.include !== false
@@ -515,6 +666,7 @@ export class ClassImportService {
 
     return {
       course: { id: String(course._id), title: course.title },
+      courses: courses.map(c => ({ id: c.id, title: c.title, modules: c.modules.map(m => ({ id: m.id, title: m.title })) })),
       academy: { slug: orgSlug, zone, tag: zoneTag(zone) },
       instructors,
       modules,
@@ -530,6 +682,7 @@ export class ClassImportService {
         inapp: count(r => r.platform === 'inapp'),
         offline: count(r => r.platform === null),
         mentors: new Set(included.map(r => r.instructor?.id)).size,
+        courses: new Set(included.map(r => r.course.id)).size,
         firstDate: dates[0] ?? null,
         lastDate: dates[dates.length - 1] ?? null,
       },
@@ -556,12 +709,13 @@ export class ClassImportService {
         durationMins: r.durationMins,
         title: r.title,
         instructorId: new Types.ObjectId(r.instructor!.id),
-        ...(r.module ? { sectionId: new Types.ObjectId(r.module.id) } : {}),
         platform: (r.platform ?? 'meet') as ClassImportPlatform,
         offline: r.platform === null,
         location: r.location,
         room: r.room,
-        importRef: `${settings.courseId}:${r.sessionKey}:${o.dateKey}`,
+        courseId: new Types.ObjectId(r.course.id),
+        ...(r.module ? { sectionId: new Types.ObjectId(r.module.id) } : {}),
+        importRef: `${r.course.id}:${r.sessionKey}:${o.dateKey}`,
       }))
     })
     if (items.length === 0) throw new ClassImportError('NOTHING_TO_IMPORT', 'Nothing selected to import.')
@@ -573,6 +727,7 @@ export class ClassImportService {
       actor,
       organizationId: course?.organizationId,
       courseId: new Types.ObjectId(settings.courseId),
+      courseIds: [...new Set(items.map(it => String(it.courseId)))].map(id => new Types.ObjectId(id)),
       fileName,
       settings: {
         startDate: settings.startDate, weeks: settings.weeks, capacity: settings.capacity,
@@ -619,7 +774,8 @@ export class ClassImportService {
         const isOffline = item.offline === true
         try {
           const { live } = await create({
-            courseId:        String(job.courseId),
+            /* A job started before rows had their own course has none on its items. */
+            courseId:        String(item.courseId ?? job.courseId),
             ...(item.sectionId ? { sectionId: String(item.sectionId) } : {}),
             title:           item.title,
             scheduledStart:  item.scheduledStart,
@@ -666,14 +822,22 @@ export class ClassImportService {
 
   /* One email per mentor: their weekly sessions from this import. */
   private async sendSummaries(job: HydratedDocument<IClassImport>): Promise<void> {
-    const { UserModel, CourseModel, ClassImportModel } = await import('@/models/schema.ts')
+    const { UserModel, CourseModel, SectionModel, ClassImportModel } = await import('@/models/schema.ts')
     const { sendInstructorImportSummary } = await import('@/services/email.service.ts')
     const created = job.items.filter(i => i.status === 'created')
     if (!created.length) return
     await ensureOrgSlugs().catch(() => {})
     const slugName = orgSlugFor(job.organizationId) ?? null
     const zone = zoneForAcademy(slugName)
-    const course = await CourseModel.findById(job.courseId).select('title').lean<{ title?: string }>()
+    const courseOf = (it: typeof created[number]) => String(it.courseId ?? job.courseId)
+    const sectionIds = [...new Set(created.filter(i => i.sectionId).map(i => String(i.sectionId)))]
+    type Titled = Array<{ _id: Types.ObjectId; title?: string }>
+    const [courseDocs, sectionDocs] = await Promise.all([
+      CourseModel.find({ _id: { $in: [...new Set(created.map(courseOf))] } }).select('title').lean<Titled>(),
+      sectionIds.length ? SectionModel.find({ _id: { $in: sectionIds } }).select('title').lean<Titled>() : Promise.resolve([] as Titled),
+    ])
+    const courseTitle = new Map(courseDocs.map(c => [String(c._id), c.title ?? '']))
+    const moduleTitle = new Map(sectionDocs.map(s => [String(s._id), s.title ?? '']))
 
     const byInstructor = new Map<string, typeof created>()
     for (const it of created) {
@@ -684,19 +848,27 @@ export class ClassImportService {
       try {
         const u = await UserModel.findById(instId).select('name email role emailPrefs').lean<{ name?: string; email?: string; role?: string; emailPrefs?: unknown }>()
         if (!u?.email || !wantsStaffEmail(u as never, 'classScheduled')) continue
-        /* One line per weekly session (series), not per date. */
+        /* One line per weekly session (series), not per date. One course heads
+           the email; when a mentor's sessions span several, each line names its own. */
+        const own = new Set(its.map(courseOf))
         const series = new Map<string, typeof its>()
         for (const it of its) series.set(String(it.seriesId), [...(series.get(String(it.seriesId)) ?? []), it])
         const sessions = [...series.values()].map(list => {
           const first = list.reduce((a, b) => (a.scheduledStart < b.scheduledStart ? a : b))
-          return { title: first.title, start: first.scheduledStart, durationMins: first.durationMins, platform: first.platform, room: first.room, weeks: list.length }
+          return {
+            title: first.title, start: first.scheduledStart, durationMins: first.durationMins, platform: first.platform,
+            offline: first.offline === true, room: first.room, weeks: list.length,
+            ...(own.size > 1 ? { course: courseTitle.get(courseOf(first)) } : {}),
+            ...(first.sectionId ? { module: moduleTitle.get(String(first.sectionId)) } : {}),
+          }
         }).sort((a, b) => {
           const wa = new Date(a.start.toLocaleString('en-US', { timeZone: zone })).getDay()
           const wb = new Date(b.start.toLocaleString('en-US', { timeZone: zone })).getDay()
           return wa - wb || a.start.getTime() - b.start.getTime()
         })
         const dates = its.map(i => i.dateKey).sort()
-        await sendInstructorImportSummary(u.email, u.name ?? 'Instructor', course?.title ?? '', sessions, dates[0]!, dates[dates.length - 1]!, its.length, slugName)
+        const heading = own.size === 1 ? courseTitle.get([...own][0]!) ?? '' : ''
+        await sendInstructorImportSummary(u.email, u.name ?? 'Instructor', heading, sessions, dates[0]!, dates[dates.length - 1]!, its.length, slugName)
       } catch (err) {
         logger.error({ err, instId }, '[ClassImport] summary email failed')
       }
@@ -740,13 +912,23 @@ export class ClassImportService {
   }
 
   async getForActor(jobId: string, actor: Actor) {
-    const { ClassImportModel } = await import('@/models/schema.ts')
+    const { ClassImportModel, CourseModel } = await import('@/models/schema.ts')
     if (!Types.ObjectId.isValid(jobId)) throw new ClassImportError('NOT_FOUND', 'Import not found.', 404)
     const job = await ClassImportModel.findById(jobId)
     if (!job) throw new ClassImportError('NOT_FOUND', 'Import not found.', 404)
     if (actor.role !== 'super_admin' && job.organizationId && actor.organizationId
         && String(job.organizationId) !== actor.organizationId) {
       throw new ClassImportError('NOT_FOUND', 'Import not found.', 404)
+    }
+    /* The programme wall, as preview() puts it up: a programme-scoped admin
+       reads, retries and undoes only imports into their own programme's
+       courses. Without it the academy check above was the only one, and a
+       Digital Marketing sub-admin could undo a Forex timetable. Every course
+       the job touched counts — an older job names only its default one. */
+    if (actor.categoryScope) {
+      const ids = job.courseIds?.length ? job.courseIds : [job.courseId]
+      const outside = await CourseModel.exists({ _id: { $in: ids }, program: { $ne: actor.categoryScope } })
+      if (outside) throw new ClassImportError('NOT_FOUND', 'Import not found.', 404)
     }
     return job
   }
@@ -769,13 +951,20 @@ export class ClassImportService {
   }
 
   async list(actor: Actor) {
-    const { ClassImportModel } = await import('@/models/schema.ts')
-    const filter = actor.role === 'super_admin' || !actor.organizationId ? {} : { organizationId: new Types.ObjectId(actor.organizationId) }
+    const { ClassImportModel, CourseModel } = await import('@/models/schema.ts')
+    const filter: Record<string, unknown> = actor.role === 'super_admin' || !actor.organizationId ? {} : { organizationId: new Types.ObjectId(actor.organizationId) }
+    /* Same programme wall as getForActor: a job is listed by the course it
+       was started in, which preview() already held to the caller's programme. */
+    if (actor.categoryScope) {
+      const ours = await CourseModel.find({ program: actor.categoryScope }).select('_id').lean<Array<{ _id: Types.ObjectId }>>()
+      filter['courseId'] = { $in: ours.map(c => c._id) }
+    }
     const jobs = await ClassImportModel.find(filter).sort({ createdAt: -1 }).limit(20)
-      .select('status fileName courseId total created skipped failed startedAt finishedAt undoneAt')
+      .select('status fileName courseId courseIds total created skipped failed startedAt finishedAt undoneAt')
       .populate<{ courseId: { title?: string } | null }>('courseId', 'title').lean()
     return jobs.map(j => ({
       id: String(j._id), status: j.status, fileName: j.fileName ?? '', course: j.courseId?.title ?? '',
+      courses: j.courseIds?.length || 1,
       total: j.total, created: j.created, skipped: j.skipped, failed: j.failed,
       startedAt: j.startedAt, finishedAt: j.finishedAt ?? null, undoneAt: j.undoneAt ?? null,
     }))
@@ -814,4 +1003,4 @@ function controllerSingleton<T>(Ctor: new () => T): T {
 }
 
 /* Exported for tests. */
-export const __test = { parseTime, parseMode, parsePlatform, parseDay, zoneDateKey, matchModule }
+export const __test = { parseTime, parseMode, parsePlatform, parseDay, zoneDateKey, matchModule, findModule, findCourse }

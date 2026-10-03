@@ -3309,6 +3309,9 @@ export interface IClassImportItem {
   offline:        boolean          // in-person only: no link at all
   location?:      string
   room?:          string
+  /* The row's own course (classImport.service.ts). Absent on items of a job
+     started before rows had their own — they use the job's courseId. */
+  courseId?:      Types.ObjectId
   importRef:      string
   status:         ClassImportItemStatus
   liveClassId?:   Types.ObjectId
@@ -3320,7 +3323,8 @@ export interface IClassImport extends Document {
   createdBy:      Types.ObjectId
   actor:          { id: string; role: string; organizationId?: string; categoryScope?: string }
   organizationId?: Types.ObjectId
-  courseId:       Types.ObjectId
+  courseId:       Types.ObjectId     // the course chosen on the form — the default for rows
+  courseIds?:     Types.ObjectId[]   // every course the items went to
   fileName?:      string
   settings: {
     startDate:       string
@@ -3360,6 +3364,7 @@ const ClassImportItemSchema = new Schema<IClassImportItem>({
   offline:        { type: Boolean, default: false },
   location:       { type: String, maxlength: 500 },
   room:           { type: String, maxlength: 100 },
+  courseId:       { type: Schema.Types.ObjectId, ref: 'Course' },
   importRef:      { type: String, required: true, maxlength: 200 },
   status:         { type: String, enum: ['pending', 'created', 'skipped', 'failed'], default: 'pending' },
   liveClassId:    { type: Schema.Types.ObjectId, ref: 'LiveClass' },
@@ -3377,6 +3382,7 @@ const ClassImportSchema = new Schema<IClassImport>(
     },
     organizationId: { type: Schema.Types.ObjectId, ref: 'Organization', index: true },
     courseId:       { type: Schema.Types.ObjectId, ref: 'Course', required: true },
+    courseIds:      { type: [{ type: Schema.Types.ObjectId, ref: 'Course' }], default: undefined },
     fileName:       { type: String, maxlength: 255 },
     settings: {
       startDate:       { type: String, required: true },

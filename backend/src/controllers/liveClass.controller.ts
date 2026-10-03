@@ -1358,6 +1358,8 @@ export class LiveClassController {
       type:             'external' | 'internal'
       provider?:        'mux' | 'livekit'
       instructorId:     string
+      /* The module: the service checks it belongs to courseId, as for the form. */
+      sectionId?:       string
       sessionCapacity?: number
       language?:        string
       isOnline?:        boolean

@@ -30,11 +30,14 @@ export interface PreviewRow {
   durationMins: number
   mentorName:   string
   instructor:   { id: string; name: string } | null
-  matchedBy:    'email' | 'exact' | 'first-name' | 'manual' | null
-  /* Optional: a backend from before modules sends none of these three, and the
+  /* 'staff': matched a staff account that is not an instructor — always flagged. */
+  matchedBy:    'email' | 'exact' | 'first-name' | 'staff' | 'manual' | null
+  /* Optional: a backend from before modules sends none of these, and the
      preview then simply has no module picker. */
   /** Batch + session number, e.g. "MBT 7" — a module pick applies to every row with it. */
   code?:        string
+  /** The course the classes go into: the one that owns the module. */
+  course?:      { id: string; title: string }
   /** The course module the classes go into; null = none (General sessions). */
   module?:      { id: string; title: string } | null
   moduleFrom?:  'sheet' | 'name' | 'none' | null
@@ -52,6 +55,8 @@ export interface PreviewRow {
 
 export interface PreviewResult {
   course:      { id: string; title: string }
+  /** Every course a row may go to — the chosen one first — with its modules. */
+  courses?:    Array<{ id: string; title: string; modules: Array<{ id: string; title: string }> }>
   academy:     { slug: string | null; zone: string; tag: string }
   instructors: Array<{ id: string; name: string; email: string; role: string }>
   /** The course's modules, in course order — what the module picker offers. */
@@ -61,7 +66,7 @@ export interface PreviewResult {
   summary: {
     rows: number; ready: number; warnings: number; errors: number
     classes: number; meet: number; inapp: number; offline: number
-    mentors: number; firstDate: string | null; lastDate: string | null
+    mentors: number; courses?: number; firstDate: string | null; lastDate: string | null
   }
 }
 
@@ -77,7 +82,7 @@ export interface ImportJobStatus {
 }
 
 export interface ImportJobListItem {
-  id: string; status: ImportJobStatus['status']; fileName: string; course: string
+  id: string; status: ImportJobStatus['status']; fileName: string; course: string; courses?: number
   total: number; created: number; skipped: number; failed: number
   startedAt: string; finishedAt: string | null; undoneAt: string | null
 }

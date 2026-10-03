@@ -178,7 +178,8 @@ export default function ImportTimetablePage() {
   async function onImport() {
     if (!result) return
     const n = result.summary.classes
-    if (!confirm(`Create ${n} classes in "${result.course.title}"?\n\n${result.summary.meet} Google Meet · ${result.summary.inapp} in-app${result.summary.offline ? ` · ${result.summary.offline} in-person` : ''}\n${fmtKey(result.summary.firstDate)} → ${fmtKey(result.summary.lastDate)}\n\nYou can undo this import afterwards.`)) return
+    const where = (result.summary.courses ?? 1) > 1 ? `${result.summary.courses} courses` : `"${courseLabel(result)}"`
+    if (!confirm(`Create ${n} classes in ${where}?\n\n${result.summary.meet} Google Meet · ${result.summary.inapp} in-app${result.summary.offline ? ` · ${result.summary.offline} in-person` : ''}\n${fmtKey(result.summary.firstDate)} → ${fmtKey(result.summary.lastDate)}\n\nYou can undo this import afterwards.`)) return
     try {
       const r = await start.mutateAsync(payload())
       setJobId(r.jobId)
@@ -241,6 +242,9 @@ export default function ImportTimetablePage() {
                     <option value="" style={{ background: '#0D0F1A' }}>Select a course…</option>
                     {(courses?.docs ?? []).map(c => <option key={c.id} value={c.id} style={{ background: '#0D0F1A' }}>{c.title}</option>)}
                   </select>
+                  <p className="mt-1 text-[11px]" style={muted}>
+                    Each row goes into the module its session code names (“MBT 4”, “IM 1”) or its module column gives. A module this course doesn&apos;t have is looked for in the academy&apos;s other courses of the same programme, and the row goes there.
+                  </p>
                 </div>
                 <div>
                   <label className={label} style={labelS}>First week starts</label>
@@ -307,7 +311,7 @@ export default function ImportTimetablePage() {
           {result && s && (
             <section className="mt-5 rounded-2xl p-5" style={card}>
               <div className="mb-4 flex flex-wrap items-center gap-x-6 gap-y-2">
-                <h2 className="text-sm font-bold text-white">3 · Preview — {result.course.title}</h2>
+                <h2 className="text-sm font-bold text-white">3 · Preview — {(s.courses ?? 1) > 1 ? `${s.courses} courses` : courseLabel(result)}</h2>
                 <Stat n={s.classes} t="classes to create" strong />
                 <Stat n={s.meet} t="Google Meet" icon={<Video className="h-3.5 w-3.5" />} />
                 <Stat n={s.inapp} t="in-app" icon={<Monitor className="h-3.5 w-3.5" />} />
@@ -329,6 +333,7 @@ export default function ImportTimetablePage() {
                       <th className="py-2 pr-3"><span className="sr-only">Include</span></th>
                       <th className="py-2 pr-3 font-semibold">Day &amp; time</th>
                       <th className="py-2 pr-3 font-semibold">Session</th>
+                      <th className="py-2 pr-3 font-semibold">Module</th>
                       <th className="py-2 pr-3 font-semibold">Mentor</th>
                       <th className="py-2 pr-3 font-semibold">Platform</th>
                       <th className="py-2 pr-3 font-semibold">Dates</th>
@@ -338,7 +343,9 @@ export default function ImportTimetablePage() {
                   <tbody>
                     {result.rows.map(r => (
                       <Row key={r.rowNumber} r={r} tag={result.academy.tag} instructors={result.instructors}
-                        modules={result.modules ?? []}
+                        home={result.course}
+                        courses={result.courses ?? [{ ...result.course, modules: result.modules ?? [] }]}
+                        picked={!!(r.code && moduleChoice[r.code])}
                         onModule={v => { if (r.code) setModuleFor(r.code, v) }}
                         onInclude={v => setOverride(r.rowNumber, { include: v })}
                         onPlatform={v => setOverride(r.rowNumber, { platform: v })}
@@ -371,14 +378,28 @@ export default function ImportTimetablePage() {
   )
 }
 
+/* The one course every included row goes to (or the chosen one, if none is included). */
+const courseLabel = (p: PreviewResult) => p.rows.find(r => r.include)?.course?.title ?? p.course.title
+
 /* ── preview row ──────────────────────────────────────── */
-function Row({ r, tag, instructors, modules, onModule, onInclude, onPlatform, onMentor }: {
+function Row({ r, tag, instructors, home, courses, picked, onModule, onInclude, onPlatform, onMentor }: {
   r: PreviewRow; tag: string; instructors: PreviewResult['instructors']
-  modules: NonNullable<PreviewResult['modules']>; onModule: (v: string) => void
+  /* The chosen course, and every course a row may go to — the chosen one first. */
+  home: PreviewResult['course']; courses: NonNullable<PreviewResult['courses']>
+  /* A module was picked here for this row's session code. */
+  picked: boolean; onModule: (v: string) => void
   onInclude: (v: boolean) => void; onPlatform: (v: ImportPlatform) => void; onMentor: (v: string) => void
 }) {
   const st = STATUS[r.status]
   const blocked = r.status === 'error'
+  const withModules = courses.filter(c => c.modules.length > 0)
+  /* A chosen course with modules always offers the pick — it is how a blocked
+     row is fixed and a found one corrected. One without modules imports as it
+     always did, so only a row that went elsewhere, or is blocked, offers it. */
+  const canPick = !!r.code && withModules.length > 0 && ((courses[0]?.modules.length ?? 0) > 0 || !!r.module || blocked)
+  const routed = !!r.course && r.course.id !== home.id
+  const how = r.moduleFrom === 'name' ? `matched “${r.code}”`
+    : r.moduleFrom === 'sheet' || r.moduleFrom === 'none' ? (picked ? 'picked' : 'from the file') : ''
   return (
     <tr style={{ borderTop: '1px solid rgba(255,255,255,0.06)', opacity: r.include || blocked ? 1 : 0.5 }}>
       <td className="py-3 pr-3 align-top">
@@ -395,22 +416,39 @@ function Row({ r, tag, instructors, modules, onModule, onInclude, onPlatform, on
           {r.sessionId !== '—' ? `${r.sessionId} · ` : ''}
           {r.mode === 'hybrid' ? `Offline + Online${r.room ? ` · ${r.room}` : ''}` : r.mode === 'offline' ? `In person${r.room ? ` · ${r.room}` : ''}` : 'Online only'}
         </div>
-        {/* Which module the classes go into. Picking applies to every row of
-            this session code, and a row with no match stays blocked until a
-            module (or "No module") is picked. */}
-        {modules.length > 0 && r.code && (
-          <select className="mt-1.5 max-w-[240px] rounded-lg px-2 py-1 text-xs text-white outline-none" style={inputS}
+      </td>
+      <td className="py-3 pr-3 align-top">
+        {/* Which module the classes go into — and so which course. Picking
+            applies to every row of this session code, and a row with no match
+            stays blocked until a module (or "No module") is picked. */}
+        {canPick ? (
+          <select className="max-w-[240px] rounded-lg px-2 py-1 text-xs text-white outline-none" style={inputS}
             aria-label={`Module for ${r.code}`}
             value={r.module?.id ?? (r.moduleFrom === 'none' ? 'none' : '')}
             onChange={e => onModule(e.target.value)}>
             <option value="" style={{ background: '#0D0F1A' }}>Pick the module for “{r.code}”…</option>
-            {modules.map(m => <option key={m.id} value={m.id} style={{ background: '#0D0F1A' }}>{m.title}</option>)}
+            {withModules.length > 1
+              ? withModules.map(c => (
+                  <optgroup key={c.id} label={c.title} style={{ background: '#0D0F1A' }}>
+                    {c.modules.map(m => <option key={m.id} value={m.id} style={{ background: '#0D0F1A' }}>{m.title}</option>)}
+                  </optgroup>
+                ))
+              : withModules[0]!.modules.map(m => <option key={m.id} value={m.id} style={{ background: '#0D0F1A' }}>{m.title}</option>)}
             <option value="none" style={{ background: '#0D0F1A' }}>No module (General sessions)</option>
           </select>
+        ) : (
+          <div className="text-white">{r.module?.title ?? '—'}</div>
+        )}
+        {(routed || how) && (
+          <div className="mt-0.5 max-w-[240px] truncate text-xs" style={muted} title={r.course?.title}>
+            {routed ? r.course!.title : ''}{routed && how ? ' · ' : ''}{how}
+          </div>
         )}
       </td>
       <td className="py-3 pr-3 align-top">
-        {r.instructor && r.matchedBy !== 'first-name' ? (
+        {/* A guess — by first name, or a staff account that is not an
+            instructor — keeps the picker, so it can be corrected here. */}
+        {r.instructor && r.matchedBy !== 'first-name' && r.matchedBy !== 'staff' ? (
           <div className="text-white">{r.instructor.name}</div>
         ) : (
           <select className="rounded-lg px-2 py-1 text-xs text-white outline-none" style={inputS}
@@ -542,7 +580,7 @@ function RecentImports({ onOpen }: { onOpen: (id: string) => void }) {
             {data.map(j => (
               <tr key={j.id} style={{ borderTop: '1px solid rgba(255,255,255,0.05)' }}>
                 <td className="px-4 py-2.5 text-white">{j.fileName || 'Timetable'}</td>
-                <td className="px-4 py-2.5" style={muted}>{j.course}</td>
+                <td className="px-4 py-2.5" style={muted}>{j.course}{(j.courses ?? 1) > 1 ? ` + ${j.courses! - 1} more` : ''}</td>
                 <td className="px-4 py-2.5" style={muted}>{new Date(j.startedAt).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}</td>
                 <td className="px-4 py-2.5 text-white">{j.created}/{j.total}{j.failed ? <span style={{ color: '#F87171' }}> · {j.failed} failed</span> : null}</td>
                 <td className="px-4 py-2.5 text-xs" style={{ color: j.status === 'completed' ? '#34D399' : j.status === 'undone' ? 'rgba(255,255,255,0.4)' : '#FBBF24' }}>{j.status}</td>

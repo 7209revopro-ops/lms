@@ -24,9 +24,18 @@
      --resume <jobId>   retry what failed (e.g. a Google Meet hiccup)
      --undo   <jobId>   remove what that import created (booked classes are kept)
 
+   Course + module per row: each row goes into the module its session code
+   names (batch + session_number: "MBT 4" → "MBT 4 - Order Types & Live Trade",
+   "IM 4 (1)" → "IM 4 - PART 1"), or its optional `module` column gives (a
+   title, or "none"); an optional `course` column narrows that to one course.
+   A module --course does not have is looked for in the academy's other courses
+   of the same programme, and the row goes to the course that owns it. A row
+   whose module is not found is blocked. Modules are what lock a class to the
+   students who may attend it, so check the Module column of the preview.
+
    Options
      --file <xlsx>              sheet "Sessions" (or the first with a "day" column)
-     --course <id>              course to add the classes to
+     --course <id>              default course (rows whose module is found elsewhere go there)
      --start <YYYY-MM-DD>       first week, in the academy's local time
      --weeks <n>                weeks to create (default 1)
      --day <Friday[,Sunday]>    only these weekdays (default: all)
@@ -143,8 +152,8 @@ async function importFile(actor: Actor) {
     die(`${p.summary.errors} session(s) are blocked (see above). Fix the file, or add --skip-blocked to add only the ready ones.`)
   }
 
-  const course = p.course.title
-  console.log(`\n▶ Adding ${p.summary.classes} classes to "${course}" — ${p.summary.meet} Google Meet, ${p.summary.inapp} in-app${p.summary.offline ? `, ${p.summary.offline} in person` : ''}.`)
+  const course = p.summary.courses > 1 ? `${p.summary.courses} courses` : `"${p.rows.find(r => r.include)?.course.title ?? p.course.title}"`
+  console.log(`\n▶ Adding ${p.summary.classes} classes to ${course} — ${p.summary.meet} Google Meet, ${p.summary.inapp} in-app${p.summary.offline ? `, ${p.summary.offline} in person` : ''}.`)
   console.log(`  Recorded as ${actor.id === 'preview' ? '—' : await who(actor.id)}.`)
   if (!flag('yes')) await countdown(5)
 
@@ -254,21 +263,23 @@ function printPreview(p: Awaited<ReturnType<typeof svc.preview>>, file: string, 
   const PLAT: Record<string, string> = { meet: 'Google Meet', inapp: 'In-app' }
   const MODE: Record<string, string> = { hybrid: 'Offline+Online', online: 'Online only', offline: 'In person' }
   const MARK: Record<string, string> = { new: '', exists: '=', conflict: '!', past: '×' }
-  console.log(`\n${basename(file)}  →  ${p.course.title}  (${p.academy.slug ?? 'no academy'}, times in ${p.academy.tag})`)
+  console.log(`\n${basename(file)}  →  ${p.course.title} (default course)  (${p.academy.slug ?? 'no academy'}, times in ${p.academy.tag})`)
   console.log(`first week ${s.startDate} · ${s.weeks} week(s) · ${s.capacity} seats · ${s.language}\n`)
-  console.log(`${pad('ID', 9)}${pad('Day', 5)}${pad(`Time (${p.academy.tag})`, 20)}${pad('Class', 30)}${pad('Mentor', 20)}${pad('Mode', 15)}${pad('Platform', 12)}Dates`)
-  console.log('─'.repeat(140))
+  console.log(`${pad('ID', 9)}${pad('Day', 5)}${pad(`Time (${p.academy.tag})`, 20)}${pad('Class', 30)}${pad('Module', 30)}${pad('Mentor', 20)}${pad('Mode', 15)}${pad('Platform', 12)}Dates`)
+  console.log('─'.repeat(170))
   const rows = [...p.rows].sort((a, b) => (a.occurrences[0]?.startISO ?? '').localeCompare(b.occurrences[0]?.startISO ?? ''))
   for (const r of rows) {
     const dates = r.occurrences.map(o => `${MARK[o.state]}${o.label.replace(/^\w+, /, '')}`).join(', ')
     const mentor = r.instructor?.name ?? `? ${r.mentorName}`
     const flagTxt = r.status === 'error' ? '  ✖ BLOCKED' : r.status === 'warning' ? '  ⚠' : ''
-    console.log(`${pad(r.sessionId, 9)}${pad(r.day.slice(0, 3), 5)}${pad(`${r.startLabel}–${r.endLabel}`, 20)}${pad(r.title, 30)}${pad(mentor, 20)}${pad(MODE[r.mode] ?? r.mode, 15)}${pad(r.platform ? PLAT[r.platform]! : '—', 12)}${dates}${flagTxt}`)
+    /* The course too when the row went somewhere other than --course. */
+    const where = `${r.module?.title ?? '— no module'}${r.course.id !== p.course.id ? ` (${r.course.title})` : ''}`
+    console.log(`${pad(r.sessionId, 9)}${pad(r.day.slice(0, 3), 5)}${pad(`${r.startLabel}–${r.endLabel}`, 20)}${pad(r.title, 30)}${pad(where, 30)}${pad(mentor, 20)}${pad(MODE[r.mode] ?? r.mode, 15)}${pad(r.platform ? PLAT[r.platform]! : '—', 12)}${dates}${flagTxt}`)
     for (const m of r.messages) console.log(`${' '.repeat(9)}↳ ${m}`)
   }
   const x = p.summary
-  console.log('─'.repeat(140))
-  console.log(`${x.classes} classes to add · ${x.meet} Google Meet · ${x.inapp} in-app${x.offline ? ` · ${x.offline} in person` : ''} · ${x.mentors} mentor(s) · ${x.firstDate ?? '—'} → ${x.lastDate ?? '—'}`)
+  console.log('─'.repeat(170))
+  console.log(`${x.classes} classes to add · ${x.meet} Google Meet · ${x.inapp} in-app${x.offline ? ` · ${x.offline} in person` : ''} · ${x.mentors} mentor(s) · ${x.courses} course(s) · ${x.firstDate ?? '—'} → ${x.lastDate ?? '—'}`)
   console.log(`${x.ready} ready · ${x.warnings} warning(s) · ${x.errors} blocked     (dates: = already added, ! clashes with the mentor's class, × in the past — all skipped)`)
 }
 

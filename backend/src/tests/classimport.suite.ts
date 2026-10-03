@@ -20,6 +20,12 @@
      M  modules: each row goes into the course module its code names (MBT 7 →
         "MBT 7 - …", IM 4 (1) → "IM 4 - PART 1"); no match waits for a pick
      N  --allow-clash: an offline group alongside the same mentor's online class
+     O  course per row: a module the chosen course lacks is found in the
+        academy's other courses of the programme ("IM 4 (1)", "ADVANCE 4"), or
+        named by a course column or a pick; imported classes carry their own
+        course and module, so a blocked module now locks them
+     P  another programme's admin cannot touch the import
+     Q  older imports, drafts, decimals, non-Latin course names, module-less courses
 
    Boots against an ISOLATED throwaway database, dropped on exit.
    Run: bun run test:classimport
@@ -412,6 +418,208 @@ section('N  an offline group alongside the same mentor\'s online class (--allow-
   const made = await LiveClassModel.findOne({ importJobId: new mongoose.Types.ObjectId(r.jobId) }).lean() as any
   check('N4 in person, with a room and no link', made?.isOnline === false && !made?.meetingUrl && made?.room === 'Room 1',
     JSON.stringify({ isOnline: made?.isOnline, meetingUrl: made?.meetingUrl, room: made?.room }))
+}
+
+/* ── O ──────────────────────────────────────────────── */
+section('O  course per row')
+{
+  /* The Dubai Forex courses as production names them, plus three that must
+     never be looked in: another programme, another academy, an archived course. */
+  const course = async (title: string, slug: string, program: string, org: unknown, status = 'published') => {
+    const _id = oid()
+    await CourseModel.collection.insertOne({ _id, title, slug, program, organizationId: org, status, price: 0 })
+    return _id
+  }
+  const MBT = await course('MARKET BREAK-OUT TRADING PROGRAM', 'mbt-suite', '4x-trading', dubai._id)
+  const IM  = await course('DELTA WAVE THEORY TRADING PROGRAMME', 'im-suite', '4x-trading', dubai._id)
+  const MMC = await course('MMC (MARKET MAKING CYCLE)', 'mmc-suite', '4x-trading', dubai._id)
+  const DM  = await course('Digital Marketing Pro', 'dm-suite', 'digital-marketing', dubai._id)
+  const BLR = await course('Bangalore Forex', 'blr-suite', '4x-trading', blr._id)
+  const OLD = await course('Old Forex', 'old-suite', '4x-trading', dubai._id, 'archived')
+  const mod: Record<string, ReturnType<typeof oid>> = {}
+  const sectionsOf = async (courseId: unknown, titles: string[]) => {
+    for (const [i, title] of titles.entries()) {
+      const _id = oid(); mod[`${String(courseId)}|${title}`] = _id
+      await SectionModel.collection.insertOne({ _id, courseId, title, order: i + 1 })
+    }
+  }
+  await sectionsOf(MBT, ['MBT 1 - Basics of Forex', 'MBT 4 - Order Types & Live Trade', 'MBT 10 - Advanced Review'])
+  await sectionsOf(IM,  ['IM 1', 'IM 4 - PART 1', 'IM 4 - PART 2'])
+  await sectionsOf(MMC, ['ADVANCE 4'])
+  await sectionsOf(DM,  ['IM 1'])
+  await sectionsOf(BLR, ['MBT 4 - Somewhere Else'])
+  await sectionsOf(OLD, ['ADVANCE 9'])
+  const M = (c: unknown, title: string) => String(mod[`${String(c)}|${title}`])
+
+  /* One Tuesday, one-hour slots for one mentor, so no two rows overlap. */
+  const ROWS_M = [
+    ['MOD-1',  'MBT', '4',     { mode: 'Offline + Online' }],
+    ['MOD-2',  'IM', '4 (1)',  {}],
+    ['MOD-3',  'ADVANCE', '4', {}],
+    ['MOD-4',  'MBT', '1',     {}],
+    ['MOD-5',  'IM', '4',      {}],
+    ['MOD-6',  'MBT', '9',     {}],
+    ['MOD-7',  'MBT', '4',     { module: 'MBT 1' }],
+    ['MOD-8',  'Session', '8', { module: 'IM 7' }],
+    ['MOD-9',  'X', '1',       { course: 'MMC', module: 'none' }],
+    ['MOD-10', 'IM', '1',      {}],
+    ['MOD-11', 'MBT', '4',     { course: 'Nonexistent Course' }],
+    ['MOD-12', 'ADVANCE', '9', {}],
+    ['MOD-13', 'MBT', '4',     { course: 'Delta Wave' }],
+    ['MOD-14', 'IM', '1',      { module: M(DM, 'IM 1') }],
+  ].map(([id, batch, num, extra], i) => ({
+    session_id: id as string, day: 'Tuesday', start_time: `${8 + i}:00`, end_time: `${9 + i}:00`,
+    mentor: 'Haffis', batch: batch as string, session_number: num as string, mode: 'Online Only',
+    ...(extra as Record<string, string>),
+  }))
+  const MSET = { ...SETTINGS, courseId: String(MBT), startDate: '2026-12-01', weeks: 1, room: 'Room No. 1' }
+  const row = (p: Awaited<ReturnType<typeof svc.preview>>, id: string) => p.rows.find(r => r.sessionId === id)!
+  const say = (r: { status: string; messages: string[]; course: { title: string }; module: unknown }) =>
+    JSON.stringify({ s: r.status, c: r.course.title, m: r.module, msg: r.messages })
+
+  const p = await svc.preview(MSET, ROWS_M, ACTOR, {}, NOW)
+  const r1 = row(p, 'MOD-1'), r2 = row(p, 'MOD-2'), r3 = row(p, 'MOD-3'), r4 = row(p, 'MOD-4')
+  check('O1 "MBT 4" → MBT 4 - Order Types & Live Trade, in the chosen MBT course',
+    r1.module?.id === M(MBT, 'MBT 4 - Order Types & Live Trade') && r1.course.id === String(MBT) && r1.moduleFrom === 'name' && r1.status === 'ready', say(r1))
+  check('O2 "IM 4 (1)", which the MBT course lacks → IM 4 - PART 1, in the IM course',
+    r2.module?.id === M(IM, 'IM 4 - PART 1') && r2.course.id === String(IM) && r2.moduleFrom === 'name' && r2.status === 'ready', say(r2))
+  check('O3 "ADVANCE 4" → ADVANCE 4, in MMC', r3.module?.id === M(MMC, 'ADVANCE 4') && r3.course.id === String(MMC), say(r3))
+  check('O4 "MBT 1" is MBT 1 - Basics of Forex, never MBT 10', r4.module?.id === M(MBT, 'MBT 1 - Basics of Forex'), say(r4))
+  const r5 = row(p, 'MOD-5')
+  check('O5 "IM 4" names two modules of another course — blocked until picked, both named',
+    r5.module === null && r5.status === 'error' && r5.messages.some(m => m.includes('IM 4 - PART 1') && m.includes('IM 4 - PART 2') && m.includes('pick one')), say(r5))
+  const r6 = row(p, 'MOD-6')
+  check('O6 no course of the programme has "MBT 9" — blocked until picked',
+    r6.module === null && r6.status === 'error' && r6.messages.some(m => m.includes('"MBT 9"') && m.includes('pick one')), say(r6))
+  const r7 = row(p, 'MOD-7')
+  check('O7 a module column wins over the session code', r7.module?.id === M(MBT, 'MBT 1 - Basics of Forex') && r7.moduleFrom === 'sheet', say(r7))
+  const r8 = row(p, 'MOD-8')
+  check('O8 a module no course of the programme has blocks the row', r8.status === 'error' && r8.messages.some(m => m.includes('"IM 7" is not a module')), say(r8))
+  const r9 = row(p, 'MOD-9')
+  check('O9 course column + module "none": that course, no module, ready',
+    r9.course.id === String(MMC) && r9.module === null && r9.moduleFrom === 'none' && r9.status === 'ready', say(r9))
+  const r10 = row(p, 'MOD-10')
+  check('O10 "IM 1" is the Forex IM course — never another programme\'s namesake', r10.module?.id === M(IM, 'IM 1'), say(r10))
+  const titles = p.courses.map(c => c.title)
+  check('O11 only this academy\'s live courses of the programme are offered, chosen one first',
+    titles[0] === 'MARKET BREAK-OUT TRADING PROGRAM' && titles.length === 3 && !titles.includes('Digital Marketing Pro') && !titles.includes('Bangalore Forex') && !titles.includes('Old Forex'),
+    titles.join(' | '))
+  const r11 = row(p, 'MOD-11')
+  check('O12 an unknown course blocks the row', r11.status === 'error' && r11.messages.some(m => m.includes('No course "Nonexistent Course"')), say(r11))
+  const r12 = row(p, 'MOD-12')
+  check('O13 an archived course is not looked in', r12.module === null && r12.status === 'error', say(r12))
+  const r13 = row(p, 'MOD-13')
+  check('O14 a course column narrows the lookup to that one course',
+    r13.course.id === String(IM) && r13.status === 'error' && r13.messages.some(m => m.includes('DELTA WAVE THEORY TRADING PROGRAMME') && m.includes('"MBT 4"')), say(r13))
+  const r14 = row(p, 'MOD-14')
+  check('O15 a module id from another programme is refused, never followed',
+    r14.module === null && r14.status === 'error' && r14.messages.some(m => m.includes('is not a module')), say(r14))
+  check('O16 7 classes over 3 courses', p.summary.classes === 7 && p.summary.courses === 3, JSON.stringify(p.summary))
+  check('O17 `modules` is still the chosen course\'s own, in order',
+    p.modules.length === 3 && p.modules[0]!.id === M(MBT, 'MBT 1 - Basics of Forex') && p.courses[0]!.modules.length === 3, JSON.stringify(p.modules))
+
+  /* A pick in the preview fills the row's module cell — with the module's id. */
+  const picked = ROWS_M.map(r => r.session_id === 'MOD-5' ? { ...r, module: M(IM, 'IM 4 - PART 2') }
+                               : r.session_id === 'MOD-6' ? { ...r, module: 'none' } : r)
+  const q = await svc.preview(MSET, picked, ACTOR, {}, NOW)
+  const q5 = row(q, 'MOD-5'), q6 = row(q, 'MOD-6')
+  check('O18 picking another course\'s module fixes the row — and moves it to that course',
+    q5.module?.id === M(IM, 'IM 4 - PART 2') && q5.course.id === String(IM) && q5.moduleFrom === 'sheet' && q5.status === 'ready', say(q5))
+  check('O19 "No module" keeps the row in the chosen course, on purpose',
+    q6.course.id === String(MBT) && q6.module === null && q6.moduleFrom === 'none' && q6.status === 'ready', say(q6))
+
+  /* Through the real create path. */
+  const before = await EmailOutboxModel.countDocuments({ to: haffis.email })
+  const started = await svc.start(MSET, ROWS_M, ACTOR, {}, 'modules.xlsx')
+  check('O20 the seven good rows are planned', started.total === 7, String(started.total))
+  const job = await waitDone(started.jobId, ACTOR)
+  check('O21 import completed', job.status === 'completed' && job.items.every(i => i.status === 'created'), JSON.stringify(job.items.map(i => i.status)))
+  const made = await LiveClassModel.find({ importJobId: new mongoose.Types.ObjectId(started.jobId) }).lean()
+  const byKey = (k: string) => made.find(c => String(c.importRef).includes(`:${k}:`))!
+  const c2 = byKey('MOD-2'), c9 = byKey('MOD-9'), c1 = byKey('MOD-1')
+  check('O22 a class carries its row\'s course and module',
+    String(c2.courseId) === String(IM) && String(c2.sectionId) === M(IM, 'IM 4 - PART 1')
+      && String(c1.courseId) === String(MBT) && String(c1.sectionId) === M(MBT, 'MBT 4 - Order Types & Live Trade'),
+    JSON.stringify({ c2: [String(c2.courseId), String(c2.sectionId)] }))
+  check('O23 "none" on purpose: that course, no module', String(c9.courseId) === String(MMC) && !c9.sectionId)
+  check('O24 import refs are keyed by the row\'s course', made.every(c => String(c.importRef).startsWith(`${String(c.courseId)}:MOD-`)))
+  const stored = await ClassImportModel.findById(started.jobId).lean()
+  check('O25 the job records every course it touched', (stored!.courseIds ?? []).length === 3)
+  const listed = (await svc.list(ACTOR)).find(j => j.id === started.jobId)
+  check('O26 recent imports say it spans 3 courses', listed?.courses === 3, String(listed?.courses))
+
+  const mail = await EmailOutboxModel.findOne({ to: haffis.email }).sort({ createdAt: -1 }).lean()
+  const html = String(mail?.html ?? '')
+  check('O27 one more summary for the mentor', (await EmailOutboxModel.countDocuments({ to: haffis.email })) === before + 1)
+  check('O28 the summary names each class\'s module', html.includes('Module: IM 4 - PART 1') && html.includes('Module: ADVANCE 4'))
+  check('O29 …and its course, since they span several', html.includes('DELTA WAVE THEORY TRADING PROGRAMME') && !String(mail?.subject ?? '').includes('MARKET BREAK-OUT'))
+  check('O30 "Room No. 1" is not printed as "Room Room No. 1"', html.includes('Room No. 1') && !html.includes('Room Room'))
+
+  const again = await svc.preview(MSET, ROWS_M, ACTOR, {}, NOW)
+  check('O31 importing it again finds everything already imported',
+    again.rows.filter(r => r.status !== 'error').every(r => r.occurrences.every(o => o.state === 'exists')) && again.summary.classes === 0)
+
+  /* The point of it all: a blocked module now locks the imported class. */
+  const { resolveClassEntitlement } = await import('@/services/classEntitlement.service.ts')
+  await EnrollmentModel.collection.insertOne({
+    userId: student._id, courseId: MBT, status: 'active', organizationId: dubai._id,
+    blockedLessons: [new mongoose.Types.ObjectId(M(MBT, 'MBT 4 - Order Types & Live Trade'))],
+  })
+  const locked = await resolveClassEntitlement(c1, String(student._id), String(dubai._id), 'active')
+  const open   = await resolveClassEntitlement(byKey('MOD-4'), String(student._id), String(dubai._id), 'active')
+  check('O32 a student blocked from MBT 4 cannot book the imported MBT 4 class', !locked.ok && locked.code === 'MODULE_BLOCKED', JSON.stringify(locked))
+  check('O33 …but can book the imported MBT 1 class', open.ok, JSON.stringify(open))
+
+  /* ── P: the programme wall on a job, not just on the preview ── */
+  section('P  another programme\'s admin cannot touch a Forex import')
+  const DM_ADMIN = { id: String(admin._id), role: 'sub_admin', organizationId: String(dubai._id), categoryScope: 'digital-marketing' }
+  const FX_ADMIN = { ...DM_ADMIN, categoryScope: '4x-trading' }
+  const codeOf = async (p: Promise<unknown>) => { try { await p; return 'ok' } catch (e) { return (e as { code?: string }).code ?? 'threw' } }
+  check('P1 cannot read its status', await codeOf(svc.status(started.jobId, DM_ADMIN)) === 'NOT_FOUND')
+  check('P2 cannot undo it', await codeOf(svc.undo(started.jobId, DM_ADMIN)) === 'NOT_FOUND')
+  check('P3 cannot resume it', await codeOf(svc.resume(started.jobId, DM_ADMIN)) === 'NOT_FOUND')
+  check('P4 does not see it in Recent imports', !(await svc.list(DM_ADMIN)).some(j => j.id === started.jobId))
+  check('P5 the Forex sub-admin still can', await codeOf(svc.status(started.jobId, FX_ADMIN)) === 'ok'
+    && (await svc.list(FX_ADMIN)).some(j => j.id === started.jobId))
+  check('P6 and the classes are all still there', (await LiveClassModel.countDocuments({ importJobId: new mongoose.Types.ObjectId(started.jobId) })) === 7)
+
+  /* ── Q: edges a real catalogue has ── */
+  section('Q  older imports, drafts, decimals, non-Latin names, module-less courses')
+  /* A file imported BEFORE rows had their own course: its "IM 1" row went into
+     the chosen course, keyed by it. Re-importing it now must not make it twice. */
+  const LEG = { session_id: 'LEG-1', day: 'Wednesday', start_time: '9:00', end_time: '10:00', mentor: 'Moiz', batch: 'IM', session_number: '1', mode: 'Online Only' }
+  await LiveClassModel.collection.insertOne({
+    title: 'IM 1 · old import', courseId: MBT, instructorId: moiz._id, organizationId: dubai._id, type: 'external', isOnline: true,
+    status: 'cancelled', scheduledStart: new Date('2026-12-02T05:00:00Z'), durationMins: 60, importRef: `${String(MBT)}:LEG-1:2026-12-02`,
+  })
+  const leg = await svc.preview(MSET, [LEG], ACTOR, {}, NOW)
+  check('Q1 a class from an older import of the same row still counts as imported', leg.rows[0]!.course.id === String(IM)
+    && leg.rows[0]!.occurrences[0]!.state === 'exists', JSON.stringify(leg.rows[0]!.occurrences))
+  const draft = await course('Forex Draft Copy', 'draft-suite', '4x-trading', dubai._id, 'draft')
+  await sectionsOf(draft, ['ADVANCE 7'])
+  const dr = await svc.preview(MSET, [{ ...LEG, session_id: 'DR-1', batch: 'ADVANCE', session_number: '7' }], ACTOR, {}, NOW)
+  check('Q2 a draft course is never a silent target', dr.rows[0]!.module === null && dr.rows[0]!.status === 'error', say(dr.rows[0]!))
+  await sectionsOf(MBT, ['MBT 1.5 - Bonus Session'])
+  const dec = await svc.preview(MSET, [
+    { ...LEG, session_id: 'DEC-1', batch: 'MBT', session_number: '1' },
+    { ...LEG, session_id: 'DEC-2', batch: 'MBT', session_number: '1.5', start_time: '11:00', end_time: '12:00' },
+  ], ACTOR, {}, NOW)
+  check('Q3 "MBT 1" is not made ambiguous by "MBT 1.5"', dec.rows[0]!.module?.title === 'MBT 1 - Basics of Forex', say(dec.rows[0]!))
+  check('Q4 "MBT 1.5" finds its own module', dec.rows[1]!.module?.title === 'MBT 1.5 - Bonus Session', say(dec.rows[1]!))
+  const na = await svc.preview(MSET, [{ ...LEG, session_id: 'NA-1', course: 'دورة الفوركس' }], ACTOR, {}, NOW)
+  check('Q5 a course name in letters the matcher cannot read matches nothing — never everything', na.rows[0]!.status === 'error'
+    && na.rows[0]!.messages.some(m => m.includes('No course')), say(na.rows[0]!))
+  /* A chosen course with no modules imports as it always did — its rows are
+     not routed away on their codes. Only a row that names its module goes
+     where that module is. */
+  const plainFx = await course('Forex Webinars', 'webinars-suite', '4x-trading', dubai._id)
+  const PW = { ...MSET, courseId: String(plainFx) }
+  const pw = await svc.preview(PW, [{ ...LEG, session_id: 'PW-1', batch: 'MBT', session_number: '4' }], ACTOR, {}, NOW)
+  check('Q6 a chosen course with no modules keeps its rows', pw.rows[0]!.course.id === String(plainFx)
+    && pw.rows[0]!.module === null && pw.rows[0]!.moduleFrom === null && pw.rows[0]!.status === 'ready', say(pw.rows[0]!))
+  const pw2 = await svc.preview(PW, [{ ...LEG, session_id: 'PW-2', batch: 'MBT', session_number: '4', module: 'MBT 4' }], ACTOR, {}, NOW)
+  check('Q7 …unless the row names its module', pw2.rows[0]!.course.id === String(MBT)
+    && pw2.rows[0]!.module?.id === M(MBT, 'MBT 4 - Order Types & Live Trade') && pw2.rows[0]!.moduleFrom === 'sheet', say(pw2.rows[0]!))
 }
 
 } catch (err) {

@@ -1924,7 +1924,9 @@ export async function sendInstructorImportSummary(
   to:          string,
   name:        string,
   courseTitle: string,
-  sessions:    Array<{ title: string; start: Date; durationMins: number; platform: 'meet' | 'inapp'; room?: string; weeks: number }>,
+  /* `module` when the class carries one; `course` only when the mentor's
+     sessions span several courses (otherwise courseTitle heads the email). */
+  sessions:    Array<{ title: string; start: Date; durationMins: number; platform: 'meet' | 'inapp'; offline?: boolean; room?: string; weeks: number; course?: string; module?: string }>,
   firstDate:   string,   // YYYY-MM-DD
   lastDate:    string,
   total:       number,
@@ -1938,14 +1940,22 @@ export async function sendInstructorImportSummary(
   })
   const subject = `Your new teaching schedule — ${total} class${total === 1 ? '' : 'es'}${courseTitle ? ` · ${courseTitle}` : ''}`
 
+  /* An in-person-only class is stored with platform 'meet' but gets no link. */
+  const whereOf = (s: typeof sessions[number]) =>
+    s.offline ? 'In person' : s.platform === 'meet' ? 'Google Meet (link in each class)' : 'In-app meeting room'
+  /* "Room No. 1" is already a room — not "Room Room No. 1". */
+  const roomOf = (r: string) => (/^room\b/i.test(r.trim()) ? r.trim() : `Room ${r.trim()}`)
+  const partOf = (s: typeof sessions[number]) => [s.course, s.module && `Module: ${s.module}`].filter(Boolean).join(' · ')
+
   const lines = sessions.map((s) => {
     const day = s.start.toLocaleDateString('en-US', { weekday: 'long', timeZone: zone })
-    const where = s.platform === 'meet' ? 'Google Meet (link in each class)' : 'In-app meeting room'
+    const part = partOf(s)
     return `
       <tr><td style="padding:10px 0;border-bottom:1px solid #EEF0F4">
         <p style="margin:0;font-size:13px;font-weight:700;color:#0057b8">Every ${escapeHtml(day)} · ${escapeHtml(scheduleRange(s.start, s.durationMins, academySlug))}</p>
         <p style="margin:2px 0 0;font-size:14px;font-weight:600;color:#0D0F1A">${escapeHtml(s.title)}</p>
-        <p style="margin:2px 0 0;font-size:12px;color:#6B7280">${escapeHtml(where)}${s.room ? ` · Room ${escapeHtml(s.room)}` : ''} · ${s.weeks} week${s.weeks === 1 ? '' : 's'}</p>
+        ${part ? `<p style="margin:2px 0 0;font-size:12px;color:#374151">${escapeHtml(part)}</p>` : ''}
+        <p style="margin:2px 0 0;font-size:12px;color:#6B7280">${escapeHtml(whereOf(s))}${s.room ? ` · ${escapeHtml(roomOf(s.room))}` : ''} · ${s.weeks} week${s.weeks === 1 ? '' : 's'}</p>
       </td></tr>`
   }).join('')
 
@@ -1963,7 +1973,7 @@ export async function sendInstructorImportSummary(
   `)
   const text = [
     `Hi ${name}, ${total} classes${courseTitle ? ` for ${courseTitle}` : ''} have been scheduled for you, ${fmtKey(firstDate)} – ${fmtKey(lastDate)}:`,
-    ...sessions.map(s => `• Every ${s.start.toLocaleDateString('en-US', { weekday: 'long', timeZone: zone })} ${scheduleRange(s.start, s.durationMins, academySlug)} — ${s.title} (${s.platform === 'meet' ? 'Google Meet' : 'In-app'}${s.room ? `, Room ${s.room}` : ''})`),
+    ...sessions.map(s => `• Every ${s.start.toLocaleDateString('en-US', { weekday: 'long', timeZone: zone })} ${scheduleRange(s.start, s.durationMins, academySlug)} — ${s.title}${partOf(s) ? ` [${partOf(s)}]` : ''} (${s.offline ? 'In person' : s.platform === 'meet' ? 'Google Meet' : 'In-app'}${s.room ? `, ${roomOf(s.room)}` : ''})`),
     `Timetable: ${timetable}`,
   ].join('\n')
   await sender.send({ to, subject, html, text })
