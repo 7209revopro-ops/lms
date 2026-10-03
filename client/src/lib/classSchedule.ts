@@ -133,6 +133,12 @@ export const effSectionOrder = (lc: LiveClass): number | undefined => {
   const s = lc.sectionId
   return typeof s === 'object' && s ? s.order : undefined
 }
+/* The module's number in its course, from the same door as its title. */
+export const effSectionNumber = (lc: LiveClass): number | undefined => {
+  if (lc.yourCohort?.sectionId) return lc.yourCohort.sectionNumber
+  const s = lc.sectionId
+  return typeof s === 'object' && s ? s.number : undefined
+}
 export const effSectionDescription = (lc: LiveClass): string | undefined => {
   if (lc.yourCohort?.sectionId) return lc.yourCohort.sectionDescription
   const s = lc.sectionId
@@ -470,6 +476,8 @@ export interface ModuleNode {
   title:        string
   description?: string
   order?:       number
+  /** "Module 04": the module's place among all of its course's modules. */
+  number?:      number
   /** Every session here is one the admin has blocked this student out of.
       They stay listed, as they always have; they are drawn locked. */
   blocked:      boolean
@@ -555,6 +563,7 @@ export function buildCatalog(
         title:       effSectionTitle(first) ?? 'General sessions',
         description: effSectionDescription(first),
         order:       effSectionOrder(first),
+        number:      effSectionNumber(first),
         blocked:     true,          // narrowed below; one open session opens it
         languages:   [],
         groups:      [],

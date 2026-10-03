@@ -33,7 +33,7 @@ export interface MyBooking {
        outlives the rows it points at — a course deleted after the fact
        leaves the reference unpopulated rather than the booking broken. */
     courseId?:      { id: string; title: string; slug: string; thumbnailUrl?: string }
-    sectionId?:     { id: string; title: string; order?: number }
+    sectionId?:     { id: string; title: string; order?: number; number?: number }
     instructorId?:  { id: string; name: string; avatarUrl?: string }
     /* WHICH OF *YOUR* COURSES THIS SEAT WAS FOR, on a class another academy
        hosts and shares with yours. The three refs above are walked off the
@@ -49,6 +49,7 @@ export interface MyBooking {
       sectionId?:    string
       sectionTitle?: string
       sectionOrder?: number
+      sectionNumber?: number
     }
     /* No meetingUrl and no join window on a booking row: the Join button on
        My Classes reads the window from the matching /live-classes row and

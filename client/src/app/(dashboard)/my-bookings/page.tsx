@@ -224,7 +224,7 @@ function toRow(b: MyBooking): Row | null {
     /* Same precedence as the two labels above — a guest cohort's module number
        is its own, and mixing "Module 1" from the host with the guest's title
        would read as a third module that exists nowhere. */
-    moduleNo:    cohort?.sectionId ? cohort.sectionOrder : lc.sectionId?.order,
+    moduleNo:    cohort?.sectionId ? (cohort.sectionNumber ?? cohort.sectionOrder) : (lc.sectionId?.number ?? lc.sectionId?.order),
     instructor,
     language:    lc.language ? titleCase(lc.language) : undefined,
     online,

@@ -53,7 +53,10 @@ export interface LiveClass {
      `description` is what the module says for itself. Both optional: a
      row from a read that does not populate the section carries the bare
      id, which is a shape this field has always also had. */
-  sectionId?: string | { id: string; title: string; order?: number; description?: string }
+  /* `number` is the module's place among ALL of its course's modules — what
+     "Module 04" means. `order` is only the sort key: it starts at 0 in most
+     courses and keeps gaps where a module was deleted. */
+  sectionId?: string | { id: string; title: string; order?: number; description?: string; number?: number }
 
   /* Capacity */
   sessionCapacity: number
@@ -96,6 +99,7 @@ export interface LiveClass {
        ordering their module list by it would rank one course's module by a
        position in another. */
     sectionOrder?:       number
+    sectionNumber?:      number
     sectionDescription?: string
   }
 
@@ -227,7 +231,7 @@ function normalizeLiveClass(c: any): LiveClass {
       /* Rebuilt field by field, so anything not named here is DROPPED -
          which is what happened to order and description. */
       ? { id: secRaw.id ?? String(secRaw._id ?? ''), title: secRaw.title ?? '',
-          order: secRaw.order, description: secRaw.description }
+          order: secRaw.order, description: secRaw.description, number: secRaw.number }
       : (secRaw ?? undefined)
 
   return {

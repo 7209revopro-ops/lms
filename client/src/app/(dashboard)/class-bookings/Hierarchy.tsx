@@ -1905,9 +1905,12 @@ export function Hierarchy({
 
   /* ── Level 3 ── */
   if (course && mod) {
+    /* The module's own number in its course, sent by the server. The position
+       among the modules on screen is only the fallback, for a server that does
+       not send it yet — it moves with the timetable ("MBT 4" read "02"). */
     const position = mod.id === GENERAL
       ? null
-      : course.modules.filter(m => m.id !== GENERAL).indexOf(mod) + 1
+      : (mod.number ?? course.modules.filter(m => m.id !== GENERAL).indexOf(mod) + 1)
     /* `search` goes in RAW: ModuleSheet owns its own normalisation so it can
        be dropped anywhere without a caller remembering to trim it. */
     return (
@@ -1977,7 +1980,7 @@ export function Hierarchy({
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
             {modules.map((m, i) => (
               <ModuleCard key={m.id || 'general'} node={m} index={i}
-                position={m.id === GENERAL ? null : ordered.indexOf(m) + 1}
+                position={m.id === GENERAL ? null : (m.number ?? ordered.indexOf(m) + 1)}
                 courseTitle={course.title}
                 onOpen={() => onNavigate(course.id, m.id)} />
             ))}

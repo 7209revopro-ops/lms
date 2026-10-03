@@ -100,7 +100,36 @@ export interface LabelledDoor extends Door {
      list by them would be comparing a value from one door against another,
      which is the one thing the door model does not permit. */
   sectionOrder?:       number
+  /* The guest module's number in the guest course — see moduleNumbers. */
+  sectionNumber?:      number
   sectionDescription?: string
+}
+
+/* ── "Module 04": a module's place among ALL of its course's modules ──────
+   The student pages numbered a module by where it fell among the modules that
+   happened to have upcoming classes, so "MBT 4" read "Module 02" whenever MBT 1
+   and MBT 3 had nothing scheduled — the number moved with the timetable.
+   `order` cannot be printed as it stands either: it starts at 0 in most courses
+   and at 1 in a few, and deleting a module leaves a gap. The rank among every
+   module of the course, by `order`, is the number a person means.
+
+   One query for the ids' courses and one for those courses' modules, whatever
+   the number of rows. Ids that are not modules are simply absent. */
+export async function moduleNumbers(sectionIds: Iterable<string>): Promise<Map<string, number>> {
+  const ids = [...new Set(sectionIds)].filter(id => Types.ObjectId.isValid(id))
+  const numbers = new Map<string, number>()
+  if (ids.length === 0) return numbers
+  const { SectionModel } = await import('@/models/schema.ts')
+  const courseIds = await SectionModel.distinct('courseId', { _id: { $in: ids.map(id => new Types.ObjectId(id)) } })
+  const all = await SectionModel.find({ courseId: { $in: courseIds } })
+    .select('_id courseId').sort({ courseId: 1, order: 1, createdAt: 1, _id: 1 }).lean()
+  const seen = new Map<string, number>()
+  for (const s of all as Array<{ _id: unknown; courseId: unknown }>) {
+    const n = (seen.get(String(s.courseId)) ?? 0) + 1
+    seen.set(String(s.courseId), n)
+    numbers.set(String(s._id), n)
+  }
+  return numbers
 }
 
 /* The caller's own course and module titles, in ONE pair of queries per
@@ -121,10 +150,11 @@ export async function labelGuestDoors(
 
   const courses  = new Map<string, { title?: string; slug?: string; program?: string; description?: string; level?: string }>()
   const sections = new Map<string, { title?: string; order?: number; description?: string }>()
+  let numbers    = new Map<string, number>()
 
   if (courseIds.size > 0 || sectionIds.size > 0) {
     const { CourseModel, SectionModel } = await import('@/models/schema.ts')
-    const [courseRows, sectionRows] = await Promise.all([
+    const [courseRows, sectionRows, numbered] = await Promise.all([
       courseIds.size > 0
         ? CourseModel.find({ _id: { $in: [...courseIds].map(id => new Types.ObjectId(id)) } })
             .select('title slug program description level').lean()
@@ -133,7 +163,9 @@ export async function labelGuestDoors(
         ? SectionModel.find({ _id: { $in: [...sectionIds].map(id => new Types.ObjectId(id)) } })
             .select('title order description').lean()
         : Promise.resolve([] as any[]),
+      moduleNumbers(sectionIds),
     ])
+    numbers = numbered
     for (const c of courseRows as any[]) courses.set(String(c._id), { title: c.title, slug: c.slug, program: c.program, description: c.description, level: c.level })
     for (const s of sectionRows as any[]) sections.set(String(s._id), { title: s.title, order: s.order, description: s.description })
   }
@@ -154,6 +186,7 @@ export async function labelGuestDoors(
       ...(course?.level       ? { courseLevel:       course.level }       : {}),
       ...(section?.title   ? { sectionTitle:       section.title }       : {}),
       ...(section?.order !== undefined ? { sectionOrder: section.order } : {}),
+      ...(door.sectionId && numbers.has(door.sectionId) ? { sectionNumber: numbers.get(door.sectionId) } : {}),
       ...(section?.description ? { sectionDescription: section.description } : {}),
     }
   }
@@ -173,6 +206,7 @@ export function yourCohortFrom(door: LabelledDoor | undefined): {
   sectionId?:    string
   sectionTitle?: string
   sectionOrder?:       number
+  sectionNumber?:      number
   sectionDescription?: string
 } | undefined {
   if (!door || door.isHost) return undefined
@@ -186,6 +220,7 @@ export function yourCohortFrom(door: LabelledDoor | undefined): {
     sectionId:    door.sectionId ?? undefined,
     sectionTitle: door.sectionTitle,
     sectionOrder:       door.sectionOrder,
+    sectionNumber:      door.sectionNumber,
     sectionDescription: door.sectionDescription,
   }
 }

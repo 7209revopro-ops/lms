@@ -16,7 +16,7 @@ import { resolveClassEntitlement, doorForOrg } from '@/services/classEntitlement
 import { reserveSeat, releaseSeat, seatStampFrom } from '@/services/seatPool.service.ts'
 import { ensureOrgSlugs, orgSlugFor } from '@/utils/orgSlugs.ts'
 import { callerOrgForRead } from '@/utils/tenancy.ts'
-import { labelGuestDoors, yourCohortFrom } from '@/controllers/liveClass.controller.ts'
+import { labelGuestDoors, yourCohortFrom, moduleNumbers } from '@/controllers/liveClass.controller.ts'
 import { z } from 'zod'
 import { resolveLiveStatus, isBookingOpen, bookingClosesAt, studentJoinWindow } from '@/utils/liveStatus.ts'
 import { authenticate, requireEnrollmentApproval } from '@/middleware/auth.middleware.ts'
@@ -463,7 +463,15 @@ router.get('/me', authenticate, validate(bookingQuerySchema, 'query'), async (re
     const callerOrg = req.user!.organizationId
     const doors     = (docs as any[]).map(b =>
       b.liveClassId ? doorForOrg(b.liveClassId, callerOrg) : undefined)
-    const label     = await labelGuestDoors(doors)
+    const sectionOf = (lc: any): string =>
+      lc?.sectionId && typeof lc.sectionId === 'object' ? String(lc.sectionId._id ?? lc.sectionId.id ?? '') : ''
+    /* "Module 04" — the module's place among all of its course's modules
+       (moduleNumbers). `order` printed as-is read "00" for the first module of
+       every course that counts from zero, which is most of them. */
+    const [label, numbers] = await Promise.all([
+      labelGuestDoors(doors),
+      moduleNumbers((docs as any[]).map(b => sectionOf(b.liveClassId)).filter(Boolean)),
+    ])
 
     const rows = (docs as any[]).map((b, i) => {
       const lc = b.liveClassId
@@ -475,6 +483,7 @@ router.get('/me', authenticate, validate(bookingQuerySchema, 'query'), async (re
         ...b,
         liveClassId: {
           ...classRow,
+          ...(sectionOf(lc) ? { sectionId: { ...(lc.sectionId as object), number: numbers.get(sectionOf(lc)) } } : {}),
           joinOpensAt:  w.opensAt.toISOString(),
           joinClosesAt: w.closesAt.toISOString(),
           /* Absent on a class the student reached through the host door, which

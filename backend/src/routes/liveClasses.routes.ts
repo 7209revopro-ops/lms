@@ -4,7 +4,7 @@ import { callerOrgForRead, andFilter, servedClassFilter } from '@/utils/tenancy.
 import { meetingDisplayName } from '@/utils/meetingIdentity.ts'
 import express from 'express'
 import { z } from 'zod'
-import { LiveClassController, seatsLeftForDoor, labelGuestDoors, yourCohortFrom } from '@/controllers/liveClass.controller.ts'
+import { LiveClassController, seatsLeftForDoor, labelGuestDoors, yourCohortFrom, moduleNumbers } from '@/controllers/liveClass.controller.ts'
 import { authenticate, authenticateAny, injectCategoryScope } from '@/middleware/auth.middleware.ts'
 import { validate } from '@/middleware/validate.middleware.ts'
 import { resolveLiveStatus, bookingClosesAt, studentJoinWindow } from '@/utils/liveStatus.ts'
@@ -142,7 +142,15 @@ router.get('/', authenticate, async (req: Request, res: Response, next: NextFunc
        instead of two per request. Nothing is asked when no row came through a
        guest door, which is every request until a class is actually shared. */
     const verdicts  = (classes as any[]).map(c => entitlementFrom(c as ClassDoors, index, caller.org))
-    const labelDoor = await labelGuestDoors(verdicts.map(v => v.door))
+    /* "Module 04" alongside: each module's place among all of its course's
+       modules (moduleNumbers), not among whichever happen to have classes
+       coming up. Asked in parallel, so the row costs no extra round trip. */
+    const [labelDoor, numbers] = await Promise.all([
+      labelGuestDoors(verdicts.map(v => v.door)),
+      moduleNumbers((classes as any[])
+        .map(c => (c.sectionId && typeof c.sectionId === 'object' ? String(c.sectionId._id ?? c.sectionId.id ?? '') : ''))
+        .filter(Boolean)),
+    ])
 
     let annotated = (classes as any[]).map((c, i) => {
       const e = verdicts[i]!
@@ -151,6 +159,9 @@ router.get('/', authenticate, async (req: Request, res: Response, next: NextFunc
       const dto: Record<string, unknown> = {
         ...c,
         id:         c.id ?? String(c._id),
+        ...(c.sectionId && typeof c.sectionId === 'object'
+          ? { sectionId: { ...c.sectionId, number: numbers.get(String(c.sectionId._id ?? c.sectionId.id ?? '')) } }
+          : {}),
         status:     resolveLiveStatus(c.status, c.scheduledStart, c.durationMins ?? 60, now),
         isEnrolled,
         /* ENROLLED IS NOT ENTITLED, AND THE DIFFERENCE IS THE WHOLE
