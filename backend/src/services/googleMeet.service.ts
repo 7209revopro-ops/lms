@@ -118,6 +118,57 @@ async function removeMeetCohost(auth: ServiceAccountAuth, spaceName: string, ema
   }
 }
 
+/* ── The staff co-host ───────────────────────────────────────────────────
+   One staff Google account co-hosts EVERY app-made class meeting, ahead of
+   the instructor — so somebody can always admit, mute or end a room, even
+   when the instructor is late or absent. GOOGLE_MEET_STAFF_COHOSTS (comma-
+   separated) replaces it; "off" turns it off. Live classes ask for it; mentor
+   meetings booked from the Root portal do not.
+
+   A meeting Calendar made (the fallback path, and every class from before
+   co-hosted meetings existed) takes no co-hosts through the API — Google
+   answers 403 — so those are left for staff to set by hand in Meet. */
+const DEFAULT_STAFF_COHOSTS = 'deltatradinguniverse@gmail.com'
+
+export function staffMeetCohosts(): string[] {
+  const raw = (process.env['GOOGLE_MEET_STAFF_COHOSTS'] ?? DEFAULT_STAFF_COHOSTS).trim()
+  if (/^(off|none)?$/i.test(raw)) return []
+  return [...new Set(raw.split(',').map(s => s.trim().toLowerCase()).filter(s => /^[^@\s]+@[^@\s]+$/.test(s)))]
+}
+
+/** Make each address a co-host, in order, skipping any already a member.
+    Never throws: what could not be added is reported, not raised. */
+export async function ensureMeetCohosts(
+  auth: ServiceAccountAuth, spaceName: string, emails: string[],
+): Promise<{ added: string[]; present: string[]; failed: string[] }> {
+  const out = { added: [] as string[], present: [] as string[], failed: [] as string[] }
+  const wanted = [...new Set(emails.map(e => e.trim().toLowerCase()).filter(Boolean))]
+  if (wanted.length === 0) return out
+
+  let members = new Set<string>()
+  try {
+    const res = await auth.request<{ members?: Array<{ email?: string }> }>({ url: `${MEET_API}/${spaceName}/members`, method: 'GET' })
+    members = new Set((res.data.members ?? []).map(m => (m.email ?? '').toLowerCase()).filter(Boolean))
+  } catch (err) {
+    /* Not knowing who is there is no reason not to try — Google refuses a
+       duplicate rather than doubling it. */
+    console.warn(`[googleMeet] could not list members of ${spaceName}: ${describeGoogleError(err)}`)
+  }
+
+  for (const email of wanted) {
+    if (members.has(email)) { out.present.push(email); continue }
+    if (await addMeetCohost(auth, spaceName, email)) out.added.push(email)
+    else out.failed.push(email)
+  }
+  return out
+}
+
+/** The staff co-host(s) on an existing app-made meeting — what the backfill
+    script runs for every upcoming class. Acts as the meeting's owner. */
+export async function addStaffCohostsToSpace(space: MeetSpaceRecord, emails = staffMeetCohosts()) {
+  return ensureMeetCohosts(makeServiceAccountAuth(space.host), space.name, emails.filter(e => e !== space.host))
+}
+
 /* ── Who may walk into the room ──────────────────────────────────────────
    A Meet attached to a Calendar event inherits the host's default access,
    which is TRUSTED: people inside the host's Workspace domain join straight
@@ -240,10 +291,19 @@ export interface CreatedMeet {
  * normal Join button. Both that and the co-host step are best-effort: only a
  * failure to create the space itself throws.
  */
-async function createCoHostedMeeting(o: {
+type CoHostedMeetingInput = {
   title: string; start: Date; end: Date; host: string; cohostEmail?: string
-}): Promise<CreatedMeet> {
-  const auth       = makeServiceAccountAuth(o.host)
+  /* Staff co-hosts, made co-host FIRST — see staffMeetCohosts. */
+  staffCohosts?: string[]
+}
+
+async function createCoHostedMeeting(o: CoHostedMeetingInput): Promise<CreatedMeet> {
+  return createCoHostedMeetingWith(makeServiceAccountAuth(o.host), o)
+}
+
+/* The same, with the owner's auth handed in — what lets the suite drive it
+   against a stand-in for Google. */
+async function createCoHostedMeetingWith(auth: ServiceAccountAuth, o: CoHostedMeetingInput): Promise<CreatedMeet> {
   const wantAccess = desiredMeetAccess()
 
   const space = (await auth.request<{
@@ -255,6 +315,12 @@ async function createCoHostedMeeting(o: {
 
   /* The host already owns the room — making it its own co-host is meaningless. */
   const invitee = o.cohostEmail && o.cohostEmail !== o.host ? o.cohostEmail : undefined
+
+  /* Staff first, then the instructor. A staff address that IS the instructor
+     is added once, as the instructor. */
+  const staff = (o.staffCohosts ?? []).filter(s => s !== o.host && s !== invitee)
+  if (staff.length) await ensureMeetCohosts(auth, space.name, staff)
+
   const cohost  = invitee && await addMeetCohost(auth, space.name, invitee) ? invitee : undefined
 
   let calendarEventId: string | undefined
@@ -282,6 +348,7 @@ async function createCoHostedMeeting(o: {
   }
 
   console.info(`[googleMeet] co-hosted meeting ${space.meetingCode} owned by ${o.host}` +
+    (staff.length ? `, staff co-host ${staff.join(', ')}` : '') +
     (cohost ? `, co-host ${cohost}` : invitee ? `, co-host ${invitee} NOT applied` : ', no co-host on file'))
 
   const applied = space.config?.accessType
@@ -308,11 +375,13 @@ async function createCoHostedMeeting(o: {
  *   schedule    the class's CURRENT title/start/duration, when any changed
  *   cancelled   removes the calendar event (Google tells the instructor)
  */
-export async function syncMeetSpace(space: MeetSpaceRecord, change: {
+type MeetSpaceChange = {
   cohost?:    string | null
   schedule?:  { title: string; startISO: string; durationMins: number }
   cancelled?: boolean
-}): Promise<{ cohost?: string; calendarEventId?: string }> {
+}
+
+export async function syncMeetSpace(space: MeetSpaceRecord, change: MeetSpaceChange): Promise<{ cohost?: string; calendarEventId?: string }> {
   let auth: ServiceAccountAuth
   try {
     auth = makeServiceAccountAuth(space.host)
@@ -320,17 +389,26 @@ export async function syncMeetSpace(space: MeetSpaceRecord, change: {
     console.warn(`[googleMeet] cannot sync ${space.name}: ${describeGoogleError(err)}`)
     return { cohost: space.cohost, calendarEventId: space.calendarEventId }
   }
+  return syncMeetSpaceWith(auth, space, change)
+}
 
+/* The same, with the owner's auth handed in — see createCoHostedMeetingWith. */
+async function syncMeetSpaceWith(auth: ServiceAccountAuth, space: MeetSpaceRecord, change: MeetSpaceChange): Promise<{ cohost?: string; calendarEventId?: string }> {
   let cohost  = space.cohost
   let invitee: string | null | undefined           // undefined = attendee list untouched
   if (change.cohost !== undefined) {
-    const next = change.cohost?.trim().toLowerCase() || null
+    const next  = change.cohost?.trim().toLowerCase() || null
+    const staff = staffMeetCohosts().filter(s => s !== space.host)
     if (next !== (cohost ?? null)) {
-      if (cohost) await removeMeetCohost(auth, space.name, cohost)
+      /* Swapping the instructor never takes the staff co-host out with them —
+         when the outgoing "instructor" address is a staff one, it stays. */
+      if (cohost && !staff.includes(cohost)) await removeMeetCohost(auth, space.name, cohost)
       const usable = next && next !== space.host ? next : null
-      cohost  = usable && await addMeetCohost(auth, space.name, usable) ? usable : undefined
+      cohost  = usable && (staff.includes(usable) || await addMeetCohost(auth, space.name, usable)) ? usable : undefined
       invitee = usable
     }
+    /* And a class edited after this existed picks the staff co-host up too. */
+    if (change.cancelled !== true && staff.length) await ensureMeetCohosts(auth, space.name, staff)
   }
 
   let calendarEventId = space.calendarEventId
@@ -390,6 +468,8 @@ export async function createGoogleMeetLink(opts: {
   durationMins:         number
   instructorEmail?:     string
   instructorMeetEmail?: string
+  /* Made co-host ahead of the instructor — live classes pass staffMeetCohosts(). */
+  staffCohosts?:        string[]
 }): Promise<CreatedMeet> {
   const WORKSPACE_DOMAIN     = process.env.GOOGLE_WORKSPACE_DOMAIN ?? 'deltagroups.ae'
   const instructorIsInternal = opts.instructorEmail?.endsWith(`@${WORKSPACE_DOMAIN}`) ?? false
@@ -405,11 +485,19 @@ export async function createGoogleMeetLink(opts: {
           end:         new Date(start.getTime() + opts.durationMins * 60_000),
           host,
           ...(opts.instructorMeetEmail ? { cohostEmail: opts.instructorMeetEmail.trim().toLowerCase() } : {}),
+          ...(opts.staffCohosts?.length ? { staffCohosts: opts.staffCohosts } : {}),
         })
       } catch (err) {
         console.warn(`[googleMeet] co-hosted meeting failed, falling back to a calendar meeting without co-host: ${describeGoogleError(err)}`)
       }
     }
+  }
+
+  /* Calendar makes the room on the paths below, and a Calendar-made room takes
+     no co-hosts through the API (403) — say so, so staff know to add them by hand. */
+  if (opts.staffCohosts?.length) {
+    console.warn(`[googleMeet] staff co-host ${opts.staffCohosts.join(', ')} NOT applied to "${opts.title}" — ` +
+      'a Calendar-made meeting takes no co-hosts through the API; add them in Meet by hand')
   }
 
   const auth       = instructorIsInternal ? makeServiceAccountAuth(opts.instructorEmail!) : makeOAuth2Client()
@@ -569,3 +657,6 @@ export async function fetchMeetRecordingUrl(meetingCode: string): Promise<string
     return null
   }
 }
+
+/* For the suite only: the two co-host paths with the owner's auth handed in. */
+export const __test = { createCoHostedMeetingWith, syncMeetSpaceWith }
