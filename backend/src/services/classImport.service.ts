@@ -55,6 +55,11 @@ export interface ImportSettings {
   location?:       string
   room?:           string
   defaultPlatform: ClassImportPlatform
+  /* Create a class even when its mentor already has one at that time — an
+     in-person group run alongside the same mentor's online class (the
+     Malayalam offline batch, Oct 2026). The clash is still shown, just not
+     skipped. Set by the CLI's --allow-clash only; the admin page never sends it. */
+  allowMentorClash?: boolean
 }
 
 /** Per-row choices made in the preview screen. Keyed by spreadsheet row number. */
@@ -482,7 +487,8 @@ export class ClassImportService {
         const s = new Date(o.startISO).getTime(), e = s + r.durationMins * 60_000
         const clash = busy.find(b => String(b.instructorId) === r.instructor!.id && !b.importRef?.startsWith(`${settings.courseId}:${r.sessionKey}:`)
           && b.scheduledStart.getTime() < e && b.scheduledStart.getTime() + b.durationMins * 60_000 > s)
-        if (clash) { o.state = 'conflict'; o.note = `Mentor already has "${clash.title}"` }
+        if (clash && settings.allowMentorClash) o.note = `Alongside "${clash.title}" — same mentor, same time (allowed)`
+        else if (clash) { o.state = 'conflict'; o.note = `Mentor already has "${clash.title}"` }
       }
       r.newCount = r.occurrences.filter(o => o.state === 'new').length
       if (r.status !== 'error') {
@@ -490,6 +496,8 @@ export class ClassImportService {
         const exists = r.occurrences.filter(o => o.state === 'exists').length
         const past = r.occurrences.filter(o => o.state === 'past').length
         if (conflicts) r.messages.push(`${conflicts} date${conflicts > 1 ? 's' : ''} clash with the mentor's existing classes — skipped.`)
+        const alongside = r.occurrences.filter(o => o.state === 'new' && o.note?.startsWith('Alongside')).length
+        if (alongside) r.messages.push(`${alongside} date${alongside > 1 ? 's run' : ' runs'} at the same time as the mentor's other classes — created anyway (--allow-clash).`)
         if (exists) r.messages.push(`${exists} date${exists > 1 ? 's' : ''} already imported — skipped.`)
         if (past) r.messages.push(`${past} date${past > 1 ? 's are' : ' is'} in the past — skipped.`)
         if (r.matchedBy === 'first-name') r.messages.push(`Mentor matched by first name to ${r.instructor!.name} — check it.`)

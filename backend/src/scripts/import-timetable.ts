@@ -39,6 +39,8 @@
      --mentor Name=email        map a mentor name in the file to an LMS account
      --as <admin email>         who the import is recorded as (default: first super admin)
      --skip-blocked             with --commit, add the good rows even if some are blocked
+     --allow-clash              create a class even when its mentor already has one at
+                                that time (an in-person group alongside an online one)
 
    Google Meet links are made with this machine's Google account, so run
    --commit where that is configured (the production server).
@@ -126,6 +128,7 @@ async function importFile(actor: Actor) {
   const settings = {
     courseId, startDate, weeks, capacity, language, defaultPlatform,
     titleLabel: opt('label'), location: opt('location'), room: opt('room'),
+    ...(flag('allow-clash') ? { allowMentorClash: true } : {}),
   }
   const p = await svc.preview(settings, rows, actor, overrides)
   printPreview(p, file, settings)

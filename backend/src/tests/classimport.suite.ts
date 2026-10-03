@@ -19,6 +19,7 @@
      L  a restart turns a running import into a resumable one
      M  modules: each row goes into the course module its code names (MBT 7 →
         "MBT 7 - …", IM 4 (1) → "IM 4 - PART 1"); no match waits for a pick
+     N  --allow-clash: an offline group alongside the same mentor's online class
 
    Boots against an ISOLATED throwaway database, dropped on exit.
    Run: bun run test:classimport
@@ -379,6 +380,38 @@ section('M  modules')
   await waitDone(started.jobId, ACTOR)
   const made = await LiveClassModel.find({ importJobId: new mongoose.Types.ObjectId(started.jobId) }).select('sectionId').lean()
   check('M11 imported classes carry the module', made.length === 4 && made.every(c => String(c.sectionId) === String(mbt1._id)), `${made.length}: ${made.map(c => String(c.sectionId)).join(',')}`)
+}
+
+/* ── N ──────────────────────────────────────────────── */
+section('N  an offline group alongside the same mentor\'s online class (--allow-clash)')
+{
+  const lena = { _id: oid(), name: 'Lena Clash', email: 'lena@imp.test', role: 'instructor', organizationId: dubai._id, isActive: true }
+  await UserModel.collection.insertOne(lena)
+  /* Her online class: Tuesday 1–3 PM GST, the first week of SETTINGS. */
+  const at = new Date('2026-10-06T09:00:00.000Z')
+  await LiveClassModel.collection.insertOne({
+    courseId, instructorId: lena._id, title: 'MBT 1 · online', scheduledStart: at, durationMins: 120,
+    type: 'external', status: 'scheduled', isOnline: true, organizationId: dubai._id, sessionCapacity: 30, bookedCount: 0,
+  })
+  const row = { session_id: 'OFF-001', day: 'Tuesday', start_time: '1:00 PM', end_time: '3:00 PM',
+    mentor: 'Lena Clash', batch: 'MBT', session_number: '1', mode: 'Offline Only' }
+  const one = { ...SETTINGS, weeks: 1 }
+
+  const plain = (await svc.preview(one, [row], ACTOR, {}, NOW)).rows[0]!
+  check('N1 by default the clash is skipped', plain.occurrences[0]?.state === 'conflict' && plain.newCount === 0,
+    JSON.stringify(plain.occurrences))
+  const allowed = (await svc.preview({ ...one, allowMentorClash: true }, [row], ACTOR, {}, NOW)).rows[0]!
+  check('N2 with --allow-clash it is kept, and the preview says why',
+    allowed.occurrences[0]?.state === 'new' && allowed.occurrences[0]?.note?.startsWith('Alongside') === true && allowed.newCount === 1,
+    JSON.stringify(allowed.occurrences))
+
+  const r = await svc.start({ ...one, allowMentorClash: true }, [row], ACTOR, {}, 'offline.xlsx')
+  await waitDone(r.jobId, ACTOR)
+  const both = await LiveClassModel.countDocuments({ instructorId: lena._id, scheduledStart: at })
+  check('N3 the offline class is created next to the online one', both === 2, String(both))
+  const made = await LiveClassModel.findOne({ importJobId: new mongoose.Types.ObjectId(r.jobId) }).lean() as any
+  check('N4 in person, with a room and no link', made?.isOnline === false && !made?.meetingUrl && made?.room === 'Room 1',
+    JSON.stringify({ isOnline: made?.isOnline, meetingUrl: made?.meetingUrl, room: made?.room }))
 }
 
 } catch (err) {
