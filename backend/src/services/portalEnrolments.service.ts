@@ -10,10 +10,11 @@
    For each address: whether the LMS has an account with it, and each course
    they are on — the course, its academy and programme, when and how they were
    put on it (bought, given by an admin, a script, a finance invoice), how much
-   of it the fee has opened, their progress, and whether they finished it (and
-   hold the certificate) or dropped it. Both academies, oldest course first.
+   of it the fee has opened, how many of its modules they can open and how many
+   are locked, their progress, and whether they finished it (and hold the
+   certificate) or dropped it. Both academies, oldest course first.
 ───────────────────────────────────────────────────── */
-import { UserModel, EnrollmentModel, CourseModel, OrganizationModel } from '@/models/schema.ts'
+import { UserModel, EnrollmentModel, CourseModel, OrganizationModel, SectionModel } from '@/models/schema.ts'
 import { PortalError } from '@/services/portal.service.ts'
 
 const MAX_EMAILS = 500
@@ -34,6 +35,8 @@ export interface PortalCourse {
   how:         string
   /** How much of the fee is paid, which decides how much of the course is open: paid, partial, unpaid — "" when no fee gates it. */
   access:      string
+  /** The course's modules, and how many of them this student cannot open — locked until the fee is paid, or by an admin by hand. */
+  modules:     { total: number; unlocked: number; locked: number }
 }
 
 export interface PortalStudentCourses {
@@ -55,11 +58,12 @@ export async function enrolmentsForPortal(input: { emails: unknown }): Promise<{
   const users = await UserModel.find({ email: { $in: wanted } }).select('_id email').lean() as unknown as { _id: unknown; email: string }[]
   const enrolments = users.length
     ? await EnrollmentModel.find({ userId: { $in: users.map(u => u._id) } })
-      .select('userId courseId status source progressPercent enrolledAt completedAt certificateId paymentAccess createdAt')
+      .select('userId courseId status source progressPercent enrolledAt completedAt certificateId paymentAccess blockedLessons createdAt')
       .sort({ enrolledAt: 1, createdAt: 1 })
       .lean() as unknown as {
         _id: unknown; userId: unknown; courseId: unknown; status?: string; source?: string; progressPercent?: number
-        enrolledAt?: Date; completedAt?: Date; certificateId?: string; paymentAccess?: { status?: string; invoiceId?: string }; createdAt?: Date
+        enrolledAt?: Date; completedAt?: Date; certificateId?: string; paymentAccess?: { status?: string; invoiceId?: string }
+        blockedLessons?: unknown[]; createdAt?: Date
       }[]
     : []
   const courseIds = [...new Set(enrolments.map(e => idOf(e.courseId)))]
@@ -71,9 +75,25 @@ export async function enrolmentsForPortal(input: { emails: unknown }): Promise<{
   const courseById = new Map(courses.map(c => [idOf(c._id), c]))
   const orgName = new Map(orgs.map(o => [idOf(o._id), o.name ?? '']))
 
+  /* Every module of those courses — what the fee rule and the student's course
+     page count. A student's locked modules are the ones in their enrolment's
+     blockedLessons (module ids, despite the name); an id left there after its
+     module was deleted is not a module, so it is not counted. */
+  const sections = courseIds.length
+    ? await SectionModel.find({ courseId: { $in: courseIds } }).select('_id courseId').lean() as unknown as { _id: unknown; courseId: unknown }[]
+    : []
+  const modulesOf = new Map<string, Set<string>>()
+  for (const s of sections) {
+    const set = modulesOf.get(idOf(s.courseId)) ?? new Set<string>()
+    set.add(idOf(s._id))
+    modulesOf.set(idOf(s.courseId), set)
+  }
+
   const byUser = new Map<string, PortalCourse[]>()
   for (const e of enrolments) {
     const c = courseById.get(idOf(e.courseId))
+    const all = modulesOf.get(idOf(e.courseId)) ?? new Set<string>()
+    const locked = new Set((e.blockedLessons ?? []).map(idOf).filter(id => all.has(id))).size
     const list = byUser.get(idOf(e.userId)) ?? []
     list.push({
       enrolmentId: idOf(e._id),
@@ -90,6 +110,7 @@ export async function enrolmentsForPortal(input: { emails: unknown }): Promise<{
       // A finance invoice's enrolment is recorded as a purchase; the invoice is what says it came from finance.
       how:         e.paymentAccess?.invoiceId ? 'finance' : e.source ?? 'unknown',
       access:      e.paymentAccess?.status ?? '',
+      modules:     { total: all.size, unlocked: all.size - locked, locked },
     })
     byUser.set(idOf(e.userId), list)
   }

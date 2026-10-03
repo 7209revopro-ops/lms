@@ -18,8 +18,10 @@
         the files by name only;
      D. students' courses, by email: each with its academy and programme, how
         they were put on it (a finance invoice told apart from a purchase), how
-        much the fee has opened, progress, finished with the certificate, or
-        dropped; somebody with no account said so; at most 500 at a time;
+        much the fee has opened, how many modules they can open and how many
+        are locked (by the fee or by hand), progress, finished with the
+        certificate, or dropped; somebody with no account said so; at most 500
+        at a time;
      E. over HTTP, only behind the /service secret check — and refused, not
         answered, if mounted where that check has not run.
 
@@ -52,7 +54,7 @@ const step = (s: string) => console.log(`\n\x1b[1m${s}\x1b[0m`)
 
 const mongoose = (await import('mongoose')).default
 const { Types } = mongoose
-const { UserModel, CourseModel, LiveClassModel, SupportTicketModel, ClassAssignmentModel, EnrollmentModel, OrganizationModel } = await import('@/models/schema.ts')
+const { UserModel, CourseModel, LiveClassModel, SupportTicketModel, ClassAssignmentModel, EnrollmentModel, OrganizationModel, SectionModel } = await import('@/models/schema.ts')
 const { enrolmentsForPortal } = await import('@/services/portalEnrolments.service.ts')
 const { studentActivityForPortal, supportTicketsForPortal, classAssignmentsForPortal } = await import('@/services/portalActivity.service.ts')
 const { PortalError } = await import('@/services/portal.service.ts')
@@ -191,8 +193,17 @@ const mbo = (await CourseModel.collection.insertOne({ title: 'Market Break-Out T
 const oldCourse = (await CourseModel.collection.insertOne({ title: 'Old Course', slug: 'old-pa', createdAt: at(DAY), updatedAt: at(DAY) })).insertedId
 const enrol = (courseId: unknown, enrolledAgo: number, extra: Record<string, unknown>) =>
   EnrollmentModel.collection.insertOne({ userId: student, courseId, status: 'active', source: 'admin', progressPercent: 0, blockedLessons: [], enrolledAt: at(enrolledAgo), createdAt: at(enrolledAgo), updatedAt: at(enrolledAgo), ...extra })
-await enrol(course, 10 * DAY, { source: 'purchase', progressPercent: 35, paymentAccess: { status: 'partial', invoiceId: 'inv-9' } })
-await enrol(mbo, 30 * DAY, { status: 'completed', progressPercent: 100, completedAt: at(2 * DAY), certificateId: 'cert-1' })
+const modules = async (courseId: unknown, n: number) => {
+  const ids = []
+  for (let i = 0; i < n; i++) ids.push((await SectionModel.collection.insertOne({ courseId, title: `Module ${i + 1}`, order: i, createdAt: at(DAY), updatedAt: at(DAY) })).insertedId)
+  return ids
+}
+const dwtModules = await modules(course, 4)
+const mboModules = await modules(mbo, 3)
+// Part-paid: the second half locked by the fee, and the id of a module since deleted.
+await enrol(course, 10 * DAY, { source: 'purchase', progressPercent: 35, paymentAccess: { status: 'partial', invoiceId: 'inv-9' }, blockedLessons: [dwtModules[2], dwtModules[3], new mongoose.Types.ObjectId()] })
+// One module locked by an admin by hand.
+await enrol(mbo, 30 * DAY, { status: 'completed', progressPercent: 100, completedAt: at(2 * DAY), certificateId: 'cert-1', blockedLessons: [mboModules[1]] })
 await enrol(oldCourse, 20 * DAY, { status: 'dropped', progressPercent: 12 })
 const asked = await enrolmentsForPortal({ emails: [' LEARNER@lms.test', 'other@lms.test', 'nobody@lms.test'] })
 check('every address asked, in order, whatever its case', asked.students.map(s => `${s.email}:${s.exists}`).join(' ') === 'learner@lms.test:true other@lms.test:true nobody@lms.test:false',
@@ -206,6 +217,11 @@ check('from a finance invoice: said so, with part of the fee paid and their prog
 const done = theirs.find(c => c.slug === 'mbo-pa')!
 check('finished: completed, when, the certificate, and the academy that runs it',
   done.status === 'completed' && done.completedAt === iso(at(2 * DAY)) && done.certificate && done.academy === 'Delta Dubai' && done.how === 'admin' && done.access === '', JSON.stringify(done))
+check('modules: how many they can open and how many are locked — the fee\'s locks counted, a deleted module\'s id not',
+  JSON.stringify(fin.modules) === JSON.stringify({ total: 4, unlocked: 2, locked: 2 }), JSON.stringify(fin.modules))
+check('...a module an admin locked by hand counted the same', JSON.stringify(done.modules) === JSON.stringify({ total: 3, unlocked: 2, locked: 1 }), JSON.stringify(done.modules))
+check('...and a course with no modules: none, and none locked',
+  JSON.stringify(theirs.find(c => c.slug === 'old-pa')?.modules) === JSON.stringify({ total: 0, unlocked: 0, locked: 0 }), JSON.stringify(theirs.find(c => c.slug === 'old-pa')?.modules))
 check('an account with no course: there, with none', asked.students[1]!.courses.length === 0)
 let badList: unknown = null, tooMany: unknown = null
 try { await enrolmentsForPortal({ emails: 'learner@lms.test' }) } catch (err) { badList = err }
