@@ -464,6 +464,10 @@ export interface PortalMentor {
     /* Who arranged it. The portal decides from this whether the person looking
        may change it — they made it, or they administer the portal. */
     bookedByEmail: string
+    /* In a room rather than on a call, and which room — a place, not a way to
+       reach anybody, so it is as fit for the listing as the title. */
+    inPerson: boolean
+    location: string
   }[]
 }
 
@@ -532,7 +536,7 @@ export async function listMentorsForPortal(input: {
       scheduledStart: { $gte: from, $lte: to },
       cancelledAt: null,
     })
-      .select('title kind mentorId scheduledStart durationMins attendees bookedByEmail')
+      .select('title kind mentorId scheduledStart durationMins attendees bookedByEmail isOnline location')
       .lean(),
   ])
 
@@ -552,6 +556,8 @@ export async function listMentorsForPortal(input: {
       durationMins: m.durationMins ?? 0,
       attendeeNames: (m.attendees ?? []).map((a) => a.name).filter(Boolean),
       bookedByEmail: m.bookedByEmail ?? '',
+      inPerson: m.isOnline === false,
+      location: m.isOnline === false ? (m.location ?? '') : '',
     })
     meetingsByMentor.set(key, list)
   }
@@ -608,6 +614,8 @@ export interface PortalMentorMeeting {
   durationMins: number
   attendees: { name: string; email?: string }[]
   meetingUrl: string
+  inPerson: boolean
+  location: string
   bookedByEmail: string
 }
 
@@ -629,6 +637,45 @@ function whenTextFor(start: Date): string {
 const overlaps = (aStart: Date, aMins: number, bStart: Date, bMins: number): boolean =>
   aStart.getTime() < bStart.getTime() + bMins * 60_000 &&
   bStart.getTime() < aStart.getTime() + aMins * 60_000
+
+/* A Google Meet for a meeting nobody gave a link — which also puts the event
+   on the mentor's own calendar when they are internal, so it shows up where
+   they already look.
+
+   A failure here does not fail the booking. The time is the thing being
+   agreed; a link can follow, and losing an agreed hour because a calendar API
+   was unhappy would be the wrong trade. Null when it could not be made. */
+async function meetLinkFor(
+  title: string,
+  start: Date,
+  durationMins: number,
+  mentor: { email: string; meetEmail?: string | null },
+): Promise<string | null> {
+  try {
+    const { createGoogleMeetLink } = await import('@/services/googleMeet.service.ts')
+    const made = await createGoogleMeetLink({
+      title,
+      startISO: start.toISOString(),
+      durationMins,
+      instructorEmail: mentor.email,
+      instructorMeetEmail: mentor.meetEmail || mentor.email,
+    })
+    return made.meetingUrl
+  } catch {
+    return null
+  }
+}
+
+const NO_LINK_NOTE = 'The meeting is booked, but a joining link could not be created — send one yourself.'
+
+/* In person, or online. Online unless the caller says so — the CRM and the
+   Root portal never send it and must keep getting exactly what they got. An
+   in-person meeting has a place instead of a link. */
+function placeOf(inPerson: boolean, location: unknown): string {
+  const where = inPerson ? String(location ?? '').trim().slice(0, 300) : ''
+  if (inPerson && where.length < 2) throw httpError('Say where the meeting is', 400)
+  return where
+}
 
 /**
  * Book time with a mentor that is not a class.
@@ -658,6 +705,8 @@ export async function createMentorMeetingForPortal(input: {
   scheduledStart?: string
   durationMins?: number
   meetingUrl?: string
+  inPerson?: boolean
+  location?: string
   attendees?: unknown
   notes?: string
   bookedByEmail?: string
@@ -698,6 +747,9 @@ export async function createMentorMeetingForPortal(input: {
   if (!Number.isInteger(durationMins) || durationMins < 5 || durationMins > 600) {
     throw httpError('durationMins must be a whole number between 5 and 600', 400)
   }
+
+  const inPerson = input.inPerson === true
+  const location = placeOf(inPerson, input.location)
 
   const { UserModel, LiveClassModel, MentorMeetingModel } = await import('@/models/schema.ts')
 
@@ -741,29 +793,14 @@ export async function createMentorMeetingForPortal(input: {
     }
   }
 
-  /* A pasted link is used as given. An empty one is an invitation to make a
-     Google Meet — which also puts the event on the mentor's own calendar when
-     they are internal, so it shows up where they already look.
-
-     A failure there does not fail the booking. The time is the thing being
-     agreed; a link can follow, and losing an agreed hour because a calendar API
-     was unhappy would be the wrong trade. */
-  let meetingUrl = String(input.meetingUrl ?? '').trim()
+  /* A pasted link is used as given; an empty one is an invitation to make a
+     Google Meet. In person there is nothing to join: no link is made, and one
+     pasted alongside is dropped rather than sent to people coming to a room. */
+  let meetingUrl = inPerson ? '' : String(input.meetingUrl ?? '').trim()
   let linkNote: string | null = null
-  if (!meetingUrl) {
-    try {
-      const { createGoogleMeetLink } = await import('@/services/googleMeet.service.ts')
-      const made = await createGoogleMeetLink({
-        title,
-        startISO: start.toISOString(),
-        durationMins,
-        instructorEmail: mentor.email,
-        instructorMeetEmail: mentor.meetEmail || mentor.email,
-      })
-      meetingUrl = made.meetingUrl
-    } catch {
-      linkNote = 'The meeting is booked, but a joining link could not be created — send one yourself.'
-    }
+  if (!meetingUrl && !inPerson) {
+    meetingUrl = (await meetLinkFor(title, start, durationMins, mentor)) ?? ''
+    if (!meetingUrl) linkNote = NO_LINK_NOTE
   }
 
   const created = await MentorMeetingModel.create({
@@ -774,6 +811,8 @@ export async function createMentorMeetingForPortal(input: {
     scheduledStart: start,
     durationMins,
     meetingUrl,
+    isOnline: !inPerson,
+    location,
     attendees,
     notes: String(input.notes ?? '').trim(),
     bookedByEmail,
@@ -792,7 +831,7 @@ export async function createMentorMeetingForPortal(input: {
 
   void (async () => {
     const { sendMentorMeetingInvite } = await import('@/services/email.service.ts')
-    const common = { title, whenText, durationMins, meetingUrl, notes: String(input.notes ?? '').trim(), bookedByEmail }
+    const common = { title, whenText, durationMins, meetingUrl, inPerson, location, notes: String(input.notes ?? '').trim(), bookedByEmail }
 
     /* The mentor is told who is coming, as one list. */
     await sendMentorMeetingInvite(mentor.email, mentor.name ?? '', {
@@ -824,6 +863,8 @@ export async function createMentorMeetingForPortal(input: {
       durationMins,
       attendees,
       meetingUrl,
+      inPerson,
+      location,
       bookedByEmail,
     },
   }
@@ -875,6 +916,8 @@ export async function getMentorMeetingForPortal(input: {
     startsAt: new Date(meeting.scheduledStart).toISOString(),
     durationMins: meeting.durationMins,
     meetingUrl: meeting.meetingUrl ?? '',
+    inPerson: meeting.isOnline === false,
+    location: meeting.isOnline === false ? (meeting.location ?? '') : '',
     notes: meeting.notes ?? '',
     bookedByEmail: meeting.bookedByEmail,
     mentorEmail: mentor?.email ?? '',
@@ -904,6 +947,8 @@ export async function updateMentorMeetingForPortal(input: {
   scheduledStart?: string
   durationMins?: number
   meetingUrl?: string
+  inPerson?: boolean
+  location?: string
   attendees?: unknown
   notes?: string
 }) {
@@ -952,6 +997,12 @@ export async function updateMentorMeetingForPortal(input: {
     if (attendees.length === 0) throw httpError('Say who the mentor is meeting', 400)
   }
 
+  /* Unsaid is unchanged: a caller that has never heard of in person keeps the
+     meeting whatever it was. */
+  const wasInPerson = meeting.isOnline === false
+  const inPerson = input.inPerson === undefined ? wasInPerson : input.inPerson === true
+  const location = placeOf(inPerson, input.location === undefined ? meeting.location : input.location)
+
   const windowStart = new Date(start.getTime() - 12 * 3600e3)
   const windowEnd = new Date(start.getTime() + 12 * 3600e3)
 
@@ -980,21 +1031,36 @@ export async function updateMentorMeetingForPortal(input: {
     }
   }
 
-  const movedOrChanged =
+  const timeMoved =
     +new Date(meeting.scheduledStart) !== +start ||
-    meeting.durationMins !== durationMins ||
-    meeting.title !== title
+    meeting.durationMins !== durationMins
+  /* Off a call and into a room, back again, or to another room: somewhere else
+     to be, which people act on as surely as a new time. */
+  const placeChanged = wasInPerson !== inPerson || (inPerson && String(meeting.location ?? '') !== location)
+  const movedOrChanged = timeMoved || meeting.title !== title || placeChanged
+
+  const mentor = await UserModel.findById(meeting.mentorId).select('name email meetEmail').lean()
 
   meeting.title = title
   meeting.kind = kind as typeof meeting.kind
   meeting.scheduledStart = start
   meeting.durationMins = durationMins
   meeting.attendees = attendees
-  if (input.meetingUrl !== undefined) meeting.meetingUrl = String(input.meetingUrl).trim()
+  meeting.isOnline = !inPerson
+  meeting.location = location
+  /* A room has no link. Back online with none given, it gets a Meet as a new
+     booking would — but only then: a meeting that was online all along keeps
+     whatever link it had, or had not. */
+  let linkNote: string | null = null
+  if (inPerson) meeting.meetingUrl = ''
+  else if (input.meetingUrl !== undefined) meeting.meetingUrl = String(input.meetingUrl).trim()
+  if (!inPerson && wasInPerson && !meeting.meetingUrl && mentor?.email) {
+    meeting.meetingUrl = (await meetLinkFor(title, start, durationMins, mentor)) ?? ''
+    if (!meeting.meetingUrl) linkNote = 'Changed, but a joining link could not be created — send one yourself.'
+  }
   if (input.notes !== undefined) meeting.notes = String(input.notes).trim()
   await meeting.save()
 
-  const mentor = await UserModel.findById(meeting.mentorId).select('name email').lean()
   const whenText = whenTextFor(start)
   const everyone = attendees.map((a) => a.name).join(', ')
 
@@ -1005,7 +1071,10 @@ export async function updateMentorMeetingForPortal(input: {
       const { sendMentorMeetingUpdate } = await import('@/services/email.service.ts')
       const common = {
         title, whenText, durationMins,
-        meetingUrl: meeting.meetingUrl ?? '', cancelled: false, byEmail: actorEmail,
+        meetingUrl: meeting.meetingUrl ?? '', inPerson, location,
+        /* "Moved" is a new time; only the place changing is "Changed". */
+        moved: timeMoved || !placeChanged,
+        cancelled: false, byEmail: actorEmail,
       }
       if (mentor?.email) {
         await sendMentorMeetingUpdate(mentor.email, mentor.name ?? '', { ...common, withWhom: everyone }).catch(() => {})
@@ -1017,7 +1086,10 @@ export async function updateMentorMeetingForPortal(input: {
     })()
   }
 
-  return { id: String(meeting._id), title, startsAt: start.toISOString(), durationMins, notified: movedOrChanged }
+  return {
+    id: String(meeting._id), title, startsAt: start.toISOString(), durationMins,
+    inPerson, location, meetingUrl: meeting.meetingUrl ?? '', notified: movedOrChanged, linkNote,
+  }
 }
 
 /**

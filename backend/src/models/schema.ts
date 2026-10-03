@@ -2817,6 +2817,13 @@ export interface IMentorMeeting extends Document {
      meeting with no link is still a meeting and losing the booking over it
      would be worse. */
   meetingUrl?:    string
+  /* Online (somewhere to join) or in person (somewhere to be). Online unless
+     somebody says otherwise, so every meeting booked before this existed — and
+     every caller that never sends it — is exactly what it was. */
+  isOnline:       boolean
+  /* Where, for an in-person meeting: free text, as whoever booked it wrote it
+     ("Dubai office, room 2"). Empty for an online one. */
+  location?:      string
   /* Who the mentor is meeting — one or many.
      Free text on purpose: an outside client has no account here, and requiring
      one would make the commonest reason for this feature the one case it could
@@ -2842,6 +2849,8 @@ const MentorMeetingSchema = new Schema<IMentorMeeting>(
     scheduledStart: { type: Date, required: true, index: true },
     durationMins:   { type: Number, required: true, min: 5, max: 600 },
     meetingUrl:     { type: String, default: '' },
+    isOnline:       { type: Boolean, default: true },
+    location:       { type: String, default: '', trim: true, maxlength: 300 },
     attendees:      {
       type: [new Schema<{ name: string; email?: string }>({
         name:  { type: String, required: true, trim: true, maxlength: 255 },

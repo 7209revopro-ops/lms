@@ -1771,7 +1771,8 @@ export async function sendAssignmentReviewed(
    Sent to the mentor and, when there is one, to whoever they are meeting —
    including outside clients, who have no account here and for whom this email
    is the only thing they will ever receive about it. So it carries everything
-   needed to turn up: when, how long, who with, and the link if there is one.
+   needed to turn up: when, how long, who with, and the link if there is one —
+   or, in person, where.
 
    The time is written in the academy's own zone and says so. A mentor in Dubai
    and a client reading it elsewhere must not each resolve "14:00" against their
@@ -1785,12 +1786,20 @@ export async function sendMentorMeetingInvite(
     durationMins: number
     withWhom: string
     meetingUrl?: string
+    /* In a room: the place goes where the link would, and nothing to join. */
+    inPerson?: boolean
+    location?: string
     notes?: string
     bookedByEmail: string
   },
 ): Promise<void> {
   const subject = `${meeting.title} — ${meeting.whenText}`
-  const joinBlock = meeting.meetingUrl
+  const whereRow = meeting.inPerson
+    ? `<tr><td style="padding:4px 16px 4px 0;color:#6B7280">Where</td><td><strong>In person — ${escapeHtml(meeting.location ?? '')}</strong></td></tr>`
+    : ''
+  const joinBlock = meeting.inPerson
+    ? ''
+    : meeting.meetingUrl
     ? `<p style="margin:24px 0">
          <a href="${escapeHtml(sanitiseUrl(meeting.meetingUrl))}" style="display:inline-block;background:linear-gradient(135deg,#0057b8,#2F6BFF);color:#fff;font-weight:600;padding:12px 24px;border-radius:12px;text-decoration:none">
            Join the meeting
@@ -1807,6 +1816,7 @@ export async function sendMentorMeetingInvite(
       <tr><td style="padding:4px 16px 4px 0;color:#6B7280">When</td><td><strong>${escapeHtml(meeting.whenText)}</strong></td></tr>
       <tr><td style="padding:4px 16px 4px 0;color:#6B7280">Length</td><td>${meeting.durationMins} minutes</td></tr>
       <tr><td style="padding:4px 16px 4px 0;color:#6B7280">With</td><td>${escapeHtml(meeting.withWhom)}</td></tr>
+      ${whereRow}
     </table>
     ${meeting.notes ? `<p style="font-size:14px;color:#374151">${escapeHtml(meeting.notes)}</p>` : ''}
     ${joinBlock}
@@ -1823,15 +1833,16 @@ export async function sendMentorMeetingInvite(
       `When:   ${meeting.whenText}`,
       `Length: ${meeting.durationMins} minutes`,
       `With:   ${meeting.withWhom}`,
+      ...(meeting.inPerson ? [`Where:  In person — ${meeting.location ?? ''}`] : []),
       meeting.notes ? `\n${meeting.notes}` : ``,
-      meeting.meetingUrl ? `\nJoin: ${meeting.meetingUrl}` : `\nNo joining link yet.`,
+      meeting.inPerson ? `` : meeting.meetingUrl ? `\nJoin: ${meeting.meetingUrl}` : `\nNo joining link yet.`,
       ``,
       `Booked by ${meeting.bookedByEmail}.`,
     ].join("\n"),
   })
 }
 
-/* A meeting has moved, or is off.
+/* A meeting has moved, or is off — or now happens somewhere else.
 
    Sent to everyone who was told about it in the first place. A time that
    changes without reaching the people holding the old one is worse than a time
@@ -1846,22 +1857,33 @@ export async function sendMentorMeetingUpdate(
     durationMins: number
     withWhom: string
     meetingUrl?: string
+    /* In a room: the place instead of a link to join. */
+    inPerson?: boolean
+    location?: string
+    /* False when only the place changed, not the time: "Changed", not "Moved". */
+    moved?: boolean
     cancelled: boolean
     byEmail: string
   },
 ): Promise<void> {
+  const moved = meeting.moved !== false
   const subject = meeting.cancelled
     ? `Cancelled — ${meeting.title}`
-    : `Moved — ${meeting.title} is now ${meeting.whenText}`
+    : moved
+    ? `Moved — ${meeting.title} is now ${meeting.whenText}`
+    : `Changed — ${meeting.title}, ${meeting.whenText}`
 
   const body = meeting.cancelled
     ? `<p>This meeting is no longer happening. Nothing is expected of you.</p>`
     : `<table style="margin:16px 0;font-size:14px;color:#111">
-         <tr><td style="padding:4px 16px 4px 0;color:#6B7280">Now</td><td><strong>${escapeHtml(meeting.whenText)}</strong></td></tr>
+         <tr><td style="padding:4px 16px 4px 0;color:#6B7280">${moved ? 'Now' : 'When'}</td><td><strong>${escapeHtml(meeting.whenText)}</strong></td></tr>
          <tr><td style="padding:4px 16px 4px 0;color:#6B7280">Length</td><td>${meeting.durationMins} minutes</td></tr>
          <tr><td style="padding:4px 16px 4px 0;color:#6B7280">With</td><td>${escapeHtml(meeting.withWhom)}</td></tr>
+         ${meeting.inPerson
+           ? `<tr><td style="padding:4px 16px 4px 0;color:#6B7280">Where</td><td><strong>In person — ${escapeHtml(meeting.location ?? '')}</strong></td></tr>`
+           : ''}
        </table>
-       ${meeting.meetingUrl
+       ${meeting.meetingUrl && !meeting.inPerson
          ? `<p style="margin:24px 0">
               <a href="${escapeHtml(sanitiseUrl(meeting.meetingUrl))}" style="display:inline-block;background:linear-gradient(135deg,#0057b8,#2F6BFF);color:#fff;font-weight:600;padding:12px 24px;border-radius:12px;text-decoration:none">Join the meeting</a>
             </p>`
@@ -1881,12 +1903,13 @@ export async function sendMentorMeetingUpdate(
     text: meeting.cancelled
       ? `${meeting.title} is cancelled. Nothing is expected of you.\n\nCancelled by ${meeting.byEmail}.`
       : [
-          `${meeting.title} has moved.`,
+          moved ? `${meeting.title} has moved.` : `${meeting.title} has changed.`,
           ``,
-          `Now:    ${meeting.whenText}`,
+          `${moved ? 'Now: ' : 'When:'}   ${meeting.whenText}`,
           `Length: ${meeting.durationMins} minutes`,
           `With:   ${meeting.withWhom}`,
-          meeting.meetingUrl ? `\nJoin: ${meeting.meetingUrl}` : ``,
+          ...(meeting.inPerson ? [`Where:  In person — ${meeting.location ?? ''}`] : []),
+          meeting.meetingUrl && !meeting.inPerson ? `\nJoin: ${meeting.meetingUrl}` : ``,
           ``,
           `Changed by ${meeting.byEmail}.`,
         ].join("\n"),
