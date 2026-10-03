@@ -19,7 +19,8 @@
      D. students' courses, by email: each with its academy and programme, how
         they were put on it (a finance invoice told apart from a purchase), how
         much the fee has opened, how many modules they can open and how many
-        are locked (by the fee or by hand), progress, finished with the
+        are locked (by the fee or by hand) — each by name when asked, for a
+        few students at a time — progress, finished with the
         certificate, or dropped; somebody with no account said so; at most 500
         at a time;
      E. over HTTP, only behind the /service secret check — and refused, not
@@ -227,6 +228,20 @@ let badList: unknown = null, tooMany: unknown = null
 try { await enrolmentsForPortal({ emails: 'learner@lms.test' }) } catch (err) { badList = err }
 try { await enrolmentsForPortal({ emails: Array.from({ length: 501 }, (_, i) => `x${i}@lms.test`) }) } catch (err) { tooMany = err }
 check('not a list, or more than 500: refused', badList instanceof PortalError && tooMany instanceof PortalError)
+check('no module names unless asked', theirs.every(c => !('list' in c.modules)), JSON.stringify(theirs.map(c => c.modules)))
+{
+  const detailed = (await enrolmentsForPortal({ emails: ['learner@lms.test'], detail: true })).students[0]!.courses
+  const listOf = (slug: string) => detailed.find(c => c.slug === slug)?.modules.list
+  check('with detail: each module by name, in course order, and whether it is locked',
+    JSON.stringify(listOf('dwt-pa')) === JSON.stringify([
+      { title: 'Module 1', locked: false }, { title: 'Module 2', locked: false }, { title: 'Module 3', locked: true }, { title: 'Module 4', locked: true },
+    ]), JSON.stringify(listOf('dwt-pa')))
+  check('...the one an admin locked by hand among them', JSON.stringify(listOf('mbo-pa')?.map(m => m.locked)) === JSON.stringify([false, true, false]), JSON.stringify(listOf('mbo-pa')))
+  check('...a course with no modules: an empty list', JSON.stringify(listOf('old-pa')) === '[]', JSON.stringify(listOf('old-pa')))
+  let tooManyDetail: unknown = null
+  try { await enrolmentsForPortal({ emails: Array.from({ length: 11 }, (_, i) => `x${i}@lms.test`), detail: true }) } catch (err) { tooManyDetail = err }
+  check('detail for more than 10 at a time: refused', tooManyDetail instanceof PortalError, String(tooManyDetail))
+}
 
 step('E. Over HTTP, behind the /service secret')
 const express = (await import('express')).default
@@ -264,6 +279,9 @@ check('tickets and assignments by POST', tix.status === 200 && tix.body.data?.ti
 const courses = await ask(live.url, '/service/enrolments', CRM_SECRET, { emails: ['learner@lms.test'] })
 check('courses by POST, and not without the secret', courses.status === 200 && courses.body.data?.students?.[0]?.courses?.length === 3 &&
   (await ask(live.url, '/service/enrolments', undefined, { emails: ['learner@lms.test'] })).status === 401, JSON.stringify(courses.body).slice(0, 200))
+const detailed = await ask(live.url, '/service/enrolments', CRM_SECRET, { emails: ['learner@lms.test'], detail: true })
+check('...and each module by name when asked', detailed.status === 200 &&
+  detailed.body.data?.students?.[0]?.courses?.find((c: { slug: string }) => c.slug === 'dwt-pa')?.modules?.list?.length === 4, JSON.stringify(detailed.body).slice(0, 200))
 live.close()
 const unguarded = await serve(app => { app.use('/service', portalActivityRoutes) })
 check('mounted where the secret check has not run: refused even with the right secret',

@@ -65,8 +65,8 @@ router.post('/class-assignments', checkedCaller, wrap(async (req, res) => {
  * query string.
  */
 router.post('/enrolments', checkedCaller, wrap(async (req, res) => {
-  const { emails } = (req.body ?? {}) as { emails?: unknown }
-  sendSuccess(res, await enrolmentsForPortal({ emails }), 'Courses')
+  const { emails, detail } = (req.body ?? {}) as { emails?: unknown; detail?: unknown }
+  sendSuccess(res, await enrolmentsForPortal({ emails, detail }), 'Courses')
 }))
 
 export default router
