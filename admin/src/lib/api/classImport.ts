@@ -31,6 +31,13 @@ export interface PreviewRow {
   mentorName:   string
   instructor:   { id: string; name: string } | null
   matchedBy:    'email' | 'exact' | 'first-name' | 'manual' | null
+  /* Optional: a backend from before modules sends none of these three, and the
+     preview then simply has no module picker. */
+  /** Batch + session number, e.g. "MBT 7" — a module pick applies to every row with it. */
+  code?:        string
+  /** The course module the classes go into; null = none (General sessions). */
+  module?:      { id: string; title: string } | null
+  moduleFrom?:  'sheet' | 'name' | 'none' | null
   title:        string
   mode:         'hybrid' | 'online' | 'offline'
   platform:     ImportPlatform | null
@@ -47,6 +54,8 @@ export interface PreviewResult {
   course:      { id: string; title: string }
   academy:     { slug: string | null; zone: string; tag: string }
   instructors: Array<{ id: string; name: string; email: string; role: string }>
+  /** The course's modules, in course order — what the module picker offers. */
+  modules?:    Array<{ id: string; title: string }>
   rows:        PreviewRow[]
   settingsErrors: string[]
   summary: {

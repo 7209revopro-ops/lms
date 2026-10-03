@@ -41,6 +41,17 @@ const OCC = {
   past:     { c: 'rgba(255,255,255,0.3)', bg: 'rgba(255,255,255,0.03)' },
 } as const
 
+/* "MALAYALAM BATCH" means Malayalam, in any case. A label that names exactly one
+   language sets the class language: on 2 Oct a Malayalam batch went in as
+   English, because only the file name was ever read, and only when the label
+   was still empty. A label naming two ("ENG/HINDI") is left to the dropdown. */
+function languageNamedIn(text: string): string | undefined {
+  if (text.includes('/')) return undefined
+  const hits = CLASS_LANGUAGES.filter(l => !l.value.includes('/')
+    && new RegExp(`\\b${l.value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i').test(text))
+  return hits.length === 1 ? hits[0]!.value : undefined
+}
+
 /* ── reading the workbook (in the browser — the file is never uploaded) ── */
 type SheetRow = Record<string, string>
 
@@ -96,25 +107,36 @@ export default function ImportTimetablePage() {
     titleLabel: '', location: '', room: '', defaultPlatform: 'inapp',
   })
   const [overrides, setOverrides] = useState<Record<number, RowOverride>>({})
+  /* Module picked in the preview, per session code ("MMC 1" → a module id, or
+     'none'). Sent as each matching row's module column, which the importer reads
+     the same way as one typed into the sheet. */
+  const [moduleChoice, setModuleChoice] = useState<Record<string, string>>({})
   const [result, setResult]   = useState<PreviewResult | null>(null)
   const [jobId, setJobId]     = useState<string | null>(null)
   const fileInput = useRef<HTMLInputElement>(null)
 
-  const payload = useCallback((ov = overrides) => ({
-    settings: { ...settings, titleLabel: settings.titleLabel || undefined, location: settings.location || undefined, room: settings.room || undefined },
-    rows: file?.rows ?? [],
-    overrides: Object.fromEntries(Object.entries(ov).map(([k, v]) => [String(k), v])),
-    fileName: file?.name,
-  }), [settings, file, overrides])
+  const payload = useCallback((ov = overrides, mc = moduleChoice) => {
+    const codeOf = new Map((result?.rows ?? []).map(r => [r.rowNumber, r.code]))
+    return {
+      settings: { ...settings, titleLabel: settings.titleLabel || undefined, location: settings.location || undefined, room: settings.room || undefined },
+      /* rowNumber = index + 2 (the header is row 1), as the preview counts them */
+      rows: (file?.rows ?? []).map((r, i) => {
+        const code = codeOf.get(i + 2)
+        return code && mc[code] ? { ...r, module: mc[code]! } : r
+      }),
+      overrides: Object.fromEntries(Object.entries(ov).map(([k, v]) => [String(k), v])),
+      fileName: file?.name,
+    }
+  }, [settings, file, overrides, moduleChoice, result])
 
-  const runPreview = useCallback(async (ov = overrides) => {
+  const runPreview = useCallback(async (ov = overrides, mc = moduleChoice) => {
     if (!file || !settings.courseId) return
     try {
-      setResult(await preview.mutateAsync(payload(ov)))
+      setResult(await preview.mutateAsync(payload(ov, mc)))
     } catch (e: any) {
       toast.error('Could not preview', e?.response?.data?.error?.message ?? 'Please try again.')
     }
-  }, [file, settings.courseId, overrides, payload, preview, toast])
+  }, [file, settings.courseId, overrides, moduleChoice, payload, preview, toast])
 
   /* Settings changed after a preview → refresh it (debounced). */
   const firstPreview = useRef(true)
@@ -126,6 +148,12 @@ export default function ImportTimetablePage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [settings])
 
+  const setModuleFor = (code: string, value: string) => {
+    const next = { ...moduleChoice, [code]: value }
+    setModuleChoice(next)
+    void runPreview(overrides, next)
+  }
+
   const setOverride = (rowNumber: number, patch: RowOverride) => {
     const next = { ...overrides, [rowNumber]: { ...overrides[rowNumber], ...patch } }
     setOverrides(next)
@@ -134,13 +162,13 @@ export default function ImportTimetablePage() {
 
   async function onFile(f: File | undefined) {
     if (!f) return
-    setReadErr(null); setResult(null); setOverrides({}); setJobId(null)
+    setReadErr(null); setResult(null); setOverrides({}); setModuleChoice({}); setJobId(null)
     try {
       const wb = await readWorkbook(f)
       setFile({ name: f.name, ...wb })
       if (!settings.titleLabel) {
         const guess = /english/i.test(f.name) ? 'English batch' : /malayalam/i.test(f.name) ? 'Malayalam batch' : ''
-        if (guess) setSettings(s => ({ ...s, titleLabel: guess, language: guess.startsWith('Malayalam') ? 'Malayalam' : s.language }))
+        if (guess) setSettings(s => ({ ...s, titleLabel: guess, language: languageNamedIn(guess) ?? s.language }))
       }
     } catch (e: any) {
       setFile(null); setReadErr(e?.message ?? 'Could not read that file.')
@@ -239,7 +267,7 @@ export default function ImportTimetablePage() {
                 <div>
                   <label className={label} style={labelS}>Title label</label>
                   <input className={input} style={inputS} placeholder="e.g. English batch" value={settings.titleLabel}
-                    onChange={e => setSettings(s => ({ ...s, titleLabel: e.target.value }))} />
+                    onChange={e => { const v = e.target.value; setSettings(s => ({ ...s, titleLabel: v, language: languageNamedIn(v) ?? s.language })) }} />
                 </div>
                 <div>
                   <label className={label} style={labelS}>Platform when the file doesn&apos;t say</label>
@@ -310,6 +338,8 @@ export default function ImportTimetablePage() {
                   <tbody>
                     {result.rows.map(r => (
                       <Row key={r.rowNumber} r={r} tag={result.academy.tag} instructors={result.instructors}
+                        modules={result.modules ?? []}
+                        onModule={v => { if (r.code) setModuleFor(r.code, v) }}
                         onInclude={v => setOverride(r.rowNumber, { include: v })}
                         onPlatform={v => setOverride(r.rowNumber, { platform: v })}
                         onMentor={v => setOverride(r.rowNumber, { instructorId: v })} />
@@ -324,7 +354,7 @@ export default function ImportTimetablePage() {
                   {s.errors > 0 && ' Blocked rows are skipped — fix them in the file and preview again.'}
                 </p>
                 <div className="flex gap-2">
-                  <Button variant="ghost" onClick={() => { setResult(null); setOverrides({}) }}>Cancel</Button>
+                  <Button variant="ghost" onClick={() => { setResult(null); setOverrides({}); setModuleChoice({}) }}>Cancel</Button>
                   <Button onClick={onImport} disabled={s.classes === 0 || result.settingsErrors.length > 0 || start.isPending || preview.isPending}>
                     {start.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
                     Import {s.classes} classes
@@ -342,8 +372,9 @@ export default function ImportTimetablePage() {
 }
 
 /* ── preview row ──────────────────────────────────────── */
-function Row({ r, tag, instructors, onInclude, onPlatform, onMentor }: {
+function Row({ r, tag, instructors, modules, onModule, onInclude, onPlatform, onMentor }: {
   r: PreviewRow; tag: string; instructors: PreviewResult['instructors']
+  modules: NonNullable<PreviewResult['modules']>; onModule: (v: string) => void
   onInclude: (v: boolean) => void; onPlatform: (v: ImportPlatform) => void; onMentor: (v: string) => void
 }) {
   const st = STATUS[r.status]
@@ -364,6 +395,19 @@ function Row({ r, tag, instructors, onInclude, onPlatform, onMentor }: {
           {r.sessionId !== '—' ? `${r.sessionId} · ` : ''}
           {r.mode === 'hybrid' ? `Offline + Online${r.room ? ` · ${r.room}` : ''}` : r.mode === 'offline' ? `In person${r.room ? ` · ${r.room}` : ''}` : 'Online only'}
         </div>
+        {/* Which module the classes go into. Picking applies to every row of
+            this session code, and a row with no match stays blocked until a
+            module (or "No module") is picked. */}
+        {modules.length > 0 && r.code && (
+          <select className="mt-1.5 max-w-[240px] rounded-lg px-2 py-1 text-xs text-white outline-none" style={inputS}
+            aria-label={`Module for ${r.code}`}
+            value={r.module?.id ?? (r.moduleFrom === 'none' ? 'none' : '')}
+            onChange={e => onModule(e.target.value)}>
+            <option value="" style={{ background: '#0D0F1A' }}>Pick the module for “{r.code}”…</option>
+            {modules.map(m => <option key={m.id} value={m.id} style={{ background: '#0D0F1A' }}>{m.title}</option>)}
+            <option value="none" style={{ background: '#0D0F1A' }}>No module (General sessions)</option>
+          </select>
+        )}
       </td>
       <td className="py-3 pr-3 align-top">
         {r.instructor && r.matchedBy !== 'first-name' ? (

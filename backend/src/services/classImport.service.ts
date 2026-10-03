@@ -89,6 +89,13 @@ export interface PreviewRow {
   mentorName:    string
   instructor:    { id: string; name: string } | null
   matchedBy:     'email' | 'exact' | 'first-name' | 'manual' | null
+  /** Batch + session number, e.g. "MBT 7" — what the module is matched on. */
+  code:          string
+  /** The course module the classes go into. null = none (General sessions). */
+  module:        { id: string; title: string } | null
+  /** 'sheet' = the row's module column (or a pick in the preview, which fills
+      that column); 'name' = matched on the code; 'none' = told no module. */
+  moduleFrom:    'sheet' | 'name' | 'none' | null
   title:         string
   mode:          'hybrid' | 'online' | 'offline'
   platform:      ClassImportPlatform | null      // null = offline only (no link)
@@ -105,6 +112,8 @@ export interface PreviewResult {
   course:      { id: string; title: string }
   academy:     { slug: string | null; zone: string; tag: string }
   instructors: Array<{ id: string; name: string; email: string; role: string }>
+  /** The course's modules in course order — what the preview's picker offers. */
+  modules:     Array<{ id: string; title: string }>
   rows:        PreviewRow[]
   settingsErrors: string[]
   summary: {
@@ -134,7 +143,33 @@ const ALIASES: Record<string, string[]> = {
   platform:      ['platform', 'meeting_platform', 'meeting', 'link_type'],
   room:          ['room'],
   notes:         ['notes', 'note', 'remarks'],
+  module:        ['module', 'module_name', 'section'],
 }
+
+/* ── Which module a row's classes go into ──────────────
+   Every class imported on 2 Oct 2026 — 609 of them — went in with no module:
+   students saw them under "General sessions", and module blocking, which only
+   applies to a class that has a module, did not apply to any of them.
+
+   A row names its module by its code: "MBT 7" is the module "MBT 7 - Volume
+   Analysis". Compared with spaces and punctuation squashed out, and the next
+   character after the code must not be a digit, so "MBT 1" never takes
+   "MBT 10". "IM 4 (1)" is also tried as "IM 4 PART 1". Only a single match
+   counts — two candidates is a question for the person importing, not a guess. */
+const squash = (s: string) => s.toUpperCase().replace(/[^A-Z0-9]+/g, '')
+export function matchModule<T extends { title: string }>(code: string, modules: T[]): T | null {
+  const forms = [code.replace(/\(\s*(\d+)\s*\)\s*$/, ' PART $1'), code]
+  for (const form of [...new Set(forms)]) {
+    const k = squash(form)
+    if (!k) continue
+    const hits = modules.filter(m => { const t = squash(m.title); return t.startsWith(k) && !/^\d/.test(t.slice(k.length)) })
+    if (hits.length === 1) return hits[0]!
+    if (hits.length > 1) return null
+  }
+  return null
+}
+/* A module column (or a preview pick) saying "no module" on purpose. */
+const NO_MODULE = /^(none|no module|-|—|general|general sessions?)$/i
 
 function pick(row: RawRow, field: keyof typeof ALIASES): string {
   const byNorm = new Map(Object.entries(row).map(([k, v]) => [norm(k), v]))
@@ -209,7 +244,7 @@ export class ClassImportService {
     overrides: Record<number, RowOverride> = {},
     now: Date = new Date(),
   ): Promise<PreviewResult> {
-    const { CourseModel, UserModel, LiveClassModel } = await import('@/models/schema.ts')
+    const { CourseModel, UserModel, LiveClassModel, SectionModel } = await import('@/models/schema.ts')
     const { LIVEKIT_MAX_PARTICIPANTS } = await import('@/services/liveClass.service.ts')
 
     if (!Types.ObjectId.isValid(settings.courseId)) throw new ClassImportError('INVALID_COURSE', 'Pick a course.')
@@ -230,6 +265,10 @@ export class ClassImportService {
     await ensureOrgSlugs().catch(() => {})
     const orgSlug = orgSlugFor(course.organizationId) ?? null
     const zone = zoneForAcademy(orgSlug)
+
+    const modules = (await SectionModel.find({ courseId: course._id }).select('title order')
+      .sort({ order: 1, createdAt: 1 }).lean<Array<{ _id: Types.ObjectId; title: string }>>())
+      .map(s => ({ id: String(s._id), title: s.title }))
 
     const settingsErrors: string[] = []
     if (!/^\d{4}-\d{2}-\d{2}$/.test(settings.startDate)) settingsErrors.push('Pick a start date.')
@@ -308,6 +347,26 @@ export class ClassImportService {
       let title = `${code}${label ? ` · ${label}` : ''}`
       if (title.length < 3) title = `${title} session`
 
+      /* Module: the row's module column (a pick in the preview fills it) →
+         matched on the code. A course with modules never silently gets a class
+         with none: an unmatched row waits for a pick, or an explicit "none". */
+      const moduleRaw = pick(raw, 'module')
+      let module: PreviewRow['module'] = null
+      let moduleFrom: PreviewRow['moduleFrom'] = null
+      if (moduleRaw && NO_MODULE.test(moduleRaw)) {
+        moduleFrom = 'none'
+      } else if (moduleRaw) {
+        const hit = modules.find(m => m.id === moduleRaw)
+          ?? modules.find(m => squash(m.title) === squash(moduleRaw))
+          ?? matchModule(moduleRaw, modules)
+        if (hit) { module = hit; moduleFrom = 'sheet' }
+        else err(`Module "${moduleRaw}" is not a module of this course.`)
+      } else if (modules.length > 0 && code) {
+        const hit = matchModule(code, modules)
+        if (hit) { module = hit; moduleFrom = 'name' }
+        else err(`No module of this course is named like "${code}" — pick one.`)
+      }
+
       const mode = parseMode(pick(raw, 'mode'))
       if (!mode) err(`Mode "${pick(raw, 'mode')}" — use "Offline + Online", "Online Only" or "Offline Only".`)
 
@@ -351,7 +410,7 @@ export class ClassImportService {
         endLabel:   end != null ? fmtMinutes(end) : endRaw,
         durationMins: duration,
         mentorName: mentorRaw,
-        instructor, matchedBy, title,
+        instructor, matchedBy, code, module, moduleFrom, title,
         mode: mode ?? 'online', platform,
         ...(mode !== 'online' ? { location, room } : {}),
         status: fatal ? 'error' : 'ready',
@@ -450,6 +509,7 @@ export class ClassImportService {
       course: { id: String(course._id), title: course.title },
       academy: { slug: orgSlug, zone, tag: zoneTag(zone) },
       instructors,
+      modules,
       rows,
       settingsErrors,
       summary: {
@@ -488,6 +548,7 @@ export class ClassImportService {
         durationMins: r.durationMins,
         title: r.title,
         instructorId: new Types.ObjectId(r.instructor!.id),
+        ...(r.module ? { sectionId: new Types.ObjectId(r.module.id) } : {}),
         platform: (r.platform ?? 'meet') as ClassImportPlatform,
         offline: r.platform === null,
         location: r.location,
@@ -551,6 +612,7 @@ export class ClassImportService {
         try {
           const { live } = await create({
             courseId:        String(job.courseId),
+            ...(item.sectionId ? { sectionId: String(item.sectionId) } : {}),
             title:           item.title,
             scheduledStart:  item.scheduledStart,
             durationMins:    item.durationMins,
@@ -744,4 +806,4 @@ function controllerSingleton<T>(Ctor: new () => T): T {
 }
 
 /* Exported for tests. */
-export const __test = { parseTime, parseMode, parsePlatform, parseDay, zoneDateKey }
+export const __test = { parseTime, parseMode, parsePlatform, parseDay, zoneDateKey, matchModule }

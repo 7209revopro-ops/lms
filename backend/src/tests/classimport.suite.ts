@@ -17,6 +17,8 @@
      J  undo removes what the import made — never a class with a booking
      K  another academy's admin cannot see or touch the import
      L  a restart turns a running import into a resumable one
+     M  modules: each row goes into the course module its code names (MBT 7 →
+        "MBT 7 - …", IM 4 (1) → "IM 4 - PART 1"); no match waits for a pick
 
    Boots against an ISOLATED throwaway database, dropped on exit.
    Run: bun run test:classimport
@@ -49,7 +51,7 @@ function section(n: string) { lines.push(`\n${n}`) }
 const mongoose = (await import('mongoose')).default
 const {
   UserModel, OrganizationModel, CourseModel, LiveClassModel, ClassImportModel,
-  EmailOutboxModel, NotificationModel, EnrollmentModel,
+  EmailOutboxModel, NotificationModel, EnrollmentModel, SectionModel,
 } = await import('@/models/schema.ts')
 const { resetOrgSlugCache } = await import('@/utils/orgSlugs.ts')
 const { ClassImportService, __test } = await import('@/services/classImport.service.ts')
@@ -332,6 +334,51 @@ section('L  restart')
   })
   await ClassImportService.markInterruptedOnBoot()
   check('L1 a running import becomes interrupted (resumable)', (await ClassImportModel.findById(j._id).lean())!.status === 'interrupted')
+}
+
+/* ── M ──────────────────────────────────────────────── */
+section('M  modules')
+{
+  check('M1 "MBT 1" is not "MBT 10"',
+    __test.matchModule('MBT 1', [{ title: 'MBT 10 - Advanced' }, { title: 'MBT 1 - Basics' }])?.title === 'MBT 1 - Basics')
+  check('M2 "IM 4" alone names two modules — no guess',
+    __test.matchModule('IM 4', [{ title: 'IM 4 - PART 1' }, { title: 'IM 4 - PART 2' }]) === null)
+
+  const mCourse = oid()
+  await CourseModel.collection.insertOne({ _id: mCourse, title: 'Forex Modules', slug: 'forex-modules', organizationId: dubai._id, status: 'published', price: 0 })
+  const sec = (title: string, order: number) => ({ _id: oid(), courseId: mCourse, title, order, createdAt: new Date(), updatedAt: new Date() })
+  const mbt1 = sec('MBT 1 - Basics of Forex', 1), mbt10 = sec('MBT 10 - Advanced', 10)
+  const im41 = sec('IM 4 - PART 1', 11), im42 = sec('IM 4 - PART 2', 12), adv1 = sec('ADVANCE 1', 13)
+  await SectionModel.collection.insertMany([mbt1, mbt10, im41, im42, adv1])
+  /* Her own mentor, so nothing earlier in the suite clashes with these rows. */
+  const mira = { _id: oid(), name: 'Mira Mentor', email: 'mira@imp.test', role: 'instructor', organizationId: dubai._id, isActive: true }
+  await UserModel.collection.insertOne(mira)
+  const MS = { ...SETTINGS, courseId: String(mCourse) }
+  const row = (batch: string, num: string, extra: Record<string, string> = {}) =>
+    ({ ...toRow(FILE[0]!), session_id: `M-${batch}-${num}`, mentor: 'Mira Mentor', batch, session_number: num, ...extra })
+  const one = async (r: Record<string, string>) => (await svc.preview(MS, [r], ACTOR, {}, NOW)).rows[0]!
+
+  let r = await one(row('MBT', '1'))
+  check('M3 "MBT 1" goes into "MBT 1 - Basics of Forex"', r.module?.id === String(mbt1._id) && r.moduleFrom === 'name' && r.status !== 'error', JSON.stringify(r.module))
+  r = await one(row('IM', '4 (1)'))
+  check('M4 "IM 4 (1)" goes into "IM 4 - PART 1"', r.module?.id === String(im41._id), JSON.stringify(r.module))
+  r = await one(row('MMC', '1'))
+  check('M5 no module named like "MMC 1" — blocked until picked', r.module === null && r.status === 'error' && r.messages.some(m => m.includes('pick one')), r.messages.join(' | '))
+  r = await one(row('MMC', '1', { module: String(adv1._id) }))
+  check('M6 a pick (the module column) fixes it', r.module?.id === String(adv1._id) && r.moduleFrom === 'sheet' && r.status !== 'error', r.messages.join(' | '))
+  r = await one(row('MMC', '1', { module: 'none' }))
+  check('M7 "none" means General sessions, on purpose', r.module === null && r.moduleFrom === 'none' && r.status !== 'error', r.messages.join(' | '))
+  r = await one(row('MBT', '1', { Module: 'Nonexistent module' }))
+  check('M8 a module the course does not have is an error', r.status === 'error' && r.messages.some(m => m.includes('is not a module')), r.messages.join(' | '))
+  const p = await svc.preview(MS, [row('MBT', '1')], ACTOR, {}, NOW)
+  check('M9 the preview lists the course modules for the picker', p.modules.length === 5 && p.modules[0]!.id === String(mbt1._id), JSON.stringify(p.modules.map(m => m.title)))
+  const plain = (await svc.preview(SETTINGS, [ROWS[0]!], ACTOR, {}, NOW)).rows[0]!
+  check('M10 a course with no modules imports as before', plain.module === null && plain.moduleFrom === null && plain.status !== 'error', plain.messages.join(' | '))
+
+  const started = await svc.start(MS, [row('MBT', '1')], ACTOR, {}, 'modules.xlsx')
+  await waitDone(started.jobId, ACTOR)
+  const made = await LiveClassModel.find({ importJobId: new mongoose.Types.ObjectId(started.jobId) }).select('sectionId').lean()
+  check('M11 imported classes carry the module', made.length === 4 && made.every(c => String(c.sectionId) === String(mbt1._id)), `${made.length}: ${made.map(c => String(c.sectionId)).join(',')}`)
 }
 
 } catch (err) {

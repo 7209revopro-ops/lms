@@ -3295,6 +3295,7 @@ export interface IClassImportItem {
   durationMins:   number
   title:          string
   instructorId:   Types.ObjectId
+  sectionId?:     Types.ObjectId   // the course module; absent = General sessions
   platform:       ClassImportPlatform
   offline:        boolean          // in-person only: no link at all
   location?:      string
@@ -3345,6 +3346,7 @@ const ClassImportItemSchema = new Schema<IClassImportItem>({
   durationMins:   { type: Number, required: true },
   title:          { type: String, required: true, maxlength: 255 },
   instructorId:   { type: Schema.Types.ObjectId, ref: 'User', required: true },
+  sectionId:      { type: Schema.Types.ObjectId, ref: 'Section' },
   platform:       { type: String, enum: ['meet', 'inapp'], required: true },
   offline:        { type: Boolean, default: false },
   location:       { type: String, maxlength: 500 },
