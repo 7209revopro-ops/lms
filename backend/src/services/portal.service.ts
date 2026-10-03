@@ -1193,6 +1193,12 @@ export interface PortalStudentClasses {
  * student can book the other academy's shared classes, and the portal wants
  * to see all of them, each labelled with the academy that runs it.
  *
+ * Only classes of courses the student has: the class's course, or the one
+ * their seat came through, must be one they are enrolled in (not dropped).
+ * Which enrolments were paid is not something this server reliably knows —
+ * most say nothing about it — so an enrolment is taken as the course they
+ * have. `allCourses` lifts that, for a caller that wants every booking.
+ *
  * A booking says 'booked' until attendance is settled after the class, so a
  * 'booked' class still ahead is upcoming and one already past is just booked
  * (not settled yet). attendedAt means they came, whatever the status says.
@@ -1204,8 +1210,9 @@ export interface PortalStudentClasses {
 export async function classAttendanceForPortal(input: {
   emails: unknown
   detail?: boolean
+  allCourses?: boolean
 }): Promise<{ students: PortalStudentClasses[] }> {
-  const { ClassBookingModel, LiveClassModel, CourseModel } = await import('@/models/schema.ts')
+  const { ClassBookingModel, LiveClassModel, CourseModel, EnrollmentModel } = await import('@/models/schema.ts')
 
   if (!Array.isArray(input.emails)) {
     throw httpError('emails must be a list of addresses', 400)
@@ -1228,9 +1235,22 @@ export async function classAttendanceForPortal(input: {
   const emailOfUser = new Map(users.map((u) => [String(u._id), String(u.email).toLowerCase()]))
   const bookings = users.length
     ? await ClassBookingModel.find({ userId: { $in: users.map((u) => u._id) } })
-      .select('userId liveClassId status attendedAt')
+      .select('userId liveClassId status attendedAt seatCourseId')
       .lean()
     : []
+
+  // Each student's courses — the ones they are enrolled in and haven't dropped.
+  const coursesOf = new Map<string, Set<string>>()
+  if (!input.allCourses && users.length) {
+    const enrolments = await EnrollmentModel.find({ userId: { $in: users.map((u) => u._id) }, status: { $ne: 'dropped' } })
+      .select('userId courseId')
+      .lean()
+    for (const e of enrolments) {
+      const key = String(e.userId)
+      if (!coursesOf.has(key)) coursesOf.set(key, new Set())
+      coursesOf.get(key)!.add(String(e.courseId))
+    }
+  }
 
   const classIds = [...new Set(bookings.map((b) => String(b.liveClassId)))]
   const classes = classIds.length
@@ -1275,6 +1295,11 @@ export async function classAttendanceForPortal(input: {
     const entry = byEmail.get(emailOfUser.get(String(b.userId)) ?? '')
     if (!entry) continue
     const live = classById.get(String(b.liveClassId))
+    if (!input.allCourses) {
+      const theirs = coursesOf.get(String(b.userId))
+      const course = String(live?.courseId ?? ''), seat = String(b.seatCourseId ?? '')
+      if (!theirs || !((course && theirs.has(course)) || (seat && theirs.has(seat)))) continue
+    }
     const startsAt = live?.scheduledStart ? new Date(live.scheduledStart).getTime() : 0
     const status = statusOf(b, startsAt)
     entry[status]++
