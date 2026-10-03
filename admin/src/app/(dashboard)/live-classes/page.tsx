@@ -14,7 +14,7 @@ import {
 } from 'lucide-react'
 import { useAllLiveClasses, useCreateLiveClass, useMyMeetings, markInstructorJoined, type LiveClass, type LiveClassType, type MentorMeeting } from '@/lib/api/liveClasses'
 import { CLASS_LANGUAGES, withFlagAndNative } from '@/lib/languages'
-import { datetimeLocalToISO, zoneOf, foreignZoneTag } from '@/lib/timezone'
+import { datetimeLocalToISO, isoToDatetimeLocal, getActiveTimeZone, zoneOf, foreignZoneTag } from '@/lib/timezone'
 import { useCourses } from '@/lib/api/courses'
 import { useCourseOutline } from '@/lib/api/outline'
 import { GuestCohortsField, cohortsProblem } from '@/components/live-classes/GuestCohortsField'
@@ -355,6 +355,13 @@ function fmtDate(iso: string, tz?: string): string {
 
 function fmtTime(iso: string, tz?: string): string {
   return new Date(iso).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', ...(tz ? { timeZone: tz } : {}) })
+}
+
+/* "YYYY-MM-DD" `days` after today, on the viewer's own academy calendar — what
+   the Today / Tomorrow / Next 7 days picks mean. */
+function dayKeyFromToday(days: number): string {
+  const [y, m, d] = isoToDatetimeLocal(new Date().toISOString(), getActiveTimeZone()).slice(0, 10).split('-').map(Number)
+  return new Date(Date.UTC(y!, m! - 1, d! + days)).toISOString().slice(0, 10)
 }
 
 function fmtDuration(mins: number): string {
@@ -1862,6 +1869,14 @@ export default function LiveClassesPage() {
   const [languageFilter,    setLanguageFilter]    = useState('')
   const [instructorFilter,  setInstructorFilter]  = useState('')
   const [search,         setSearch]         = useState('')
+  /* A date window and a time-of-day window. Both read each class on its OWN
+     academy's clock — the clock its row prints — so "4–7 PM" means the times
+     you can see, whichever academy hosts the class. */
+  const [dateFrom, setDateFrom] = useState('')   // YYYY-MM-DD
+  const [dateTo,   setDateTo]   = useState('')
+  const [timeFrom, setTimeFrom] = useState('')   // HH:mm
+  const [timeTo,   setTimeTo]   = useState('')
+  const rangeActive = !!(dateFrom || dateTo || timeFrom || timeTo)
   const [createOpen,         setCreateOpen]         = useState(false)
   const [offlineCreateOpen,  setOfflineCreateOpen]  = useState(false)
   const [view,               setView]               = useState<'table' | 'month' | 'grid'>('table')
@@ -1884,7 +1899,16 @@ export default function LiveClassesPage() {
   /* For stats bar, always use the full unfiltered list */
   const { data: allItems = [] } = useAllLiveClasses('all')
 
-  /* Apply type + course + search + instructor + delivery filters client-side */
+  /* Each class's start as "YYYY-MM-DDTHH:mm" on its academy's clock. Worked out
+     once per load, and only while a date or time filter is set — not on every
+     keystroke in the search box. */
+  const localStart = useMemo(() => {
+    const m = new Map<string, string>()
+    if (rangeActive) for (const l of rawItems) m.set(l.id, isoToDatetimeLocal(l.scheduledStart, zoneOf(l.organizationSlug)))
+    return m
+  }, [rawItems, rangeActive])
+
+  /* Apply type + course + search + instructor + delivery + date/time filters client-side */
   const items = useMemo(() => {
     let list = rawItems
     if (typeFilter !== 'all') list = list.filter(l => l.type === typeFilter)
@@ -1924,8 +1948,23 @@ export default function LiveClassesPage() {
         return instrId === me.id
       })
     }
+    if (rangeActive) {
+      list = list.filter(l => {
+        const local = localStart.get(l.id) ?? ''
+        const day = local.slice(0, 10), hm = local.slice(11, 16)
+        if (dateFrom && day < dateFrom) return false
+        if (dateTo   && day > dateTo)   return false
+        /* By START time. A window that runs past midnight (10 PM – 2 AM) wraps
+           rather than matching nothing. */
+        if (timeFrom && timeTo && timeFrom > timeTo) return hm >= timeFrom || hm <= timeTo
+        if (timeFrom && hm < timeFrom) return false
+        if (timeTo   && hm > timeTo)   return false
+        return true
+      })
+    }
     return list
-  }, [rawItems, typeFilter, deliveryFilter, courseFilter, languageFilter, instructorFilter, search, isInstructor, me?.id])
+  }, [rawItems, typeFilter, deliveryFilter, courseFilter, languageFilter, instructorFilter, search, isInstructor, me?.id,
+      rangeActive, localStart, dateFrom, dateTo, timeFrom, timeTo])
 
   /* Offline stats for the dashboard panel */
   const offlineStats = useMemo(() => {
@@ -2185,6 +2224,61 @@ export default function LiveClassesPage() {
         <LanguageDropdown value={languageFilter} onChange={setLanguageFilter} />
       </div>
 
+      {/* Date range and time range */}
+      <div className="mb-3 flex flex-wrap items-center gap-2">
+        <div className="flex items-center gap-1.5 rounded-xl px-2.5 py-1.5"
+          style={(dateFrom || dateTo)
+            ? { background: 'rgba(0,87,184,0.10)', border: '1px solid rgba(0,87,184,0.30)' }
+            : { background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.07)' }}>
+          <CalendarDays size={12} style={{ color: (dateFrom || dateTo) ? '#0057b8' : 'rgba(255,255,255,0.35)' }} />
+          <input type="date" aria-label="From date" value={dateFrom} max={dateTo || undefined}
+            onChange={e => setDateFrom(e.target.value)}
+            className="bg-transparent text-xs text-white outline-none" style={{ colorScheme: 'dark' }} />
+          <span className="text-[11px]" style={{ color: 'rgba(255,255,255,0.30)' }}>to</span>
+          <input type="date" aria-label="To date" value={dateTo} min={dateFrom || undefined}
+            onChange={e => setDateTo(e.target.value)}
+            className="bg-transparent text-xs text-white outline-none" style={{ colorScheme: 'dark' }} />
+        </div>
+
+        {([['Today', 0, 0], ['Tomorrow', 1, 1], ['Next 7 days', 0, 6]] as const).map(([label, a, b]) => {
+          const from = dayKeyFromToday(a), to = dayKeyFromToday(b)
+          const on = dateFrom === from && dateTo === to
+          return (
+            <Button key={label} variant="ghost" size="sm"
+              onClick={() => { setDateFrom(on ? '' : from); setDateTo(on ? '' : to) }}
+              className="rounded-lg px-2.5 py-1 text-[11px] font-semibold"
+              style={on
+                ? { background: 'rgba(0,87,184,0.15)', color: '#0057b8', border: '1px solid rgba(0,87,184,0.25)' }
+                : { background: 'transparent', color: 'rgba(255,255,255,0.40)', border: '1px solid rgba(255,255,255,0.06)' }}>
+              {label}
+            </Button>
+          )
+        })}
+
+        <div className="flex items-center gap-1.5 rounded-xl px-2.5 py-1.5"
+          style={(timeFrom || timeTo)
+            ? { background: 'rgba(0,87,184,0.10)', border: '1px solid rgba(0,87,184,0.30)' }
+            : { background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.07)' }}>
+          <Clock size={12} style={{ color: (timeFrom || timeTo) ? '#0057b8' : 'rgba(255,255,255,0.35)' }} />
+          <input type="time" aria-label="Starting from" value={timeFrom}
+            onChange={e => setTimeFrom(e.target.value)}
+            className="bg-transparent text-xs text-white outline-none" style={{ colorScheme: 'dark' }} />
+          <span className="text-[11px]" style={{ color: 'rgba(255,255,255,0.30)' }}>to</span>
+          <input type="time" aria-label="Starting until" value={timeTo}
+            onChange={e => setTimeTo(e.target.value)}
+            className="bg-transparent text-xs text-white outline-none" style={{ colorScheme: 'dark' }} />
+        </div>
+
+        {rangeActive && (
+          <Button variant="ghost" size="sm"
+            onClick={() => { setDateFrom(''); setDateTo(''); setTimeFrom(''); setTimeTo('') }}
+            className="flex items-center gap-1 rounded-lg px-2.5 py-1 text-[11px] font-semibold"
+            style={{ color: 'rgba(255,255,255,0.55)', border: '1px solid rgba(255,255,255,0.10)' }}>
+            <X size={11} />Clear
+          </Button>
+        )}
+      </div>
+
       {/* Search bar */}
       <div className="relative mb-5">
         <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none"
@@ -2245,7 +2339,9 @@ export default function LiveClassesPage() {
               <div>
                 <p className="text-base font-bold text-white">No sessions found</p>
                 <p className="mt-1 text-sm" style={{ color: 'rgba(255,255,255,0.3)' }}>
-                  {activeFilter === 'all'
+                  {rangeActive
+                    ? 'Nothing in this date or time range — widen it or press Clear.'
+                    : activeFilter === 'all'
                     ? 'Create a live class inside any course to get started.'
                     : activeFilter === 'live'      ? 'No streams are live right now.'
                     : activeFilter === 'scheduled' ? 'No upcoming sessions scheduled.'
