@@ -170,7 +170,7 @@ function EventPopover({
               variant="outline"
               size="sm"
               onClick={() => { onEdit(live); onClose() }}
-              className="flex items-center gap-1.5 rounded-xl px-3 py-1.5 text-xs font-semibold !border-white/[0.12] !text-white/65 hover:!bg-white/10"
+              className="flex items-center gap-1.5 rounded-xl px-3 py-1.5 text-xs font-semibold !border-white/[0.12] !bg-transparent !text-white/65 hover:!bg-white/10"
             >
               <Pencil size={11} />Edit
             </Button>
@@ -186,6 +186,84 @@ function EventPopover({
               <ExternalLink size={11} />Course
             </Link>
           )}
+        </div>
+      </motion.div>
+    </motion.div>
+  )
+}
+
+/* ── Every class on one day ──────────────────────────
+   A cell shows three chips; "+N more" was plain text with no handler, so on a
+   busy day (thirty-odd imported classes) everything past the third could not
+   be opened from this screen at all. This lists the whole day in time order,
+   and a row opens the same detail popover a chip does. It sits UNDER that
+   popover (z-40 vs z-50), so closing a class lands back on the list. */
+function DayListModal({
+  day, sessions, onPick, onClose,
+}: {
+  day:      Date
+  sessions: LiveClass[]
+  onPick:   (l: LiveClass) => void
+  onClose:  () => void
+}) {
+  const sorted = [...sessions].sort((a, b) => new Date(a.scheduledStart).getTime() - new Date(b.scheduledStart).getTime())
+
+  return (
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      className="fixed inset-0 z-40 flex items-center justify-center p-4"
+      style={{ background: 'rgba(0,0,0,0.55)' }}
+      onClick={onClose}
+    >
+      <motion.div
+        initial={{ opacity: 0, scale: 0.96, y: 6 }}
+        animate={{ opacity: 1, scale: 1, y: 0 }}
+        exit={{ opacity: 0, scale: 0.96, y: 4 }}
+        onClick={e => e.stopPropagation()}
+        className="flex w-full max-w-md flex-col rounded-2xl shadow-2xl"
+        style={{ background: '#161829', border: '1px solid rgba(255,255,255,0.10)', maxHeight: '80vh' }}
+      >
+        <div className="flex items-start justify-between gap-3 px-5 pt-5 pb-3"
+          style={{ borderBottom: '1px solid rgba(255,255,255,0.07)' }}>
+          <div>
+            <h3 className="text-base font-bold text-white" style={{ fontFamily: 'Bricolage Grotesque, sans-serif' }}>
+              {day.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })}
+            </h3>
+            <p className="mt-0.5 text-xs" style={{ color: 'rgba(255,255,255,0.45)' }}>
+              {sorted.length} {sorted.length === 1 ? 'class' : 'classes'}
+            </p>
+          </div>
+          <Button variant="ghost" size="icon-sm" onClick={onClose} aria-label="Close"
+            className="rounded-lg !text-white/40 hover:!bg-white/10">
+            <X size={14} />
+          </Button>
+        </div>
+
+        <div className="flex-1 space-y-1 overflow-y-auto px-3 py-3">
+          {sorted.map(s => {
+            const colors    = statusColor(s.status)
+            const isOffline = (s as any).isOnline === false
+            return (
+              <button key={s.id} type="button" onClick={() => onPick(s)}
+                className="flex w-full items-center gap-3 rounded-xl px-3 py-2 text-left transition-colors hover:bg-white/[0.06]">
+                <span className="w-16 flex-shrink-0 text-xs font-semibold" style={{ color: colors.text }}>
+                  {new Date(s.scheduledStart).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', timeZone: zoneOf(s.organizationSlug) })}
+                </span>
+                <span className="min-w-0 flex-1">
+                  <span className="flex items-center gap-1 truncate text-sm font-semibold text-white">
+                    {isOffline && <Building2 size={11} className="flex-shrink-0" style={{ color: '#34D399' }} />}
+                    {s.title}
+                  </span>
+                  <span className="block truncate text-[11px]" style={{ color: 'rgba(255,255,255,0.40)' }}>
+                    {[s.instructor?.name, s.course?.title].filter(Boolean).join(' · ')}
+                  </span>
+                </span>
+                <span className="h-2 w-2 flex-shrink-0 rounded-full" style={{ background: colors.dot }} title={s.status} />
+              </button>
+            )
+          })}
         </div>
       </motion.div>
     </motion.div>
@@ -442,6 +520,7 @@ export default function TimetablePage() {
     const d = new Date(); d.setDate(1); d.setHours(0, 0, 0, 0); return d
   })
   const [selected,          setSelected]          = useState<LiveClass | null>(null)
+  const [dayList,           setDayList]           = useState<Date | null>(null)
   const [draft,             setDraft]             = useState<SlotDraft | null>(null)
   const [draftDay,          setDraftDay]          = useState<Date | null>(null)
   const [editTarget,        setEditTarget]        = useState<LiveClass | null>(null)
@@ -668,9 +747,11 @@ export default function TimetablePage() {
                       )
                     })}
                     {overflow > 0 && (
-                      <p className="px-2 text-[10px] font-medium" style={{ color: 'rgba(255,255,255,0.30)' }}>
+                      <button type="button" onClick={() => setDayList(day)}
+                        className="w-full rounded-md px-2 py-0.5 text-left text-[10px] font-semibold transition-colors hover:bg-white/10"
+                        style={{ color: 'rgba(255,255,255,0.45)' }}>
                         +{overflow} more
-                      </p>
+                      </button>
                     )}
                   </div>
                 </div>
@@ -687,6 +768,15 @@ export default function TimetablePage() {
 
       {/* ── Modals ── */}
       <AnimatePresence>
+        {dayList && (
+          <DayListModal
+            key="day"
+            day={dayList}
+            sessions={getSessionsForDay(dayList)}
+            onPick={s => setSelected(s)}
+            onClose={() => setDayList(null)}
+          />
+        )}
         {selected && (
           <EventPopover
             key="popover"
