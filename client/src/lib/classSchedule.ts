@@ -312,9 +312,18 @@ export function buildGroups(classes: LiveClass[], bookingMap: Map<string, MyBook
 
 /* ── What is worth offering as a filter ─────────────────────────── */
 
+/** How a session is attended: on a link, or in a room only. An online class
+    that also names a room counts as online — it has a link. */
+export type SessionMode = 'online' | 'offline'
+export const modeOf = (lc: { isOnline?: boolean }): SessionMode => (lc.isOnline === false ? 'offline' : 'online')
+
 export interface SlotFacets {
   languages:   string[]
   instructors: { id: string; name: string; avatarUrl?: string }[]
+  /** 'online' then 'offline', as far as the slots have them. The Malayalam
+      batch runs an in-person group at the same hours as its online one, and a
+      student looking for the room should not have to read every card. */
+  modes:       SessionMode[]
 }
 
 /**
@@ -331,9 +340,11 @@ export interface SlotFacets {
 export function moduleFacets(groups: ClassGroup[]): SlotFacets {
   const langs = new Set<string>()
   const tutors = new Map<string, { id: string; name: string; avatarUrl?: string }>()
+  const modes = new Set<SessionMode>()
   for (const g of groups) {
     const lang = (g.slots[0] as { language?: string } | undefined)?.language
     if (lang) langs.add(lang)
+    for (const s of g.slots) modes.add(modeOf(s))
     /* Read off the GROUP, not the first slot: the group key already includes
        the instructor, so every session in one shares theirs. */
     if (g.instructor && !tutors.has(g.instructor.id)) tutors.set(g.instructor.id, g.instructor)
@@ -341,6 +352,7 @@ export function moduleFacets(groups: ClassGroup[]): SlotFacets {
   return {
     languages:   [...langs].sort(),
     instructors: [...tutors.values()].sort((a, b) => a.name.localeCompare(b.name)),
+    modes:       (['online', 'offline'] as const).filter(m => modes.has(m)),
   }
 }
 
@@ -348,16 +360,18 @@ export function moduleFacets(groups: ClassGroup[]): SlotFacets {
     none — means every slot already matches, so the filter is not drawn. */
 export const showFacet = (values: unknown[]): boolean => values.length > 1
 
-/** Narrow slots to a chosen language and instructor. `null` means "all". */
+/** Narrow slots to a chosen language, instructor and mode. `null` means "all". */
 export function filterGroups(
   groups: ClassGroup[],
   language: string | null,
   instructorId: string | null,
+  mode: SessionMode | null = null,
 ): ClassGroup[] {
-  if (!language && !instructorId) return groups
+  if (!language && !instructorId && !mode) return groups
   return groups.filter(g =>
     (!language     || (g.slots[0] as { language?: string } | undefined)?.language === language) &&
-    (!instructorId || g.instructor?.id === instructorId))
+    (!instructorId || g.instructor?.id === instructorId) &&
+    (!mode         || g.slots.some(s => modeOf(s) === mode)))
 }
 
 /* ── How a group describes itself ───────────────────────────────────────── */

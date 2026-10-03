@@ -302,7 +302,25 @@ console.log('\nH. A filter offers what is THERE, and nothing else')
   const none = moduleFacets([])
   check('H13 no slots, no facets', none.languages.length === 0 && none.instructors.length === 0)
   check('H14 and neither filter is drawn',
-    showFacet(none.languages) === false && showFacet(none.instructors) === false)
+    showFacet(none.languages) === false && showFacet(none.instructors) === false && showFacet(none.modes) === false)
+
+  /* Online and in person at the same hour — the Malayalam batch's two groups. */
+  const both = buildGroups([
+    slot('o1', 'Malayalam', alex, 0, 18),
+    row({ ...HOST, id: 'f1', title: 'Core Concepts · offline', language: 'Malayalam', instructor: alex,
+          scheduledStart: at(0, 18), isEnrolled: true, isEntitled: true, isOnline: false, location: 'AL QUSAIS', room: 'Room 1' }),
+  ], noBookings)
+  const f3 = moduleFacets(both)
+  check('H15 both modes are offered, online first', JSON.stringify(f3.modes) === '["online","offline"]', JSON.stringify(f3.modes))
+  check('H16 so the mode filter is drawn', showFacet(f3.modes) === true)
+  const inRoom = filterGroups(both, null, null, 'offline'), onLink = filterGroups(both, null, null, 'online')
+  check('H17 "In person" keeps only the in-person class',
+    inRoom.length === 1 && inRoom[0]!.slots.every(s => s.isOnline === false), String(inRoom.length))
+  check('H18 "Online" keeps only the online one',
+    onLink.length === 1 && onLink[0]!.slots.every(s => s.isOnline !== false), String(onLink.length))
+  check('H19 mode combines with language and instructor', filterGroups(both, 'Malayalam', 'i-alex', 'offline').length === 1)
+  check('H20 an online-only module offers no mode filter',
+    JSON.stringify(f2.modes) === '["online"]' && showFacet(f2.modes) === false, JSON.stringify(f2.modes))
 }
 
 console.log('\nI. Sessions bucket by the STUDENT\'S day, soonest first')

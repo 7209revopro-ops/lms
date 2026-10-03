@@ -46,7 +46,7 @@ import {
   moduleFacets, showFacet, filterGroups,
   buildCatalog, GENERAL_MODULE_ID as GENERAL,
   groupByDay, zonedKey, bookingClosedAt, offlineDayOffset,
-  type ClassGroup, type SlotStatus, type CourseNode, type ModuleNode, type DayBucket,
+  type ClassGroup, type SlotStatus, type CourseNode, type ModuleNode, type DayBucket, type SessionMode,
 } from '@/lib/classSchedule'
 
 /** "1 module" / "2 modules" — screen readers read the aria-label out loud. */
@@ -1652,11 +1652,12 @@ export function ModuleSheet({
 
   const [language, setLanguage] = useState<string | null>(null)
   const [tutorId,  setTutorId]  = useState<string | null>(null)
+  const [mode,     setMode]     = useState<SessionMode | null>(null)
 
   /* Reset when the module changes. Without this, walking from a module taught
      in Hindi to one that is English-only would carry `language: 'Hindi'`
      across and show an empty screen for a module that has sessions. */
-  useEffect(() => { setLanguage(null); setTutorId(null) }, [node.id])
+  useEffect(() => { setLanguage(null); setTutorId(null); setMode(null) }, [node.id])
 
   /* THE LIST IS DERIVED ON A MINUTE, NOT ON A SECOND. `now` ticks once a
      second while any booked session is within two minutes of a join
@@ -1693,16 +1694,18 @@ export function ModuleSheet({
   const facets = useMemo(() => moduleFacets(live), [live])
   const showLang  = showFacet(facets.languages)
   const showTutor = showFacet(facets.instructors)
+  const showMode  = showFacet(facets.modes)
 
   /* A chip that is no longer offered must not keep filtering from off-screen. */
   useEffect(() => {
     if (language && !facets.languages.includes(language)) setLanguage(null)
     if (tutorId  && !facets.instructors.some(i => i.id === tutorId)) setTutorId(null)
-  }, [facets, language, tutorId])
+    if (mode     && !facets.modes.includes(mode)) setMode(null)
+  }, [facets, language, tutorId, mode])
 
   const groups = useMemo(
-    () => filterGroups(live, showLang ? language : null, showTutor ? tutorId : null),
-    [live, language, tutorId, showLang, showTutor],
+    () => filterGroups(live, showLang ? language : null, showTutor ? tutorId : null, showMode ? mode : null),
+    [live, language, tutorId, mode, showLang, showTutor, showMode],
   )
 
   /* ── FROM WEEKLY SLOTS TO A RUN OF DATES ──
@@ -1797,7 +1800,7 @@ export function ModuleSheet({
           a control whose every option returns the same list is furniture,
           and on a screen this small it is furniture in the way. The same
           rule drops the language row on a single-language module. */}
-      {(showLang || showTutor) && (
+      {(showLang || showTutor || showMode) && (
         <div className="mb-4 flex flex-col gap-2 rounded-2xl px-3 py-2.5"
           style={{ background: 'var(--color-bg-inset)', border: '1px solid var(--color-border)' }}>
           {showLang && (
@@ -1811,6 +1814,13 @@ export function ModuleSheet({
               icon={<User size={11} strokeWidth={2.5} style={{ color: 'var(--color-primary-on-surface, var(--color-primary))' }} />}
               label="Instructor" value={tutorId} onChange={setTutorId}
               options={facets.instructors.map(i => ({ id: i.id, label: i.name, avatarUrl: i.avatarUrl }))} />
+          )}
+          {/* Online or in the room — shown only when the module has both. */}
+          {showMode && (
+            <FilterRow
+              icon={<MapPin size={11} strokeWidth={2.5} style={{ color: 'var(--color-text-muted)' }} />}
+              label="Mode" value={mode} onChange={v => setMode(v as SessionMode | null)}
+              options={facets.modes.map(m => ({ id: m, label: m === 'online' ? 'Online' : 'In person' }))} />
           )}
         </div>
       )}
