@@ -271,6 +271,19 @@ const ID_TYPES = [
 
 const MAX_FILE_BYTES = 3 * 1024 * 1024 // 3 MB — enforced on all document uploads
 
+/* The profile photo is the one upload that most often fails on a slow phone
+   uplink: it is the last of three sent in a row and, as a selfie, the largest —
+   and it was going up at full camera resolution whenever it happened to be
+   under the 3 MB cap (compressImageIfNeeded only shrinks files OVER its limit).
+   An avatar is rendered at avatar size everywhere it appears, so none of those
+   megabytes survive display. Shrinking it hard — a ~1024px long edge and a
+   ~0.6 MB budget — cuts the bytes on the wire several-fold, which is what pulls
+   the transfer back under the timeout and well clear of a dropped connection on
+   a far, slow link. Identity scans keep the document cap above; they need the
+   resolution for review and are not the upload that fails. */
+const AVATAR_MAX_BYTES     = 600 * 1024 // ~0.6 MB
+const AVATAR_MAX_DIMENSION = 1024
+
 /* The server's upload allow-lists (backend/src/middleware/upload.middleware.ts),
    applied here FIRST so a wrong file is refused where it was picked and the
    document is named. Without this a HEIC photo or a .docx "scan" sailed
@@ -1481,7 +1494,7 @@ export function RegisterForm({ onSwitch, lockFull = false }: { onSwitch: () => v
               if (problem) { setAvatarError(problem); return }
               setAvatarError(null)
               setAvatarBusy(true)
-              const compressed = await compressImageIfNeeded(f, MAX_FILE_BYTES)
+              const compressed = await compressImageIfNeeded(f, AVATAR_MAX_BYTES, AVATAR_MAX_DIMENSION)
               setAvatarBusy(false)
               if (compressed.size > MAX_FILE_BYTES) {
                 setAvatarError('Profile photo must not exceed 3 MB')
