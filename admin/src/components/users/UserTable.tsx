@@ -8,6 +8,7 @@ import {
 } from 'lucide-react'
 import { useUsers, useUpdateUser, useImpersonateClient, type AdminUser } from '@/lib/api/users'
 import { useCurrentUser } from '@/lib/api/user'
+import { categoryScopeOf, isProgrammeScoped } from '@/lib/programScope'
 import Spinner from '@/components/ui/Spinner'
 import { AvatarImg } from '@/components/ui/AvatarImg'
 import { useToast } from '@/store/ui.store'
@@ -43,6 +44,10 @@ function fmtDate(d?: string) {
 }
 
 export function UserTable({ role, label }: Props) {
+  /* A department's sub_admin only ever gets its own department's people
+     (plan.md §10): the chips that offered the other three become a label. */
+  const { data: viewer } = useCurrentUser()
+  const viewerDepartment = isProgrammeScoped(viewer) ? categoryScopeOf(viewer) : undefined
   const [search,      setSearch]      = useState('')
   const [page,        setPage]        = useState(1)
   const [category,    setCategory]    = useState<CategoryFilter>('')
@@ -77,7 +82,15 @@ export function UserTable({ role, label }: Props) {
             onBlur={e => { e.currentTarget.style.border = '1px solid rgba(255,255,255,0.08)'; e.currentTarget.style.boxShadow = 'none' }} />
         </div>
 
-        {/* Category filter chips */}
+        {/* Category filter chips — a fixed label for a department's sub_admin */}
+        {isProgrammeScoped(viewer) ? (
+          <span className="rounded-xl px-3 py-1.5 text-xs font-semibold"
+            style={viewerDepartment && CATEGORY_STYLE[viewerDepartment]
+              ? { background: CATEGORY_STYLE[viewerDepartment].bg, color: CATEGORY_STYLE[viewerDepartment].color, border: `1px solid ${CATEGORY_STYLE[viewerDepartment].color}50` }
+              : { background: 'rgba(248,113,113,0.12)', color: '#F87171', border: '1px solid rgba(248,113,113,0.35)' }}>
+            {viewerDepartment ? `${CATEGORY_LABELS[viewerDepartment]} department` : 'No department'}
+          </span>
+        ) : (
         <div className="flex items-center gap-1.5">
           {(['', '4x-trading', 'digital-marketing', 'ai', 'jura'] as CategoryFilter[]).map(cat => {
             const s = cat ? CATEGORY_STYLE[cat] : null
@@ -94,6 +107,7 @@ export function UserTable({ role, label }: Props) {
             )
           })}
         </div>
+        )}
 
         <p className="ml-auto text-xs" style={{ color: 'rgba(255,255,255,0.4)' }}>
           {data && `${data.meta.total_count.toLocaleString()} ${label.toLowerCase()}`}

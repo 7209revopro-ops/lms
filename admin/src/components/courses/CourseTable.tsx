@@ -15,6 +15,8 @@ import { useUIStore } from '@/store/ui.store'
 import type { Course, CourseStatus } from '@/types/index'
 import { useOrgCurrency, formatCoursePrice } from '@/lib/currency'
 import { useToast } from '@/store/ui.store'
+import { useCurrentUser } from '@/lib/api/user'
+import { categoryScopeOf, isProgrammeScoped } from '@/lib/programScope'
 
 /* ── Config ────────────────────────────────────────────────────── */
 const STATUS_CONFIG: Record<CourseStatus, {
@@ -446,6 +448,11 @@ const PROGRAM_STYLE: Record<string, { bg: string; color: string }> = {
 }
 
 export function CourseTable() {
+  /* A department's sub_admin only ever gets its own department's courses
+     (plan.md §10), so the programme pills — which offered the other three —
+     become a fixed label for them. */
+  const { data: me } = useCurrentUser()
+  const myDepartment = isProgrammeScoped(me) ? categoryScopeOf(me) : undefined
   const [search,   setSearch]   = useState('')
   const [status,   setStatus]   = useState<string>('all')
   const [program,  setProgram]  = useState<string>('')
@@ -557,7 +564,15 @@ export function CourseTable() {
             ))}
           </div>
 
-          {/* Program filter */}
+          {/* Program filter — a fixed label for a department's sub_admin */}
+          {isProgrammeScoped(me) ? (
+            <span className="rounded-xl px-3 py-1.5 text-xs font-semibold"
+              style={myDepartment && PROGRAM_STYLE[myDepartment]
+                ? { background: PROGRAM_STYLE[myDepartment].bg, color: PROGRAM_STYLE[myDepartment].color, border: `1px solid ${PROGRAM_STYLE[myDepartment].color}55` }
+                : { background: 'rgba(248,113,113,0.12)', color: '#F87171', border: '1px solid rgba(248,113,113,0.35)' }}>
+              {myDepartment ? `${PROGRAM_LABELS[myDepartment]} department` : 'No department'}
+            </span>
+          ) : (
           <div className="flex items-center gap-1">
             {(['', '4x-trading', 'digital-marketing', 'ai', 'jura'] as const).map(p => (
               <button key={p || 'all'} onClick={() => { setProgram(p); setPage(1); setSelected(new Set()) }}
@@ -569,6 +584,7 @@ export function CourseTable() {
               </button>
             ))}
           </div>
+          )}
 
           {/* View toggle */}
           <div className="flex rounded-xl p-0.5" style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.07)' }}>

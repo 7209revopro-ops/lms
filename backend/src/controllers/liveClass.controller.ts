@@ -1,10 +1,10 @@
 import type { Request, Response, NextFunction } from 'express'
 import { Types } from 'mongoose'
 import { instructorOwnsSession, callerOrgForRead, classServesOrg } from '@/utils/tenancy.ts'
+import { assertInstructorInDepartment, isDepartmentScoped, mayAccessLiveClass } from '@/utils/departmentScope.ts'
 import { ensureOrgSlugs, orgSlugFor } from '@/utils/orgSlugs.ts'
 import { academyClock } from '@/utils/academyClock.ts'
 import { doorsFor, entitlementFrom, loadEnrolmentIndex, type Door, type ClassDoors } from '@/services/classEntitlement.service.ts'
-import { CROSS_ORG_CLASSES_ENABLED } from '@/utils/featureFlags.ts'
 import { logger } from '@/utils/logger.ts'
 import { LiveClassService, LiveClassError } from '@/services/liveClass.service.ts'
 import { SectionService } from '@/services/section.service.ts'
@@ -1024,37 +1024,14 @@ export class LiveClassController {
         ? undefined
         : (req.user?.categoryScope as string | undefined)
       if (scope) {
-        const { CourseModel } = await import('@/models/schema.ts')
-        const courseIdStr = isPopulated(live.courseId as any) ? (live.courseId as any).id : String(live.courseId)
-        const course = await CourseModel.findById(courseIdStr).select('program').lean()
-        let inScope = !!course && (course as any).program === scope
-
-        /* THE GUEST DOOR'S COURSE IS ALSO "THIS PROGRAMME".
-           The check above asks only about the HOST course, which on a shared
-           class belongs to the other academy and carries its programme. A guest
-           academy's programme-scoped admin therefore got 403 on a class their
-           own programme's course is the door to: the list showed it (the
-           repository was widened) and opening it answered Access denied.
-
-           Narrowed to a cohort serving the CALLER'S OWN academy, not any
-           cohort — otherwise a Dubai sub_admin would inherit scope from a
-           course belonging to Bangalore. #canManage has already decided the
-           academy question; this is only about the programme. */
-        if (!inScope && CROSS_ORG_CLASSES_ENABLED) {
-          const callerOrg = req.user?.organizationId
-          const cohorts = ((live as { guestCohorts?: Array<{ organizationId?: unknown; courseId?: unknown }> }).guestCohorts ?? [])
-            .filter(c => !callerOrg || String(c.organizationId ?? '') === String(callerOrg))
-          for (const c of cohorts) {
-            /* Guarded: a legacy cohort row with no course would make findById
-               cast an empty string and throw, turning a scope question into a
-               500 on a read. */
-            const gcId = String(c.courseId ?? '')
-            if (!Types.ObjectId.isValid(gcId)) continue
-            const gc = await CourseModel.findById(gcId).select('program').lean()
-            if (gc && (gc as any).program === scope) { inScope = true; break }
-          }
-        }
-
+        /* utils/departmentScope.ts decides, as it does for the list: the HOST
+           course counts for the caller's own academy's classes, and a class
+           shared into it counts through the caller's OWN cohort course. The
+           hand-written version asked about the host course for any academy,
+           so a guest academy's sub_admin opened a class whose host course was
+           their department while their own cohort course was another's
+           (plan.md §10). The 403 stays — tests and the UI rely on it. */
+        const inScope = await mayAccessLiveClass(req, live as Parameters<typeof mayAccessLiveClass>[1])
         if (!inScope) {
           res.status(403).json({ success: false, error: { code: 'FORBIDDEN', message: 'Access denied.' } }); return
         }
@@ -1111,8 +1088,16 @@ export class LiveClassController {
           })
         : visible
 
+      /* A department's sub_admin: the program check above is about the course
+         in the URL, but a class shared into this academy belongs to the
+         department of THIS academy's cohort course, which need not match
+         (plan.md §10) — so each row is asked the shared rule. */
+      const inDept = isDepartmentScoped(req)
+        ? (await Promise.all(scoped.map(async d => (await mayAccessLiveClass(req, d as never)) ? d : null)))
+            .filter((d): d is NonNullable<typeof d> => d !== null)
+        : scoped
 
-      sendSuccess(res, scoped.map(d => toDTO(d)))
+      sendSuccess(res, inDept.map(d => toDTO(d)))
     } catch (err) { next(err) }
   }
 
@@ -1198,6 +1183,11 @@ export class LiveClassController {
         { statusCode: 400, code: 'INVALID_INSTRUCTOR_ID' },
       )
     }
+    /* A department's sub_admin schedules its own department's instructors
+       (plan.md §10, R5) — the only ones its instructor picker lists, so an id
+       from elsewhere means a hidden person reached by id. Themselves allowed,
+       as before. Admins keep scheduling anyone. */
+    await assertInstructorInDepartment(req, instructorId)
 
     /* Auto-generate a Google Meet link for online external sessions */
     let meetingUrl: string | undefined
@@ -1444,6 +1434,10 @@ export class LiveClassController {
         return
       }
       if (!(await this.#canManage(req, res, sourceId))) return
+      /* Every copy assigns the source's instructor again, so a department's
+         sub_admin is held to the instructor rule BEFORE seriesId is written to
+         the source — #createOne asks it too, but only after that write. */
+      await assertInstructorInDepartment(req, String(source.instructorId))
 
       let seriesId = (source as any).seriesId ? String((source as any).seriesId) : undefined
       if (!seriesId) {
@@ -1598,6 +1592,13 @@ export class LiveClassController {
       /* An instructor is always the instructor of record for their own
          sessions — mirrors adminCreate, which forces the same thing. */
       if (typeof dto['instructorId'] === 'string' && req.user?.role !== 'instructor') {
+        /* Only a CHANGE of instructor is held to the department (plan.md §10,
+           R5): re-saving the form re-sends the current one, and a class an
+           admin staffed from another department must stay editable. */
+        const current = await LCM.findById(id).select('instructorId').lean<{ instructorId?: unknown }>()
+        if (String(current?.instructorId ?? '') !== dto['instructorId']) {
+          await assertInstructorInDepartment(req, dto['instructorId'])
+        }
         data.instructorId = dto['instructorId']
       }
       if (typeof dto['sectionId']         === 'string')  data.sectionId         = dto['sectionId']

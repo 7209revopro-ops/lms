@@ -169,9 +169,23 @@ export class LiveClassRepository extends BaseRepository<ILiveClass> {
 
          The guest arm is gated on the feature switch, so with cross-academy
          classes off this is byte-identical to the plain courseId match. */
-      andFilter(query, CROSS_ORG_CLASSES_ENABLED
-        ? { $or: [{ courseId: { $in: ids } }, { 'guestCohorts.courseId': { $in: ids } }] }
-        : { courseId: { $in: ids } })
+      /* Both arms tied to the caller's OWN academy (plan.md §10). The guest
+         arm used to match `guestCohorts.courseId` from ANY academy, so a host
+         sub_admin listed another department's class because a guest academy
+         had put it in a matching course; and the host arm admitted a guest
+         academy's sub_admin through the HOST's course while their own cohort
+         course was another department's. utils/departmentScope.ts
+         liveClassClause is the same rule. */
+      const callerOrgId = filter.organizationId && Types.ObjectId.isValid(filter.organizationId)
+        ? new Types.ObjectId(filter.organizationId) : null
+      andFilter(query, !CROSS_ORG_CLASSES_ENABLED
+        ? { courseId: { $in: ids } }
+        : callerOrgId
+          ? { $or: [
+              { courseId: { $in: ids }, organizationId: { $in: [callerOrgId, null] } },
+              { guestCohorts: { $elemMatch: { organizationId: callerOrgId, courseId: { $in: ids } } } },
+            ] }
+          : { $or: [{ courseId: { $in: ids } }, { 'guestCohorts.courseId': { $in: ids } }] })
     }
     if (filter.organizationId && Types.ObjectId.isValid(filter.organizationId)) {
       /* CLASSES THIS ACADEMY IS SERVED BY, not only the ones it owns.

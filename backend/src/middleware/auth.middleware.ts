@@ -553,12 +553,40 @@ export async function authenticateAdmin(
    Use on public endpoints that want to personalise
    their response when the caller happens to be logged in.
 ───────────────────────────────────────────────────── */
-export async function injectCategoryScope(req: Request, _res: Response, next: NextFunction): Promise<void> {
+/* The caller's OWN account, which no department owns: their notification
+   preferences, their academy's name and currency (the top bar of every page)
+   and their own calendar. A sub_admin with no department may still use these —
+   refusing them protects no department's data and only breaks the page around
+   the "no department" notice. Exact method + path, nothing broader. */
+const OWN_ACCOUNT_ROUTES = new Set([
+  'PATCH /api/v1/admin/auth/me/email-preferences',
+  'GET /api/v1/admin/my-organization',
+  'GET /api/v1/admin/availability/me',
+  'PUT /api/v1/admin/availability/me',
+])
+
+export async function injectCategoryScope(req: Request, res: Response, next: NextFunction): Promise<void> {
   if (!req.user) { next(); return }
   if (req.user.role === 'sub_admin') {
     // sub_admin program → categoryScope
     const scope = toStudentProgram(req.user.program)
-    if (scope) req.user.categoryScope = scope
+    /* FAIL CLOSED (plan.md §10, rule R2). A sub_admin is a department head;
+       one with no department used to get no categoryScope, and every
+       `if (scope)` downstream read that as "unscoped" — the whole academy, all
+       four departments. Refused here instead, before any read or write runs:
+       a missing field must never widen access. */
+    if (!scope) {
+      if (OWN_ACCOUNT_ROUTES.has(`${req.method} ${(req.baseUrl + req.path).replace(/[/]+$/, '')}`)) { next(); return }
+      res.status(403).json({
+        success: false,
+        error: {
+          code:    'NO_DEPARTMENT',
+          message: 'Your account is not assigned to a department yet. Ask an administrator to set one.',
+        },
+      })
+      return
+    }
+    req.user.categoryScope = scope
   } else if (req.user.role === 'instructor') {
     const { UserModel } = await import('@/models/schema.ts')
     const user = await UserModel.findById(req.user.id).select('category').lean()

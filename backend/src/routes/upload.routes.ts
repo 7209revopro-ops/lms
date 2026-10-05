@@ -1,6 +1,6 @@
 import { Router, type Request, type Response, type NextFunction } from 'express'
 import { z } from 'zod'
-import { authenticate, authenticateAny, requireAnyAdmin, requireInstructor } from '@/middleware/auth.middleware.ts'
+import { authenticate, authenticateAny, requireAdmin, requireAnyAdmin, requireInstructor } from '@/middleware/auth.middleware.ts'
 import { signupUploadRateLimit } from '@/middleware/rateLimit.middleware.ts'
 import {
   imageUpload,
@@ -527,7 +527,11 @@ router.post('/video', requireInstructor, async (req: Request, res: Response) => 
    those objects must stay deletable when such a lesson is cleaned up. */
 const DELETABLE_PREFIXES = ['images/', 'documents/', 'videos/', 'hls/', 'uploads/']
 
-router.delete('/:key(*)', requireAnyAdmin, async (req: Request, res: Response) => {
+/* requireAdmin, not requireAnyAdmin: the key names no owner, academy or
+   department, so a sub_admin (of any department, or none) or a support agent
+   could delete another department's course media. Nothing in the admin or
+   client apps calls this. */
+router.delete('/:key(*)', requireAdmin, async (req: Request, res: Response) => {
   const key = Array.isArray(req.params['key']) ? req.params['key'][0] : req.params['key']
   if (!key) {
     res.status(400).json({

@@ -36,8 +36,9 @@ export const PROGRAM_LABEL: Record<string, string> = {
  *
  * A `sub_admin` with no `program` is deliberately undefined rather than
  * defaulted: an unset programme means nobody chose one, and guessing would
- * silently narrow or widen what they can see. The backend treats it the same
- * way — no `categoryScope`, so no programme filter.
+ * silently narrow or widen what they can see. The backend FAILS CLOSED on it
+ * (plan.md §10): every request is refused with NO_DEPARTMENT, and
+ * NoDepartmentNotice tells them why.
  */
 export function categoryScopeOf(
   user: { role?: string; program?: string; category?: string } | null | undefined,

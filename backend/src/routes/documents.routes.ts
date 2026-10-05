@@ -5,6 +5,7 @@ import fs from 'fs'
 import { authenticateAny } from '@/middleware/auth.middleware.ts'
 import { sendSuccess } from '@/utils/response.ts'
 import { UserModel } from '@/models/schema.ts'
+import { mayAccessStudent } from '@/utils/departmentScope.ts'
 import {
   isR2Configured,
   keyFromUrl,
@@ -83,7 +84,7 @@ router.get(
       }
 
       const target = await UserModel.findById(targetId)
-        .select('organizationId enrollmentApplication')
+        .select('organizationId enrollmentApplication enrollmentStatus category categories')
         .lean()
         .exec()
 
@@ -131,6 +132,14 @@ router.get(
         }
       }
 
+      /* Department — a sub_admin reads the scans of their own department's
+         students and applicants only (plan.md §10), with the same 404. */
+      if (!isOwner && !(await mayAccessStudent(req, target as Parameters<typeof mayAccessStudent>[1]))) {
+        res.status(404).json({
+          success: false,
+          error: { code: 'NOT_FOUND', message: 'Document not found.' },
+        }); return
+      }
       const app      = (target as { enrollmentApplication?: Record<string, string> }).enrollmentApplication
       const storedUrl = app?.[FIELDS[field]]
       if (!storedUrl) {

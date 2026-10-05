@@ -13,6 +13,7 @@ import {
 import { useCreateInstructor } from '@/lib/api/instructors'
 import { useOrganizations } from '@/lib/api/organizations'
 import { useCurrentUser } from '@/lib/api/user'
+import { categoryScopeOf, isProgrammeScoped } from '@/lib/programScope'
 import { useOrgStore } from '@/store/org.store'
 import Spinner from '@/components/ui/Spinner'
 import { api } from '@/lib/axios'
@@ -102,6 +103,15 @@ export function AddInstructorModal({ open, onClose }: AddInstructorModalProps) {
   })
 
   const roleVal      = watch('role')
+  /* A department's sub_admin creates instructors for its own department only
+     — the server stamps it regardless (plan.md §10) — so the picker shows,
+     and pre-selects, that one department instead of all four. */
+  const myDepartment = isProgrammeScoped(me) ? categoryScopeOf(me) : undefined
+  useEffect(() => {
+    if (myDepartment) setValue('category', myDepartment as Values['category'], { shouldValidate: true })
+  }, [myDepartment, setValue])
+  const shownCats = isProgrammeScoped(me) ? CATS.filter(c => c.value === myDepartment) : CATS
+
   const categoryVal  = watch('category') ?? ''
   const emailVal     = watch('email') ?? ''
   const meetEmailVal = watch('meetEmail') ?? ''
@@ -369,7 +379,7 @@ export function AddInstructorModal({ open, onClose }: AddInstructorModalProps) {
                 {/* Category chips */}
                 <DField label="Program Category *" error={errors.category?.message}>
                   <div className="flex flex-wrap gap-2">
-                    {CATS.map(({ value, label, color, Icon }) => {
+                    {shownCats.map(({ value, label, color, Icon }) => {
                       const active = categoryVal === value
                       return (
                         <button key={value} type="button"

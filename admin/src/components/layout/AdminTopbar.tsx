@@ -183,15 +183,16 @@ export function AdminTopbar() {
       {/* Reads the PROGRAMME, not the role name. This used to be a ladder of
           role comparisons because three roles each encoded their own
           programme; with those folded into sub_admin there is one rule and
-          one colour table. A sub_admin with no programme set is genuinely
-          unscoped, and says so rather than defaulting to a programme. */}
+          one colour table. A sub_admin with no programme reaches nothing —
+          the backend refuses them (NO_DEPARTMENT, plan.md §10) — and the
+          badge says so rather than defaulting to a programme. */}
       {user && (user.role === 'sub_admin' || user.role === 'support') && (() => {
         const scope = user.role === 'support'
           ? { label: 'Support', color: '#FBBF24' }
           : user.program
             ? { label: `${PROGRAM_LABEL[user.program] ?? user.program} Sub-Admin`,
                 color: SCOPE_COLOR[user.program] ?? '#94A3B8' }
-            : { label: 'Sub-Admin · no programme', color: '#94A3B8' }
+            : { label: 'Sub-Admin · no department', color: '#F87171' }
         const rgb = scope.color
         return (
           <div className="hidden min-w-0 items-center gap-1.5 rounded-xl px-3 py-1.5 text-xs font-semibold md:flex"

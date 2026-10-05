@@ -381,12 +381,20 @@ export class ClassImportService {
 
     /* Who may teach here: any staff account of this academy, or one lent to it
        (sharedAcrossOrgs) — the same rule the create path enforces. */
+    /* A department's sub_admin matches and picks its own department's people
+       only (plan.md §10, R5): the create path refuses anyone else, and this
+       list — returned whole to the import page's mentor picker — used to name
+       every staff member of the academy, every department, with their email. */
+    const deptOnly = actor.role === 'sub_admin' && actor.categoryScope
+      ? { $and: [{ $or: [{ category: actor.categoryScope }, { categories: actor.categoryScope }] }] }
+      : {}
     const staff = await UserModel.find({
       role: { $nin: ['student'] },
       isActive: { $ne: false },
       ...(course.organizationId
         ? { $or: [{ organizationId: course.organizationId }, { sharedAcrossOrgs: true }, { organizationId: { $exists: false } }] }
         : {}),
+      ...deptOnly,
     }).select('name email role').sort({ name: 1 }).lean<Array<{ _id: Types.ObjectId; name?: string; email?: string; role: string }>>()
     const instructors = staff.map(u => ({ id: String(u._id), name: u.name ?? u.email ?? 'Unnamed', email: u.email ?? '', role: u.role }))
     const byId = new Map(instructors.map(i => [i.id, i]))
@@ -622,8 +630,15 @@ export class ClassImportService {
           instructorId: { $in: instIds.map(i => new Types.ObjectId(i)) },
           status: { $ne: 'cancelled' },
           scheduledStart: { $gte: new Date(Math.min(...starts) - 600 * 60_000), $lte: new Date(Math.max(...starts) + 600 * 60_000) },
-        }).select('instructorId scheduledStart durationMins title importRef').lean<Array<{ instructorId: Types.ObjectId; scheduledStart: Date; durationMins: number; title: string; importRef?: string }>>()
+        }).select('instructorId scheduledStart durationMins title importRef courseId').lean<Array<{ instructorId: Types.ObjectId; scheduledStart: Date; durationMins: number; title: string; importRef?: string; courseId?: Types.ObjectId }>>()
       : []
+    /* A department head learns that the mentor is busy — never the title of
+       another department's class (plan.md §10). The clash itself still counts. */
+    const ownCourses = actor.categoryScope && busy.length
+      ? new Set((await CourseModel.find({ program: actor.categoryScope }).select('_id').lean<Array<{ _id: Types.ObjectId }>>()).map(c => String(c._id)))
+      : null
+    const clashName = (b: { title: string; courseId?: Types.ObjectId }) =>
+      ownCourses && !ownCourses.has(String(b.courseId)) ? 'a class in another department' : `"${b.title}"`
 
     for (const r of rows) {
       for (const o of r.occurrences) {
@@ -634,8 +649,8 @@ export class ClassImportService {
         const clash = busy.find(b => String(b.instructorId) === r.instructor!.id
           && !b.importRef?.startsWith(`${r.course.id}:${r.sessionKey}:`) && !b.importRef?.startsWith(`${settings.courseId}:${r.sessionKey}:`)
           && b.scheduledStart.getTime() < e && b.scheduledStart.getTime() + b.durationMins * 60_000 > s)
-        if (clash && settings.allowMentorClash) o.note = `Alongside "${clash.title}" — same mentor, same time (allowed)`
-        else if (clash) { o.state = 'conflict'; o.note = `Mentor already has "${clash.title}"` }
+        if (clash && settings.allowMentorClash) o.note = `Alongside ${clashName(clash)} — same mentor, same time (allowed)`
+        else if (clash) { o.state = 'conflict'; o.note = `Mentor already has ${clashName(clash)}` }
       }
       r.newCount = r.occurrences.filter(o => o.state === 'new').length
       if (r.status !== 'error') {

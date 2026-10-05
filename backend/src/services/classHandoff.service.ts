@@ -130,7 +130,10 @@ export async function exchangeHandoff(code: string): Promise<ExchangedHandoff> {
     const { UserModel: UM } = await import('@/models/schema.ts')
     const withProgram = await UM.findById(row.userId).select('program').lean() as { program?: string } | null
     const scope = toStudentProgram(withProgram?.program)
-    if (scope) ctx.categoryScope = scope
+    /* Fail closed, as injectCategoryScope does (plan.md §10, R2): a
+       sub_admin with no department enters no department's room. */
+    if (!scope) throw new JoinError('NO_DEPARTMENT', 'Your account is not assigned to a department yet.', 403)
+    ctx.categoryScope = scope
   }
 
   /* Authorisation happens HERE, against the state as it is now. */

@@ -18,6 +18,7 @@ import {
 import { useCourses } from '@/lib/api/courses'
 import { useUsers } from '@/lib/api/users'
 import { useCurrentUser } from '@/lib/api/user'
+import { categoryScopeOf, isProgrammeScoped } from '@/lib/programScope'
 import Spinner from '@/components/ui/Spinner'
 import { useToast } from '@/store/ui.store'
 import { datetimeLocalToISO } from '@/lib/timezone'
@@ -504,7 +505,9 @@ export default function BookingsPage() {
   const { data: me }    = useCurrentUser()
   const toast           = useToast()
   const isInstructor    = me?.role === 'instructor'
-  const userScope       = (me as any)?.categoryScope as string | undefined  // '4x-trading' | 'digital-marketing' | undefined
+  /* The department a sub_admin is confined to. This read `me.categoryScope`,
+     which /admin/auth/me has never returned, so it was always undefined. */
+  const userScope       = isProgrammeScoped(me) ? categoryScopeOf(me) : undefined
 
   /* Date range — default: past 30 days to 90 days ahead (shows upcoming bookings) */
   const [dateFrom, setDateFrom] = useState<Date>(() => dayStart(addDays(new Date(), -30)))
@@ -832,8 +835,11 @@ export default function BookingsPage() {
   ]
 
   /* Scope label for header */
-  const scopeLabel = (me as any)?.categoryScope
-    ? `${(me as any).categoryScope === 'digital-marketing' ? 'Digital Marketing' : 'FOREX'} Bookings`
+  const SCOPE_TITLE: Record<string, string> = {
+    '4x-trading': 'FOREX', 'digital-marketing': 'Digital Marketing', ai: 'AI', jura: 'JURA',
+  }
+  const scopeLabel = userScope
+    ? `${SCOPE_TITLE[userScope] ?? userScope} Bookings`
     : isInstructor ? 'My Session Bookings' : 'All Bookings'
 
   return (

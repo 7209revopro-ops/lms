@@ -148,14 +148,21 @@ function iso(v: Date | null | undefined): string | null {
 export async function adminListDevices(opts: {
   status?: DeviceStatus
   organizationId?: string | null
+  /* The owners a department's sub_admin may see (plan.md §10). Matched on the
+     device's indexed userId BEFORE the join, so only their devices are ever
+     joined — matching after the join read every device in the academy and
+     was 5x slower at 5,000 devices. An empty list means none. */
+  ownerIds?: Types.ObjectId[] | null
 }): Promise<DeviceAdminView[]> {
   const orgMatch =
     opts.organizationId && Types.ObjectId.isValid(opts.organizationId)
       ? [{ $match: { 'user.organizationId': new Types.ObjectId(opts.organizationId) } }]
       : []
   const statusMatch = opts.status ? [{ $match: { status: opts.status } }] : []
+  const ownerFirst = opts.ownerIds ? [{ $match: { userId: { $in: opts.ownerIds } } }] : []
 
   const rows = await DeviceModel.aggregate([
+    ...ownerFirst,
     { $addFields: { _rank: { $indexOfArray: [['pending', 'approved', 'revoked'], '$status'] } } },
     { $sort: { _rank: 1, createdAt: -1 } },
     { $lookup: { from: 'users', localField: 'userId', foreignField: '_id', as: 'user' } },

@@ -5,6 +5,9 @@
 > cross-academy instructor work, see [`docs/work-status.md`](docs/work-status.md):
 > what is done, what is blocked and on whom, and the next actions.
 
+> **Department isolation** (FOREX · DM · AI · JURA sub-admins see only their own
+> department) is planned and tracked in [§10](#10-department-isolation--forex--dm--ai--jura).
+
 **Working plan.** Derived from `LMS_CLT_INTEGRATION_PLAN.md` (the design), this file
 tracks what is actually built. Update the status boxes as work lands.
 
@@ -1004,3 +1007,211 @@ has seen it. Separately: the 2038-line file contains no `aria-*` or `role=`
 attribute anywhere, and the modal is a mobile bottom sheet (`:588`) - a
 three-level drill-down needs focus management and a back affordance that a
 single-screen page never did. Phase 4 adds them for the new surfaces only.
+
+---
+
+## 10. Department isolation — FOREX · DM · AI · JURA
+
+> Status: **implemented, then hardened by a second test campaign (§10.11); not yet committed or deployed** (2026-10-05). Owner request: keep the four
+> departments fully separate; a department's sub-admin sees — and acts on —
+> its own department's data only, in every admin section.
+
+### 10.1 Goal
+
+A Forex sub-admin sees Forex courses, Forex instructors, Forex classes,
+attendance, bookings, assignments and support tickets — and nothing of Digital
+Marketing, AI or Jura, whether through the screens, a typed URL or the API.
+Enforced on the **backend**; the admin UI only stops offering what the backend
+would refuse.
+
+### 10.2 Rules (decisions)
+
+| # | Rule | Why |
+|---|---|---|
+| R1 | Only `sub_admin` is department-scoped. `super_admin`, `admin` and `support` keep every department of the academies tenancy lets them reach; instructors keep their ownership-based limits. | The request is about department heads; nothing else changes. |
+| R2 | **Fail closed.** A sub-admin with no valid `program` sees *nothing* (today: *everything* — every `if (scope)` goes unscoped). | A missing field must never widen access. |
+| R3 | Filter **inside the query**, never after the read. | Post-filtering paginates other departments' rows (the P-04 shape). |
+| R4 | Lists filter silently. A single record of another department answers **404** — as tenancy does across academies — so an id is never confirmed. Guards that already answer 403 keep their codes. | No existence leak; no churn in passing tests. |
+| R5 | A sub-admin may only assign instructors, enrol students, book seats for students and approve applicants **of their own department**. | Otherwise hidden people are reachable by id. |
+| R6 | Revenue stays admin-only — not on a sub-admin's dashboard. | `/analytics/revenue` is already admin-only; `/stats` leaked it. |
+
+### 10.3 What decides a record's department
+
+| Record | Department | Note |
+|---|---|---|
+| Course | `course.program` | course vocabulary `4x-trading · digital-marketing · ai · jura` |
+| Live class / recording / feedback / no-show | its course's `program` | a guest academy's cohort counts through *its own* course (`guestCohorts[].courseId`) |
+| Booking / attendance | its class's department | |
+| Assignment (`ClassAssignment`) | `courseId` → program | no stored program |
+| Instructor | `category` or any of `categories` | the UI writes one `category` |
+| Student | `category` / `categories`, or enrolled on a department course | unchanged from `programscope.suite.ts` |
+| Applicant (pending / rejected) | `enrollmentApplication.programs` option ids `forex-* · dm-* · ai-* · jura-*` (+ legacy labels) | `categories` is empty until approval |
+| Support ticket | `ticket.program`; when empty, the student's departments | multi-programme students no longer orphan their tickets |
+| Sub-admin | `user.program` (`forex · digital_marketing · ai · jura`) | translated by `utils/programVocabulary.ts` |
+
+### 10.4 Architecture — one implementation, like `utils/tenancy.ts`
+
+- **`backend/src/utils/departmentScope.ts`**: `callerDepartment(req)`
+  (`null` = every department, a department, or *nothing*); Mongo clause
+  builders composed with `andFilter` (course, course-id, member, applicant,
+  class); `mayAccess*` checks for loaded records; Express guards
+  `requireDepartment*` that answer 404; a per-request memo of the department's
+  course ids. The seven inline "course ids for this programme" lookups route
+  through it.
+- **`injectCategoryScope`**: a sub-admin with no valid program gets a scope
+  that matches no record, so every existing `if (scope)` site fails closed at
+  once (R2) and the new helper agrees with it.
+- **`GET /admin/auth/me`** returns `department`, so the UI can label the
+  account and drop cross-department controls.
+
+### 10.5 Gap inventory (audit, 2026-10-05)
+
+| Section | Already department-scoped | Leaks today → fix |
+|---|---|---|
+| Courses | list | `GET /admin/courses/:id/students` (any roster) |
+| Users · Instructors | lists | `POST /admin/users` accepts `categories` + `courses[]` of any department; `GET /users/:id/enrollments`; mentor availability + meetings; devices list/approve/revoke |
+| Requests | approved tab; approve forces own program | pending/rejected/all tabs (applicants' ID data); finance-check, revoke-to-viewer, docs, reject/cancel; `GET /documents/:userId/:field` |
+| Dashboard | top courses | `/stats` revenue + instructor + review counts; `/analytics/enrollments`, `/analytics/completion` |
+| Live classes | list, detail, create, edit, delete, backup-link, import jobs | start/end/recreate; stream-credentials; feedback; repeat writes before refusing; import preview lists every staff member; instructor of another department assignable |
+| Instructor attendance | — | `GET /admin/live-classes/no-shows` |
+| Bookings | list, stats | cancel, attendance, bulk-attendance, book-for-student |
+| Assignments | — | `/class-assignments/review`, `/review/stats`, `/:id/review`, `/:id` |
+| Support | list, stats (exact program) | `PATCH /support/:id/status`; `/admin/performance`; no-program tickets readable by every sub-admin yet listed for none; alerts pick a different program than the ticket |
+| Reports | — | `/admin/reports/attendance`, `/admin/reports/mentor-schedule` |
+| Everywhere | — | sub-admin without a program sees everything (R2) |
+
+Out of scope, unchanged: course detail/outline/exams and learning paths
+already refuse sub-admins; instructor reviews already filter by
+`review.program`; the commission-portal `/service` help desk is deliberately
+unscoped.
+
+### 10.6 Phases
+
+**Phase 1 — Foundation** ✅
+- [x] `utils/departmentScope.ts` (filters, checks, 404 guards, course-id memo, `DepartmentError`)
+- [x] `injectCategoryScope` fails closed for a sub-admin without a program (403 `NO_DEPARTMENT`); the class hand-off does the same
+- [x] ~~`/admin/auth/me` returns `department`~~ — not needed: `me.program` already reaches the UI (`lib/programScope.ts`)
+
+**Phase 2 — Courses · Users · Requests · Dashboard** ✅
+- [x] course roster guard
+- [x] create-user: department forced for sub-admin (`categories` too), `courses[]` limited to department courses
+- [x] per-user enrolments, mentor availability/meetings, devices
+- [x] enrollment requests: every tab + every per-applicant action; documents; express members
+- [x] reject read `categories` it never selected — the multi-programme guard never ran; revoke-to-viewer now follows the same rule
+- [x] dashboard: department figures, no revenue for sub-admins; reviews counted on courses in view
+
+**Phase 3 — Live classes · Instructor attendance · Bookings** ✅
+- [x] start/end/recreate, stream-credentials, handoff, feedback, repeat (checked before any write)
+- [x] instructor must be of the department on create/update (only on a *change*); import preview lists department staff only
+- [x] no-shows scoped
+- [x] booking cancel/attendance/bulk/book-for-student scoped (class *and* student)
+- [x] cross-academy guest-course clauses tied to the caller's own academy (list, detail, bookings, recordings)
+
+**Phase 4 — Assignments · Support · Reports · leftovers** ✅
+- [x] class-assignment review list/stats/review/detail scoped
+- [x] support status/performance/detail/messages; no-program tickets follow the student; alerts go to every department the student is in
+- [x] reports scoped; recordings playback hole (class without course)
+
+**Phase 5 — Admin UI** ✅
+- [x] department badge for sub-admins (top bar); cross-department pills/chips/picker become a fixed department
+- [x] dashboard without revenue tile/chart for sub-admins; sidebar badge scoped by the API; "no department" notice
+
+**Phase 6 — Verification** ✅
+- [x] `departmentisolation.suite.ts` (64 checks, `bun run test:departmentisolation`): four departments × every section — lists hold only own rows; other departments' records 404/403 on read and write; a head reaches their own calendar; admin sees all; no-program sub-admin sees nothing
+- [x] regression sweep, 46 suites — see 10.9
+- [x] browser walk-through in the sandbox (Forex head, no-department head, admin) and an API probe of every parameter-free admin GET as three sub-admins — see 10.9
+
+**Phase 7 — Fix what Phase 6 finds** ✅
+- [x] swapping a class to another department's instructor answered **500** — a plain `Error` the error middleware does not map → typed `DepartmentError`, now 403 `INSTRUCTOR_OUTSIDE_DEPARTMENT`
+- [x] the AI head could no longer approve a DM student who studies on an AI course (`programscope` F) — applicant actions used the applicant rule, the Students table the enrolment rule → one reach rule (`mayAccessStudent` / `studentReachClause`) for the request tabs, every applicant action, ID documents and devices
+- [x] the live-classes page asks for the head's **own** meetings and got 404 — a head has no instructor category → the member guard lets the caller reach their own record (check C7)
+- [x] `integrationroles` / `clientimpersonation`: their generic sub-admin had no department; R2 refuses that by design → fixtures carry a department, the "unscoped" check now asserts 403 `NO_DEPARTMENT`
+
+### 10.7 Risks
+
+- **Reversed expectation**: `integrationroles.suite.ts` asserts an unscoped
+  sub-admin is *not* restricted; R2 deliberately flips it.
+- **Instructor data**: an instructor whose `category` is unset, or differs from
+  the department they teach in, disappears from that sub-admin's pickers
+  (already true of the instructor table). Admins fix it by setting the
+  category.
+- **Legacy applicant labels**: old applications name programmes in prose;
+  unmapped ones stay visible to admins only.
+- **Lock-out on deploy (R2)**: a sub-admin with no valid `program` is refused
+  everywhere the moment the backend ships. The admin UI already requires a
+  program for every sub-admin it creates or edits, so only legacy or scripted
+  accounts are at risk — list them first (10.10).
+
+### 10.8 Open product questions
+
+1. Should a sub-admin be strictly **read-only**? This plan keeps today's
+   actions and limits *where* they apply.
+2. May a sub-admin claim an applicant who applied to another department?
+   This plan says no.
+3. Should sub-admins get read-only course detail for their own department
+   (today 403 for every course)?
+4. **Applicants of two departments share one status.** Once one head
+   approves, the other head no longer sees them (the privacy rule in §10.11);
+   an admin adds the second department. A reject by one head moves the
+   applicant to the other's Rejected tab. Keep, or add per-department
+   pending state?
+5. Repeat copies a shared class's guest cohorts (deliberate in the code), so a
+   host head can add classes to a guest academy's department; and "view as
+   student" of a two-department student shows the whole student view.
+
+### 10.9 Verification results (2026-10-05)
+
+| Check | Result |
+|---|---|
+| `bun run test:departmentisolation` | **75 / 75** (64 in the first round) — part of the full `bun run test` chain, with the property and matrix suites (§10.11) |
+| Regression sweep, 46 suites | First run 2,197 pass / 13 fail; 8 of the 13 were Phase 7 items, so after the fixes **2,209 pass / 5 fail**. The 5 are outside this change: `crossorgfixes` ×2 reproduce on a clean checkout of HEAD (`CLASS_NOT_STARTED`, the attendance rule from 4fbb829); `crossorginstructor.deep` ×1 fails with the same code on the instructor path, and `crossorgauthoring` ×2 expects an org admin to be refused — neither role is department-scoped (R1); those two were not re-baselined at HEAD |
+| Suites touched by Phase 7, re-run after the last fix | programscope, integrationroles, clientimpersonation, adminmatrix, permissions, smoke, portalguards — green |
+| Type-check | backend and admin clean |
+| Browser — Forex head | dashboard, requests, users, instructors, devices, courses, live classes, timetable, instructor attendance, instructor reviews, recordings, bookings, assignments, support, exams, settings: Forex rows only; no revenue; every request 2xx |
+| Browser — no-department head | red "no department" badge + notice; 403 `NO_DEPARTMENT` on every admin data endpoint (own preferences, academy name and own calendar still answer — §10.11) |
+| Browser — admin | all four departments, all staff |
+| API probe — 85 GET routes × Forex head, DM head, no-department head | no admin route returns another department's rows. Only the public catalogue `/courses` and directory `/instructors` do — an anonymous visitor gets the same, and the admin app never calls them |
+
+### 10.10 Deploy checklist
+
+1. Before shipping, list the sub-admins R2 would lock out, per academy:
+   `db.users.find({ role: 'sub_admin', program: { $nin: ['forex', 'digital_marketing', 'ai', 'jura'] } }, { name: 1, email: 1, organizationId: 1 })`
+   and give each a department (Users → Edit → Program) — or accept the lock-out.
+2. Check instructors with no department at all (neither `category` nor `categories`): they vanish from every head's pickers and tables.
+   `db.users.find({ role: 'instructor', category: { $in: [null, ''] }, 'categories.0': { $exists: false } }, { name: 1, email: 1, organizationId: 1 })`
+3. Backend: pull + `pm2 restart` (no migration, no new env). Admin: deploy after the backend — the new UI only labels and hides; the backend is the boundary.
+
+### 10.11 Second test campaign (2026-10-05) — methods, results, fixes
+
+Ten methods, each answering a different question; several were run many times.
+
+| # | Method | Result |
+|---|---|---|
+| M1 | Every backend suite (101), one by one, in an isolated snapshot of the tree (throwaway databases, no real credentials, no Google key) — before the fixes below | failures were environment-only (R2, backup SMTP, Google Meet, WhatsApp unset in the snapshot) or known (`crossorgfixes` ×2) — plus **`emailprefs` ×3, real, fixed below** |
+| M1b | The same on the final code | still running when this was committed (all 104 suites, one by one, alone on the machine); so far only the environment-only failures listed for M1 |
+| M2 | `departmentisolation.suite.ts` five times back to back | 5 / 5 identical — no flakiness (75 checks now) |
+| M3 | New `departmentisolation.property.suite.ts`: random worlds (2 academies, 4 departments, members, applicants, enrolled-only, once-ticked students, shared classes); every head's view of 13 lists = the admin's view filtered by the §10.3 rules; detail pages; paging; transitions | 12 seeds × 1–3 worlds, cross-academy classes on and off — all green (382 checks per 3-world run); on the pre-fix code it reports 18 failures |
+| M4 | New `departmentisolation.matrix.suite.ts`: walks the live Express router (355 routes, 170 take an id), calls each with the other department's ids, own ids and a malformed id; a 2xx naming the other department is a leak, any change to its data (fingerprinted before and after) a write | 1,558 calls · 0 leaks · 0 cross-department writes · 0 server errors · 0 over-blocking (course reviews identified as public) |
+| M5 | Concurrency: every head's lists fired together (240+ interleaved reads per world) | identical to the one-at-a-time answers in every world |
+| M6 | Transitions on a live session: department moved / removed, deactivated, promoted, restored | each takes effect on the very next request |
+| M7 | Static code audit (separate reviewer) of ids arriving in bodies and query strings | 7 real defects — fixed below |
+| M8 | Browser (sandbox): no-department head, DM head (every page), Forex head, typed URLs carrying DM ids | DM-only / Forex-only everywhere; typed URLs show empty rosters or "not found"; the notice still loads the academy name |
+| M9 | Load: 5,000 students, 10,000 enrolments, 600 classes, 20,000 seats, 3,000 tickets, 5,000 devices — every list timed, head vs admin | department lists as fast as the admin's or faster, except Devices (1.5 s → **0.65 s** after the fix below) and the Students table (0.3 s, an older rule). **Bookings: admin 48 s / stats 16 s — older than this work** (heads 6 s / 4 s); raised as its own task |
+| M10 | Mutation testing: six guards deliberately broken in a disposable copy (404 guards, class clause, student-reach clause, support check, fail-closed gate, class check) | **6 / 6 caught** by the department and property suites; the matrix catches the four that touch id routes |
+
+Defects found and fixed — each now has a check that fails on the old code:
+
+| Finding | Fix | Check |
+|---|---|---|
+| An approved student who had once ticked another department on the form stayed visible to that department's head — "all" tab, devices, **passport / ID scans** | application picks count only for pending / rejected / cancelled students | D8, property |
+| The "all" tab's approved rows disagreed with the Approved tab | each row judged by its own status | property |
+| `DELETE /uploads/:key` open to any sub-admin (even without a department) and to support | `requireAdmin` (nothing in the apps calls it) | N1 |
+| A course page listed a shared class whose door into this academy is another department's course | each row asks `mayAccessLiveClass` | N2 |
+| Reject / revert / remove-last-programme / block on a student another department also teaches — reject deleted that department's enrolments | refused (403) when another department has the student by category or enrolment | N3, N3b |
+| Timetable import failed for every sub-admin — the background actor carries no `program` | `callerDepartment` also reads `categoryScope` | N4 |
+| Repeat wrote `seriesId` on the source before refusing another department's instructor | instructor rule asked first | N5 |
+| Approve / remove-category erased the other department's category on legacy records (`categories: []` beside `category`) | same `?.length` rule as reject | N6 |
+| Recordings search: `(` answered 500, crafted patterns could stall the database | escaped, capped at 100 characters | N7 |
+| Import preview named another department's clashing class | "a class in another department" | N8 |
+| A sub-admin without a department could not save their own email preferences or load the academy name | 4-route own-account allowlist; every data route still refused | A6, emailprefs |
+| Devices list joined every device before filtering (5× slower for a head at 5,000 devices) | owners resolved first, matched on the indexed `userId` | perf, K, D8 |

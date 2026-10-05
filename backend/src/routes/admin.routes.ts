@@ -26,6 +26,11 @@ import {
   callerMayAccess, instructorOwnsSession, callerOrgForRead,
   servedClassFilter, classServesOrg, andFilter,
 } from '@/utils/tenancy.ts'
+import {
+  callerDepartment, isDepartmentScoped, mayAccessDepartment, mayAccessLiveClass,
+  courseIdClause, departmentCourseIds, studentReachClause, mayAccessStudent, liveClassClause,
+  requireDepartmentApplicant, requireDepartmentBooking, requireDepartmentLiveClass, requireDepartmentMember,
+} from '@/utils/departmentScope.ts'
 import { CROSS_ORG_CLASSES_ENABLED } from '@/utils/featureFlags.ts'
 import { reserveSeat, releaseSeat, seatStampFrom } from '@/services/seatPool.service.ts'
 import { ensureOrgSlugs, orgSlugFor } from '@/utils/orgSlugs.ts'
@@ -392,6 +397,24 @@ router.post ('/users', requirePermission('users','create'),          validate(us
        programme baked into the role, and injectCategoryScope now derives the
        same value from `program`. */
     if (req.user!.categoryScope) (req.body as any).category = req.user!.categoryScope
+    /* `categories` too (plan.md §10): adminCreateUser prefers it over
+       `category`, so stamping only `category` let a scoped creator put the new
+       account in any department by sending `categories` alongside. And no
+       enrolment outside the department through `courses[]`. */
+    const createDept = callerDepartment(req)
+    if (typeof createDept === 'string') {
+      ;(req.body as any).categories = [createDept]
+      const wanted = ((req.body as { courses?: Array<{ courseId?: string }> }).courses ?? []).map(c => String(c.courseId ?? ''))
+      if (wanted.length) {
+        let ours: Set<string>
+        try { ours = new Set(((await departmentCourseIds(req)) ?? []).map(String)) }
+        catch (err) { next(err); return }
+        if (wanted.some(id => !ours.has(id))) {
+          res.status(403).json({ success: false, error: { code: 'FORBIDDEN', message: 'You can only enrol into your own department\'s courses.' } })
+          return
+        }
+      }
+    }
 
     /* Lending an instructor to the other academy is an admin decision.
        REJECTED, not silently dropped: a sub-admin who ticks the box and gets a
@@ -782,13 +805,39 @@ router.get('/devices', requireAnyAdmin, async (req: Request, res: Response, next
     const statusRaw = String(req.query['status'] ?? '')
     const status = DEVICE_STATUSES.find(s => s === statusRaw)
     const orgId = req.user!.role === 'super_admin' ? undefined : req.user!.organizationId
-    const devices = await adminListDevices({ status, organizationId: orgId ?? undefined })
+    /* A department's sub_admin: its own students' devices only (plan.md §10),
+       resolved to owner ids first so the list joins nothing else. */
+    const reach = await studentReachClause(req)
+    let ownerIds: MongoTypes.ObjectId[] | undefined
+    if (reach) {
+      const { UserModel } = await import('@/models/schema.ts')
+      ownerIds = await UserModel.distinct('_id', reach) as unknown as MongoTypes.ObjectId[]
+    }
+    const devices = await adminListDevices({ status, organizationId: orgId ?? undefined, ownerIds })
     sendSuccess(res, devices)
   } catch (err) { next(err) }
 })
 
+/* A department's sub_admin approves and revokes its own students' devices
+   only — another department's answers 404, like another academy's. */
+async function deviceOwnerReachable(req: Request, deviceId: string): Promise<boolean> {
+  if (!isDepartmentScoped(req)) return true
+  const { Types } = await import('mongoose')
+  if (!Types.ObjectId.isValid(deviceId)) return false
+  const { DeviceModel, UserModel } = await import('@/models/schema.ts')
+  const device = await DeviceModel.findById(deviceId).select('userId').lean<{ userId?: unknown }>()
+  if (!device?.userId) return false
+  const owner = await UserModel.findById(String(device.userId))
+    .select('category categories enrollmentStatus enrollmentApplication.programs').lean<Parameters<typeof mayAccessStudent>[1]>()
+  return mayAccessStudent(req, owner)
+}
+
 router.patch('/devices/:id/approve', requireAnyAdmin, async (req: Request, res: Response, next: NextFunction) => {
   try {
+    if (!(await deviceOwnerReachable(req, String(req.params['id'] ?? '')))) {
+      res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Device not found' } })
+      return
+    }
     const orgId = req.user!.role === 'super_admin' ? undefined : req.user!.organizationId
     const result = await adminApproveDevice(String(req.params['id'] ?? ''), req.user!.id, orgId ?? undefined)
     if (!result.ok) {
@@ -805,6 +854,10 @@ router.patch('/devices/:id/approve', requireAnyAdmin, async (req: Request, res: 
 
 router.patch('/devices/:id/revoke', requireAnyAdmin, async (req: Request, res: Response, next: NextFunction) => {
   try {
+    if (!(await deviceOwnerReachable(req, String(req.params['id'] ?? '')))) {
+      res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Device not found' } })
+      return
+    }
     const orgId = req.user!.role === 'super_admin' ? undefined : req.user!.organizationId
     const result = await adminRevokeDevice(String(req.params['id'] ?? ''), orgId ?? undefined)
     if (!result.ok) {
@@ -868,7 +921,7 @@ router.patch('/settings/finance-check',
 /* What finance says about a student, for the Approve dialog to show before
    anybody clicks. Only a preview: approving asks finance again. While the
    check is off finance is not asked: `enforced: false`, and no answer. */
-router.get('/enrollment-requests/:userId/finance-check', requireAnyAdmin, requireSameOrgUser('userId'), async (req: Request, res: Response, next: NextFunction) => {
+router.get('/enrollment-requests/:userId/finance-check', requireAnyAdmin, requireSameOrgUser('userId'), requireDepartmentApplicant('userId'), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { UserModel } = await import('@/models/schema.ts')
     const { Types } = await import('mongoose')
@@ -890,15 +943,15 @@ router.get('/enrollment-requests/:userId/finance-check', requireAnyAdmin, requir
     }
   } catch (err) { next(err) }
 })
-router.patch('/enrollment-requests/:userId/approve',         requireAnyAdmin, requireSameOrgUser('userId'), validate(approveEnrollmentSchema), ctrl.approveEnrollment)
-router.patch('/enrollment-requests/:userId/reject',          requireAnyAdmin, requireSameOrgUser('userId'), validate(rejectEnrollmentSchema),  ctrl.rejectEnrollment)
-router.patch('/enrollment-requests/:userId/cancel',          requireAnyAdmin, requireSameOrgUser('userId'), validate(rejectEnrollmentSchema),  ctrl.rejectEnrollment)
-router.patch('/enrollment-requests/:userId/revoke-to-viewer', requireAnyAdmin, requireSameOrgUser('userId'), ctrl.revokeToViewer)
+router.patch('/enrollment-requests/:userId/approve',         requireAnyAdmin, requireSameOrgUser('userId'), requireDepartmentApplicant('userId'), validate(approveEnrollmentSchema), ctrl.approveEnrollment)
+router.patch('/enrollment-requests/:userId/reject',          requireAnyAdmin, requireSameOrgUser('userId'), requireDepartmentApplicant('userId'), validate(rejectEnrollmentSchema),  ctrl.rejectEnrollment)
+router.patch('/enrollment-requests/:userId/cancel',          requireAnyAdmin, requireSameOrgUser('userId'), requireDepartmentApplicant('userId'), validate(rejectEnrollmentSchema),  ctrl.rejectEnrollment)
+router.patch('/enrollment-requests/:userId/revoke-to-viewer', requireAnyAdmin, requireSameOrgUser('userId'), requireDepartmentApplicant('userId'), ctrl.revokeToViewer)
 
 const removeCategorySchema = z.object({
   category: z.enum(['4x-trading', 'digital-marketing', 'ai', 'jura']),
 })
-router.patch('/enrollment-requests/:userId/remove-category', requireAnyAdmin, requireSameOrgUser('userId'), validate(removeCategorySchema), ctrl.removeEnrollmentCategory)
+router.patch('/enrollment-requests/:userId/remove-category', requireAnyAdmin, requireSameOrgUser('userId'), requireDepartmentApplicant('userId'), validate(removeCategorySchema), ctrl.removeEnrollmentCategory)
 
 /* Identity scans arrive as a `kyc/` key (H-11), the photo as a URL on our own
    storage. `z.string().url()` here rejected every key the upload endpoint
@@ -908,7 +961,7 @@ const enrollmentDocsAdminSchema = z.object({
   idDocUrl:    documentRef,
   photoUrl:    documentRef,
 })
-router.patch('/enrollment-requests/:userId/docs', requireAnyAdmin, requireSameOrgUser('userId'), validate(enrollmentDocsAdminSchema), ctrl.updateStudentDocs)
+router.patch('/enrollment-requests/:userId/docs', requireAnyAdmin, requireSameOrgUser('userId'), requireDepartmentApplicant('userId'), validate(enrollmentDocsAdminSchema), ctrl.updateStudentDocs)
 
 /* ─── Express Members ─────────────────────────────── */
 const expressMembersQuerySchema = z.object({
@@ -918,7 +971,7 @@ const expressMembersQuerySchema = z.object({
   search:   z.string().trim().optional(),
 })
 router.get   ('/express-members',            requireAnyAdmin, validate(expressMembersQuerySchema, 'query'), ctrl.listExpressMembers)
-router.patch ('/express-members/:userId/block', requireAnyAdmin, requireSameOrgUser('userId'), ctrl.blockExpressMember)
+router.patch ('/express-members/:userId/block', requireAnyAdmin, requireSameOrgUser('userId'), requireDepartmentApplicant('userId'), ctrl.blockExpressMember)
 router.delete('/express-members/:userId',    requireAdmin,    requireSameOrgUser('userId'), ctrl.deleteExpressMember)
 
 /* ── Category-scope guards for enrollment management ──────────────
@@ -1063,7 +1116,12 @@ router.get('/users/:id/enrollments', requireAnyAdmin, requireSameOrgUser('id'),
           return
         }
       }
-      const enrollments = await EnrollmentModel.find({ userId: new Types.ObjectId(studentId) })
+      /* A student in two departments shows a sub_admin only their own
+         department's courses (plan.md §10): the student is reachable, the
+         other department's enrolments are not. */
+      const enrolFilter: Record<string, unknown> = { userId: new Types.ObjectId(studentId) }
+      andFilter(enrolFilter, await courseIdClause(req))
+      const enrollments = await EnrollmentModel.find(enrolFilter)
         .populate('courseId', 'id title thumbnailUrl')
         .lean({ virtuals: true })
       /* What an enrolment cost, what was paid and the receipt are money, and
@@ -1116,6 +1174,12 @@ router.get('/courses/:id/students', requireAnyAdmin,
           res.status(403).json({ success: false, error: { code: 'FORBIDDEN', message: 'This course belongs to another academy.' } })
           return
         }
+      }
+      /* Department next (plan.md §10): another department's roster is as
+         private as another academy's — and answers 404, never confirming it. */
+      if (!mayAccessDepartment(req, course.program)) {
+        res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Course not found' } })
+        return
       }
 
       const page    = Math.max(1, parseInt(String(req.query['page'] ?? '1'), 10) || 1)
@@ -1432,15 +1496,22 @@ router.get('/recordings', requireAnyAdmin, requireClassroomAccess, async (req: R
          the class; whoever may see the class may see it. */
       andFilter(filter, servedClassFilter(orgId))
     }
-    const search = String((req.query as Record<string, string>)['search'] ?? '').trim()
-    if (search) filter['title'] = { $regex: search, $options: 'i' }
+    /* Escaped and capped: typed text, not a pattern — "(" used to answer 500,
+       and a crafted pattern could tie the database up. */
+    const search = String((req.query as Record<string, string>)['search'] ?? '').trim().slice(0, 100)
+    if (search) filter['title'] = { $regex: search.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), $options: 'i' }
 
     /* Programme scope, mirroring assertAdminMayObserve: a sub_admin who may not
        ENTER a JURA class must not be able to WATCH it afterwards either. The
        recording is the class. Scope lives on the course, so this resolves the
        caller's programme to a course id set first. */
     const scope = req.user!.categoryScope
-    if (scope) {
+    if (isDepartmentScoped(req)) {
+      /* A department's sub_admin: the shared rule, both arms tied to the
+         caller's own academy (plan.md §10). The guest arm below matched a
+         guest cohort course from ANY academy. */
+      andFilter(filter, await liveClassClause(req))
+    } else if (scope) {
       const { CourseModel } = await import('@/models/schema.ts')
       const scoped = await CourseModel.find({ program: scope }).select('_id').lean()
       const ids = scoped.map(c => c._id)
@@ -1510,7 +1581,13 @@ router.post('/recordings/:id/playback', requireAnyAdmin, requireClassroomAccess,
          while this endpoint still served them to anyone who guessed an id —
          a filter is not a permission. */
       const scope = req.user!.categoryScope
-      if (scope && live.courseId) {
+      if (isDepartmentScoped(req)) {
+        /* A sub_admin: the shared department rule, which also refuses a class
+           with no course at all — the check below skipped those (plan.md §10). */
+        if (!(await mayAccessLiveClass(req, live as Parameters<typeof mayAccessLiveClass>[1]))) {
+          res.status(403).json({ success: false, error: { code: 'OUT_OF_SCOPE', message: 'That class belongs to another programme.' } }); return
+        }
+      } else if (scope && live.courseId) {
         const { CourseModel } = await import('@/models/schema.ts')
         const course = await CourseModel.findById(String(live.courseId)).select('program').lean()
         if (!course || (course as { program?: string }).program !== scope) {
@@ -1703,14 +1780,16 @@ router.get('/live-classes/no-shows', requireAnyAdmin, async (req: Request, res: 
 
     const filter: Record<string, unknown> = { mentorNoShowAlertSent: true }
     /* Same tenancy shape as adminListAll just above: super_admin unscoped,
-       everyone else pinned to their own academy. A sub_admin's programme
-       scope is intentionally NOT applied here — they were one of the people
-       this alert was sent TO (reminders.job.ts), so seeing every no-show in
-       their academy, not just their own programme's, is the point: it is
-       their inbox as much as it is a course filter. */
+       everyone else pinned to their own academy. */
     if (req.user?.role !== 'super_admin' && req.user?.organizationId) {
       filter['organizationId'] = req.user.organizationId
     }
+    /* And a department's sub_admin sees its own department's no-shows only
+       (plan.md §10). This page used to show them the whole academy on the
+       grounds that it was their alert inbox — but the escalation itself
+       (reminders.job.ts runMentorNoShowEscalation) only ever alerts the
+       CLASS's department's sub_admins, so the inbox was never academy-wide. */
+    andFilter(filter, await liveClassClause(req))
 
     const [docs, totalCount] = await Promise.all([
       LiveClassModel.find(filter)
@@ -1814,7 +1893,7 @@ const liveRepeatSchema = z.object({ weeks: z.coerce.number().int().min(1).max(52
    only validate() while its three siblings above and below all carry the
    matrix guard, so a custom role explicitly DENIED live-class creation could
    still produce up to 52 of them by repeating one it was allowed to see. */
-router.post  ('/live-classes/:id/repeat',                 requirePermission('live-classes','create'), validate(liveRepeatSchema), audit('liveclass.repeat', 'LiveClass', r => String(r.params['id'] ?? ''), r => ({ weeks: r.body.weeks })), live.adminRepeat)
+router.post  ('/live-classes/:id/repeat',                 requireDepartmentLiveClass('id'), requirePermission('live-classes','create'), validate(liveRepeatSchema), audit('liveclass.repeat', 'LiveClass', r => String(r.params['id'] ?? ''), r => ({ weeks: r.body.weeks })), live.adminRepeat)
 router.patch ('/live-classes/:id', requirePermission('live-classes','update'),                        validate(liveUpdateSchema), audit('liveclass.update', 'LiveClass', r => String(r.params['id'] ?? '')), live.adminUpdate)
 router.delete('/live-classes/:id', requirePermission('live-classes','delete'),                        audit('liveclass.delete', 'LiveClass', r => String(r.params['id'] ?? '')), live.adminDelete)
 /* Backup link — the instructor cannot get into the class's room: swap in a
@@ -1828,10 +1907,10 @@ router.get ('/live-classes/:id/backup-link', requirePermission('live-classes','u
 router.post('/live-classes/:id/backup-link', requirePermission('live-classes','update'), validate(backupLinkSchema),
   audit('liveclass.backup-link', 'LiveClass', r => String(r.params['id'] ?? ''),
     r => ({ mode: r.body?.mode, ...(r.body?.url ? { url: String(r.body.url).slice(0, 500) } : {}) })), live.adminBackupLink)
-router.post  ('/live-classes/:id/start',                  live.adminStart)
-router.post  ('/live-classes/:id/end',                    live.adminEnd)
-router.post  ('/live-classes/:id/recreate',               live.adminRecreate)
-router.get   ('/live-classes/:id/stream-credentials',     ctrl.guardStreamCredentials, live.adminGetStreamCredentials)
+router.post  ('/live-classes/:id/start',                  requireDepartmentLiveClass('id'), live.adminStart)
+router.post  ('/live-classes/:id/end',                    requireDepartmentLiveClass('id'), live.adminEnd)
+router.post  ('/live-classes/:id/recreate',               requireDepartmentLiveClass('id'), live.adminRecreate)
+router.get   ('/live-classes/:id/stream-credentials',     requireDepartmentLiveClass('id'), ctrl.guardStreamCredentials, live.adminGetStreamCredentials)
 
 /* POST /admin/live-classes/:id/handoff — the ADMIN portal's door into a class.
 
@@ -1839,7 +1918,7 @@ router.get   ('/live-classes/:id/stream-credentials',     ctrl.guardStreamCreden
    router's `authenticateAdmin`, so it resolves the admin/instructor session.
    Splitting it by mount is what stops the two portals' cookies competing —
    see the handler. */
-router.post ('/live-classes/:id/handoff',                 issueClassHandoff)
+router.post ('/live-classes/:id/handoff',                 requireDepartmentLiveClass('id'), issueClassHandoff)
 
 /* ─── Admin book-for-student (offline classes only) ──── */
 const bookForStudentSchema = z.object({
@@ -1870,6 +1949,11 @@ router.post('/bookings/book-for-student', requireAnyAdmin, validate(bookForStude
     if (!(await callerMayManageSession(req, liveClassId))) {
       res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Session not found' } }); return
     }
+    /* And department on both sides (plan.md §10): a sub_admin books its own
+       department's class, for its own department's student. */
+    if (!(await mayAccessLiveClass(req, session as Parameters<typeof mayAccessLiveClass>[1]))) {
+      res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Session not found' } }); return
+    }
 
     if (session.status === 'cancelled' || session.status === 'ended') {
       res.status(400).json({ success: false, error: { code: 'SESSION_UNAVAILABLE', message: 'Session is no longer available for booking' } }); return
@@ -1884,6 +1968,9 @@ router.post('/bookings/book-for-student', requireAnyAdmin, validate(bookForStude
       res.status(404).json({ success: false, error: { code: 'STUDENT_NOT_FOUND', message: 'Student not found' } }); return
     }
     if (!(await callerMayAccessUser(req, studentId))) {
+      res.status(404).json({ success: false, error: { code: 'STUDENT_NOT_FOUND', message: 'Student not found' } }); return
+    }
+    if (!(await mayAccessStudent(req, student as Parameters<typeof mayAccessStudent>[1]))) {
       res.status(404).json({ success: false, error: { code: 'STUDENT_NOT_FOUND', message: 'Student not found' } }); return
     }
 
@@ -2524,7 +2611,7 @@ const availabilityUpdateSchema = z.object({
   return true
 }, { message: 'Maximum 3 slots per day of week' })
 
-router.get('/mentors/:id/availability', requireInstructor, async (req: Request, res: Response, next: NextFunction) => {
+router.get('/mentors/:id/availability', requireInstructor, requireDepartmentMember('id'), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { MentorAvailabilityModel } = await import('@/models/schema.ts')
     const mentorId = String(req.params['id'] ?? '')
@@ -2552,7 +2639,7 @@ router.get('/mentors/:id/availability', requireInstructor, async (req: Request, 
 
    These are booked from the Root portal, so without this an instructor would
    learn about their own week only from the email they were sent. */
-router.get('/mentors/:id/meetings', requireInstructor, async (req: Request, res: Response, next: NextFunction) => {
+router.get('/mentors/:id/meetings', requireInstructor, requireDepartmentMember('id'), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { MentorMeetingModel } = await import('@/models/schema.ts')
     const mentorId = String(req.params['id'] ?? '')
@@ -2592,7 +2679,7 @@ router.get('/mentors/:id/meetings', requireInstructor, async (req: Request, res:
   } catch (err) { next(err) }
 })
 
-router.put('/mentors/:id/availability', requireInstructor, validate(availabilityUpdateSchema), async (req: Request, res: Response, next: NextFunction) => {
+router.put('/mentors/:id/availability', requireInstructor, requireDepartmentMember('id'), validate(availabilityUpdateSchema), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { MentorAvailabilityModel } = await import('@/models/schema.ts')
     const mentorId = String(req.params['id'] ?? '')
@@ -2813,7 +2900,12 @@ async function buildBookingFilter(
     const { CourseModel } = await import('@/models/schema.ts')
     const scopedCourses = await CourseModel.find({ program: scope }, '_id').lean()
     scopedCourseIds = scopedCourses.map((c: any) => c._id)
-    andFilter(lcFilter, courseDoorFilter({ $in: scopedCourseIds }))
+    /* The department rule from utils/departmentScope.ts (plan.md §10): the
+       host arm counts only for the caller's own academy's classes. Through
+       courseDoorFilter it matched the host course for ANY academy, so a guest
+       academy's sub_admin saw — and could mark — seats on a class whose host
+       course was their department while their own cohort course was not. */
+    andFilter(lcFilter, await liveClassClause(req))
   }
 
   /* Narrow to one course — but INTERSECT with the programme scope, never
@@ -3141,7 +3233,7 @@ router.get('/bookings/stats', requireInstructor, requirePermission('bookings', '
    cancel releases the seat once, then a floor-guarded decrement — and reuses
    the attendance route's tenancy rule (404 across an academy boundary, never a
    403 that would confirm the id exists elsewhere). */
-router.patch('/bookings/:id/cancel', requireInstructor, requirePermission('bookings', 'update'),
+router.patch('/bookings/:id/cancel', requireInstructor, requireDepartmentBooking('id'), requirePermission('bookings', 'update'),
   audit('booking.cancel', 'ClassBooking', r => String(r.params['id'] ?? '')),
   async (req: Request, res: Response, next: NextFunction) => {
   try {
@@ -3333,7 +3425,11 @@ router.patch('/bookings/bulk-attendance', requireInstructor, requirePermission('
        the rest being marked. */
     const classIds = [...new Set(docs.map(d => String((d as any).liveClassId ?? '')))]
       .filter(i => Types.ObjectId.isValid(i))
-    const classes = await LiveClassModel.find({ _id: { $in: classIds } })
+    /* Another department's class is not markable either — skipped, like
+       another academy's seat (plan.md §10). */
+    const classFilter: Record<string, unknown> = { _id: { $in: classIds } }
+    andFilter(classFilter, await liveClassClause(req))
+    const classes = await LiveClassModel.find(classFilter)
       .select('scheduledStart status').lean()
     const markable = new Set(classes.filter(c => !attendanceRefusal(c)).map(c => String(c._id)))
 
@@ -3357,7 +3453,7 @@ router.patch('/bookings/bulk-attendance', requireInstructor, requirePermission('
   } catch (err) { next(err) }
 })
 
-router.patch('/bookings/:id/attendance', requireInstructor, requirePermission('bookings','update'), validate(attendanceUpdateSchema),
+router.patch('/bookings/:id/attendance', requireInstructor, requireDepartmentBooking('id'), requirePermission('bookings','update'), validate(attendanceUpdateSchema),
   audit('booking.bulkAttendance', 'ClassBooking', r => String(r.params['id'] ?? ''), attendanceAuditMeta),
   async (req: Request, res: Response, next: NextFunction) => {
   try {
@@ -3472,6 +3568,9 @@ router.get('/reports/attendance', requireInstructor, requirePermission('reports'
        guest arm is gated on the feature switch — off means byte-identical. */
     if (!reportingInstructor) {
       andFilter(lcScope, servedClassFilter(reportCaller.org))
+      /* A department's sub_admin reports on its own department's classes
+         (plan.md §10) — this report names every student and offers a CSV. */
+      andFilter(lcScope, await liveClassClause(req))
     }
     if (Object.keys(lcScope).length > 0) {
       const scopedClassIds = await LiveClassModel.find(lcScope, '_id').lean()
@@ -3548,6 +3647,8 @@ router.get('/reports/mentor-schedule', requireInstructor, requirePermission('rep
     if (mentorId && Types.ObjectId.isValid(mentorId)) {
       filter['instructorId'] = new Types.ObjectId(mentorId)
     }
+    /* A department's sub_admin sees its own department's sessions (plan.md §10). */
+    andFilter(filter, await liveClassClause(req))
 
     const sessions = await LiveClassModel.find(filter)
       .populate('instructorId', 'id name email')
@@ -3811,7 +3912,7 @@ router.patch('/homework-submissions/:id/grade', requireRole('super_admin', 'admi
 })
 
 /* GET /admin/live-classes/:id/feedback — feedback summary for a session */
-router.get('/live-classes/:id/feedback', requireInstructor, async (req: Request, res: Response, next: NextFunction) => {
+router.get('/live-classes/:id/feedback', requireInstructor, requireDepartmentLiveClass('id'), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { ClassFeedbackModel } = await import('@/models/schema.ts')
     const { Types } = await import('mongoose')

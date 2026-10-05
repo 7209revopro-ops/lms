@@ -10,7 +10,8 @@ export interface AdminStats {
   totalInstructors: number
   totalEnrollments: number
   totalReviews:     number
-  revenueEstimate:  number
+  /** null for a department's sub_admin — revenue is admin-only. */
+  revenueEstimate:  number | null
 }
 
 export function useAdminStats() {

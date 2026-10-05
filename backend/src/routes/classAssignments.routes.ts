@@ -5,6 +5,7 @@ import { validate } from '@/middleware/validate.middleware.ts'
 import { ClassAssignmentService } from '@/services/classAssignment.service.ts'
 import { requiredDocumentRef } from '@/utils/documentRef.ts'
 import { sendSuccess } from '@/utils/response.ts'
+import { departmentCourseIds } from '@/utils/departmentScope.ts'
 
 /* ─────────────────────────────────────────────────────
    Class assignments — student sends work, instructor judges it
@@ -23,6 +24,13 @@ const caller = (req: Request) => ({
   id:             req.user!.id,
   role:           req.user!.role,
   organizationId: req.user!.organizationId,
+})
+/* The reviewer, with their department's courses when they are a department's
+   sub_admin (plan.md §10) — the queue, the stats and every decision are held
+   to them. undefined for everyone else, which leaves them unchanged. */
+const reviewer = async (req: Request) => ({
+  ...caller(req),
+  departmentCourseIds: (await departmentCourseIds(req)) ?? undefined,
 })
 
 /* Files are references to OUR storage, never arbitrary URLs. requiredDocumentRef
@@ -106,7 +114,7 @@ router.get(
   requireRole('super_admin', 'admin', 'sub_admin', 'support', 'instructor'),
   async (req: Request, res: Response, next: NextFunction) => {
     try {
-      sendSuccess(res, await svc.listForReview(caller(req), qs(req, 'status'), qs(req, 'instructorId')))
+      sendSuccess(res, await svc.listForReview(await reviewer(req), qs(req, 'status'), qs(req, 'instructorId')))
     } catch (err) { next(err) }
   },
 )
@@ -123,7 +131,7 @@ router.get(
   requireRole('super_admin', 'admin', 'sub_admin', 'support', 'instructor'),
   async (req: Request, res: Response, next: NextFunction) => {
     try {
-      sendSuccess(res, await svc.reviewStats(caller(req), qs(req, 'instructorId')))
+      sendSuccess(res, await svc.reviewStats(await reviewer(req), qs(req, 'instructorId')))
     } catch (err) { next(err) }
   },
 )
@@ -136,7 +144,7 @@ router.patch(
   async (req: Request, res: Response, next: NextFunction) => {
     try {
       const { decision, reason } = req.body as { decision: 'approved' | 'rejected'; reason?: string }
-      const updated = await svc.review(caller(req), String(req.params['id'] ?? ''), decision, reason)
+      const updated = await svc.review(await reviewer(req), String(req.params['id'] ?? ''), decision, reason)
       sendSuccess(res, updated, decision === 'approved' ? 'Assignment approved' : 'Sent back to the student')
     } catch (err) { next(err) }
   },
@@ -146,7 +154,7 @@ router.patch(
    Declared LAST so it cannot shadow /submittable, /me or /review. */
 router.get('/:id', authenticateAny, async (req: Request, res: Response, next: NextFunction) => {
   try {
-    sendSuccess(res, await svc.getForCaller(caller(req), String(req.params['id'] ?? '')))
+    sendSuccess(res, await svc.getForCaller(await reviewer(req), String(req.params['id'] ?? '')))
   } catch (err) { next(err) }
 })
 

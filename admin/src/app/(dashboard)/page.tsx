@@ -9,6 +9,7 @@ import {
 import { StatCard } from '@/components/ui/StatCard'
 import { EnrollmentsChart } from '@/components/analytics/EnrollmentsChart'
 import { RevenueChart } from '@/components/analytics/RevenueChart'
+import { isProgrammeScoped, PROGRAM_LABEL } from '@/lib/programScope'
 import { TopCoursesWidget } from '@/components/analytics/TopCoursesWidget'
 import { CompletionWidget } from '@/components/analytics/CompletionWidget'
 import { useCourses } from '@/lib/api/courses'
@@ -66,13 +67,18 @@ export default function DashboardPage() {
     return { value: Math.round(n), suffix: '' }
   }
   const rev = splitCompact(stats?.revenueEstimate ?? 0)
+  /* A department's sub_admin sees its department's figures and no revenue —
+     revenue is admin-only (plan.md §10, R6); the API sends null for them. */
+  const departmentScoped = isProgrammeScoped(currentUser)
+  const departmentName = currentUser?.program ? (PROGRAM_LABEL[currentUser.program] ?? currentUser.program) : null
 
-  const statCards = [
+  const allCards = [
     { label: 'Total Courses',    value: stats?.totalCourses     ?? 0, change: 0, changeLabel: `${stats?.publishedCourses ?? 0} published · ${stats?.draftCourses ?? 0} drafts`, icon: BookOpen,      color: '#0057b8', prefix: '',  suffix: '',         delay: 0     },
     { label: 'Total Students',   value: stats?.totalStudents    ?? 0, change: 0, changeLabel: `${stats?.totalEnrollments ?? 0} active enrollments`,                            icon: Users,         color: '#2F6BFF', prefix: '',  suffix: '',         delay: 0.05  },
     { label: 'Instructors',      value: stats?.totalInstructors ?? 0, change: 0, changeLabel: 'Course authors',                                                                 icon: GraduationCap, color: '#A78BFA', prefix: '',  suffix: '',         delay: 0.1   },
     { label: 'Revenue (est.)',   value: rev.value,                     change: 0, changeLabel: 'Sum of paid course earnings',                                                   icon: DollarSign,    color: '#4ADE80', prefix: cur.symbol, suffix: rev.suffix, delay: 0.15  },
   ]
+  const statCards = departmentScoped ? allCards.filter(c => c.label !== 'Revenue (est.)') : allCards
 
   return (
     <div className="space-y-8">
@@ -85,14 +91,16 @@ export default function DashboardPage() {
           {greeting ? `${greeting}, ` : ''}{firstName} 👋
         </h1>
         <p className="mt-1 text-sm" style={{ color: 'rgba(255,255,255,0.4)' }}>
-          Here&apos;s what&apos;s happening with Delta Institutions today.
+          {departmentScoped && departmentName
+            ? <>Here&apos;s what&apos;s happening in the {departmentName} department today.</>
+            : <>Here&apos;s what&apos;s happening with Delta Institutions today.</>}
         </p>
       </motion.div>
 
       {/* ── Stat cards ──────────────────────────────── */}
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+      <div className={`grid grid-cols-1 gap-4 sm:grid-cols-2 ${departmentScoped ? 'xl:grid-cols-3' : 'xl:grid-cols-4'}`}>
         {statsLoading
-          ? Array.from({ length: 4 }).map((_, i) => (
+          ? Array.from({ length: departmentScoped ? 3 : 4 }).map((_, i) => (
               <div key={i} className="h-[110px] rounded-2xl animate-pulse"
                 style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.07)' }} />
             ))
@@ -106,8 +114,8 @@ export default function DashboardPage() {
         <CompletionWidget />
       </div>
 
-      {/* ── Revenue chart ──────────────────────────── */}
-      <RevenueChart />
+      {/* ── Revenue chart — admins only ─────────────── */}
+      {!departmentScoped && <RevenueChart />}
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
         <div className="lg:col-span-3"><TopCoursesWidget /></div>

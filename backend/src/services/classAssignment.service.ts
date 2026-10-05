@@ -30,6 +30,16 @@ export interface Caller {
   id:             string
   role:           string
   organizationId?: string
+  /* A department's sub_admin: the department's course ids (plan.md §10).
+     Absent for everyone else. */
+  departmentCourseIds?: Types.ObjectId[]
+}
+
+/** True when a submission's course is outside the caller's department. */
+function outsideDepartment(caller: Caller, courseId: unknown): boolean {
+  if (!caller.departmentCourseIds) return false
+  const id = String((courseId as { _id?: unknown })?._id ?? courseId ?? '')
+  return !caller.departmentCourseIds.some(c => String(c) === id)
 }
 
 export class ClassAssignmentService {
@@ -210,10 +220,14 @@ export class ClassAssignmentService {
        the point: the earlier `role !== 'super_admin'` guard here guaranteed
        this branch was skipped FOR every super_admin, switcher or not, which
        is the opposite of what the comment above always said it should do. */
+    /* And a department's sub_admin reviews its own department's submissions
+       only — by the submission's course, the only department signal it
+       carries (plan.md §10). */
+    const dept = caller.departmentCourseIds ? { courseId: { $in: caller.departmentCourseIds } } : {}
     if (caller.organizationId && Types.ObjectId.isValid(caller.organizationId)) {
-      return { organizationId: new Types.ObjectId(caller.organizationId) }
+      return { organizationId: new Types.ObjectId(caller.organizationId), ...dept }
     }
-    return {}
+    return { ...dept }
   }
 
   /* Narrowing to one instructor must never WIDEN reach. An instructor's own
@@ -414,7 +428,8 @@ export class ClassAssignmentService {
     if (STAFF.has(caller.role)) {
       if (caller.role === 'super_admin') return doc
       const org = (doc as any).organizationId
-      if (!org || !caller.organizationId || String(org) === String(caller.organizationId)) return doc
+      const sameOrg = !org || !caller.organizationId || String(org) === String(caller.organizationId)
+      if (sameOrg && !outsideDepartment(caller, (doc as any).courseId)) return doc
     }
     /* Same answer as "not there" — a reviewer outside this session learns
        nothing about whether it exists. */
@@ -455,6 +470,10 @@ export class ClassAssignmentService {
        the switcher had a specific academy selected. */
     if (doc.organizationId && caller.organizationId &&
         String(doc.organizationId) !== String(caller.organizationId)) {
+      throw new ClassAssignmentError('NOT_FOUND', 'Submission not found.', 404)
+    }
+    /* Another department's submission answers the same 404 (plan.md §10). */
+    if (outsideDepartment(caller, doc.courseId)) {
       throw new ClassAssignmentError('NOT_FOUND', 'Submission not found.', 404)
     }
     return doc

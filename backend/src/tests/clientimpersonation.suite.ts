@@ -258,7 +258,8 @@ try {
   if (ns.status === 200) {
     const tryIt = await call('POST', `/admin/users/${student._id}/impersonate-client`, { jar: noScopeJar })
     check('a sub_admin with no programme gets nothing, not everything',
-      tryIt.status === 404, `got ${tryIt.status} — failing open here handed it the whole academy`)
+      tryIt.status === 404 || (tryIt.status === 403 && tryIt.body?.error?.code === 'NO_DEPARTMENT'),
+      `got ${tryIt.status} — failing open here handed it the whole academy`)
   } else {
     check('a sub_admin with no programme cannot sign in', true, `login refused with ${ns.status}`)
   }

@@ -10,7 +10,8 @@ import { LessonRepository } from '@/repositories/lesson.repository.ts'
 import { SectionRepository } from '@/repositories/section.repository.ts'
 import { sendSuccess, buildPaginationMeta, parsePagination } from '@/utils/response.ts'
 import { toCourseDTO } from '@/utils/courseDTO.ts'
-import { instructorOwnsSession } from '@/utils/tenancy.ts'
+import { instructorOwnsSession, andFilter } from '@/utils/tenancy.ts'
+import { studentReachClause, memberClause, callerDepartment, otherDepartmentsOf } from '@/utils/departmentScope.ts'
 import { signAccessToken, toSeconds } from '@/utils/jwt.ts'
 import type { UserRole } from '@/types/index.ts'
 
@@ -580,6 +581,22 @@ export class AdminController {
       } else if (status === 'approved' && q['category']) {
         filter['$or'] = [{ category: q['category'] }, { categories: q['category'] }]
       }
+      /* Every other tab, for a department's sub_admin (plan.md §10): its own
+         members, the applicants who APPLIED to it and the students on its
+         courses — never the academy's whole queue, with its ID numbers and
+         document scans. On "all" an APPROVED row is judged the way the approved
+         tab judges it — on categories, for the reason programscope.suite.ts
+         gives — so the approved rows of "all" are exactly the approved tab. */
+      if (status !== 'approved') {
+        const reach = await studentReachClause(req)
+        const members = memberClause(req)
+        andFilter(filter, status === 'all' && reach && members
+          ? { $or: [
+              { $and: [{ enrollmentStatus: 'approved' }, members] },
+              { $and: [{ enrollmentStatus: { $ne: 'approved' } }, reach] },
+            ] }
+          : reach)
+      }
 
       if (status === 'all') {
         // no enrollmentStatus filter — but still requires enrollmentStatus to exist (set above)
@@ -634,6 +651,10 @@ export class AdminController {
         const re = new RegExp(search.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i')
         filter['$or'] = [{ name: re }, { email: re }]
       }
+      /* A department's sub_admin sees the express members its department
+         turned away — the programmes on the application say whose they were —
+         and no-one else's (plan.md §10). */
+      andFilter(filter, await studentReachClause(req))
 
       const projection = 'id name email avatarUrl enrollmentApplication isActive createdAt signupType'
       const [docs, totalCount] = await Promise.all([
@@ -665,9 +686,13 @@ export class AdminController {
         res.status(400).json({ success: false, error: { code: 'INVALID_ID', message: 'Invalid user ID' } }); return
       }
 
-      const user = await UserModel.findOne({ _id: userId, signupType: 'express' }).select('isActive').lean()
+      const user = await UserModel.findOne({ _id: userId, signupType: 'express' }).select('isActive category categories').lean()
       if (!user) {
         res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Express member not found' } }); return
+      }
+      /* Blocking disables the whole account — every department's access. */
+      if ((await otherDepartmentsOf(req, { _id: userId, ...(user as object) })).length) {
+        res.status(403).json({ success: false, error: { code: 'FORBIDDEN', message: 'This member is also in another department. Ask an administrator to block them.' } }); return
       }
 
       const newActive = !user.isActive
@@ -731,8 +756,13 @@ export class AdminController {
         res.status(refusal.status).json({ success: false, error: { code: refusal.code, message: refusal.message } }); return
       }
 
-      // Merge new categories with existing ones (avoid duplicates)
-      const existingCats: string[] = (existing.categories as string[] | undefined) ?? (existing.category ? [existing.category as string] : [])
+      // Merge new categories with existing ones (avoid duplicates). An empty
+      // array is not "no programmes": records written before categories existed
+      // carry [] beside a category, and `??` let the merge drop that category —
+      // one department's approval erasing another's student. Same rule as reject.
+      const existingCats: string[] = (existing.categories as string[] | undefined)?.length
+        ? existing.categories as string[]
+        : (existing.category ? [existing.category as string] : [])
       const mergedCats  = [...new Set([...existingCats, ...assignCategories])]
       const primaryCat  = mergedCats[0]
 
@@ -793,7 +823,12 @@ export class AdminController {
         res.status(400).json({ success: false, error: { code: 'INVALID_ID', message: 'Invalid user ID' } }); return
       }
 
-      const existing = await UserModel.findById(userId).select('email name approvedBy').lean()
+      /* category + categories are read by the programme check below. They
+         used to be left out of this select, so the check always saw a student
+         with no programmes and let any sub_admin revoke anyone — including a
+         student of two departments, whose OTHER department's enrolments the
+         revoke then deleted (plan.md §10). */
+      const existing = await UserModel.findById(userId).select('email name approvedBy category categories').lean()
       if (!existing) { res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'User not found' } }); return }
 
       // A programme-scoped admin can only revoke approved students in exactly
@@ -819,6 +854,11 @@ export class AdminController {
               : `You can only revoke students in your own program (${adminScope}).`
             res.status(403).json({ success: false, error: { code: 'FORBIDDEN', message: msg } }); return
           }
+        }
+        /* …nor may another department have them through a course: the reject
+           below deletes EVERY enrolment, that department's included. */
+        if ((await otherDepartmentsOf(req, { _id: userId, ...(existing as object) })).length) {
+          res.status(403).json({ success: false, error: { code: 'FORBIDDEN', message: 'This student also studies a course of another department. Ask an administrator to revoke them.' } }); return
         }
       }
 
@@ -881,8 +921,16 @@ export class AdminController {
         res.status(400).json({ success: false, error: { code: 'INVALID_ID', message: 'Invalid user ID' } }); return
       }
 
-      const existing = await UserModel.findById(userId).select('email name enrollmentStatus').lean()
+      const existing = await UserModel.findById(userId).select('email name enrollmentStatus category categories').lean()
       if (!existing) { res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'User not found' } }); return }
+
+      /* Reverting wipes EVERY programme off the student. A department's
+         sub_admin may only do that to a student who is in no other department
+         — the reject path's rule — or one department would erase another's
+         student (plan.md §10). */
+      if (callerDepartment(req) !== null && (await otherDepartmentsOf(req, { _id: userId, ...(existing as object) })).length) {
+        res.status(403).json({ success: false, error: { code: 'FORBIDDEN', message: 'This student is also in another department. Remove only your department from them instead.' } }); return
+      }
 
       await UserModel.findByIdAndUpdate(userId, {
         $set:   { enrollmentStatus: 'pending', categories: [] },
@@ -919,10 +967,18 @@ export class AdminController {
       const existing = await UserModel.findById(userId).select('email name categories category').lean()
       if (!existing) { res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'User not found' } }); return }
 
-      const existingCats: string[] = (existing.categories as string[] | undefined) ?? (existing.category ? [existing.category as string] : [])
+      const existingCats: string[] = (existing.categories as string[] | undefined)?.length
+        ? existing.categories as string[]
+        : (existing.category ? [existing.category as string] : [])
       const updatedCats = existingCats.filter(c => c !== category)
       const primaryCat  = updatedCats[0] ?? null
       const newStatus   = updatedCats.length === 0 ? 'rejected' : 'approved'
+
+      /* Taking away the last programme rejects the whole account, which would
+         also lock the student out of another department's course. */
+      if (newStatus === 'rejected' && (await otherDepartmentsOf(req, { _id: userId })).length) {
+        res.status(403).json({ success: false, error: { code: 'FORBIDDEN', message: 'This student also studies a course of another department, so removing your department would revoke them there too. Ask an administrator.' } }); return
+      }
 
       const adminUser = await UserModel.findById(admin.id).select('name email').lean()
 
@@ -1102,7 +1158,7 @@ export class AdminController {
   enrollmentsTimeseries = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     try {
       const days = Math.min(180, Math.max(7, Number(req.query['days'] ?? 30)))
-      const data = await this.admin.enrollmentsTimeseries(days, req.user!.organizationId)
+      const data = await this.admin.enrollmentsTimeseries(days, req.user!.organizationId, req.user!.categoryScope)
       sendSuccess(res, data)
     } catch (err) { next(err) }
   }
@@ -1116,7 +1172,7 @@ export class AdminController {
   }
 
   completionStats = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
-    try { sendSuccess(res, await this.admin.completionStats(req.user!.organizationId)) } catch (err) { next(err) }
+    try { sendSuccess(res, await this.admin.completionStats(req.user!.organizationId, req.user!.categoryScope)) } catch (err) { next(err) }
   }
 
   /* ─── Live-class stream credentials guard ─────── */

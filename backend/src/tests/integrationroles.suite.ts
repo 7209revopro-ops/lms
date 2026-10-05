@@ -123,6 +123,10 @@ try {
     users[role] = await UserModel.create({
       name: role, email: `${role}@roles.local`, passwordHash: hash, role, isActive: true,
       organizationId: org._id, ...(role === 'student' ? { enrollmentStatus: 'approved' } : {}),
+      /* A sub_admin is a department head: one with no department is refused
+         outright (plan.md §10, R2), so the generic one heads Forex — the
+         generic course's department. */
+      ...(role === 'sub_admin' ? { program: 'forex' } : {}),
     })
   }
   /* A second instructor: the one the class is actually assigned to. */
@@ -134,6 +138,7 @@ try {
   const course = await CourseModel.create({
     title: 'C', slug: 'c-' + Date.now(), description: 'd', instructorId: owner._id,
     price: 0, isFree: true, status: 'published', language: 'English', organizationId: org._id,
+    program: '4x-trading',
   })
   /* Started 5 minutes ago — "live now", the case the product cares about. */
   const live = await LiveClassModel.create({
@@ -413,13 +418,32 @@ try {
       outScope.status === 403 && outScope.body?.error?.code === 'OUT_OF_SCOPE',
       `${outScope.status} ${outScope.body?.error?.code}`)
 
-    const noProgramme = await call('POST', `/live-classes/${live._id}/host-ticket`, { jar: dmJar })
+    const bareCourse = await CourseModel.create({
+      title: 'Bare', slug: 'bare-' + Date.now(), description: 'd', instructorId: owner._id,
+      price: 0, isFree: true, status: 'published', language: 'English', organizationId: org._id,
+    })
+    const bareClass = await LiveClassModel.create({
+      courseId: bareCourse._id, instructorId: owner._id, title: 'No programme live',
+      scheduledStart: new Date(Date.now() - 5 * 60_000), durationMins: 60,
+      type: 'internal', provider: 'livekit', status: 'live',
+      sessionCapacity: 30, organizationId: org._id,
+    })
+    const noProgramme = await call('POST', `/live-classes/${bareClass._id}/host-ticket`, { jar: dmJar })
     check('and a class with no programme at all — same rule as the admin API',
       noProgramme.status === 403 && noProgramme.body?.error?.code === 'OUT_OF_SCOPE',
       `${noProgramme.status} ${noProgramme.body?.error?.code}`)
 
-    const unscoped = await call('POST', `/live-classes/${fxClass._id}/host-ticket`, { jar: jars['sub_admin'] })
-    check('an UNSCOPED sub_admin is not newly restricted', unscoped.status === 200, String(unscoped.status))
+    /* REVERSED on purpose (plan.md §10, R2): a sub_admin with no department
+       used to be unscoped — every department. Now it reaches nothing. */
+    await UserModel.create({
+      name: 'no dept sub', email: 'no-dept-sub@roles.local', passwordHash: hash,
+      role: 'sub_admin', isActive: true, organizationId: org._id,
+    })
+    const noDeptJar: Jar = new Map()
+    await call('POST', '/admin/auth/login', { jar: noDeptJar, body: { email: 'no-dept-sub@roles.local', password: PW } })
+    const unscoped = await call('POST', `/live-classes/${fxClass._id}/host-ticket`, { jar: noDeptJar })
+    check('a sub_admin with NO department is refused — fail closed, never every department',
+      unscoped.status === 403 && unscoped.body?.error?.code === 'NO_DEPARTMENT', `${unscoped.status} ${unscoped.body?.error?.code}`)
 
     const superScope = await call('POST', `/live-classes/${fxClass._id}/host-ticket`, { jar: jars['super_admin'] })
     check('and a super admin ignores programme too', superScope.status === 200, String(superScope.status))

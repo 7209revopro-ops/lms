@@ -3,6 +3,7 @@
 import { useUIStore } from '@/store/ui.store'
 import { AdminSidebar } from '@/components/layout/AdminSidebar'
 import { AdminTopbar } from '@/components/layout/AdminTopbar'
+import { NoDepartmentNotice } from '@/components/layout/NoDepartmentNotice'
 import { DeleteModal } from '@/components/courses/DeleteModal'
 import { Toaster } from '@/components/ui/Toaster'
 import { AdminGuard } from '@/components/auth/AdminGuard'
@@ -38,6 +39,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
         <main className="min-h-dvh pt-[60px] transition-[margin-left] duration-300 ease-out lg:ml-[var(--admin-sb)]">
           <div className="px-4 py-4 sm:px-6 sm:py-6">
+            <NoDepartmentNotice />
             {children}
           </div>
         </main>

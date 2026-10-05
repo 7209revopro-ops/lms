@@ -29,7 +29,8 @@ export class AdminService {
     totalInstructors: number
     totalEnrollments: number
     totalReviews:     number
-    revenueEstimate:  number
+    /** null for a department's sub_admin — revenue is admin-only (plan.md §10). */
+    revenueEstimate:  number | null
   }> {
     const orgMatch: Record<string, unknown> = {}
     if (organizationId && Types.ObjectId.isValid(organizationId)) {
@@ -76,15 +77,23 @@ export class AdminService {
          tile has to agree with the instructor list, which is widened the same
          way. `$and` rather than a spread: `orgMatch` may already carry its own
          organizationId key, and a spread would let one silently win. */
-      UserModel.countDocuments(
-        instructorCountFilter(orgMatch as Record<string, unknown>),
+      /* A department's sub_admin counts its own instructors — the same rule
+         as the instructor table they see (plan.md §10). */
+      UserModel.countDocuments(program
+        ? { $and: [instructorCountFilter(orgMatch as Record<string, unknown>), { $or: [{ category: program }, { categories: program }] }] }
+        : instructorCountFilter(orgMatch as Record<string, unknown>),
       ).exec(),
       EnrollmentModel.countDocuments({ courseId: { $in: scopedCourseIds } }).exec(),
-      ReviewModel.countDocuments({}).exec(),
-      OrderModel.aggregate([
-        { $match: { ...orgMatch, status: 'paid' } },
-        { $group: { _id: null, total: { $sum: '$amount' } } },
-      ]).exec(),
+      /* Reviews on the courses in view. countDocuments({}) counted every
+         review on the platform — both academies, every department — next to
+         tiles that were scoped. Unscoped only for a super admin on All Orgs. */
+      ReviewModel.countDocuments(program || orgMatch['organizationId'] ? { courseId: { $in: scopedCourseIds } } : {}).exec(),
+      program
+        ? Promise.resolve([] as Array<{ total?: number }>)
+        : OrderModel.aggregate([
+          { $match: { ...orgMatch, status: 'paid' } },
+          { $group: { _id: null, total: { $sum: '$amount' } } },
+        ]).exec(),
     ])
 
     const revenueCents = revenueAgg[0]?.total ?? 0
@@ -97,11 +106,11 @@ export class AdminService {
       totalInstructors,
       totalEnrollments,
       totalReviews,
-      revenueEstimate: Math.round(revenueCents) / 100,
+      revenueEstimate: program ? null : Math.round(revenueCents) / 100,
     }
   }
 
-  async enrollmentsTimeseries(days: number, organizationId?: string): Promise<{ date: string; count: number }[]> {
+  async enrollmentsTimeseries(days: number, organizationId?: string, program?: string): Promise<{ date: string; count: number }[]> {
     const since = new Date()
     since.setUTCHours(0, 0, 0, 0)
     since.setUTCDate(since.getUTCDate() - (days - 1))
@@ -109,6 +118,10 @@ export class AdminService {
     const matchBase: Record<string, unknown> = { createdAt: { $gte: since } }
     if (organizationId && Types.ObjectId.isValid(organizationId)) {
       matchBase['organizationId'] = new Types.ObjectId(organizationId)
+    }
+    /* A department's sub_admin charts its own courses' enrolments (plan.md §10). */
+    if (program) {
+      matchBase['courseId'] = { $in: (await CourseModel.find({ program }, { _id: 1 }).lean()).map(c => c._id) }
     }
 
     const rows = await EnrollmentModel.aggregate([
@@ -202,7 +215,7 @@ export class AdminService {
     })
   }
 
-  async completionStats(organizationId?: string): Promise<{
+  async completionStats(organizationId?: string, program?: string): Promise<{
     totalEnrollments: number
     completed:        number
     active:           number
@@ -212,6 +225,10 @@ export class AdminService {
     const matchBase: Record<string, unknown> = {}
     if (organizationId && Types.ObjectId.isValid(organizationId)) {
       matchBase['organizationId'] = new Types.ObjectId(organizationId)
+    }
+    /* Same department rule as enrollmentsTimeseries above (plan.md §10). */
+    if (program) {
+      matchBase['courseId'] = { $in: (await CourseModel.find({ program }, { _id: 1 }).lean()).map(c => c._id) }
     }
 
     const rows = await EnrollmentModel.aggregate([

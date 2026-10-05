@@ -131,10 +131,20 @@ export class SupportService {
 
     const orgId = requester.organizationId
       ?? (student.organizationId ? String(student.organizationId) : undefined)
-    const studentProgram = student.category ?? student.categories?.[0]
-    const subAdminProgram = toSubAdminProgram(studentProgram)
+    /* EVERY department the student is in, not the first one. A ticket from a
+       student of two departments carries no programme (support.controller.ts
+       create) and is listed for each department's sub_admin — so each of them
+       is told about it, and nobody is told about a ticket they cannot open
+       (plan.md §10). */
+    const subAdminPrograms = [...new Set([...(student.categories ?? []), student.category]
+      .filter(Boolean).map(p => toSubAdminProgram(p as string)).filter(Boolean))] as string[]
 
-    const staff = orgId ? await userRepo.findOrgStaffForProgram(orgId, subAdminProgram) : []
+    let staff = orgId ? await userRepo.findOrgStaffForProgram(orgId) : []
+    if (orgId && Types.ObjectId.isValid(orgId) && subAdminPrograms.length) {
+      staff = [...staff, ...(await UserModel.find({
+        role: 'sub_admin', organizationId: new Types.ObjectId(orgId), program: { $in: subAdminPrograms }, isActive: true,
+      }).lean() as unknown as typeof staff)]
+    }
     const superAdmins = await UserModel.find({ role: 'super_admin', isActive: true })
       .select('name email phone').lean()
     /* No de-dupe needed — findOrgStaffForProgram only ever returns
@@ -193,9 +203,10 @@ export class SupportService {
       const escaped = filter.search.trim().slice(0, MAX_SEARCH_LEN).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
       query['subject'] = { $regex: escaped, $options: 'i' }
     }
-    if (filter.program) query['program'] = filter.program
     const scoped = orgScope(requester)
     if (scoped) Object.assign(query, scoped)
+    if (requester?.categoryScope) Object.assign(query, await this.#departmentClause(requester.categoryScope, scoped))
+    else if (filter.program) query['program'] = filter.program
     return SupportTicketModel
       .find(query)
       .sort({ lastMessageAt: -1 })
@@ -206,8 +217,10 @@ export class SupportService {
 
   /* ── Admin: status counts (scoped by program and org if set) ── */
   async adminStats(program?: string, requester?: Requester): Promise<{ open: number; pending: number; resolved: number; closed: number; unread: number; total: number }> {
-    const base: Record<string, unknown> = program ? { program } : {}
     const scoped = orgScope(requester)
+    const base: Record<string, unknown> = requester?.categoryScope
+      ? await this.#departmentClause(requester.categoryScope, scoped)
+      : program ? { program } : {}
     if (scoped) Object.assign(base, scoped)
     const [open, pending, resolved, closed, unread, total] = await Promise.all([
       SupportTicketModel.countDocuments({ ...base, status: 'open' }),
@@ -225,7 +238,7 @@ export class SupportService {
     if (!Types.ObjectId.isValid(ticketId)) throw new SupportError('INVALID_ID', 'Invalid ticket id', 400)
     const ticket = await SupportTicketModel.findById(ticketId)
     if (!ticket) throw new SupportError('NOT_FOUND', 'Ticket not found', 404)
-    this.assertAccess(ticket, requester)
+    await this.assertAccess(ticket, requester)
 
     // Clear the unread flag for whoever is viewing
     if (isStaff(requester) && ticket.adminUnread) { ticket.adminUnread = false; await ticket.save() }
@@ -239,7 +252,7 @@ export class SupportService {
     if (!Types.ObjectId.isValid(ticketId)) throw new SupportError('INVALID_ID', 'Invalid ticket id', 400)
     const ticket = await SupportTicketModel.findById(ticketId)
     if (!ticket) throw new SupportError('NOT_FOUND', 'Ticket not found', 404)
-    this.assertAccess(ticket, requester)
+    await this.assertAccess(ticket, requester)
     if (ticket.status === 'closed') throw new SupportError('TICKET_CLOSED', 'This ticket is closed. Open a new one if you still need help.', 400)
     if (ticket.messages.length >= MAX_MESSAGES) throw new SupportError('TICKET_MESSAGE_LIMIT', `This ticket has reached its ${MAX_MESSAGES}-message limit. Open a new one to continue.`, 400)
 
@@ -274,7 +287,7 @@ export class SupportService {
     if (!Types.ObjectId.isValid(ticketId)) throw new SupportError('INVALID_ID', 'Invalid ticket id', 400)
     const ticket = await SupportTicketModel.findById(ticketId)
     if (!ticket) throw new SupportError('NOT_FOUND', 'Ticket not found', 404)
-    this.assertAccess(ticket, requester)
+    await this.assertAccess(ticket, requester)
     ticket.status = status
     await ticket.save()
     return this.populate(ticketId)
@@ -289,7 +302,9 @@ export class SupportService {
       { id: 'jura',              label: 'JURA' },
       { id: 'digital-marketing', label: 'Digital Marketing' },
     ]
-    return Promise.all(programs.map(async prog => {
+    /* A department's sub_admin sees its own department's row only (plan.md §10). */
+    const shown = requester?.categoryScope ? programs.filter(p => p.id === requester.categoryScope) : programs
+    return Promise.all(shown.map(async prog => {
       const tickets = await SupportTicketModel.find({ program: prog.id, ...scoped }).lean()
       const total    = tickets.length
       const open     = tickets.filter(t => t.status === 'open').length
@@ -314,7 +329,7 @@ export class SupportService {
   }
 
   /* ── helpers ───────────────────────────────────────── */
-  private assertAccess(ticket: ISupportTicket, requester: Requester): void {
+  private async assertAccess(ticket: ISupportTicket, requester: Requester): Promise<void> {
     if (!isStaff(requester)) {
       // clients can only view their own tickets
       if (String(ticket.userId) !== requester.id) {
@@ -337,7 +352,31 @@ export class SupportService {
       if (ticket.program && ticket.program !== requester.categoryScope) {
         throw new SupportError('FORBIDDEN', 'You do not have access to this ticket', 403)
       }
+      /* A ticket with no programme follows its student (plan.md §10): open to
+         the sub_admin of a department the student is in, and to nobody else.
+         It used to be open to EVERY sub_admin of the academy, while being
+         listed for none of them. */
+      if (!ticket.program) {
+        const owner = await UserModel.findById(ticket.userId).select('category categories').lean()
+        const theirs = [...((owner?.categories as string[] | undefined) ?? []), owner?.category]
+        if (!theirs.includes(requester.categoryScope)) {
+          throw new SupportError('FORBIDDEN', 'You do not have access to this ticket', 403)
+        }
+      }
     }
+  }
+
+  /* Tickets of a department: filed under it, or filed under no programme by a
+     student who belongs to it (a student of two departments). One rule for the
+     list, the counts and assertAccess above. */
+  async #departmentClause(program: string, scoped: Record<string, unknown> | null): Promise<Record<string, unknown>> {
+    const orphanOwners = await SupportTicketModel.distinct('userId', { ...(scoped ?? {}), program: { $in: [null, ''] } })
+    const ours = orphanOwners.length
+      ? await UserModel.find({ _id: { $in: orphanOwners }, $or: [{ category: program }, { categories: program }] }).distinct('_id')
+      : []
+    return ours.length
+      ? { $or: [{ program }, { program: { $in: [null, ''] }, userId: { $in: ours } }] }
+      : { program }
   }
 
   private async populate(ticketId: string): Promise<ISupportTicket> {

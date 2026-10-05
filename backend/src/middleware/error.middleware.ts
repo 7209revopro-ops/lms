@@ -27,6 +27,7 @@ import { BookmarkError } from '@/services/bookmark.service.ts'
 import { LearningPathError } from '@/services/learningpath.service.ts'
 import { AIError } from '@/services/ai.service.ts'
 import { SupportError } from '@/services/support.service.ts'
+import { DepartmentError } from '@/utils/departmentScope.ts'
 import { TotpError } from '@/services/totp.service.ts'
 import { TranscriptError } from '@/services/transcript.service.ts'
 import { PortalError } from '@/services/portal.service.ts'
@@ -117,6 +118,10 @@ export function errorMiddleware(
     return
   }
   if (err instanceof SupportError) {
+    sendError(res, err.code, err.message, err.statusCode)
+    return
+  }
+  if (err instanceof DepartmentError) {
     sendError(res, err.code, err.message, err.statusCode)
     return
   }

@@ -39,10 +39,10 @@ const messageSchema = z.object({ body: z.string().trim().min(1).max(5000) })
 const statusSchema  = z.object({ status: z.enum(['open', 'pending', 'resolved', 'closed']) })
 
 /* ── Admin portal (cookie `lms_admin_at`) — declared before "/:id" ── */
-router.get('/admin/performance', authenticateAdmin, requireAnyAdmin, ctrl.performance)
+router.get('/admin/performance', authenticateAdmin, requireAnyAdmin, injectCategoryScope, ctrl.performance)
 router.get('/admin/stats',       authenticateAdmin, requireAnyAdmin, injectCategoryScope, ctrl.stats)
 router.get('/admin',             authenticateAdmin, requireAnyAdmin, requirePermission('support','list'), injectCategoryScope, ctrl.listAll)
-router.patch('/:id/status', authenticateAdmin, requireAnyAdmin, requirePermission('support','update'), validate(statusSchema), ctrl.setStatus)
+router.patch('/:id/status', authenticateAdmin, requireAnyAdmin, requirePermission('support','update'), injectCategoryScope, validate(statusSchema), ctrl.setStatus)
 
 /* ── Client portal (cookie `lms_at`) ── */
 router.post('/', authenticate, validate(createSchema), ctrl.create)
