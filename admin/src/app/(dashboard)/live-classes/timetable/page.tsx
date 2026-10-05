@@ -31,6 +31,7 @@ import Spinner from '@/components/ui/Spinner'
 import { IN_APP_RGB, MEET_RGB } from '@/lib/liveClassTheme'
 import { categoryScopeOf } from '@/lib/programScope'
 import { CLASS_LANGUAGES, withFlagAndNative } from '@/lib/languages'
+import { useBackdropClose } from '@/hooks/useBackdropClose'
 
 /* ── Helpers ─────────────────────────────────────────── */
 function sameDay(a: Date, b: Date): boolean {
@@ -67,6 +68,7 @@ function EventPopover({
   onClose: () => void
   onEdit:  (l: LiveClass) => void
 }) {
+  const backdrop = useBackdropClose(onClose)
   const router = useRouter()
   const colors = statusColor(live.status)
   const start  = new Date(live.scheduledStart)
@@ -81,7 +83,7 @@ function EventPopover({
       exit={{ opacity: 0 }}
       className="fixed inset-0 z-50 flex items-center justify-center p-4"
       style={{ background: 'rgba(0,0,0,0.55)' }}
-      onClick={onClose}
+      {...backdrop}
     >
       <motion.div
         initial={{ opacity: 0, scale: 0.96, y: 6 }}
@@ -206,6 +208,7 @@ function DayListModal({
   onPick:   (l: LiveClass) => void
   onClose:  () => void
 }) {
+  const backdrop = useBackdropClose(onClose)
   const sorted = [...sessions].sort((a, b) => new Date(a.scheduledStart).getTime() - new Date(b.scheduledStart).getTime())
 
   return (
@@ -215,7 +218,7 @@ function DayListModal({
       exit={{ opacity: 0 }}
       className="fixed inset-0 z-40 flex items-center justify-center p-4"
       style={{ background: 'rgba(0,0,0,0.55)' }}
-      onClick={onClose}
+      {...backdrop}
     >
       <motion.div
         initial={{ opacity: 0, scale: 0.96, y: 6 }}
@@ -280,6 +283,7 @@ function QuickCreateModal({
   onSuccess:        () => void
   categoryProgram?: string
 }) {
+  const backdrop = useBackdropClose(onClose)
   const { data: coursesData, isLoading: cLoading } = useCourses({ per_page: 200, ...(categoryProgram ? { program: categoryProgram } : {}) })
   const { data: instructorsData } = useUsers('instructor', { per_page: 200 })
   const createMutation = useCreateLiveClass()
@@ -350,7 +354,7 @@ function QuickCreateModal({
       exit={{ opacity: 0 }}
       className="fixed inset-0 z-50 flex items-center justify-center p-4"
       style={{ background: 'rgba(0,0,0,0.65)' }}
-      onClick={onClose}
+      {...backdrop}
     >
       <motion.div
         initial={{ opacity: 0, scale: 0.96, y: 10 }}

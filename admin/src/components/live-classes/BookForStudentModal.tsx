@@ -11,6 +11,7 @@ import Spinner from '@/components/ui/Spinner'
 import { useAdminBookForStudent } from '@/lib/api/adminBookings'
 import type { LiveClass } from '@/lib/api/liveClasses'
 import type { AdminUser } from '@/lib/api/users'
+import { useBackdropClose } from '@/hooks/useBackdropClose'
 
 interface Props {
   live: LiveClass
@@ -19,6 +20,7 @@ interface Props {
 }
 
 export function BookForStudentModal({ live, onClose, onSuccess }: Props) {
+  const backdrop = useBackdropClose(onClose)
   const [search, setSearch] = useState('')
   const [debouncedSearch, setDebouncedSearch] = useState('')
   const [selectedStudent, setSelectedStudent] = useState<AdminUser | null>(null)
@@ -99,7 +101,7 @@ export function BookForStudentModal({ live, onClose, onSuccess }: Props) {
   }) + (foreignZoneTag(live.organizationSlug) ? ' ' + foreignZoneTag(live.organizationSlug) : '')
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" onClick={onClose}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" {...backdrop}>
       <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
       <motion.div
         initial={{ opacity: 0, scale: 0.95, y: 8 }}

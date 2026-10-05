@@ -6,6 +6,7 @@ import Link from 'next/link'
 import { X, ChevronDown, Check, Eye, EyeOff, Camera, ShieldAlert } from 'lucide-react'
 import { useQueryClient } from '@tanstack/react-query'
 import Spinner from '@/components/ui/Spinner'
+import { useBackdropClose } from '@/hooks/useBackdropClose'
 import { api } from '@/lib/axios'
 import { useToast } from '@/store/ui.store'
 import { useOrgStore } from '@/store/org.store'
@@ -156,6 +157,7 @@ interface Props {
 }
 
 export function AddUserModal({ me, open, onClose }: Props) {
+  const backdrop = useBackdropClose(onClose)
   const roleOptions = creatableStaffRoles(me.role)
   /* Admin, not the first entry: the most privileged role in the list must be
      chosen on purpose, never landed on. */
@@ -275,7 +277,7 @@ export function AddUserModal({ me, open, onClose }: Props) {
         initial={{ opacity: 0 }} animate={{ opacity: 1 }}
         className="absolute inset-0"
         style={{ background: 'rgba(0,0,0,0.65)', backdropFilter: 'blur(4px)' }}
-        onClick={onClose}
+        {...backdrop}
       />
       <motion.div
         initial={{ opacity: 0, scale: 0.96, y: 8 }}

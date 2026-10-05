@@ -15,6 +15,7 @@ import { datetimeLocalToISO, isoToDatetimeLocal } from '@/lib/timezone'
 import { MediaUploadField } from '@/components/ui/MediaUploadField'
 import Spinner from '@/components/ui/Spinner'
 import { useToast } from '@/store/ui.store'
+import { useBackdropClose } from '@/hooks/useBackdropClose'
 
 /* ── Dark-modal select, same shape as AddUserModal's — kept local rather
    than extracted, matching how every dark-modal field in this app already
@@ -106,6 +107,7 @@ function fmtRange(startISO: string, endISO: string): string {
 
 /* ─── Create / edit form ─────────────────────────────── */
 function AnnouncementFormModal({ initial, onClose }: { initial?: AdminAnnouncement; onClose: () => void }) {
+  const backdrop = useBackdropClose(onClose)
   const { data: me } = useCurrentUser()
   const isSuper = me?.role === 'super_admin'
   const { data: orgs } = useOrganizations(isSuper)
@@ -178,7 +180,7 @@ function AnnouncementFormModal({ initial, onClose }: { initial?: AdminAnnounceme
   return (
     <div className="fixed inset-0 z-50 flex items-end justify-center p-4 sm:items-center"
       style={{ background: 'rgba(0,0,0,0.65)', backdropFilter: 'blur(4px)' }}
-      onClick={onClose}>
+      {...backdrop}>
       <motion.div initial={{ opacity: 0, scale: 0.96, y: 8 }} animate={{ opacity: 1, scale: 1, y: 0 }}
         transition={{ type: 'spring', stiffness: 400, damping: 30 }}
         onClick={e => e.stopPropagation()}

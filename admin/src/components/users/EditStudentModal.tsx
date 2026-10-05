@@ -22,6 +22,7 @@ import { Button, MotionButton } from '@/components/ui/button'
 import { useDocumentUrl } from '@/lib/api/documents'
 import { programLabel } from '@/lib/programs'
 import { AvatarImg } from '@/components/ui/AvatarImg'
+import { useBackdropClose } from '@/hooks/useBackdropClose'
 
 /* ── Custom dark course picker (avoids native white dropdown) ── */
 function CourseSelect({
@@ -225,6 +226,7 @@ function KycThumb({ userId, field, stored, label }: {
 }
 
 export function EditStudentModal({ user, onClose, onSuccess }: Props) {
+  const backdrop        = useBackdropClose(onClose)
   const update         = useUpdateUser()
   const updateAccess   = useUpdateEnrollmentAccess()
   const enrollStudent  = useEnrollStudent()
@@ -416,7 +418,7 @@ export function EditStudentModal({ user, onClose, onSuccess }: Props) {
         initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
         className="fixed inset-0 z-50 flex items-center justify-center p-4"
         style={{ background: 'rgba(0,0,0,0.65)' }}
-        onClick={onClose}
+        {...backdrop}
       >
         <motion.div
           initial={{ opacity: 0, scale: 0.96, y: 10 }}

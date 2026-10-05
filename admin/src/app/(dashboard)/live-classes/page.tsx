@@ -37,6 +37,7 @@ import { useToast } from '@/store/ui.store'
 import { shareOrCopyLink } from '@/lib/shareLink'
 import { categoryScopeOf } from '@/lib/programScope'
 import { AvatarImg } from '@/components/ui/AvatarImg'
+import { useBackdropClose } from '@/hooks/useBackdropClose'
 import {
   IN_APP_RGB, MEET_RGB, ROOM_RGB, BROADCAST_RGB,
   LIVEKIT_MAX_SEATS, OPEN_SEATS_DEFAULT,
@@ -1295,6 +1296,7 @@ function DaySessionsModal({
 
 /* ── Quick create modal ──────────────────────────────── */
 function QuickCreateModal({ onClose, onSuccess, categoryProgram }: { onClose: () => void; onSuccess: () => void; categoryProgram?: string }) {
+  const backdrop = useBackdropClose(onClose)
   const createMutation = useCreateLiveClass()
   const { data: coursesData,     isLoading: loadingCourses }     = useCourses({ per_page: 200, ...(categoryProgram ? { program: categoryProgram } : {}) })
   const { data: instructorsData, isLoading: loadingInstructors } = useUsers('instructor', { per_page: 200 })
@@ -1434,7 +1436,7 @@ function QuickCreateModal({ onClose, onSuccess, categoryProgram }: { onClose: ()
     <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
       className="fixed inset-0 z-50 flex items-center justify-center p-4"
       style={{ background: 'rgba(0,0,0,0.65)' }}
-      onClick={onClose}>
+      {...backdrop}>
       <motion.div
         initial={{ opacity: 0, scale: 0.96, y: 10 }}
         animate={{ opacity: 1, scale: 1, y: 0 }}

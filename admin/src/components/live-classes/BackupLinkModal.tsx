@@ -17,12 +17,14 @@ import {
 import Spinner from '@/components/ui/Spinner'
 import { useToast } from '@/store/ui.store'
 import { copyText } from '@/lib/shareLink'
+import { useBackdropClose } from '@/hooks/useBackdropClose'
 
 /* The Backup colour: urgent, and apart from the green Join and the blue actions. */
 export const BACKUP_RED = '#F43F5E'
 const muted = { color: 'rgba(255,255,255,0.45)' } as const
 
 export function BackupLinkModal({ live, onClose }: { live: LiveClass; onClose: () => void }) {
+  const backdrop = useBackdropClose(onClose)
   const toast = useToast()
   const { data: info, isLoading, error: infoError } = useBackupLinkInfo(live.id)
   const swap = useSwitchBackupLink()
@@ -64,7 +66,7 @@ export function BackupLinkModal({ live, onClose }: { live: LiveClass; onClose: (
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" onClick={onClose}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" {...backdrop}>
       <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
       <motion.div
         initial={{ opacity: 0, scale: 0.95, y: 8 }}

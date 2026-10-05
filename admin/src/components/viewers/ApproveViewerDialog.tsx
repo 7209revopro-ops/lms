@@ -5,6 +5,7 @@ import { motion } from 'framer-motion'
 import { CheckCircle2, Check, ChevronDown, X } from 'lucide-react'
 import type { AdminUser } from '@/lib/api/users'
 import Spinner from '@/components/ui/Spinner'
+import { useBackdropClose } from '@/hooks/useBackdropClose'
 
 type ProgramCategory = '4x-trading' | 'digital-marketing' | 'ai' | 'jura'
 
@@ -26,6 +27,7 @@ interface Props {
 }
 
 export function ApproveViewerDialog({ user, scopeCategory, loading, onClose, onConfirm }: Props) {
+  const backdrop = useBackdropClose(onClose)
   const [cats, setCats]   = useState<ProgramCategory[]>(scopeCategory ? [scopeCategory] : [])
   const [open, setOpen]   = useState(false)
 
@@ -37,7 +39,7 @@ export function ApproveViewerDialog({ user, scopeCategory, loading, onClose, onC
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
       <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
         className="absolute inset-0" style={{ background: 'rgba(0,0,0,0.65)', backdropFilter: 'blur(4px)' }}
-        onClick={onClose} />
+        {...backdrop} />
       <motion.div
         initial={{ opacity: 0, scale: 0.96, y: 8 }}
         animate={{ opacity: 1, scale: 1, y: 0 }}

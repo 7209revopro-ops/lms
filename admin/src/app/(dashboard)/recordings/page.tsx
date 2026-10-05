@@ -9,6 +9,7 @@ import {
 import Spinner from '@/components/ui/Spinner'
 import { useRecordings, useRecordingPlayback, type RecordingRow } from '@/lib/api/recordings'
 import { useCurrentUser } from '@/lib/api/user'
+import { useBackdropClose } from '@/hooks/useBackdropClose'
 
 /* ── Class recordings ────────────────────────────────────
    Every interactive class is recorded from the moment the first person walks
@@ -36,10 +37,11 @@ function fmtWhen(iso: string | null, fallback: string): string {
 
 /* ── Player overlay ─────────────────────────────────── */
 function PlayerModal({ row, url, onClose }: { row: RecordingRow; url: string; onClose: () => void }) {
+  const backdrop = useBackdropClose(onClose)
   return (
     <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
       className="fixed inset-0 z-50 flex items-center justify-center p-4"
-      style={{ background: 'rgba(0,0,0,0.72)' }} onClick={onClose}>
+      style={{ background: 'rgba(0,0,0,0.72)' }} {...backdrop}>
       <motion.div
         initial={{ opacity: 0, scale: 0.97, y: 10 }} animate={{ opacity: 1, scale: 1, y: 0 }}
         exit={{ opacity: 0, scale: 0.97, y: 8 }} onClick={e => e.stopPropagation()}

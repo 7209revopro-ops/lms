@@ -9,6 +9,7 @@ import { useToast } from '@/store/ui.store'
 import { api } from '@/lib/axios'
 import type { CurrentAdmin } from '@/lib/api/user'
 import { AvatarImg } from '@/components/ui/AvatarImg'
+import { useBackdropClose } from '@/hooks/useBackdropClose'
 import { MeetEmailField } from '@/components/users/MeetEmailField'
 
 /* ── Custom dark select ──────────────────────────── */
@@ -182,6 +183,7 @@ interface Props {
 }
 
 export function EditUserModal({ user, me, onClose, onSuccess }: Props) {
+  const backdrop = useBackdropClose(onClose)
   const [name,          setName]          = useState(user.name)
   const [email,         setEmail]         = useState(user.email)
   const [phone,         setPhone]         = useState(user.phone ?? '')
@@ -287,7 +289,7 @@ export function EditUserModal({ user, me, onClose, onSuccess }: Props) {
           initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
           className="absolute inset-0"
           style={{ background: 'rgba(0,0,0,0.65)', backdropFilter: 'blur(4px)' }}
-          onClick={onClose}
+          {...backdrop}
         />
         <motion.div
           initial={{ opacity: 0, scale: 0.96, y: 8 }}

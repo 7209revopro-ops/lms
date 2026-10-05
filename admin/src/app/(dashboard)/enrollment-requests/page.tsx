@@ -27,6 +27,7 @@ import { useDeleteUser } from '@/lib/api/users'
 import { useDocumentUrl, type ResolvedDocument } from '@/lib/api/documents'
 import Spinner from '@/components/ui/Spinner'
 import { programLabel } from '@/lib/programs'
+import { useBackdropClose } from '@/hooks/useBackdropClose'
 
 /* ── Constants ─────────────────────────────────────── */
 const CATEGORY_META: Record<ProgramCategory, { label: string; color: string; bg: string; Icon: React.ComponentType<{ size?: number }> }> = {
@@ -324,6 +325,7 @@ function ApproveDialog({ user, scopeCategory, onClose, onConfirm, loading }: {
   onConfirm:     (cats: ProgramCategory[]) => void
   loading:       boolean
 }) {
+  const backdrop = useBackdropClose(onClose)
   const [cats, setCats] = useState<ProgramCategory[]>(
     scopeCategory ? [scopeCategory] : (user.categories.length ? user.categories : []),
   )
@@ -339,7 +341,7 @@ function ApproveDialog({ user, scopeCategory, onClose, onConfirm, loading }: {
       <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
         className="absolute inset-0"
         style={{ background: 'rgba(0,0,0,0.65)', backdropFilter: 'blur(4px)' }}
-        onClick={onClose} />
+        {...backdrop} />
       <motion.div
         initial={{ opacity: 0, scale: 0.96, y: 8 }}
         animate={{ opacity: 1, scale: 1, y: 0 }}
@@ -398,6 +400,7 @@ function RejectDialog({ user, isRevoke, onClose, onConfirm, loading }: {
   onConfirm: (reason: string) => void
   loading:   boolean
 }) {
+  const backdrop = useBackdropClose(onClose)
   const [reason, setReason] = useState('')
 
   return (
@@ -405,7 +408,7 @@ function RejectDialog({ user, isRevoke, onClose, onConfirm, loading }: {
       <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
         className="absolute inset-0"
         style={{ background: 'rgba(0,0,0,0.65)', backdropFilter: 'blur(4px)' }}
-        onClick={onClose} />
+        {...backdrop} />
       <motion.div
         initial={{ opacity: 0, scale: 0.96, y: 8 }}
         animate={{ opacity: 1, scale: 1, y: 0 }}
@@ -741,6 +744,7 @@ function ApplicationDetailModal({ user, scopeCategory, onClose, onApprove, onRej
   approveLoading: boolean
   rejectLoading:  boolean
 }) {
+  const backdrop = useBackdropClose(onClose)
   const app = user.enrollmentApplication
   const isPending  = user.enrollmentStatus === 'pending'
   const isApproved = user.enrollmentStatus === 'approved'
@@ -773,7 +777,7 @@ function ApplicationDetailModal({ user, scopeCategory, onClose, onApprove, onRej
       <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
         className="absolute inset-0"
         style={{ background: 'rgba(0,0,0,0.75)', backdropFilter: 'blur(6px)' }}
-        onClick={onClose} />
+        {...backdrop} />
       <motion.div
         initial={{ opacity: 0, scale: 0.96, y: 12 }}
         animate={{ opacity: 1, scale: 1, y: 0 }}

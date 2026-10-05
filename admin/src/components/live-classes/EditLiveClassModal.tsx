@@ -20,6 +20,7 @@ import { GuestCohortsField, cohortsProblem } from '@/components/live-classes/Gue
 import type { GuestCohortInput } from '@/lib/api/liveClasses'
 import { useCurrentUser } from '@/lib/api/user'
 import { CLASS_LANGUAGES, withFlagAndNative } from '@/lib/languages'
+import { useBackdropClose } from '@/hooks/useBackdropClose'
 
 /* ── Helpers ──────────────────────────────────────────────
    No bare alias for isoToDatetimeLocal any more, on purpose. It and
@@ -36,6 +37,7 @@ interface Props {
 
 /* ── Component ──────────────────────────────────────────── */
 export function EditLiveClassModal({ live, onClose, onSuccess }: Props) {
+  const backdrop = useBackdropClose(onClose)
   const originalCourseId = (typeof live.course === 'object' ? live.course?.id : null) ?? live.courseId
 
   /* Course switcher */
@@ -245,7 +247,7 @@ export function EditLiveClassModal({ live, onClose, onSuccess }: Props) {
       exit={{ opacity: 0 }}
       className="fixed inset-0 z-50 flex items-center justify-center p-4"
       style={{ background: 'rgba(0,0,0,0.65)' }}
-      onClick={onClose}
+      {...backdrop}
     >
       <motion.div
         initial={{ opacity: 0, scale: 0.96, y: 10 }}

@@ -18,6 +18,7 @@ import { useOrganizations } from '@/lib/api/organizations'
 import { useCurrentUser } from '@/lib/api/user'
 import { useOrgStore } from '@/store/org.store'
 import { useCourseOutline } from '@/lib/api/outline'
+import { useBackdropClose } from '@/hooks/useBackdropClose'
 
 /* ── Types ──────────────────────────────────────────------ */
 interface CourseState {
@@ -320,6 +321,7 @@ export function AddStudentModal({ open, onClose }: Props) {
     setSuccess(false)
     onClose()
   }
+  const backdrop = useBackdropClose(handleClose)
 
   const selectedCourseIds = Object.keys(blockState)
 
@@ -330,7 +332,7 @@ export function AddStudentModal({ open, onClose }: Props) {
             initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
             transition={{ duration: 0.18 }}
             className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm"
-            onClick={handleClose}>
+            {...backdrop}>
 
           <motion.div key="add-student-modal"
             initial={{ opacity: 0, scale: 0.95, y: 16 }} animate={{ opacity: 1, scale: 1, y: 0 }}

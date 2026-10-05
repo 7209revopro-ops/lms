@@ -15,6 +15,7 @@ import { useUsers } from '@/lib/api/users'
 import { Button } from '@/components/ui/button'
 import { DarkSelect, DarkDateTimePicker } from './FormWidgets'
 import { CLASS_LANGUAGES, withFlag } from '@/lib/languages'
+import { useBackdropClose } from '@/hooks/useBackdropClose'
 
 interface Props {
   onClose:          () => void
@@ -30,6 +31,7 @@ interface Props {
 const LANGUAGE_OPTIONS = CLASS_LANGUAGES.map(l => ({ value: l.value, label: withFlag(l) }))
 
 export function CreateOfflineClassModal({ onClose, onSuccess, categoryProgram, prefillDate }: Props) {
+  const backdrop = useBackdropClose(onClose)
   const createMutation = useCreateLiveClass()
   const { data: coursesData,     isLoading: loadingCourses }     = useCourses({ per_page: 200, ...(categoryProgram ? { program: categoryProgram } : {}) })
   const { data: instructorsData, isLoading: loadingInstructors } = useUsers('instructor', { per_page: 200 })
@@ -94,7 +96,7 @@ export function CreateOfflineClassModal({ onClose, onSuccess, categoryProgram, p
       initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
       className="fixed inset-0 z-50 flex items-center justify-center p-4"
       style={{ background: 'rgba(0,0,0,0.65)' }}
-      onClick={onClose}
+      {...backdrop}
     >
       <motion.div
         initial={{ opacity: 0, scale: 0.96, y: 10 }}

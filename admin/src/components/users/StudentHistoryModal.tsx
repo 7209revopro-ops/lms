@@ -11,6 +11,7 @@ import { useStudentEnrollments, useStudentOrders } from '@/lib/api/users'
 import { useAdminBookings } from '@/lib/api/liveClasses'
 import Spinner from '@/components/ui/Spinner'
 import { AvatarImg } from '@/components/ui/AvatarImg'
+import { useBackdropClose } from '@/hooks/useBackdropClose'
 import { SalesCrmBadge } from '@/components/ui/SalesCrmBadge'
 
 const BOOKING_STATUS_STYLE: Record<string, { bg: string; color: string; label: string }> = {
@@ -68,6 +69,7 @@ interface Props {
 }
 
 export function StudentHistoryModal({ user, onClose }: Props) {
+  const backdrop = useBackdropClose(onClose)
   const { data: enrollments, isLoading: enrollmentsLoading } = useStudentEnrollments(user.id)
   const { data: orders,      isLoading: ordersLoading }      = useStudentOrders(user.id)
   const { data: bookingsRes, isLoading: bookingsLoading }     = useAdminBookings({ userId: user.id, per_page: 200 })
@@ -97,7 +99,7 @@ export function StudentHistoryModal({ user, onClose }: Props) {
         initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
         className="fixed inset-0 z-50 flex items-center justify-end"
         style={{ background: 'rgba(0,0,0,0.55)' }}
-        onClick={onClose}
+        {...backdrop}
       >
         <motion.div
           initial={{ x: '100%' }} animate={{ x: 0 }} exit={{ x: '100%' }}

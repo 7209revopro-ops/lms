@@ -22,6 +22,7 @@ import { MediaUploadField } from '@/components/ui/MediaUploadField'
 import { secondsToMinutes } from '@/lib/videoDuration'
 import { TranscriptEditor } from './TranscriptEditor'
 import Spinner from '@/components/ui/Spinner'
+import { useBackdropClose } from '@/hooks/useBackdropClose'
 
 /* ── Lesson type config ───────────────────────────────────────── */
 const TYPE_META: Record<AdminLesson['type'], {
@@ -109,6 +110,7 @@ function ModuleModal({
   const reset = () => { setTitle(initial?.title ?? ''); setDesc(initial?.description ?? '') }
 
   const handleClose = () => { onClose(); reset() }
+  const backdrop = useBackdropClose(handleClose)
 
   const handleSave = async () => {
     if (!title.trim()) return
@@ -123,7 +125,7 @@ function ModuleModal({
           initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
           className="fixed inset-0 z-50 flex items-center justify-center p-4"
           style={{ background: 'rgba(0,0,0,0.65)', backdropFilter: 'blur(6px)' }}
-          onClick={handleClose}>
+          {...backdrop}>
           <motion.div key="module-modal-panel"
             initial={{ opacity: 0, scale: 0.95, y: 16 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}

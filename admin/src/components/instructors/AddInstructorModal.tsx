@@ -18,6 +18,7 @@ import { useOrgStore } from '@/store/org.store'
 import Spinner from '@/components/ui/Spinner'
 import { api } from '@/lib/axios'
 import { meetEmailHint } from '@/components/users/MeetEmailField'
+import { useBackdropClose } from '@/hooks/useBackdropClose'
 
 /* ── Validation schema ──────────────────────────────── */
 const schema = z.object({
@@ -102,7 +103,6 @@ export function AddInstructorModal({ open, onClose }: AddInstructorModalProps) {
     defaultValues: { role: 'instructor' },
   })
 
-  const roleVal      = watch('role')
   /* A department's sub_admin creates instructors for its own department only
      — the server stamps it regardless (plan.md §10) — so the picker shows,
      and pre-selects, that one department instead of all four. */
@@ -112,6 +112,7 @@ export function AddInstructorModal({ open, onClose }: AddInstructorModalProps) {
   }, [myDepartment, setValue])
   const shownCats = isProgrammeScoped(me) ? CATS.filter(c => c.value === myDepartment) : CATS
 
+  const roleVal      = watch('role')
   const categoryVal  = watch('category') ?? ''
   const emailVal     = watch('email') ?? ''
   const meetEmailVal = watch('meetEmail') ?? ''
@@ -171,6 +172,7 @@ export function AddInstructorModal({ open, onClose }: AddInstructorModalProps) {
     setAvatarError(null)
     onClose()
   }
+  const backdrop = useBackdropClose(handleClose)
 
   const isSubmitting = isPending || uploading
 
@@ -185,7 +187,7 @@ export function AddInstructorModal({ open, onClose }: AddInstructorModalProps) {
           transition={{ duration: 0.18 }}
           className="fixed inset-0 z-50 flex items-center justify-center p-4"
           style={{ background: 'rgba(0,0,0,0.72)', backdropFilter: 'blur(4px)' }}
-          onClick={handleClose}
+          {...backdrop}
         >
           <motion.div
             key="add-instructor-modal"

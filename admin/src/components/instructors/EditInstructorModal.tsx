@@ -14,6 +14,7 @@ import { useToast } from '@/store/ui.store'
 import { Button, MotionButton } from '@/components/ui/button'
 import { AvatarImg } from '@/components/ui/AvatarImg'
 import { meetEmailHint } from '@/components/users/MeetEmailField'
+import { useBackdropClose } from '@/hooks/useBackdropClose'
 
 /* ── Category options ───────────────────────────────── */
 const CATS = [
@@ -30,6 +31,7 @@ interface Props {
 }
 
 export function EditInstructorModal({ user, onClose, onSuccess }: Props) {
+  const backdrop = useBackdropClose(onClose)
   const update = useUpdateUser()
   const toast  = useToast()
 
@@ -139,7 +141,7 @@ export function EditInstructorModal({ user, onClose, onSuccess }: Props) {
         initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
         className="fixed inset-0 z-50 flex items-center justify-center p-4"
         style={{ background: 'rgba(0,0,0,0.72)', backdropFilter: 'blur(4px)' }}
-        onClick={onClose}
+        {...backdrop}
       >
         <motion.div
           initial={{ opacity: 0, scale: 0.96, y: 10 }}

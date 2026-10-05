@@ -15,6 +15,7 @@ import { useToast } from '@/store/ui.store'
 import Spinner from '@/components/ui/Spinner'
 import { useDocumentUrl } from '@/lib/api/documents'
 import { programLabel } from '@/lib/programs'
+import { useBackdropClose } from '@/hooks/useBackdropClose'
 import { AvatarImg } from '@/components/ui/AvatarImg'
 
 function fmtDate(d?: string) {
@@ -95,6 +96,7 @@ function SignedDocCard({ label, userId, field, stored }: {
 
 /* ── Detail modal (read-only) ──────────────────────── */
 function ViewerDetailModal({ user, onClose }: { user: AdminUser; onClose: () => void }) {
+  const backdrop = useBackdropClose(onClose)
   const app = user.enrollmentApplication
   const isRejected = user.enrollmentStatus === 'rejected' || user.enrollmentStatus === 'cancelled'
 
@@ -129,7 +131,7 @@ function ViewerDetailModal({ user, onClose }: { user: AdminUser; onClose: () => 
       <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
         className="absolute inset-0"
         style={{ background: 'rgba(0,0,0,0.75)', backdropFilter: 'blur(6px)' }}
-        onClick={onClose} />
+        {...backdrop} />
       <motion.div
         initial={{ opacity: 0, scale: 0.96, y: 12 }}
         animate={{ opacity: 1, scale: 1, y: 0 }}
