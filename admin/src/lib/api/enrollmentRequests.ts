@@ -99,8 +99,51 @@ export function useEnrollmentRequests(
    customer with their email; this lets the Approve dialog say so before anybody
    clicks. Only a preview — approving asks finance again. */
 export interface FinanceCheck {
-  exists:        boolean
+  /** False while the finance check is switched off: finance was not asked
+      (`exists` is null) and approving won't ask it. Absent from an older
+      server, which always asks. */
+  enforced?:     boolean
+  exists:        boolean | null
   organizations: string[]
+}
+
+/* The finance check's switch — whether approving asks finance at all. Off by
+   default; any admin sees it, only a super admin flips it. Its own key, not
+   under 'enrollment-requests', so approving (which invalidates that) never
+   refetches it. */
+export interface FinanceCheckSetting {
+  enabled:       boolean
+  updatedAt:     string | null
+  updatedByName: string | null
+}
+
+const FINANCE_SWITCH_KEY = ['admin', 'settings', 'finance-check'] as const
+
+export function useFinanceCheckSetting() {
+  return useQuery({
+    queryKey: FINANCE_SWITCH_KEY,
+    queryFn: async () => {
+      const res = await api.get<{ success: true; data: FinanceCheckSetting }>('/admin/settings/finance-check')
+      return res.data.data
+    },
+    retry:     false,
+    staleTime: 20_000,
+  })
+}
+
+export function useSetFinanceCheck() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async (enabled: boolean) => {
+      const res = await api.patch<{ success: true; data: FinanceCheckSetting }>('/admin/settings/finance-check', { enabled })
+      return res.data.data
+    },
+    onSuccess: (data) => {
+      // Straight into the cache, so the switch doesn't flick back while refetching.
+      qc.setQueryData(FINANCE_SWITCH_KEY, data)
+      qc.invalidateQueries({ queryKey: ['admin', 'enrollment-requests', 'finance-check'] })
+    },
+  })
 }
 
 export function useFinanceCheck(userId: string | null | undefined) {

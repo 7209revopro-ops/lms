@@ -1,7 +1,8 @@
 /* ─────────────────────────────────────────────────────
    System settings — operator switches, read hot, written cold
    ─────────────────────────────────────────────────────
-   Today there is one: whether the student two-device limit is enforced.
+   Whether the student two-device limit is enforced, and whether finance must
+   know a student before an admin approves them by hand.
 
    The limit is checked on every student sign-in and on every token refresh,
    so reading it from Mongo each time would put a query on the hottest path in
@@ -19,6 +20,7 @@
 import { logger } from '@/utils/logger.ts'
 
 export const SETTING_DEVICE_LIMIT = 'deviceLimit.enabled'
+export const SETTING_FINANCE_CHECK = 'financeCheck.enabled'
 
 /* Short enough that a toggle is live across instances in seconds.
 
@@ -94,6 +96,52 @@ export async function deviceLimitMeta(): Promise<{
   const { SystemSettingModel, UserModel } = await import('@/models/schema.ts')
   const row = await SystemSettingModel.findOne({ key: SETTING_DEVICE_LIMIT }).lean() as any
   const enabled = row?.value === false ? false : true
+  if (!row?.updatedBy) return { enabled, updatedAt: row?.updatedAt ?? null, updatedByName: null }
+
+  const who = await UserModel.findById(row.updatedBy).select('name email').lean() as any
+  return {
+    enabled,
+    updatedAt: row.updatedAt ?? null,
+    updatedByName: who?.name ?? who?.email ?? null,
+  }
+}
+
+/**
+ * Must finance know a student before an admin approves them by hand?
+ * (services/financeCustomerCheck.service.ts)
+ *
+ * Defaults to FALSE, the opposite of the device limit: off until a super admin
+ * turns it on from Enrollment Requests. An absent row, an unreadable database
+ * or a value of the wrong shape all mean off — nothing short of somebody
+ * deliberately storing `true` makes approving ask finance.
+ */
+export async function isFinanceCheckEnabled(): Promise<boolean> {
+  return (await readSetting(SETTING_FINANCE_CHECK)) === true
+}
+
+/** Flip the switch. Returns the value now stored. */
+export async function setFinanceCheckEnabled(
+  enabled: boolean,
+  updatedBy?: string,
+): Promise<boolean> {
+  const { SystemSettingModel } = await import('@/models/schema.ts')
+  await SystemSettingModel.updateOne(
+    { key: SETTING_FINANCE_CHECK },
+    { $set: { value: enabled, ...(updatedBy ? { updatedBy } : {}) } },
+    { upsert: true },
+  )
+  invalidateSetting(SETTING_FINANCE_CHECK)
+  logger.warn({ enabled, updatedBy }, '[Settings] finance check on approval toggled')
+  return enabled
+}
+
+/** Who last changed it and when — shown next to the switch on Enrollment Requests. */
+export async function financeCheckMeta(): Promise<{
+  enabled: boolean; updatedAt: Date | null; updatedByName: string | null
+}> {
+  const { SystemSettingModel, UserModel } = await import('@/models/schema.ts')
+  const row = await SystemSettingModel.findOne({ key: SETTING_FINANCE_CHECK }).lean() as any
+  const enabled = row?.value === true
   if (!row?.updatedBy) return { enabled, updatedAt: row?.updatedAt ?? null, updatedByName: null }
 
   const who = await UserModel.findById(row.updatedBy).select('name email').lean() as any

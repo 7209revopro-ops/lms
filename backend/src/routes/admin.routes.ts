@@ -33,7 +33,7 @@ import { academyClock } from '@/utils/academyClock.ts'
 import { documentRef } from '@/utils/documentRef.ts'
 import { UserService } from '@/services/user.service.ts'
 import { adminListDevices, adminApproveDevice, adminRevokeDevice } from '@/services/device.service.ts'
-import { deviceLimitMeta, setDeviceLimitEnabled } from '@/services/settings.service.ts'
+import { deviceLimitMeta, setDeviceLimitEnabled, financeCheckMeta, setFinanceCheckEnabled, isFinanceCheckEnabled } from '@/services/settings.service.ts'
 import { sendSuccess, buildPaginationMeta, parsePagination } from '@/utils/response.ts'
 import { toSafeUser } from '@/models/types.ts'
 import { audit } from '@/middleware/audit.middleware.ts'
@@ -415,7 +415,7 @@ router.post ('/users', requirePermission('users','create'),          validate(us
 
     /* A student made here is approved the moment they exist (approvedBy is set
        below), so it is the same decision as Approve and the same rule holds:
-       finance must know them. */
+       finance must know them — while the finance check is on. */
     if (targetRole === 'student') {
       const { financeRefusal } = await import('@/services/financeCustomerCheck.service.ts')
       const refusal = await financeRefusal(String((req.body as { email?: string }).email ?? ''))
@@ -839,8 +839,35 @@ router.get ('/enrollment-requests',
   validate(enrollmentRequestQuerySchema, 'query'),
   ctrl.listEnrollmentRequests,
 )
+/* ─── The finance check's switch ─────────────────────────────────
+   Whether approving by hand asks finance first. Off by default. Read by any
+   admin, so Enrollment Requests can say whether it is on; flipped only by a
+   super admin — one switch for every academy, like the device limit. */
+router.get('/settings/finance-check', requireAnyAdmin, async (_req: Request, res: Response, next: NextFunction) => {
+  try {
+    sendSuccess(res, await financeCheckMeta())
+  } catch (err) { next(err) }
+})
+
+const financeCheckSwitchSchema = z.object({ enabled: z.boolean() })
+
+router.patch('/settings/finance-check',
+  requireRole('super_admin'),
+  validate(financeCheckSwitchSchema),
+  audit('settings.finance-check', 'SystemSetting', undefined, r => ({ enabled: r.body.enabled })),
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const enabled = await setFinanceCheckEnabled(Boolean(req.body.enabled), req.user!.id)
+      sendSuccess(res, await financeCheckMeta(),
+        enabled
+          ? 'Finance check is on — a student is approved only when finance knows their email'
+          : 'Finance check is off — approving no longer asks finance')
+    } catch (err) { next(err) }
+  })
+
 /* What finance says about a student, for the Approve dialog to show before
-   anybody clicks. Only a preview: approving asks finance again. */
+   anybody clicks. Only a preview: approving asks finance again. While the
+   check is off finance is not asked: `enforced: false`, and no answer. */
 router.get('/enrollment-requests/:userId/finance-check', requireAnyAdmin, requireSameOrgUser('userId'), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { UserModel } = await import('@/models/schema.ts')
@@ -851,9 +878,12 @@ router.get('/enrollment-requests/:userId/finance-check', requireAnyAdmin, requir
     }
     const user = await UserModel.findById(userId).select('email').lean()
     if (!user) { res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'User not found' } }); return }
+    if (!(await isFinanceCheckEnabled())) {
+      sendSuccess(res, { enforced: false, exists: null, organizations: [] }); return
+    }
     const { checkFinanceCustomer, financeCheckFailure } = await import('@/services/financeCustomerCheck.service.ts')
     try {
-      sendSuccess(res, await checkFinanceCustomer(String(user.email ?? '')))
+      sendSuccess(res, { enforced: true, ...await checkFinanceCustomer(String(user.email ?? '')) })
     } catch (err) {
       const failure = financeCheckFailure(err)
       res.status(failure.status).json({ success: false, error: { code: failure.code, message: failure.message } })

@@ -723,7 +723,8 @@ export class AdminController {
 
       /* Let in by hand only somebody finance knows — their sale reached finance.
          Asked every time, a programme added to an approved student included;
-         when finance cannot be asked, nobody is approved. */
+         when finance cannot be asked, nobody is approved. All while the finance
+         check is switched on; off (the default), nothing is asked. */
       const { financeRefusal } = await import('@/services/financeCustomerCheck.service.ts')
       const refusal = await financeRefusal(String(existing.email ?? ''))
       if (refusal) {

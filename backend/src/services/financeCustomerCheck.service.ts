@@ -13,8 +13,14 @@
    not one is an error, never a yes: the approval is refused and says why.
    Where the money is already known — finance's own enrolments, a website
    purchase, the AI-academy site — nothing here is asked.
+
+   All of it only while the finance check is switched on (a super admin's
+   switch on Enrollment Requests, `financeCheck.enabled` in settings.service.ts).
+   It is off by default: then finance is not asked and admins approve as they
+   did before the check.
 ───────────────────────────────────────────────────── */
 import { logger } from '@/utils/logger.ts'
+import { isFinanceCheckEnabled } from '@/services/settings.service.ts'
 
 const TIMEOUT_MS = 8_000
 
@@ -77,8 +83,9 @@ export function financeCheckFailure(err: unknown): { status: number; code: strin
   }
 }
 
-/** Why this student may not be let in by hand — or null, when finance knows them. Never throws. */
+/** Why this student may not be let in by hand — or null, when finance knows them or the check is off. Never throws. */
 export async function financeRefusal(email: string): Promise<{ status: number; code: string; message: string } | null> {
+  if (!(await isFinanceCheckEnabled())) return null
   const address = email.trim().toLowerCase()
   try {
     if ((await checkFinanceCustomer(address)).exists) return null

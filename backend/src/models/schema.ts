@@ -2495,8 +2495,10 @@ export type AuditAction =
   | 'liveclass.import' | 'liveclass.import.undo' | 'liveclass.backup-link'
   | 'exam.upsert'      | 'exam.delete'      | 'exam.grade'       | 'exam.reset'
   /* Operator switches. `settings.device-limit` disables a security control
-     for every academy at once, so it is audited like an impersonation. */
+     for every academy at once, so it is audited like an impersonation; so does
+     `settings.finance-check`, whether approving asks finance first. */
   | 'settings.device-limit'
+  | 'settings.finance-check'
 
 export interface IAuditLog extends Document {
   id:         string

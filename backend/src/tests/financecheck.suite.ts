@@ -5,6 +5,10 @@
 
    Over HTTP, against a real database and the real admin routes, with a
    stand-in finance this suite controls:
+     0. the check is off by default: approving, adding a programme and
+        creating a student never ask finance, and the preview says so;
+     S. the switch: any admin reads it, only a super admin flips it, and the
+        flip is audited. A–F run with it on:
      A. approving a student finance knows: approved, and finance was asked
         about exactly their email, with the shared secret;
      B. one finance does not know: refused, saying so, and left as they were;
@@ -14,7 +18,9 @@
      E. a student created already approved under Users: the same rule — and
         an instructor is not asked about;
      F. the Approve dialog's preview: what finance said, a 503 when it could
-        not be asked, and nothing at all without an admin session.
+        not be asked, and nothing at all without an admin session;
+     G. turned off again: the student finance turned down is approved, and
+        finance is not asked.
    Run: bun --no-env-file src/tests/financecheck.suite.ts
    (FINANCECHECK_DATABASE_URL to point it at a throwaway mongod.)
 ───────────────────────────────────────────────────────────── */
@@ -81,7 +87,7 @@ financeIs(FINANCE_URL)
 /* ── The LMS ────────────────────────────────────────────────── */
 const mongoose = (await import('mongoose')).default
 const app = (await import('@/app.ts')).default
-const { UserModel, OrganizationModel } = await import('@/models/schema.ts')
+const { UserModel, OrganizationModel, AuditLogModel } = await import('@/models/schema.ts')
 const { hashPassword } = await import('@/utils/hash.ts')
 await mongoose.connect(process.env.DATABASE_URL!)
 const dbName = mongoose.connection.db!.databaseName
@@ -117,10 +123,17 @@ const known     = await mk('known@t.local',     'student', { enrollmentStatus: '
 const unknown   = await mk('unknown@t.local',   'student', { enrollmentStatus: 'pending', signupType: 'full' })
 const approved  = await mk('approved.known@t.local', 'student', { enrollmentStatus: 'approved', categories: ['4x-trading'], category: '4x-trading' })
 const legacy    = await mk('legacy@t.local',    'student', { enrollmentStatus: 'approved', categories: ['4x-trading'], category: '4x-trading' })
+const offUnknown = await mk('off.unknown@t.local', 'student', { enrollmentStatus: 'pending', signupType: 'full' })
+const offLegacy  = await mk('off.legacy@t.local',  'student', { enrollmentStatus: 'approved', categories: ['4x-trading'], category: '4x-trading' })
+await mk('academy.admin@t.local', 'admin')
 
 const boss: Jar = new Map()
 const login = await call('POST', '/admin/auth/login', { jar: boss, body: { email: 'boss@t.local', password: PW } })
 if (login.status !== 200) { console.error(`The admin could not sign in: ${why(login)}`); process.exit(1) }
+const academyAdmin: Jar = new Map()
+const login2 = await call('POST', '/admin/auth/login', { jar: academyAdmin, body: { email: 'academy.admin@t.local', password: PW } })
+if (login2.status !== 200) { console.error(`The academy admin could not sign in: ${why(login2)}`); process.exit(1) }
+const flipSwitch = (enabled: unknown, jar: Jar = boss) => call('PATCH', '/admin/settings/finance-check', { jar, body: { enabled } })
 
 const approve = (id: unknown, categories: string[]) =>
   call('PATCH', `/admin/enrollment-requests/${String(id)}/approve`, { jar: boss, body: { categories } })
@@ -130,6 +143,43 @@ const stateOf = async (id: unknown) => {
 }
 
 try {
+  step('0. Off — the default: approving does not ask finance')
+  {
+    const s = await call('GET', '/admin/settings/finance-check', { jar: boss })
+    check('the switch reads off, changed by nobody', s.status === 200 && s.body?.data?.enabled === false && s.body?.data?.updatedByName === null, why(s) + JSON.stringify(s.body?.data))
+    financeIs(undefined)   // not even set up on this server
+    asked.length = 0
+    const r = await approve(offUnknown._id, ['4x-trading'])
+    check('a student finance does not know: approved', r.status === 200 && (await stateOf(offUnknown._id)) === 'approved:4x-trading', `${why(r)} ${await stateOf(offUnknown._id)}`)
+    const p = await approve(offLegacy._id, ['ai'])
+    check('a programme added to one finance does not know: added', p.status === 200 && (await stateOf(offLegacy._id)) === 'approved:4x-trading,ai', `${why(p)} ${await stateOf(offLegacy._id)}`)
+    const made = await call('POST', '/admin/users', { jar: boss, body: { name: 'off made', email: 'off.made@t.local', password: PW, role: 'student', organizationId: String(dubai._id) } })
+    check('a student created under Users: created', made.status === 201, why(made))
+    const preview = await call('GET', `/admin/enrollment-requests/${String(unknown._id)}/finance-check`, { jar: boss })
+    check('the Approve dialog\'s preview: not enforced, and no answer', preview.status === 200 && preview.body?.data?.enforced === false && preview.body?.data?.exists === null, why(preview) + JSON.stringify(preview.body?.data))
+    check('...and finance was never asked', asked.length === 0, `asked=${asked.length}`)
+    financeIs(FINANCE_URL)
+  }
+
+  step('S. The switch')
+  {
+    const read = await call('GET', '/admin/settings/finance-check', { jar: academyAdmin })
+    check('an academy admin can read it', read.status === 200 && read.body?.data?.enabled === false, why(read))
+    const denied = await flipSwitch(true, academyAdmin)
+    check('...but not flip it', denied.status === 403, why(denied))
+    const anon = await call('PATCH', '/admin/settings/finance-check', { body: { enabled: true } })
+    check('no admin session: nothing', anon.status === 401, why(anon))
+    const bad = await flipSwitch('yes')
+    check('not a yes or a no: refused', bad.status === 422 && bad.body?.error?.code === 'VALIDATION_ERROR', why(bad))
+    const still = await call('GET', '/admin/settings/finance-check', { jar: boss })
+    check('...all of which left it off', still.body?.data?.enabled === false, JSON.stringify(still.body?.data))
+    const on = await flipSwitch(true)
+    check('a super admin turns it on, and is named as who did', on.status === 200 && on.body?.data?.enabled === true && on.body?.data?.updatedByName === 'boss', why(on) + JSON.stringify(on.body?.data))
+    await new Promise(r => setTimeout(r, 400))
+    const rows = await AuditLogModel.find({ action: 'settings.finance-check' }).lean() as { meta?: { enabled?: unknown } }[]
+    check('...in the audit log', rows.length === 1 && rows[0]!.meta?.enabled === true, JSON.stringify(rows.map(r => r.meta)))
+  }
+
   step('A. A student finance knows')
   {
     asked.length = 0
@@ -196,7 +246,7 @@ try {
   step('F. The Approve dialog\'s preview')
   {
     const yes = await call('GET', `/admin/enrollment-requests/${String(known._id)}/finance-check`, { jar: boss })
-    check('in finance, and where', yes.status === 200 && yes.body?.data?.exists === true && JSON.stringify(yes.body?.data?.organizations) === JSON.stringify(['Delta HQ']), why(yes) + JSON.stringify(yes.body?.data))
+    check('in finance, and where', yes.status === 200 && yes.body?.data?.enforced === true && yes.body?.data?.exists === true && JSON.stringify(yes.body?.data?.organizations) === JSON.stringify(['Delta HQ']), why(yes) + JSON.stringify(yes.body?.data))
     const no = await call('GET', `/admin/enrollment-requests/${String(unknown._id)}/finance-check`, { jar: boss })
     check('not in finance', no.status === 200 && no.body?.data?.exists === false, why(no))
     financeIs(FINANCE_URL, 'the-wrong-secret')
@@ -207,6 +257,16 @@ try {
     check('no admin session: nothing', anon.status === 401, why(anon))
     const nobody = await call('GET', `/admin/enrollment-requests/${String(new mongoose.Types.ObjectId())}/finance-check`, { jar: boss })
     check('nobody with that id: 404', nobody.status === 404, why(nobody))
+  }
+
+  step('G. Turned off again')
+  {
+    const off = await flipSwitch(false)
+    check('a super admin turns it off', off.status === 200 && off.body?.data?.enabled === false, why(off))
+    asked.length = 0
+    const r = await approve(unknown._id, ['4x-trading'])
+    check('the student finance turned down in B: approved now', r.status === 200 && (await stateOf(unknown._id)) === 'approved:4x-trading', `${why(r)} ${await stateOf(unknown._id)}`)
+    check('...without asking finance', asked.length === 0, `asked=${asked.length}`)
   }
 } finally {
   await mongoose.connection.dropDatabase().catch(() => {})

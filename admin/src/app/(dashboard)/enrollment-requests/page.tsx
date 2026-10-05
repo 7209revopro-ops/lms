@@ -16,7 +16,7 @@ import {
 } from '@/lib/api/expressMembers'
 import {
   useEnrollmentRequests, useApproveEnrollment, useRejectEnrollment, useRemoveEnrollmentCategory,
-  useRevokeToViewer, useToggleBlock, useFinanceCheck,
+  useRevokeToViewer, useToggleBlock, useFinanceCheck, useFinanceCheckSetting, useSetFinanceCheck,
   type EnrollmentRequest, type EnrollmentRequestStatus, type ProgramCategory,
 } from '@/lib/api/enrollmentRequests'
 import { useCurrentUser } from '@/lib/api/user'
@@ -218,6 +218,8 @@ function CategorySelect({ value, onChange, disabled }: {
    Shown before anybody clicks; when finance cannot be asked, Approve stays on
    and the server — which asks again — decides. */
 function FinanceStatus({ email, check }: { email: string; check: ReturnType<typeof useFinanceCheck> }) {
+  // The check is switched off: finance wasn't asked, and approving won't ask it.
+  if (check.data?.enforced === false) return null
   const box = (color: string, bg: string, Icon: React.ComponentType<{ size?: number; style?: React.CSSProperties }>, children: React.ReactNode) => (
     <div className="flex items-start gap-2 rounded-xl px-3 py-2.5 text-xs" style={{ background: bg, border: `1px solid ${color}33`, color }}>
       <Icon size={14} style={{ marginTop: 1, flexShrink: 0 }} />
@@ -249,6 +251,71 @@ function FinanceStatus({ email, check }: { email: string; check: ReturnType<type
   </>)
 }
 
+/* ── The finance check's switch ─────────────────────── */
+/* Whether approving asks finance first. One switch for every academy: shown to
+   every admin so they know whether approvals are checked, flipped only by a
+   super admin (the server enforces the same). Hidden on a server that doesn't
+   have the switch yet — that one always asks finance. */
+function FinanceCheckSwitch() {
+  const { data: me } = useCurrentUser()
+  const { data: state } = useFinanceCheckSetting()
+  const setCheck = useSetFinanceCheck()
+  const toast    = useToast()
+
+  if (!state) return null
+  const isSuper = me?.role === 'super_admin'
+  const on      = state.enabled
+
+  async function flip() {
+    if (!isSuper || setCheck.isPending) return
+    try {
+      const next = await setCheck.mutateAsync(!on)
+      toast.success(next.enabled
+        ? 'Finance check is on — a student is approved only when finance knows their email'
+        : 'Finance check is off — approving no longer asks finance')
+    } catch (err: unknown) {
+      const msg = (err as { response?: { data?: { error?: { message?: string } } } })?.response?.data?.error?.message
+      toast.error(msg ?? 'Could not change the setting.')
+    }
+  }
+
+  return (
+    <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl px-4 py-3"
+      style={on
+        ? { background: 'rgba(74,222,128,0.06)', border: '1px solid rgba(74,222,128,0.20)' }
+        : { background: 'rgba(251,191,36,0.06)', border: '1px solid rgba(251,191,36,0.22)' }}>
+      <div className="flex min-w-0 items-start gap-2.5">
+        {on
+          ? <ShieldCheck size={15} style={{ color: '#4ADE80', marginTop: 2, flexShrink: 0 }} />
+          : <ShieldOff   size={15} style={{ color: '#FBBF24', marginTop: 2, flexShrink: 0 }} />}
+        <div className="min-w-0">
+          <p className="text-sm font-semibold text-white">Finance check is {on ? 'on' : 'off'}</p>
+          <p className="mt-0.5 text-xs" style={{ color: 'rgba(255,255,255,0.45)' }}>
+            {on
+              ? 'A student is approved only when finance has a customer with their email.'
+              : 'Approving doesn’t ask finance — students are approved without it.'}
+            {state.updatedByName && <> · Changed by {state.updatedByName}
+              {state.updatedAt && ` on ${new Date(state.updatedAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`}</>}
+            {!isSuper && <> · Only a super admin can change this.</>}
+          </p>
+        </div>
+      </div>
+      <button
+        type="button"
+        onClick={flip}
+        disabled={!isSuper || setCheck.isPending}
+        title={isSuper ? (on ? 'Turn the finance check off' : 'Turn the finance check on') : 'Only a super admin can change this'}
+        aria-pressed={on}
+        aria-label="Finance check on approval"
+        className="relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors disabled:cursor-not-allowed disabled:opacity-50"
+        style={{ background: on ? '#22c55e' : 'rgba(255,255,255,0.18)' }}>
+        <span className="inline-block h-[18px] w-[18px] rounded-full bg-white shadow transition-transform"
+          style={{ transform: on ? 'translateX(23px)' : 'translateX(3px)' }} />
+      </button>
+    </div>
+  )
+}
+
 /* ── Approve dialog ─────────────────────────────────── */
 function ApproveDialog({ user, scopeCategory, onClose, onConfirm, loading }: {
   user:          EnrollmentRequest
@@ -260,8 +327,12 @@ function ApproveDialog({ user, scopeCategory, onClose, onConfirm, loading }: {
   const [cats, setCats] = useState<ProgramCategory[]>(
     scopeCategory ? [scopeCategory] : (user.categories.length ? user.categories : []),
   )
-  const finance = useFinanceCheck(user.id)
-  const notInFinance = finance.data?.exists === false
+  /* With the finance check off, finance isn't asked: no preview, and nothing
+     greys out Approve. An older server has no switch (its read fails), and
+     always asks — so then the preview runs as before. */
+  const financeOff = useFinanceCheckSetting().data?.enabled === false
+  const finance = useFinanceCheck(financeOff ? null : user.id)
+  const notInFinance = !financeOff && finance.data?.exists === false
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
@@ -283,7 +354,7 @@ function ApproveDialog({ user, scopeCategory, onClose, onConfirm, loading }: {
           <p className="text-xs" style={{ color: 'rgba(255,255,255,0.4)' }}>{user.email}</p>
         </div>
         <div className="p-5 space-y-4">
-          <FinanceStatus email={user.email} check={finance} />
+          {!financeOff && <FinanceStatus email={user.email} check={finance} />}
           <div>
             <label className="mb-1.5 block text-xs font-medium" style={{ color: 'rgba(255,255,255,0.45)' }}>
               Assign program category {scopeCategory ? '(auto-set for your role)' : '(select one or more)'}
@@ -1157,6 +1228,8 @@ export default function EnrollmentRequestsPage() {
           </button>
         </div>
       </div>
+
+      {accountType === 'full' && <FinanceCheckSwitch />}
 
       {/* ── Dashboard stat cards ── */}
       {accountType === 'full' && (
