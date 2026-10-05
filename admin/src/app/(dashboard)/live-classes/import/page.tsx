@@ -12,6 +12,8 @@ import {
   Video, Monitor, Building2, RotateCcw, Undo2, Loader2, CalendarDays, Users,
 } from 'lucide-react'
 import { useCourses } from '@/lib/api/courses'
+import { useOrganizations } from '@/lib/api/organizations'
+import { useCurrentUser } from '@/lib/api/user'
 import { CLASS_LANGUAGES } from '@/lib/languages'
 import {
   usePreviewImport, useStartImport, useImportJob, useImportJobs, useResumeImport, useUndoImport, importKeys,
@@ -97,6 +99,19 @@ const fmtKey = (k: string | null) => k
 export default function ImportTimetablePage() {
   const toast = useToast()
   const { data: courses } = useCourses({ per_page: 100 })
+  /* Each academy can have a course of the same name ("MARKET BREAK-OUT TRADING
+     PROGRAM" in Dubai and in Bangalore), and picking the wrong one imports into
+     the wrong academy at its hours. A super admin's list is every academy's, or
+     whichever one the switcher is on — so for them each course names its
+     academy, including when the switcher has quietly been left on the other. */
+  const { data: me } = useCurrentUser()
+  const isSuper = me?.role === 'super_admin'
+  const { data: orgs = [] } = useOrganizations(isSuper)
+  const academyOf = new Map(orgs.map(o => [o.id, o.name]))
+  const courseOption = (c: { title: string; organizationId?: string }) => {
+    const academy = isSuper && c.organizationId ? academyOf.get(c.organizationId) : undefined
+    return academy ? `${c.title} · ${academy}` : c.title
+  }
   const preview = usePreviewImport()
   const start   = useStartImport()
 
@@ -240,7 +255,7 @@ export default function ImportTimetablePage() {
                   <select className={input} style={inputS} value={settings.courseId}
                     onChange={e => setSettings(s => ({ ...s, courseId: e.target.value }))}>
                     <option value="" style={{ background: '#0D0F1A' }}>Select a course…</option>
-                    {(courses?.docs ?? []).map(c => <option key={c.id} value={c.id} style={{ background: '#0D0F1A' }}>{c.title}</option>)}
+                    {(courses?.docs ?? []).map(c => <option key={c.id} value={c.id} style={{ background: '#0D0F1A' }}>{courseOption(c)}</option>)}
                   </select>
                   <p className="mt-1 text-[11px]" style={muted}>
                     Each row goes into the module its session code names (“MBT 4”, “IM 1”) or its module column gives. A module this course doesn&apos;t have is looked for in the academy&apos;s other courses of the same programme, and the row goes there.
