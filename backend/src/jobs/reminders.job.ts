@@ -35,7 +35,7 @@ import {
 } from '@/services/email.service.ts'
 import {
   sendClassReminderTomorrowWhatsApp, sendClassStartingSoonWhatsApp,
-  sendClassStartsIn5MinWhatsApp, sendClassHasStartedWhatsApp,
+  sendClassStartsIn5MinWhatsApp, sendClassHasStartedWhatsApp, sendMentorClassIn10MinWhatsApp,
   sendInstructorReviewRequestWhatsApp,
 } from '@/services/whatsapp.service.ts'
 import { wantsStaffEmail } from '@/utils/emailPrefs.ts'
@@ -596,6 +596,59 @@ export async function runInstructor15MinReminders(): Promise<void> {
   }
 }
 
+/* ── Mentor 10-min WhatsApp ────────────────────────────────────────────────
+   About ten minutes before an ONLINE class, its mentor gets
+   mentor_class_in_10_min — the class, its time, how many students are booked
+   — with a Start button to {ADMIN_URL}/live-classes/<id>/join, which records
+   them as joined and opens the room.
+
+   Every minute against a three-minute window ([7, 10] minutes ahead): close
+   enough that "starts in 10 minutes" is true, wide enough that a late tick
+   still catches every start time. mentorWhatsApp10MinSent makes it once per
+   class — `$ne: true`, so classes made before the field existed count too.
+   A mentor with no phone on file is skipped and the class marked done:
+   there is nowhere to send it, and leaving the flag false would re-read the
+   class every minute until it starts. In person: nothing to start online. */
+export async function runMentor10MinWhatsApp(): Promise<void> {
+  try {
+    const { LiveClassModel } = await import('@/models/schema.ts')
+    await warmSlugs()
+    const now  = new Date()
+    const from = new Date(now.getTime() + 7 * 60 * 1000)
+    const to   = new Date(now.getTime() + 10 * 60 * 1000)
+
+    const classes = await LiveClassModel.find({
+      status:   'scheduled',
+      isOnline: { $ne: false },
+      mentorWhatsApp10MinSent: { $ne: true },
+      scheduledStart: { $gte: from, $lte: to },
+    })
+      .populate<{ instructorId: { id: string; name: string; phone?: string } }>('instructorId', 'name phone')
+      .lean({ virtuals: true })
+
+    for (const cls of classes) {
+      const mentor = cls.instructorId as { id?: string; name?: string; phone?: string } | null
+      const liveClassId = String((cls as { id?: string }).id ?? cls._id)
+      try {
+        if (mentor?.phone?.trim()) {
+          await sendMentorClassIn10MinWhatsApp(
+            mentor.phone, mentor.name ?? 'Mentor', cls.title,
+            fmtTime(new Date(cls.scheduledStart), orgSlugFor((cls as { organizationId?: unknown }).organizationId)),
+            cls.bookedCount ?? 0, liveClassId,
+          )
+        }
+        await LiveClassModel.updateOne({ _id: cls._id }, { $set: { mentorWhatsApp10MinSent: true } })
+      } catch (err) {
+        logger.error({ err, classId: cls._id }, '[Reminders] Mentor 10-min WhatsApp failed')
+      }
+    }
+
+    if (classes.length) logger.info(`[Reminders] Mentor 10-min WhatsApp: processed ${classes.length} classes`)
+  } catch (err) {
+    logger.error({ err }, '[Reminders] mentor 10-min WhatsApp job error')
+  }
+}
+
 /* ── Mentor no-show detection — stage 1: nudge at start time ───────────────
    "Joined" is LiveClassModel.instructorJoinedAt — a real webhook for
    internal/LiveKit classes (cltWebhook.service.ts onParticipantJoined), a
@@ -1088,6 +1141,9 @@ export function startReminderJobs(): void {
 
   // Every 5 min — instructor 15-min reminder with Google Meet link (13–17 min window)
   cron.schedule('*/5 * * * *', exclusive('instructor-15min', runInstructor15MinReminders))
+
+  // Every minute — the mentor's WhatsApp ~10 min before an online class, with a Start button (7–10 min window)
+  cron.schedule('* * * * *', exclusive('mentor-10min-whatsapp', runMentor10MinWhatsApp))
 
   // Every 5 min — mentor no-show stage 1: nudge the mentor if not joined by start time
   cron.schedule('*/5 * * * *', exclusive('mentor-join-reminder', runMentorJoinReminder))

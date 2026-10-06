@@ -2,6 +2,7 @@ import axios from 'axios'
 import { useImpersonationStore } from '@/store/impersonation.store'
 import { useOrgStore } from '@/store/org.store'
 import { PUBLIC_PATHS } from '@/lib/publicPaths'
+import { returnParamFor } from '@/lib/returnPath'
 
 /**
  * Admin API client.
@@ -100,7 +101,9 @@ export const EXPIRED_PARAM = 'session=expired'
    admin to /login before they could see the form, let alone use it. */
 function toLogin() {
   if (PUBLIC_PATHS.has(window.location.pathname)) return
-  window.location.href = `/login?${EXPIRED_PARAM}`
+  /* And back to this page once signed in again (lib/returnPath). */
+  const from = returnParamFor(window.location.pathname, window.location.search)
+  window.location.href = `/login?${EXPIRED_PARAM}${from ? `&from=${encodeURIComponent(from)}` : ''}`
 }
 
 api.interceptors.response.use(

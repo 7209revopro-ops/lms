@@ -10,12 +10,13 @@
      bun src/scripts/whatsapp-test-templates.ts --send
      bun src/scripts/whatsapp-test-templates.ts --send --to 919526288116,918590026442
      bun src/scripts/whatsapp-test-templates.ts --send --only class_has_started,class_starts_in_5_min
+     bun src/scripts/whatsapp-test-templates.ts --send --only mentor_class_in_10_min
      bun src/scripts/whatsapp-test-templates.ts --send --class <liveClassId>   (join buttons open that class)
 
    Needs WHATSAPP_API_KEY and WHATSAPP_PHONE_NUMBER_ID — run it where WhatsApp
-   is configured (the server). `class_starts_in_5_min` and `class_has_started`
-   are the new join-button templates the LMS does not send yet; until Meta
-   approves them they fail with #132001 (template does not exist).
+   is configured (the server). The join-button templates (`isNew` below) fail
+   with #132001 (template does not exist) until Meta approves them —
+   `mentor_class_in_10_min`'s button opens the ADMIN site (<id>/join).
 ───────────────────────────────────────────────────────────── */
 import { CreatyvotWhatsAppSender, WhatsAppApiError } from '@/services/whatsapp.service.ts'
 import { normalizeWhatsAppNumber } from '@/utils/normalizeWhatsAppNumber.ts'
@@ -39,6 +40,7 @@ const TEMPLATES: { name: string; params: string[]; buttonParam?: string; isNew?:
   { name: 'instructor_review_request_v1', params: ['Test Student', CLASS] },
   { name: 'class_starts_in_5_min',        params: ['Test Student', CLASS, 'Tue, 6 Oct', '1:00 PM'], buttonParam: `${CLASS_ID}/watch`, isNew: true },
   { name: 'class_has_started',            params: ['Test Student', CLASS], buttonParam: `${CLASS_ID}/watch`, isNew: true },
+  { name: 'mentor_class_in_10_min',       params: ['Test Mentor', CLASS, '02:00 PM GST', '12'], buttonParam: `${CLASS_ID}/join`, isNew: true },
 ]
 
 const unknown = (ONLY ?? []).filter(n => !TEMPLATES.some(t => t.name === n))

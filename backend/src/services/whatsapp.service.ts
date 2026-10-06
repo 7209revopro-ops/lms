@@ -365,6 +365,25 @@ export async function sendClassHasStartedWhatsApp(
     { category: 'utility', buttonParam: `${liveClassId}/watch` })
 }
 
+/* mentor_class_in_10_min — to the class's MENTOR, about ten minutes before an
+   online class: the class, its time and how many students are booked, with a
+   Start button. The template's URL is {ADMIN_URL}/live-classes/ and the send
+   adds `<classId>/join` — the admin page that records the mentor as joined
+   (the no-show jobs read that) and then opens the room. Same guards as the
+   student join reminders above: a fixed 4 body params, and no send at all
+   without a class id. */
+export async function sendMentorClassIn10MinWhatsApp(
+  to: string | null | undefined, mentorName: string, sessionTitle: string,
+  timeLabel: string, bookedCount: number, liveClassId: string,
+): Promise<void> {
+  if (!liveClassId) {
+    logger.warn({ templateName: 'mentor_class_in_10_min' }, 'WhatsApp mentor reminder skipped — no class id for its button')
+    return
+  }
+  await sendTemplate(to, 'mentor_class_in_10_min', [mentorName || 'there', sessionTitle, timeLabel, String(Math.max(0, bookedCount || 0))],
+    { category: 'utility', buttonParam: `${liveClassId}/join` })
+}
+
 /* First WhatsApp template aimed at STAFF rather than students — every other
    function in this file notifies a student. Sent to a support ticket's
    org admin(s), programme sub_admin(s), and every super_admin (see

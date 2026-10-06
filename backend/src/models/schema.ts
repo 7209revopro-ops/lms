@@ -1184,6 +1184,8 @@ export interface ILiveClass extends Document {
 
   /* Instructor reminder tracking */
   reminderInstructor15MinSent: boolean
+  /* The mentor's 10-minute WhatsApp (mentor_class_in_10_min) — once per class. */
+  mentorWhatsApp10MinSent: boolean
 
   /* Mentor no-show detection.
      instructorJoinedAt is set two different ways depending on `type`:
@@ -1336,6 +1338,7 @@ const LiveClassSchema = new Schema<ILiveClass>(
     room:              { type: String, maxlength: 100 },
     rescheduledReason:           { type: String, maxlength: 2000 },
     reminderInstructor15MinSent: { type: Boolean, default: false },
+    mentorWhatsApp10MinSent:     { type: Boolean, default: false },
     instructorJoinedAt:          { type: Date },
     mentorReminderSent:          { type: Boolean, default: false },
     mentorNoShowAlertSent:       { type: Boolean, default: false },

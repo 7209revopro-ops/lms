@@ -92,6 +92,7 @@
     "test:regvalidation": "bun src/tests/registrationvalidation.suite.ts",
     "test:remindermails": "bun src/tests/remindermails.suite.ts",
     "test:mentornoshow": "bun src/tests/mentornoshow.suite.ts",
+    "test:mentor10min": "bun --no-env-file src/tests/mentor10min.suite.ts",
     "test:attendance": "bun src/tests/attendance.suite.ts",
     "test:orgswitcherscope": "bun src/tests/orgswitcherscope.suite.ts",
     "test:supportticketalerts": "bun src/tests/supportticketalerts.suite.ts",
