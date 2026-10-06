@@ -18,6 +18,7 @@ import { parkCriticalMail, flushCriticalMail, isUrgent } from '@/jobs/criticalma
 import type { CriticalKind } from '@/jobs/criticalmail.job.ts'
 import { SCHEDULE_LINK, liveClassWatchUrl } from '@/utils/clientLinks.ts'
 import { publicJoinByCodeUrl } from '@/services/clt.service.ts'
+import { enrolledProgramsOf } from '@/utils/enrolledPrograms.ts'
 
 function isPopulated(v: unknown): v is Record<string, unknown> & { id: string } {
   return !!v && typeof v === 'object' && typeof (v as { id?: unknown }).id === 'string'
@@ -763,8 +764,14 @@ export class LiveClassController {
     try {
       const limit = Math.min(Number(req.query['limit'] ?? 10), 100)
       const { UserModel } = await import('@/models/schema.ts')
-      const user     = await UserModel.findById(req.user!.id).select('category').lean()
-      const category = (user as any)?.category as string | undefined
+      const user     = await UserModel.findById(req.user!.id).select('category categories').lean() as
+        { category?: string; categories?: string[] } | null
+      /* Every programme the student approved into OR studies — an AI student
+         enrolled on a Digital Marketing course must see that course's classes
+         here. Not the legacy single `category` alone; and [] beside a
+         `category` is a pre-`categories` record, not "none". */
+      const approved = user?.categories?.length ? user.categories : (user?.category ? [user.category] : [])
+      const category = [...new Set([...approved, ...await enrolledProgramsOf(req.user!.id)])]
 
       /* Resolved, not read off the request: a session minted before the field
          existed carries no academy, and reading it blind would leave that

@@ -93,6 +93,9 @@ export interface AdminUser {
   meetEmail?:       string | null
   program?:         'ai' | 'digital_marketing' | 'forex' | 'jura'
   enrollmentStatus?: 'pending' | 'approved' | 'rejected' | 'cancelled'
+  /** Students only: programmes of the courses they are enrolled on — derived
+      server-side, separate from the programmes they were approved into. */
+  enrolledPrograms?: string[]
   rejectionReason?:        string
   rejectedByEmail?:        string
   rejectedByName?:         string
@@ -180,6 +183,9 @@ export function useEnrollStudent() {
     },
     onSuccess: (_data, { userId }) => {
       qc.invalidateQueries({ queryKey: ['admin', 'enrollments', userId] })
+      /* The Students table lists each student's enrolled programmes — a new
+         course may add one. */
+      qc.invalidateQueries({ queryKey: ['admin', 'users'] })
     },
   })
 }

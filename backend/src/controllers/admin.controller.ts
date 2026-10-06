@@ -14,6 +14,8 @@ import { instructorOwnsSession, andFilter } from '@/utils/tenancy.ts'
 import { studentReachClause, memberClause, callerDepartment, otherDepartmentsOf } from '@/utils/departmentScope.ts'
 import { signAccessToken, toSeconds } from '@/utils/jwt.ts'
 import type { UserRole } from '@/types/index.ts'
+import type { Types } from 'mongoose'
+import { enrolledProgramsByUser } from '@/utils/enrolledPrograms.ts'
 
 /* Long enough to open a tab, far too short to pass around. The impersonation
    session itself still runs for IMPERSONATION_EXPIRES_IN. */
@@ -293,7 +295,14 @@ export class AdminController {
       const enrollmentStatus = q['enrollmentStatus'] as 'pending' | 'approved' | 'rejected' | 'cancelled' | undefined
       const { docs, totalCount } = await this.userService.listByRole(role, { page, perPage: per_page, search, category: effectiveCategory, status, excludeStudents, enrollmentStatus, organizationId: req.user!.organizationId })
       const meta = buildPaginationMeta(totalCount, page, per_page)
-      sendSuccess(res, docs, undefined, 200, meta)
+      /* What each student studies, beside what they were approved into
+         (`categories`) — see utils/enrolledPrograms.ts. */
+      const studentIds = docs.filter(d => d.role === 'student').map(d => d._id as Types.ObjectId)
+      const enrolled   = await enrolledProgramsByUser(studentIds)
+      const rows = docs.map(d => d.role === 'student'
+        ? { ...d.toJSON(), enrolledPrograms: enrolled.get(String(d._id)) ?? [] }
+        : d)
+      sendSuccess(res, rows, undefined, 200, meta)
     } catch (err) { next(err) }
   }
 

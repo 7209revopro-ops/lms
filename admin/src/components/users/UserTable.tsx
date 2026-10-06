@@ -274,6 +274,10 @@ function UserRow({ user, index, onEdit, onViewHistory }: {
   const displayCats: string[] = (user as any).categories?.length
     ? (user as any).categories
     : user.category ? [user.category] : []
+  /* Programmes they study but were not approved into — e.g. an AI student an
+     admin added to a Digital Marketing course. Shown outlined, not as a second
+     approval: `categories` stays the approval record. */
+  const enrolledOnly = (user.enrolledPrograms ?? []).filter(p => !displayCats.includes(p))
 
   return (
     <>
@@ -358,7 +362,7 @@ function UserRow({ user, index, onEdit, onViewHistory }: {
         </div>
       </td>
       <td className="px-4 py-3.5">
-        {displayCats.length > 0 ? (
+        {displayCats.length > 0 || enrolledOnly.length > 0 ? (
           <div className="flex flex-wrap gap-1">
             {displayCats.map(cat => {
               const s = CATEGORY_STYLE[cat]
@@ -366,6 +370,18 @@ function UserRow({ user, index, onEdit, onViewHistory }: {
                 <span key={cat} className="inline-flex items-center rounded-lg px-2 py-0.5 text-[11px] font-semibold"
                   style={{ background: s.bg, color: s.color }}>
                   {CATEGORY_LABELS[cat] ?? cat}
+                </span>
+              ) : null
+            })}
+            {enrolledOnly.map(cat => {
+              const s = CATEGORY_STYLE[cat]
+              return s ? (
+                <span key={`enrolled-${cat}`}
+                  title={`Enrolled on a ${CATEGORY_LABELS[cat] ?? cat} course — not approved into this programme`}
+                  className="inline-flex items-center rounded-lg px-2 py-0.5 text-[11px] font-semibold"
+                  style={{ color: s.color, border: `1px dashed ${s.color}80` }}>
+                  {CATEGORY_LABELS[cat] ?? cat}
+                  <span className="ml-1 font-normal opacity-70">· enrolled</span>
                 </span>
               ) : null
             })}

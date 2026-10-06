@@ -144,7 +144,9 @@ export class LiveClassService {
   async listUpcomingForUser(
     userId: string,
     limit = 50,
-    categoryFilter?: string,
+    /* Every programme the student belongs to — a student enrolled on a second
+       programme must see its sessions too, not only their first programme's. */
+    categoryFilter?: string[],
     /* The caller's academy, RESOLVED by the controller — see callerOrgForRead.
        null means unscoped, which is what every caller passed before this and
        what a student with no academy on record still gets. */
@@ -156,11 +158,11 @@ export class LiveClassService {
     // blocked module is not entitled even though the course enrolment is.
     const index = await loadEnrolmentIndex(userId, 'notDropped')
 
-    // If student has a category, restrict to that category's courses
+    // If the student has programmes, restrict to those programmes' courses
     let courseIds: string[] | undefined
-    if (categoryFilter) {
+    if (categoryFilter?.length) {
       const { CourseModel } = await import('@/models/schema.ts')
-      const courses = await CourseModel.find({ program: categoryFilter }, { _id: 1 }).lean()
+      const courses = await CourseModel.find({ program: { $in: categoryFilter } }, { _id: 1 }).lean()
       courseIds = courses.map((c: any) => String(c._id))
       // No courses in this category → return empty rather than showing all sessions
       if (courseIds.length === 0) return []
