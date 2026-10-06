@@ -7,8 +7,9 @@ import { usePathname } from 'next/navigation'
 import {
   BookOpen, GraduationCap, Trophy,
   Settings, LogOut, Flame, Map, X, Video, CalendarDays, LifeBuoy, ClipboardList,
-  Ticket, Receipt, Sparkles, Sun, Moon, Monitor, Star,
+  Ticket, Receipt, Sparkles, Sun, Moon, Monitor, Star, MessageCircle,
 } from 'lucide-react'
+import { useChatUnread } from '@/lib/api/chat'
 import { useUIStore } from '@/store/ui.store'
 import { useThemeStore } from '@/store/theme.store'
 import { logout as apiLogout, useCurrentUser } from '@/lib/api/user'
@@ -19,6 +20,7 @@ const navItems = [
   { label: 'Class Schedule', href: '/class-bookings', icon: CalendarDays },
   { label: 'My Bookings',    href: '/my-bookings',    icon: Ticket },
   { label: 'Rate Classes',   href: '/reviews',        icon: Star },
+  { label: 'Messages',       href: '/messages',       icon: MessageCircle },
   { label: 'Assignments',    href: '/assignments',     icon: ClipboardList },
   { label: 'Catalog',        href: '/courses',         icon: BookOpen },
   { label: 'Orders',         href: '/orders',          icon: Receipt },
@@ -54,6 +56,7 @@ function SidebarContent({ onClose }: { onClose: () => void }) {
      button. Same source and same shape as ClientTopbar, which was doing it
      correctly all along. */
   const { data: user } = useCurrentUser()
+  const { data: chatUnread } = useChatUnread(user?.role === 'student')
   const displayName    = user?.name ?? 'Account'
   const displayEmail   = user?.email ?? ''
   const avatarInitial  = (user?.name?.trim()?.[0] ?? '?').toUpperCase()
@@ -104,6 +107,10 @@ function SidebarContent({ onClose }: { onClose: () => void }) {
                   )}
                   <Icon size={17} className="relative z-10 flex-shrink-0" strokeWidth={active ? 2.2 : 1.8} />
                   <span className="relative z-10 whitespace-nowrap text-sm font-medium">{item.label}</span>
+                  {item.href === '/messages' && !!chatUnread && (
+                    <span className="relative z-10 ml-auto flex h-5 min-w-5 items-center justify-center rounded-full px-1.5 text-[10px] font-bold text-white"
+                      style={{ background: '#0057b8' }}>{chatUnread > 99 ? '99+' : chatUnread}</span>
+                  )}
                 </motion.div>
               </Link>
             </motion.div>

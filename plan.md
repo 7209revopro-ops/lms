@@ -1215,3 +1215,126 @@ Defects found and fixed — each now has a check that fails on the old code:
 | Import preview named another department's clashing class | "a class in another department" | N8 |
 | A sub-admin without a department could not save their own email preferences or load the academy name | 4-route own-account allowlist; every data route still refused | A6, emailprefs |
 | Devices list joined every device before filtering (5× slower for a head at 5,000 devices) | owners resolved first, matched on the indexed `userId` | perf, K, D8 |
+
+## 11. Chat — student ↔ instructor messaging
+
+### 11.1 Goal
+
+A WhatsApp-style chat between a student and the instructors of their own
+programme, inside the LMS:
+
+1. A student sees every instructor **of their own academy** who teaches **one of
+   their programmes** (a Forex student: all of their academy's Forex
+   instructors) and can message any of them.
+2. The instructor is notified on the admin side (unread badge + toast).
+3. An instructor sees **only the students who messaged them**, and can then
+   reply through the LMS. An instructor can never start a conversation.
+4. A super admin can read every conversation, filtered by instructor —
+   read-only.
+
+### 11.2 Rules (decisions)
+
+| # | Rule | Why |
+|---|---|---|
+| C1 | A conversation is one (student, instructor) pair, created by the student's **first** message. Instructors only reply. | Requirement 3/4/5: the instructor's list is "students who messaged me" by construction. |
+| C2 | Student → instructor is allowed when the instructor is active, in the **student's own academy**, and teaches one of the student's programmes = approved `categories` ∪ enrolled programmes (`utils/enrolledPrograms.ts`). Lent instructors of the *other* academy are not listed. | "his organization's Forex instructors"; a student studying a DM course reaches DM instructors (§10.3 semantics). |
+| C3 | Only an **approved, active** student may write (`requireEnrollmentApproval`). An existing conversation stays readable if eligibility later lapses; sending to a no-longer-eligible instructor is refused — **and the instructor's side locks too** (409 `NOT_YOUR_STUDENT` / `STUDENT_NOT_APPROVED` / `STUDENT_INACTIVE`), so no chat is ever one-way. | Viewers/pending applicants browse only; a viewer's composer says why instead of failing on send. |
+| C4 | Impersonation is read-only — `authenticate` already 403s writes under `lms_imp_at`. | No admin speaks as a student. |
+| C5 | Super-admin oversight is read-only, follows the org switcher, and never marks anything read. | Requirement 6; reading must not hide a message from its recipient. |
+| C6 | Messages are plain text, 1–2000 chars, rendered as text (no HTML). | XSS-proof by construction. |
+| C7 | Every send carries a client-generated `clientMsgId`; a retried send returns the original message instead of duplicating it (unique index). | Flaky mobile networks retry. |
+| C8 | 30 messages / minute / user (`chatSendRateLimit`, keyed per user, mounted after auth). | Spam / runaway clients. |
+
+### 11.3 Transport — why polling, not WebSocket/SSE
+
+There is no realtime channel in the stack, and the client's `/api/v1` relay is a
+Vercel function with `maxDuration = 60`: an SSE stream through it reconnects every
+minute and holds a function per open tab. Smart polling is cheaper and works
+through both relays unchanged:
+
+- open thread: `GET …/messages?after=<lastId>` every **3 s** — returns the new
+  messages plus a **10 s re-read window** behind the cursor (an `_id` is minted
+  before it commits, so two racing sends can commit out of id order; without the
+  window a poll that already holds the newer one skips the older one forever).
+  The client merges by id and keeps the same array when nothing is new, so a
+  quiet poll re-renders nothing; a hidden tab stops polling
+- conversation list + unread badge: every **15 s**
+- send is **optimistic** (bubble appears instantly, ✓ on ack, ✓✓ when read)
+
+Upgrade path, if ever needed: SSE straight to the backend host once auth cookies
+are shared across the API domain — the incremental `after` cursor is already the
+event-stream contract.
+
+### 11.4 Data model
+
+- `ChatConversation` { organizationId, studentId, instructorId, lastMessageAt,
+  lastMessagePreview, lastSenderRole, studentUnread, instructorUnread,
+  studentLastReadAt, instructorLastReadAt }
+  — unique `{studentId, instructorId}`; `{instructorId, lastMessageAt:-1}`;
+  `{studentId, lastMessageAt:-1}`; `{organizationId, lastMessageAt:-1}`
+- `ChatMessage` { conversationId, senderId, senderRole: 'student'|'instructor',
+  body, clientMsgId } — `{conversationId, _id:-1}`; unique sparse
+  `{conversationId, clientMsgId}`
+- Separate collections, not an embedded array: a chat grows without bound (the
+  support ticket's embedded `messages[]` caps at 200).
+- Unread counts are denormalised counters (`$inc` on send, reset on read), so
+  badges never scan messages.
+
+### 11.5 API (`/api/v1/chat`)
+
+| Who | Method · path | Notes |
+|---|---|---|
+| student | `GET /chat/instructors` | eligible instructors (C2) + existing conversation id + unread |
+| student | `GET /chat/conversations` · `GET /chat/unread-count` | |
+| student | `GET /chat/conversations/:id/messages?after=&before=&limit=` | incremental / older pages |
+| student | `POST /chat/messages` `{instructorId, body, clientMsgId}` | creates the conversation on first send |
+| student | `POST /chat/conversations/:id/read` | |
+| instructor | `GET /chat/staff/conversations?q=&cursor=&limit=` · `GET /chat/staff/unread-count` | own conversations only; `{items, nextCursor}` |
+| instructor | `GET /chat/staff/conversations/:id/messages` · `POST …/messages` · `POST …/read` | reply only (C1); opening (no cursor) adds `canReply` + `readOnlyReason` |
+| super_admin | `GET /chat/oversight/conversations?instructorId=&q=&cursor=` · `GET /chat/oversight/instructors` · `GET /chat/oversight/conversations/:id/messages` | read-only (C5); `q` matches student **or** instructor |
+
+Anyone else's conversation id answers **404** (no existence leak, as §10 R4).
+Lists are cursor-paged (`<lastMessageAt ISO>_<id>`, 50 a page) with search done
+server-side, so nothing silently falls off a cap (cf. the 100-row live-class
+incident). Unknown paths under `/staff` and `/oversight` answer 404 rather than
+falling through to the student door's 401, which the admin app would read as an
+expired session.
+
+### 11.6 UI
+
+- **Client** `/messages`: two panes — instructors of my programmes (with
+  unread dots, last message, time) | thread. Phone: list → thread. Enter sends,
+  Shift+Enter new line, day separators, ✓/✓✓ ticks, auto-scroll that does not
+  yank a reader who scrolled up. "Messages" in sidebar + topbar with an unread
+  badge. The student is also notified (bell) when an instructor replies —
+  one notification per conversation until read, never one per message.
+- **Admin, instructor** `/messages`: same layout, list = students who wrote to
+  me; unread badge on the nav item and a toast when a new message lands.
+- **Admin, super admin** `/chats`: every conversation, instructor filter,
+  read-only thread.
+
+### 11.7 Phases
+
+- [x] P1 backend: `ChatConversation`/`ChatMessage` (schema.ts), `services/chat.service.ts`, `routes/chat.routes.ts`, `chatSendRateLimit`, notification kind `chat-message`
+- [x] P2 `chat.suite.ts` — 57 checks (eligibility, refusals, inbox, one-bell-per-run, 404 isolation, cursors, idempotent retry + racing first sends, impersonation read-only, oversight + org switcher, XSS-as-text, per-user rate limit). Caught one real bug: a new message returned `id: undefined` (toObject renames `_id`).
+- [x] P3 client `/messages` (`lib/api/chat.ts`), Messages tab + unread badge in sidebar and topbar
+- [x] P4 admin `/messages` (instructor), `/chats` (super admin), shared `components/chat/ChatPanel.tsx`, `ChatNotifier` toast (mounted once in the layout), nav badges
+- [x] P5 live, QA sandbox (2026-10-06): Forex student saw only the Forex instructor; sent; instructor badge 1→2 and toast "New message from …"; inbox showed only that student; reply delivered; badge cleared on read; student tab badge + bell notification deep-linking `/messages?c=`; ✓✓ Seen after the instructor read; super-admin `/chats` read-only (no composer) with the instructor filter. Each idle 3-s poll = `?after=` cursor, 361 bytes.
+
+- [x] P6 QA round (2026-10-06) — adversarial API probe (26 checks: roles, injection-shaped bodies, query abuse, org switch, lapsed eligibility) + live runs as pending student, approved student, instructor, admin, super admin, desktop and 375 px. Found and fixed:
+  1. **Lost messages under racing sends** — `?after=` could skip a message committed late with an older `_id` → 10 s re-read window + merge-by-id (E4/E5).
+  2. **One-way chats** — an instructor could keep writing to a student who left the programme / lost approval, while the student's side was read-only → reply refused with a reason; thread opens read-only (J1–J6).
+  3. **Pending/rejected students got a working composer** whose every send failed with "tap to retry" → composer replaced by the reason; impersonation likewise.
+  4. **"Tap to retry" on refusals no retry can fix** (403/404/409/422) → shown as "Not sent", retry only for network/5xx/429.
+  5. **500-row silent cap** on the instructor inbox and oversight list, and search only over loaded rows → cursor paging + server-side search (J7–J11).
+  6. **Super-admin POST into oversight fell through to the student door → 401** → 404 terminators (J12/J13).
+  7. Admin day separators used the device date while times used the academy zone → both in the academy zone.
+  8. UI: composer kept its grown height after sending; Enter sent on phones (now newline, button sends); "Load earlier messages" jumped the reader; long unbroken words could overflow a bubble; a search that filtered out the open chat closed it; the instructor toast could not open the chat (now a link to `/messages?c=`); the student's orphan-chat unread did not clear on read.
+  9. Added: unread count in the instructor's tab title — `(3) Delta Institutions Admin`.
+  `chat.suite.ts` 57 → 72 checks.
+
+### 11.8 Out of scope (v1)
+
+Attachments, voice, typing indicators, message edit/delete, email/WhatsApp
+alerts for chat, admin/sub-admin chatting. Each fits the model above without
+schema changes except attachments.

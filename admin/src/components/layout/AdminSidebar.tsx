@@ -8,8 +8,9 @@ import {
   LayoutDashboard, BookOpen, Users, GraduationCap,
   Tag, Star, Settings, ChevronLeft, ChevronRight, LogOut, X,
   ShoppingBag, Ticket, Map, ClipboardList, Video, CalendarDays, BarChart3, ShieldCheck, UserCog, LifeBuoy,
-  ClipboardCheck, Film, MonitorSmartphone, FileCheck2, Megaphone, Mail, UserX, Award,
+  ClipboardCheck, Film, MonitorSmartphone, FileCheck2, Megaphone, Mail, UserX, Award, MessageCircle, MessagesSquare,
 } from 'lucide-react'
+import { useStaffUnread } from '@/lib/api/chat'
 import { useUIStore } from '@/store/ui.store'
 import { mayReachClassroom } from '@/lib/classroomAccess'
 import { useAllLiveClasses } from '@/lib/api/liveClasses'
@@ -79,6 +80,7 @@ const instructorNavItems = [
   { label: 'Students',      href: '/students',            icon: Users },
   { label: 'Instructors',   href: '/instructors',        icon: GraduationCap },
   { label: 'Reviews',       href: '/reviews',             icon: Star },
+  { label: 'Messages',      href: '/messages',            icon: MessageCircle },
 ]
 
 /* Settings is platform configuration, and the page's own device-limit query
@@ -108,6 +110,7 @@ function SidebarContent({ collapsed, onClose }: SidebarContentProps) {
   const { data: pendingData } = useEnrollmentRequests('pending', undefined)
   const pendingCount = canSeeRequests ? (pendingData?.meta?.total_count ?? 0) : 0
   const { data: unreadSupport = 0 } = useUnreadSupportCount()
+  const { data: unreadChat = 0 } = useStaffUnread(isInstructor)
   const baseNavItems = isInstructor ? instructorNavItems : isManager ? scopedAdminNavItems : adminNavItems
   /* Support sits in the admin nav but may not reach a classroom, live or
      recorded. Offering the link anyway would just hand them a 403. */
@@ -122,6 +125,7 @@ function SidebarContent({ collapsed, onClose }: SidebarContentProps) {
     ? [...withClassroom,
         { label: 'Roles',      href: '/roles',       icon: ShieldCheck },
         { label: 'Email Logs', href: '/email-logs',  icon: Mail },
+        { label: 'Chats',      href: '/chats',       icon: MessagesSquare },
       ]
     : withClassroom
   const roleLabel = isInstructor ? 'Instructor' : isManager ? 'Manager' : 'Admin'
@@ -215,6 +219,12 @@ function SidebarContent({ collapsed, onClose }: SidebarContentProps) {
                           {pendingCount}
                         </span>
                       )}
+                      {item.href === '/messages' && unreadChat > 0 && (
+                        <span className="ml-1.5 flex h-4 min-w-4 items-center justify-center rounded-full px-1 text-[9px] font-bold text-white"
+                          style={{ background: '#22C55E' }}>
+                          {unreadChat > 99 ? '99+' : unreadChat}
+                        </span>
+                      )}
                       {/* Unread support messages badge */}
                       {item.href === '/support' && unreadSupport > 0 && (
                         <span className="ml-1.5 flex h-4 min-w-4 items-center justify-center rounded-full px-1 text-[9px] font-bold text-white"
@@ -243,6 +253,9 @@ function SidebarContent({ collapsed, onClose }: SidebarContentProps) {
                     className="absolute right-1.5 top-1.5 h-2 w-2 rounded-full"
                     style={{ background: '#EF4444' }}
                   />
+                )}
+                {collapsed && item.href === '/messages' && unreadChat > 0 && (
+                  <span className="absolute right-1.5 top-1.5 h-2 w-2 rounded-full" style={{ background: '#22C55E' }} />
                 )}
                 {collapsed && item.href === '/support' && unreadSupport > 0 && (
                   <span className="absolute right-1.5 top-1.5 h-2 w-2 rounded-full"

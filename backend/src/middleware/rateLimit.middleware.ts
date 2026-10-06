@@ -323,3 +323,17 @@ export const impersonationRateLimit = rateLimit({
     sendError(res, 'RATE_LIMITED', 'Too many impersonation attempts. Please try again shortly.', 429)
   },
 })
+
+/* Chat sends — plan.md §11.2 C8. Mounted AFTER authentication so clientKey
+   keys it per user, not per shared office IP. */
+export const chatSendRateLimit = rateLimit({
+  windowMs:         60 * 1000,
+  max:              envInt('RATE_LIMIT_CHAT_MAX', 30),
+  standardHeaders:  true,
+  legacyHeaders:    false,
+  keyGenerator:     clientKey,
+  skip:             rateLimitDisabled,
+  handler: (_req, res) => {
+    sendError(res, 'RATE_LIMITED', 'You are sending messages too quickly. Please wait a moment.', 429)
+  },
+})

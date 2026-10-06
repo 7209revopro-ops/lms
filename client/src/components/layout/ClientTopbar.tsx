@@ -8,9 +8,10 @@ import {
   Search, Bell, X, MessageSquare, BookOpen,
   GraduationCap, Heart, Sparkles, Trophy,
   Settings, Clock, Star, Users, Video, Flame, Menu, ShoppingCart, Map, CalendarDays, LifeBuoy,
-  Ticket, Receipt,
+  Ticket, Receipt, MessageCircle,
   ClipboardList, LogOut, Sun, Moon, Monitor,
 } from 'lucide-react'
+import { useChatUnread } from '@/lib/api/chat'
 import { useQuery } from '@tanstack/react-query'
 import { api } from '@/lib/axios'
 import { useUIStore } from '@/store/ui.store'
@@ -32,6 +33,7 @@ const SIDEBAR_TABS = [
   { label: 'Schedule',    href: '/class-bookings', icon: CalendarDays },
   { label: 'My Bookings', href: '/my-bookings',    icon: Ticket },
   { label: 'Rate Classes', href: '/reviews',       icon: Star },
+  { label: 'Messages',     href: '/messages',      icon: MessageCircle },
   { label: 'Assignments', href: '/assignments',     icon: ClipboardList },
   { label: 'Catalog',     href: '/courses',         icon: BookOpen },
   { label: 'Learning Paths', href: '/learning-paths', icon: Map },
@@ -49,6 +51,7 @@ const TOPBAR_TABS = [
      typing its URL, which is what /my-bookings was. */
   { label: 'My Bookings',    href: '/my-bookings',     icon: Ticket },
   { label: 'Rate Classes',   href: '/reviews',         icon: Star },
+  { label: 'Messages',       href: '/messages',        icon: MessageCircle },
   { label: 'Assignments',    href: '/assignments',     icon: ClipboardList },
   { label: 'Catalog',        href: '/courses',         icon: BookOpen },
   { label: 'Learning Paths', href: '/learning-paths',  icon: Map },
@@ -206,6 +209,7 @@ export function ClientTopbar() {
   const { data: suggestions, isFetching } = useTypeahead(debouncedQ)
   const showDropdown = focused && !isSearchPage && debouncedQ.trim().length >= 2
   const { data: user } = useCurrentUser()
+  const { data: chatUnread } = useChatUnread(user?.role === 'student')
   const { data: notifData } = useNotifications({ per_page: 8 })
   const { data: unreadCount } = useUnreadCount()
   const markRead = useMarkRead()
@@ -696,13 +700,17 @@ export function ClientTopbar() {
                     style={{ color: active ? 'var(--color-text-primary)' : 'var(--color-text-muted)', fontWeight: active ? 600 : 400 }}>
                     {tab.label}
                   </span>
-                  {tab.badge && (
-                    <span aria-label={`${tab.badge} items`}
+                  {(() => {
+                    /* Messages carries the live unread count; others keep their own. */
+                    const badge = tab.href === '/messages' ? (chatUnread ? (chatUnread > 9 ? '9+' : chatUnread) : undefined) : tab.badge
+                    return badge ? (
+                    <span aria-label={`${badge} unread`}
                       className="flex h-4 w-4 items-center justify-center rounded-full text-[9px] font-bold text-white"
                       style={{ background: 'var(--color-primary)' }}>
-                      <span aria-hidden="true">{tab.badge}</span>
+                      <span aria-hidden="true">{badge}</span>
                     </span>
-                  )}
+                    ) : null
+                  })()}
                   {active && (
                     <motion.div layoutId="tab-underline"
                       className="absolute bottom-0 left-0 right-0 h-[2.5px] rounded-full"

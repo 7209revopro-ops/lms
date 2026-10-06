@@ -6,6 +6,7 @@ import { AdminTopbar } from '@/components/layout/AdminTopbar'
 import { NoDepartmentNotice } from '@/components/layout/NoDepartmentNotice'
 import { DeleteModal } from '@/components/courses/DeleteModal'
 import { Toaster } from '@/components/ui/Toaster'
+import { ChatNotifier } from '@/components/chat/ChatNotifier'
 import { AdminGuard } from '@/components/auth/AdminGuard'
 import { RootPortalHistoryBridge } from '@/components/RootPortalHistoryBridge'
 
@@ -35,6 +36,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         } as React.CSSProperties}
       >
         <AdminSidebar />
+        <ChatNotifier />
         <AdminTopbar />
 
         <main className="min-h-dvh pt-[60px] transition-[margin-left] duration-300 ease-out lg:ml-[var(--admin-sb)]">

@@ -1008,6 +1008,7 @@ export type NotificationKind =
   | 'mentor-no-show'
   | 'support-ticket-raised'
   | 'instructor-review-requested'
+  | 'chat-message'
   | 'system'
 
 export interface INotification extends Document {
@@ -1025,7 +1026,7 @@ export interface INotification extends Document {
 const NotificationSchema = new Schema<INotification>(
   {
     userId: { type: Schema.Types.ObjectId, ref: 'User', required: true },
-    kind:   { type: String, enum: ['enrollment','lesson-complete','course-complete','review-posted','live-class-scheduled','achievement','booking-confirmed','booking-cancelled','class-reminder','mentor-no-show','support-ticket-raised','instructor-review-requested','system'], required: true },
+    kind:   { type: String, enum: ['enrollment','lesson-complete','course-complete','review-posted','live-class-scheduled','achievement','booking-confirmed','booking-cancelled','class-reminder','mentor-no-show','support-ticket-raised','instructor-review-requested','chat-message','system'], required: true },
     title:  { type: String, required: true, maxlength: 255 },
     body:   { type: String, maxlength: 1000 },
     link:   { type: String, maxlength: 1024 },
@@ -3238,6 +3239,86 @@ const SupportTicketSchema = new Schema<ISupportTicket>(
 SupportTicketSchema.index({ organizationId: 1 })
 
 export const SupportTicketModel = mongoose.model<ISupportTicket>('SupportTicket', SupportTicketSchema)
+
+/* ─────────────────────────────────────────────────────
+   CHAT — one conversation per (student, instructor), plan.md §11.
+   ─────────────────────────────────────────────────────
+   Messages live in their own collection rather than an embedded array (the
+   support ticket's): a chat grows without bound. Unread counts are counters on
+   the conversation — $inc on send, reset on read — so a badge never scans
+   messages. */
+export type ChatRole = 'student' | 'instructor'
+
+export interface IChatConversation extends Document {
+  id:                   string
+  organizationId?:      Types.ObjectId
+  studentId:            Types.ObjectId
+  instructorId:         Types.ObjectId
+  lastMessageAt:        Date
+  lastMessagePreview:   string
+  lastSenderRole:       ChatRole
+  studentUnread:        number
+  instructorUnread:     number
+  studentLastReadAt?:   Date
+  instructorLastReadAt?: Date
+  createdAt:            Date
+  updatedAt:            Date
+}
+
+const ChatConversationSchema = new Schema<IChatConversation>(
+  {
+    organizationId:       { type: Schema.Types.ObjectId, ref: 'Organization' },
+    studentId:            { type: Schema.Types.ObjectId, ref: 'User', required: true },
+    instructorId:         { type: Schema.Types.ObjectId, ref: 'User', required: true },
+    lastMessageAt:        { type: Date, required: true },
+    lastMessagePreview:   { type: String, maxlength: 160, default: '' },
+    lastSenderRole:       { type: String, enum: ['student', 'instructor'], required: true },
+    studentUnread:        { type: Number, default: 0, min: 0 },
+    instructorUnread:     { type: Number, default: 0, min: 0 },
+    studentLastReadAt:    { type: Date },
+    instructorLastReadAt: { type: Date },
+  },
+  baseSchemaOptions,
+)
+/* One conversation per pair — the first send's upsert relies on it. */
+ChatConversationSchema.index({ studentId: 1, instructorId: 1 }, { unique: true })
+ChatConversationSchema.index({ instructorId: 1, lastMessageAt: -1 })
+ChatConversationSchema.index({ studentId: 1, lastMessageAt: -1 })
+ChatConversationSchema.index({ organizationId: 1, lastMessageAt: -1 })
+
+export const ChatConversationModel =
+  mongoose.model<IChatConversation>('ChatConversation', ChatConversationSchema)
+
+export interface IChatMessage extends Document {
+  id:             string
+  conversationId: Types.ObjectId
+  senderId:       Types.ObjectId
+  senderRole:     ChatRole
+  body:           string
+  clientMsgId?:   string
+  createdAt:      Date
+  updatedAt:      Date
+}
+
+const ChatMessageSchema = new Schema<IChatMessage>(
+  {
+    conversationId: { type: Schema.Types.ObjectId, ref: 'ChatConversation', required: true },
+    senderId:       { type: Schema.Types.ObjectId, ref: 'User', required: true },
+    senderRole:     { type: String, enum: ['student', 'instructor'], required: true },
+    body:           { type: String, required: true, maxlength: 2000 },
+    clientMsgId:    { type: String, maxlength: 64 },
+  },
+  baseSchemaOptions,
+)
+/* _id order is creation order — the `after`/`before` cursors page on it. */
+ChatMessageSchema.index({ conversationId: 1, _id: -1 })
+/* A retried send returns the original instead of a duplicate (plan §11.2 C7). */
+ChatMessageSchema.index(
+  { conversationId: 1, clientMsgId: 1 },
+  { unique: true, partialFilterExpression: { clientMsgId: { $type: 'string' } } },
+)
+
+export const ChatMessageModel = mongoose.model<IChatMessage>('ChatMessage', ChatMessageSchema)
 
 /* ─────────────────────────────────────────────────────
    CLASS ASSIGNMENT  (student → instructor, after a live class)

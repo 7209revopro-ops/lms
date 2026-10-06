@@ -8,6 +8,8 @@ interface Toast {
   kind:  ToastKind
   title: string
   body?: string
+  /** Optional: clicking the toast opens this page. */
+  href?: string
 }
 
 interface UIState {
@@ -60,6 +62,6 @@ export function useToast() {
   return {
     success: (title: string, body?: string) => push({ kind: 'success', title, body }),
     error:   (title: string, body?: string) => push({ kind: 'error',   title, body }),
-    info:    (title: string, body?: string) => push({ kind: 'info',    title, body }),
+    info:    (title: string, body?: string, href?: string) => push({ kind: 'info', title, body, href }),
   }
 }

@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect } from 'react'
+import Link from 'next/link'
 import { motion, AnimatePresence } from 'framer-motion'
 import { CheckCircle2, XCircle, Info, X } from 'lucide-react'
 import { useUIStore, type ToastKind } from '@/store/ui.store'
@@ -31,12 +32,13 @@ export function Toaster() {
 }
 
 function ToastCard({
-  id, kind, title, body, onDismiss,
+  id, kind, title, body, href, onDismiss,
 }: {
   id:       string
   kind:     ToastKind
   title:    string
   body?:    string
+  href?:    string
   onDismiss: () => void
 }) {
   const s = STYLES[kind]
@@ -66,14 +68,21 @@ function ToastCard({
         style={{ background: s.bg, border: `1px solid ${s.border}` }}>
         <Icon size={15} style={{ color: s.fg }} />
       </div>
-      <div className="min-w-0 flex-1">
-        <p className="text-sm font-semibold text-white">{title}</p>
-        {body && (
-          <p className="mt-0.5 text-xs leading-relaxed" style={{ color: 'rgba(255,255,255,0.55)' }}>
-            {body}
-          </p>
-        )}
-      </div>
+      {(() => {
+        const text = (
+          <>
+            <p className="text-sm font-semibold text-white">{title}</p>
+            {body && (
+              <p className="mt-0.5 line-clamp-3 break-words text-xs leading-relaxed" style={{ color: 'rgba(255,255,255,0.55)' }}>
+                {body}
+              </p>
+            )}
+          </>
+        )
+        return href
+          ? <Link href={href} onClick={onDismiss} className="min-w-0 flex-1 hover:opacity-90">{text}</Link>
+          : <div className="min-w-0 flex-1">{text}</div>
+      })()}
       <button onClick={onDismiss}
         className="flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-lg transition-colors hover:bg-white/[0.05]"
         style={{ color: 'rgba(255,255,255,0.4)' }}>

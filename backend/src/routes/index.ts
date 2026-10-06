@@ -38,6 +38,7 @@ import instructorRoutes   from './instructors.routes.ts'
 import documentRoutes    from './documents.routes.ts'
 import classAssignmentRoutes from './classAssignments.routes.ts'
 import instructorReviewRoutes from './instructorReviews.routes.ts'
+import chatRoutes from './chat.routes.ts'
 import portalRoutes        from './portal.routes.ts'
 import portalActivityRoutes from './portalActivity.routes.ts'
 
@@ -133,5 +134,6 @@ router.use('/documents',       documentRoutes)
    belongs to the lesson-level assignment feature above. */
 router.use('/class-assignments', classAssignmentRoutes)
 router.use('/instructor-reviews', instructorReviewRoutes)
+router.use('/chat', chatRoutes)
 
 export default router
