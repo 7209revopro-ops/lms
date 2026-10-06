@@ -16,12 +16,14 @@ import {
   approveEnrolmentForPortal,
   rejectEnrolmentForPortal,
 } from '@/services/portalEnrolmentRequests.service.ts'
+import { studentViewForPortal } from '@/services/portalStudentView.service.ts'
 
 /* ─────────────────────────────────────────────────────
-   /service — the help desk, class assignments, students' courses and
-   enrolment requests, for the commission portal
+   /service — the help desk, class assignments, students' courses,
+   enrolment requests and "view as student", for the commission portal
    (services/portalActivity.service.ts, services/portalEnrolments.service.ts,
-   services/portalEnrolmentRequests.service.ts).
+   services/portalEnrolmentRequests.service.ts,
+   services/portalStudentView.service.ts).
 
    Mounted at /service after portal.routes.ts, whose secret check runs first for
    every /service request and lets through only a caller it knows — the Root
@@ -134,6 +136,16 @@ router.post('/enrolment-requests/:userId/approve', checkedCaller, wrap(async (re
 router.post('/enrolment-requests/:userId/reject', checkedCaller, wrap(async (req, res) => {
   const { email, reason, byName, byEmail } = (req.body ?? {}) as Record<string, unknown>
   sendSuccess(res, await rejectEnrolmentForPortal({ userId: req.params['userId'], email, reason, byName, byEmail }), 'Rejected')
+}))
+
+/**
+ * View a student's own LMS as they see it, read-only — the admin's client-portal
+ * impersonation, started from the portal: a link with a 60-second single-use
+ * code for the student app (services/portalStudentView.service.ts).
+ */
+router.post('/students/view', checkedCaller, wrap(async (req, res) => {
+  const { email, byName, byEmail } = (req.body ?? {}) as Record<string, unknown>
+  sendSuccess(res, await studentViewForPortal({ email, byName, byEmail }), 'View as student')
 }))
 
 export default router
