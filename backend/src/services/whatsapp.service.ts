@@ -330,6 +330,41 @@ export async function sendClassStartingSoonWhatsApp(
   await sendTemplate(to, 'class_starting_soon_v5', [sessionTitle, minutesLeft], { category: 'utility' })
 }
 
+/* class_starts_in_5_min and class_has_started — the join reminders for an
+   ONLINE class, each with a Join button that opens the class's own page:
+   the template's URL is {CLIENT_URL}/live-classes/ and every send adds
+   `<classId>/watch`, where the seat and the join window are checked before
+   the meeting link is handed over.
+
+   That is a DYNAMIC button again, the kind v1/v2 of class_starting_soon died
+   of (see above). Both of their bugs are closed off here: the body param
+   counts are fixed by these signatures — 4 and 2, as the approved templates
+   take — and with no class id there is no send at all, rather than a send
+   whose button component is missing and which Meta refuses whole. The email
+   beside it still goes either way. */
+export async function sendClassStartsIn5MinWhatsApp(
+  to: string | null | undefined, studentName: string, sessionTitle: string,
+  dateLabel: string, timeLabel: string, liveClassId: string,
+): Promise<void> {
+  if (!liveClassId) {
+    logger.warn({ templateName: 'class_starts_in_5_min' }, 'WhatsApp join reminder skipped — no class id for its button')
+    return
+  }
+  await sendTemplate(to, 'class_starts_in_5_min', [studentName || 'there', sessionTitle, dateLabel, timeLabel],
+    { category: 'utility', buttonParam: `${liveClassId}/watch` })
+}
+
+export async function sendClassHasStartedWhatsApp(
+  to: string | null | undefined, studentName: string, sessionTitle: string, liveClassId: string,
+): Promise<void> {
+  if (!liveClassId) {
+    logger.warn({ templateName: 'class_has_started' }, 'WhatsApp join reminder skipped — no class id for its button')
+    return
+  }
+  await sendTemplate(to, 'class_has_started', [studentName || 'there', sessionTitle],
+    { category: 'utility', buttonParam: `${liveClassId}/watch` })
+}
+
 /* First WhatsApp template aimed at STAFF rather than students — every other
    function in this file notifies a student. Sent to a support ticket's
    org admin(s), programme sub_admin(s), and every super_admin (see

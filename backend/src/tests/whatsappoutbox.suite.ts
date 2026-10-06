@@ -36,7 +36,7 @@ const { WhatsAppOutboxModel } = await import('@/models/schema.ts')
 const {
   whatsappBackoffFor, MAX_WHATSAPP_ATTEMPTS, classify, WhatsAppApiError, CreatyvotWhatsAppSender,
   sendEnrollmentApprovedWhatsApp, sendBookingConfirmedWhatsApp, sendClassReminderTomorrowWhatsApp,
-  sendClassStartingSoonWhatsApp,
+  sendClassStartingSoonWhatsApp, sendClassStartsIn5MinWhatsApp, sendClassHasStartedWhatsApp,
 } = await import('@/services/whatsapp.service.ts')
 const { drainWhatsAppOutboxOnce } = await import('@/jobs/whatsappOutbox.job.ts')
 const { normalizeWhatsAppNumber } = await import('@/utils/normalizeWhatsAppNumber.ts')
@@ -236,6 +236,33 @@ try {
      bug, because there is no per-send button component to drop. */
   check('and does not set a buttonParam — the button is static, not per-message',
     starting?.buttonParam === undefined, starting?.buttonParam)
+
+  /* The join reminders for an online class: a DYNAMIC button again — the
+     class's own page — so the two ways v1/v2 broke are asserted shut: the
+     body param count, and the button never sent without its id. */
+  await sendClassStartsIn5MinWhatsApp('919876543210', 'Priya', 'MBT 1 · MALAYALAM BATCH', 'Tue, 6 Oct', '01:00 PM GST', 'abc123')
+  const five = await WhatsAppOutboxModel.findOne({ templateName: 'class_starts_in_5_min' }).lean() as any
+  check('sendClassStartsIn5MinWhatsApp queues the 4 BODY params [name, class, day, time]',
+    JSON.stringify(five?.params) === JSON.stringify(['Priya', 'MBT 1 · MALAYALAM BATCH', 'Tue, 6 Oct', '01:00 PM GST']), JSON.stringify(five?.params))
+  check('and its Join button opens the class page: <id>/watch', five?.buttonParam === 'abc123/watch', five?.buttonParam)
+  check('and is utility', five?.category === 'utility')
+
+  await sendClassHasStartedWhatsApp('919876543210', 'Priya', 'MBT 1 · MALAYALAM BATCH', 'abc123')
+  const started = await WhatsAppOutboxModel.findOne({ templateName: 'class_has_started' }).lean() as any
+  check('sendClassHasStartedWhatsApp queues the 2 BODY params [name, class]',
+    JSON.stringify(started?.params) === JSON.stringify(['Priya', 'MBT 1 · MALAYALAM BATCH']), JSON.stringify(started?.params))
+  check('and the same Join button', started?.buttonParam === 'abc123/watch', started?.buttonParam)
+
+  const joinTemplates = { templateName: { $in: ['class_starts_in_5_min', 'class_has_started'] } }
+  const joinBefore = await WhatsAppOutboxModel.countDocuments(joinTemplates)
+  await sendClassStartsIn5MinWhatsApp('919876543210', 'Priya', 'X', 'Tue, 6 Oct', '01:00 PM GST', '')
+  await sendClassHasStartedWhatsApp('919876543210', 'Priya', 'X', '')
+  check('with no class id, neither is sent at all — never a message without its button',
+    await WhatsAppOutboxModel.countDocuments(joinTemplates) === joinBefore)
+
+  await sendClassHasStartedWhatsApp('919876543210', '', 'Y', 'abc123')
+  const anon = await WhatsAppOutboxModel.findOne({ templateName: 'class_has_started', 'params.1': 'Y' }).lean() as any
+  check('a missing name never reaches Meta as an empty param', anon?.params?.[0] === 'there', JSON.stringify(anon?.params))
 
   section('K · a title with newlines/injection characters cannot corrupt a template param')
   await sendClassReminderTomorrowWhatsApp('919876543210', 'Live\n\n\nQ&A     Session\t\ttitle', 'Tomorrow at 7pm')

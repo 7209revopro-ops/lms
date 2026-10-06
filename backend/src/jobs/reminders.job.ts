@@ -35,6 +35,7 @@ import {
 } from '@/services/email.service.ts'
 import {
   sendClassReminderTomorrowWhatsApp, sendClassStartingSoonWhatsApp,
+  sendClassStartsIn5MinWhatsApp, sendClassHasStartedWhatsApp,
   sendInstructorReviewRequestWhatsApp,
 } from '@/services/whatsapp.service.ts'
 import { wantsStaffEmail } from '@/utils/emailPrefs.ts'
@@ -118,10 +119,14 @@ interface BookingWithRefs {
      what let the crash below through in the first place. */
   liveClassId: {
     id:             string
+    _id?:           unknown
     title:          string
     scheduledStart: Date
     meetingUrl?:    string
     muxPlaybackId?: string
+    /* false for an in-person class — which has no room to join, so its
+       WhatsApp reminders carry no Join button (see the 5-min and at-time jobs). */
+    isOnline?:      boolean
     /* Needed to stop reminding people about a class that was cancelled or has
        already ended — the query only filters the BOOKING's status. */
     status?:        string
@@ -159,6 +164,20 @@ function fmtTime(d: Date, academySlug?: string | null): string {
   return academyTime(d, academySlug)
 }
 
+/* "Tue, 6 Oct" — the short day for a WhatsApp line, in the reader's academy
+   zone like every other date here (the time beside it carries the zone tag). */
+function fmtShortDay(d: Date, academySlug?: string | null): string {
+  const { zone } = academyClock(d, academySlug)
+  return d.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', timeZone: zone })
+    .replace(/^(\w{3}) /, '$1, ')
+}
+
+/* The class's id for a link. `id` is a lean virtual and is not always
+   materialised (see getJoinUrl), so fall back to `_id`. */
+function classIdOf(lc: NonNullable<BookingWithRefs['liveClassId']>): string {
+  return String(lc.id ?? (lc._id as { toString(): string } | undefined)?.toString() ?? '')
+}
+
 /* orgSlugFor() is synchronous, and on a cold cache it answers `undefined` —
    which renders every reminder in the default zone. That is the precise bug
    the threading below exists to fix, restored silently and with nothing to
@@ -194,8 +213,8 @@ async function dispatch(
      Same booking, same minute, two different times — and the mail was the
      only one of the two that was right. */
   academySlug?: string | null,
-  /* WhatsApp is best-effort ALONGSIDE email, not instead of it — supplied only
-     for the two tiers in phase 1 scope (day-before, five-min). A missing or
+  /* WhatsApp is best-effort ALONGSIDE email, not instead of it — supplied for
+     day-before, five-min and (online classes) at-time. A missing or
      unusable phone number is handled inside whatsapp.service.ts itself
      (normalizeWhatsAppNumber returns null → skipped, logged, never thrown),
      so failure here never triggers the "email failed" system notification. */
@@ -417,7 +436,7 @@ export async function runFiveMinReminders(): Promise<void> {
          academy clock. On a shared class the student's academy and the class's
          differ, and an unlabelled ninety-minute gap is a missed class. */
       .populate<{ userId: BookingWithRefs['userId'] }>('userId', 'name email organizationId enrollmentApplication.phone')
-      .populate<{ liveClassId: BookingWithRefs['liveClassId'] }>('liveClassId', 'id title scheduledStart meetingUrl muxPlaybackId status')
+      .populate<{ liveClassId: BookingWithRefs['liveClassId'] }>('liveClassId', 'id title scheduledStart meetingUrl muxPlaybackId status isOnline')
       .lean({ virtuals: true }) as unknown as BookingWithRefs[]
 
     const due = dueBetween(bookings, from, to)
@@ -427,15 +446,22 @@ export async function runFiveMinReminders(): Promise<void> {
       const classAt = new Date(b.liveClassId.scheduledStart)
       const joinUrl = getJoinUrl(b.liveClassId)
       const slug    = orgSlugFor((b.userId as { organizationId?: unknown }).organizationId)
+      const phone   = b.userId.enrollmentApplication?.phone
 
       await dispatch(userId, b.liveClassId.title, classAt, 'five-min', () =>
         sendFiveMinReminder(
           b.userId.email, b.userId.name, b.liveClassId.title, joinUrl, classAt, slug,
         ),
         undefined, slug,
-        () => sendClassStartingSoonWhatsApp(
-          b.userId.enrollmentApplication?.phone, b.liveClassId.title, '5',
-        ),
+        /* Online: class_starts_in_5_min, whose Join button opens this class's
+           page. In person there is nothing to join, so the plain reminder as
+           before (class_starting_soon_v5, its fixed button to My Bookings). */
+        b.liveClassId.isOnline === false
+          ? () => sendClassStartingSoonWhatsApp(phone, b.liveClassId.title, '5')
+          : () => sendClassStartsIn5MinWhatsApp(
+              phone, b.userId.name, b.liveClassId.title,
+              fmtShortDay(classAt, slug), fmtTime(classAt, slug), classIdOf(b.liveClassId),
+            ),
       )
 
       await ClassBookingModel.findByIdAndUpdate(b._id, { reminder5MinSent: true })
@@ -463,8 +489,8 @@ export async function runAtTimeReminders(): Promise<void> {
       /* organizationId comes back so the mail can be rendered in the READER's
          academy clock. On a shared class the student's academy and the class's
          differ, and an unlabelled ninety-minute gap is a missed class. */
-      .populate<{ userId: BookingWithRefs['userId'] }>('userId', 'name email organizationId')
-      .populate<{ liveClassId: BookingWithRefs['liveClassId'] }>('liveClassId', 'id title scheduledStart meetingUrl muxPlaybackId status')
+      .populate<{ userId: BookingWithRefs['userId'] }>('userId', 'name email organizationId enrollmentApplication.phone')
+      .populate<{ liveClassId: BookingWithRefs['liveClassId'] }>('liveClassId', 'id title scheduledStart meetingUrl muxPlaybackId status isOnline')
       .lean({ virtuals: true }) as unknown as BookingWithRefs[]
 
     const due = dueBetween(bookings, from, to)
@@ -487,6 +513,14 @@ export async function runAtTimeReminders(): Promise<void> {
         sendClassStartingReminder(b.userId.email, b.userId.name, b.liveClassId.title, joinUrl),
         `/live-classes/${liveClassId}/watch`,
         orgSlugFor((b.userId as { organizationId?: unknown }).organizationId),
+        /* Online only: class_has_started, its Join button opening the same
+           class page the in-app notice points at. An in-person class gets no
+           WhatsApp at its start, as before — there is nothing to join. */
+        b.liveClassId.isOnline === false
+          ? undefined
+          : () => sendClassHasStartedWhatsApp(
+              b.userId.enrollmentApplication?.phone, b.userId.name, b.liveClassId.title, classIdOf(b.liveClassId),
+            ),
       )
 
       await ClassBookingModel.findByIdAndUpdate(b._id, { reminderAtTimeSent: true })
