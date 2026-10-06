@@ -13,7 +13,7 @@ import {
 import { useAllLiveClasses, useCreateLiveClass, type LiveClass, type LiveClassType } from '@/lib/api/liveClasses'
 import { useCourses } from '@/lib/api/courses'
 import { useCourseOutline } from '@/lib/api/outline'
-import { useUsers } from '@/lib/api/users'
+import { useProgramInstructors, useDropInstructorOutside } from '@/lib/api/users'
 import { useCurrentUser } from '@/lib/api/user'
 import { datetimeLocalToISO, zoneOf, foreignZoneTag } from '@/lib/timezone'
 import { EditLiveClassModal } from '@/components/live-classes/EditLiveClassModal'
@@ -285,13 +285,15 @@ function QuickCreateModal({
 }) {
   const backdrop = useBackdropClose(onClose)
   const { data: coursesData, isLoading: cLoading } = useCourses({ per_page: 200, ...(categoryProgram ? { program: categoryProgram } : {}) })
-  const { data: instructorsData } = useUsers('instructor', { per_page: 200 })
   const createMutation = useCreateLiveClass()
 
   const courses     = coursesData?.docs     ?? []
-  const instructors = instructorsData?.docs ?? []
 
   const [courseId,        setCourseId]        = useState('')
+  /* Only the chosen course's programme teaches it. */
+  const courseProgram    = courses.find(c => c.id === courseId)?.program
+  const instructorsQuery = useProgramInstructors(courseProgram)
+  const instructors      = instructorsQuery.data?.docs ?? []
   const [sectionId,       setSectionId]       = useState('')
   const [title,           setTitle]           = useState('')
   const [start,           setStart]           = useState(draft.dateISO)
@@ -305,6 +307,7 @@ function QuickCreateModal({
   const [instructorId,    setInstructorId]    = useState('')
   const [language,        setLanguage]        = useState('English')
   const [error,           setError]           = useState<string | null>(null)
+  useDropInstructorOutside(instructorsQuery.isSuccess ? instructors : undefined, instructorId, setInstructorId)
 
   const { data: outline } = useCourseOutline(courseId)
   const sections = outline?.sections ?? []
@@ -480,7 +483,10 @@ function QuickCreateModal({
               style={{ color: 'rgba(255,255,255,0.35)' }}>Instructor</label>
             <select value={instructorId} onChange={e => setInstructorId(e.target.value)}
               className={`${base} cursor-pointer`} style={selStyle}>
-              <option value="">Default (you)</option>
+              <option value="">
+                {courseProgram && instructorsQuery.isSuccess && instructors.length === 0
+                  ? 'No instructors in this programme — default (you)' : 'Default (you)'}
+              </option>
               {instructors.map(i => <option key={i.id} value={i.id}>{i.name}</option>)}
             </select>
           </div>

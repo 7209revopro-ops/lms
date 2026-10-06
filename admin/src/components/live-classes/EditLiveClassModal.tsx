@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
   X, AlertCircle, ExternalLink, Tv2,
@@ -13,7 +13,7 @@ import {
 } from '@/lib/api/liveClasses'
 import { useCourses } from '@/lib/api/courses'
 import { useCourseOutline } from '@/lib/api/outline'
-import { useUsers } from '@/lib/api/users'
+import { useProgramInstructors } from '@/lib/api/users'
 import { isoToDatetimeLocal, datetimeLocalToISO, zoneOf, foreignZoneTag } from '@/lib/timezone'
 import Spinner from '@/components/ui/Spinner'
 import { GuestCohortsField, cohortsProblem } from '@/components/live-classes/GuestCohortsField'
@@ -50,8 +50,11 @@ export function EditLiveClassModal({ live, onClose, onSuccess }: Props) {
   const { data: coursesData } = useCourses({ per_page: 200 })
   const courses = coursesData?.docs ?? []
 
-  const { data: instructorsData } = useUsers('instructor', { per_page: 200 })
-  const instructors = instructorsData?.docs ?? []
+  /* Only the chosen course's programme teaches it — follows the course
+     switcher, so moving the class to a Forex course offers Forex instructors. */
+  const courseProgram    = courses.find(c => c.id === activeCourseId)?.program
+  const instructorsQuery = useProgramInstructors(courseProgram)
+  const instructors      = instructorsQuery.data?.docs ?? []
 
   const { data: outline } = useCourseOutline(activeCourseId)
   const sections = outline?.sections ?? []
@@ -79,9 +82,19 @@ export function EditLiveClassModal({ live, onClose, onSuccess }: Props) {
   const [room,             setRoom]             = useState<string>((live as any).room ?? '')
   const [rescheduleReason, setRescheduleReason] = useState<string>('')
   const [status,           setStatus]           = useState<LiveClassStatus>(live.status)
-  const [instructorId,     setInstructorId]     = useState(
-    typeof live.instructor === 'object' ? (live.instructor?.id ?? '') : (live.instructorId ?? ''),
-  )
+  const originalInstructorId =
+    typeof live.instructor === 'object' ? (live.instructor?.id ?? '') : (live.instructorId ?? '')
+  const [instructorId,     setInstructorId]     = useState(originalInstructorId)
+  /* A NEW pick that the course change put out of reach goes back to the
+     class's own instructor. The class's own instructor is never cleared here,
+     even when outside the list — silently reassigning a scheduled class is
+     worse than showing who it is; the select labels them instead. */
+  useEffect(() => {
+    if (!instructorsQuery.isSuccess) return
+    if (instructorId && instructorId !== originalInstructorId && !instructors.some(i => i.id === instructorId)) {
+      setInstructorId(originalInstructorId)
+    }
+  }, [instructorsQuery.isSuccess, instructors, instructorId, originalInstructorId])
   const [sectionId, setSectionId] = useState(() => {
     const s = (live as any).sectionId
     if (!s) return ''
@@ -627,7 +640,7 @@ export function EditLiveClassModal({ live, onClose, onSuccess }: Props) {
                   className={base} style={{ ...selStyle }}>
                   <option value="">Default (current user)</option>
                   {!known && instructorId && (
-                    <option value={instructorId}>{current} — no longer available to this academy</option>
+                    <option value={instructorId}>{current} — currently assigned, not in this course&apos;s list</option>
                   )}
                   {instructors.map(i => (
                     <option key={i.id} value={i.id}>{i.name}</option>

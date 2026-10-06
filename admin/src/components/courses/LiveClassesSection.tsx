@@ -17,7 +17,8 @@ import {
 } from '@/lib/api/liveClasses'
 import { useCourseOutline } from '@/lib/api/outline'
 import { datetimeLocalToISO } from '@/lib/timezone'
-import { useUsers } from '@/lib/api/users'
+import { useProgramInstructors } from '@/lib/api/users'
+import { useCourse } from '@/lib/api/courses'
 import { EditLiveClassModal } from '@/components/live-classes/EditLiveClassModal'
 import {
   useAcademyView, SharedAcademiesChip, GuestReadOnlyNote,
@@ -491,7 +492,9 @@ function CreateForm({
   const { data: outline } = useCourseOutline(courseId)
   const sections = outline?.sections ?? []
 
-  const { data: instructorsData } = useUsers('instructor', { per_page: 200 })
+  /* Only this course's programme teaches it. */
+  const { data: course } = useCourse(courseId)
+  const { data: instructorsData } = useProgramInstructors(course?.program)
   const instructors = instructorsData?.docs ?? []
 
   const handle = async (e: React.FormEvent) => {

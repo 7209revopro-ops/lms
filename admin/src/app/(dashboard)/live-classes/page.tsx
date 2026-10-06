@@ -20,7 +20,7 @@ import { useCourseOutline } from '@/lib/api/outline'
 import { GuestCohortsField, cohortsProblem } from '@/components/live-classes/GuestCohortsField'
 import type { GuestCohortInput } from '@/lib/api/liveClasses'
 import { useOrgStore } from '@/store/org.store'
-import { useUsers } from '@/lib/api/users'
+import { useUsers, useProgramInstructors, useDropInstructorOutside } from '@/lib/api/users'
 import { useCurrentUser } from '@/lib/api/user'
 import { EditLiveClassModal } from '@/components/live-classes/EditLiveClassModal'
 import {
@@ -1299,11 +1299,15 @@ function QuickCreateModal({ onClose, onSuccess, categoryProgram }: { onClose: ()
   const backdrop = useBackdropClose(onClose)
   const createMutation = useCreateLiveClass()
   const { data: coursesData,     isLoading: loadingCourses }     = useCourses({ per_page: 200, ...(categoryProgram ? { program: categoryProgram } : {}) })
-  const { data: instructorsData, isLoading: loadingInstructors } = useUsers('instructor', { per_page: 200 })
   const courses     = coursesData?.docs     ?? []
-  const allInstructors = instructorsData?.docs ?? []
 
   const [courseId,        setCourseId]        = useState(courses[0]?.id ?? '')
+  /* Only the chosen course's programme teaches it — a Forex class offers Forex
+     instructors, not the whole academy's staff. */
+  const courseProgram = courses.find(c => c.id === courseId)?.program
+  const instructorsQuery = useProgramInstructors(courseProgram)
+  const { data: instructorsData, isLoading: loadingInstructors } = instructorsQuery
+  const allInstructors = instructorsData?.docs ?? []
   const [title,           setTitle]           = useState('')
   const [start,           setStart]           = useState('')
   const [durationMins,    setDurationMins]    = useState(60)
@@ -1384,6 +1388,7 @@ function QuickCreateModal({ onClose, onSuccess, categoryProgram }: { onClose: ()
     if (String(i.organizationId) === String(hostOrgId)) return true
     return i.sharedAcrossOrgs === true
   })
+  useDropInstructorOutside(instructorsQuery.isSuccess ? instructors : undefined, instructorId, setInstructorId)
 
   const handleCourseChange = (id: string) => { setCourseId(id); setSectionId('') }
 
@@ -1578,7 +1583,9 @@ function QuickCreateModal({ onClose, onSuccess, categoryProgram }: { onClose: ()
               value={instructorId}
               onChange={setInstructorId}
               options={instructors.map(i => ({ value: i.id, label: i.name }))}
-              placeholder="Default (current user)"
+              placeholder={courseProgram && instructorsQuery.isSuccess && instructors.length === 0
+                ? 'No instructors in this programme — default (current user)'
+                : 'Default (current user)'}
               loading={loadingInstructors}
               loadingText="Loading…"
             />

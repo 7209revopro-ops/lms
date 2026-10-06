@@ -1,5 +1,6 @@
 'use client'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useEffect } from 'react'
 import { api } from '@/lib/axios'
 import type { PaginationMeta } from '@/types/index'
 import type { EnrollmentApplication } from './enrollmentRequests'
@@ -125,6 +126,29 @@ export function useUsers(role: AdminUserRole | undefined, params: {
     },
     staleTime: 30_000,
   })
+}
+
+/* Instructors who teach a course's programme, for the class forms' picker.
+   Filtered on the server (`category` matches an instructor's `category` or any
+   of `categories`, lent instructors included), so the 200 cap applies to the
+   programme rather than the whole academy. No programme → every instructor.
+   A sub-admin's list is narrowed to their own department by the server either
+   way. */
+export function useProgramInstructors(program?: string | null) {
+  return useUsers('instructor', { per_page: 200, ...(program ? { category: program } : {}) })
+}
+
+/** Clears a picked instructor who is not in `list` — i.e. the course, and with
+    it the programme, just changed. `list` is undefined while loading, so a
+    list still in flight never wipes a valid choice. */
+export function useDropInstructorOutside(
+  list: { id: string }[] | undefined,
+  instructorId: string,
+  setInstructorId: (id: string) => void,
+) {
+  useEffect(() => {
+    if (list && instructorId && !list.some(i => i.id === instructorId)) setInstructorId('')
+  }, [list, instructorId, setInstructorId])
 }
 
 /* ─── Student Enrollments ───────────────────────────── */

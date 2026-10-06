@@ -11,7 +11,7 @@ import { datetimeLocalToISO } from '@/lib/timezone'
 import Spinner from '@/components/ui/Spinner'
 import { useCourses } from '@/lib/api/courses'
 import { useCourseOutline } from '@/lib/api/outline'
-import { useUsers } from '@/lib/api/users'
+import { useProgramInstructors, useDropInstructorOutside } from '@/lib/api/users'
 import { Button } from '@/components/ui/button'
 import { DarkSelect, DarkDateTimePicker } from './FormWidgets'
 import { CLASS_LANGUAGES, withFlag } from '@/lib/languages'
@@ -34,12 +34,15 @@ export function CreateOfflineClassModal({ onClose, onSuccess, categoryProgram, p
   const backdrop = useBackdropClose(onClose)
   const createMutation = useCreateLiveClass()
   const { data: coursesData,     isLoading: loadingCourses }     = useCourses({ per_page: 200, ...(categoryProgram ? { program: categoryProgram } : {}) })
-  const { data: instructorsData, isLoading: loadingInstructors } = useUsers('instructor', { per_page: 200 })
 
   const courses     = coursesData?.docs     ?? []
-  const instructors = instructorsData?.docs ?? []
 
   const [courseId,        setCourseId]        = useState(courses[0]?.id ?? '')
+  /* Only the chosen course's programme teaches it. */
+  const courseProgram    = courses.find(c => c.id === courseId)?.program
+  const instructorsQuery = useProgramInstructors(courseProgram)
+  const loadingInstructors = instructorsQuery.isLoading
+  const instructors      = instructorsQuery.data?.docs ?? []
   const [sectionId,       setSectionId]       = useState('')
   const [title,           setTitle]           = useState('')
   const [description,     setDescription]     = useState('')
@@ -51,6 +54,7 @@ export function CreateOfflineClassModal({ onClose, onSuccess, categoryProgram, p
   const [instructorId,    setInstructorId]    = useState('')
   const [language,        setLanguage]        = useState('English')
   const [error,           setError]           = useState<string | null>(null)
+  useDropInstructorOutside(instructorsQuery.isSuccess ? instructors : undefined, instructorId, setInstructorId)
 
   const { data: outline } = useCourseOutline(courseId)
   const sections = outline?.sections ?? []
@@ -248,7 +252,9 @@ export function CreateOfflineClassModal({ onClose, onSuccess, categoryProgram, p
                 value={instructorId}
                 onChange={setInstructorId}
                 options={instructors.map(i => ({ value: i.id, label: i.name }))}
-                placeholder="Default (current user)"
+                placeholder={courseProgram && instructorsQuery.isSuccess && instructors.length === 0
+                  ? 'No instructors in this programme — default (current user)'
+                  : 'Default (current user)'}
                 loading={loadingInstructors}
                 loadingText="Loading…"
               />
