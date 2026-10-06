@@ -16,7 +16,8 @@ export interface LiveClass {
   description?:   string
   scheduledStart: string
   durationMins:   number
-  /** When new bookings stop being accepted — an hour before the start.
+  /** When new bookings stop being accepted — 15 minutes before an online
+   *  start, 5 hours before an in-person one.
    *  Computed by the SERVER so this screen never holds its own copy of the
    *  rule; absent only on payloads written before the field existed. */
   bookingClosesAt?: string

@@ -346,7 +346,7 @@ function toDTO(doc: any, entitled = true, staff = true, door?: LabelledDoor | un
 
     /* When new bookings stop being accepted — the SERVER's answer, so the UI
        never has to hold its own copy of the rule and drift from it. */
-    bookingClosesAt: j.scheduledStart ? bookingClosesAt(j.scheduledStart).toISOString() : undefined,
+    bookingClosesAt: j.scheduledStart ? bookingClosesAt(j.scheduledStart, j.isOnline).toISOString() : undefined,
 
     language:       j.language ?? 'English',
 

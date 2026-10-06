@@ -181,12 +181,13 @@ router.get('/', authenticate, async (req: Request, res: Response, next: NextFunc
            can draw the lock BEFORE the click. */
         isEntitled,
         /* When new bookings stop being accepted, computed by the SERVER.
-           The schedule screen needs to grey out a seat an hour before the
-           class, and deriving that in the browser would put the rule in two
-           places — where the two can disagree, and the one the student sees
-           is the one that is wrong. */
+           The schedule screen greys out a seat at the cut-off — 15 minutes
+           before an online class, 5 hours before an in-person one — and
+           deriving that in the browser would put the rule in two places,
+           where the two can disagree, and the one the student sees is the
+           one that is wrong. */
         bookingClosesAt: c.scheduledStart
-          ? bookingClosesAt(c.scheduledStart).toISOString()
+          ? bookingClosesAt(c.scheduledStart, c.isOnline).toISOString()
           : undefined,
         /* The join window, from the same server clock as everything else on
            this row. The button is drawn from these two instants; the link

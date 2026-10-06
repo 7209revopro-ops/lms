@@ -19,49 +19,70 @@
 export const LIVE_LEAD_MS = 15 * 60_000  // session becomes "live" 15 min before start
 
 /* ── When a student may still take a seat ────────────────────────────────
-   Booking closes a fixed period BEFORE the class starts: a class at 11:00
-   stops accepting bookings at 10:00.
+   Booking closes a fixed period BEFORE the class starts, and the period
+   depends on where the class happens:
 
-   The point is the hour itself. Somebody booking at 10:58 for an 11:00 class
-   is a seat the instructor cannot prepare for, a join link the mail queue may
-   not deliver in time, and a head-count that was already wrong when it was
-   taken. An hour is enough to act on the final list.
+     online     15 minutes before — an 11:00 class stops taking seats at 10:45,
+                the moment resolveLiveStatus() starts calling it "live";
+     in person  5 hours before    — a 19:00 class stops at 14:00, time enough
+                to set out the room for the final head-count.
 
-   Note what this REPLACES. Booking did not previously close at the start time
-   — it closed at start minus 15 minutes, because resolveLiveStatus() calls a
-   class "live" from then and the route refuses a live class. So this widens an
-   existing 15-minute window to 60, rather than introducing the first one.
+   History, so neither number is mistaken for an accident: online booking
+   closed 15 minutes before (when a class goes "live"), then an hour before,
+   and is back at 15 minutes at the academy's request. In-person booking
+   closed at midnight before the class day, a rule only the student app held;
+   it is now 5 hours before the start, and the server enforces it too.
 
-   Offline classes are not governed by this: they already close at midnight the
-   day before, which is stricter, and that rule lives in the client's slot
-   resolver. Nothing here loosens it.
+   An admin seating a student (book-for-student) is not governed by either —
+   a staff override for a genuine exception.
 
-   Overridable so an academy running short-notice sessions can shorten it
-   without a deploy. Parsed once — env is fixed at boot. */
-const CUTOFF_MINUTES = (() => {
-  const raw = Number(process.env['BOOKING_CUTOFF_MINUTES'])
-  return Number.isFinite(raw) && raw >= 0 ? raw : 60
-})()
+   Overridable so an academy can move either without a deploy:
+   BOOKING_CUTOFF_MINUTES (online) and IN_PERSON_BOOKING_CUTOFF_MINUTES.
+   Parsed once — env is fixed at boot. */
+const minutesFromEnv = (name: string, fallback: number): number => {
+  const raw = Number(process.env[name])
+  return process.env[name]?.trim() && Number.isFinite(raw) && raw >= 0 ? raw : fallback
+}
 
-export const BOOKING_CUTOFF_MS = CUTOFF_MINUTES * 60_000
+export const BOOKING_CUTOFF_MS           = minutesFromEnv('BOOKING_CUTOFF_MINUTES', 15) * 60_000
+export const IN_PERSON_BOOKING_CUTOFF_MS = minutesFromEnv('IN_PERSON_BOOKING_CUTOFF_MINUTES', 300) * 60_000
+
+/** How long before its start a class stops taking seats. `isOnline: false` is
+ *  in person; anything else — absent included — is online, as the class
+ *  model defaults. */
+export function bookingCutoffMs(isOnline?: boolean | null): number {
+  return isOnline === false ? IN_PERSON_BOOKING_CUTOFF_MS : BOOKING_CUTOFF_MS
+}
+
+/** The cut-off in words for a message: "15 minutes", "5 hours". */
+export function bookingCutoffPhrase(isOnline?: boolean | null): string {
+  const mins = Math.round(bookingCutoffMs(isOnline) / 60_000)
+  if (mins % 60 === 0 && mins >= 60) return `${mins / 60} hour${mins === 60 ? '' : 's'}`
+  return `${mins} minute${mins === 1 ? '' : 's'}`
+}
 
 /** The instant after which no new booking is accepted. */
-export function bookingClosesAt(scheduledStart: Date | string): Date {
-  return new Date(new Date(scheduledStart).getTime() - BOOKING_CUTOFF_MS)
+export function bookingClosesAt(scheduledStart: Date | string, isOnline?: boolean | null): Date {
+  return new Date(new Date(scheduledStart).getTime() - bookingCutoffMs(isOnline))
 }
 
 /** True while a seat may still be taken. `now` is injectable so the rule can
  *  be tested at an exact instant rather than against the wall clock. */
-export function isBookingOpen(scheduledStart: Date | string, now: number = Date.now()): boolean {
-  return now < bookingClosesAt(scheduledStart).getTime()
+export function isBookingOpen(
+  scheduledStart: Date | string,
+  now: number = Date.now(),
+  isOnline?: boolean | null,
+): boolean {
+  return now < bookingClosesAt(scheduledStart, isOnline).getTime()
 }
 
 /** Minutes until booking closes — negative once it has. For messages. */
 export function minutesUntilBookingCloses(
   scheduledStart: Date | string,
   now: number = Date.now(),
+  isOnline?: boolean | null,
 ): number {
-  return Math.round((bookingClosesAt(scheduledStart).getTime() - now) / 60_000)
+  return Math.round((bookingClosesAt(scheduledStart, isOnline).getTime() - now) / 60_000)
 }
 
 export function resolveLiveStatus(

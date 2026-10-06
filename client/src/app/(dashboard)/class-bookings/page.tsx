@@ -27,7 +27,7 @@ import { useAnchoredPosition } from '@/lib/useAnchoredPosition'
    added so the two views cannot answer the same question differently. */
 import {
   zonedKey, toZonedDateStr, offlineDayOffset,
-  isWithinLiveWindow, isBookingClosed, bookingClosedAt, isPastEnd,
+  isWithinLiveWindow, isBookingClosed, bookingClosedAt, bookingCutoffLabel, isPastEnd,
   seatsLeft, isFull, effCourseId, effProgram, effSectionId, effSectionTitle,
   getSlotStatus, SC, buildGroups, groupKeyOf, buildCatalog,
   type SlotStatus, type ClassGroup,
@@ -623,7 +623,7 @@ function SlotModal({group,bookingMap,onBook,onCancel,bookPending,cancelPending,o
 
                         A student who finds out about the cut-off by being
                         refused has already lost the seat. Shown as a concrete
-                        time rather than the policy — "seats close one hour
+                        time rather than the policy — "seats close 5 hours
                         before" makes a reader do arithmetic against a class
                         time they are also reading off the screen — and it
                         sharpens into a countdown inside the last two hours,
@@ -639,7 +639,7 @@ function SlotModal({group,bookingMap,onBook,onCancel,bookPending,cancelPending,o
                           <Clock size={11} style={{flexShrink:0}}/>
                           {urgent
                             ? <span>Booking closes in <strong>{minsLeft < 60 ? `${Math.max(1,minsLeft)} min` : `${Math.floor(minsLeft/60)}h ${minsLeft%60}m`}</strong> — reserve now to keep your seat.</span>
-                            : <span>Reserve by <strong>{fmtTime(new Date(closesAt).toISOString())}</strong> — seats close one hour before the class starts.</span>}
+                            : <span>Reserve by <strong>{fmtTime(new Date(closesAt).toISOString())}</strong> — {isOff ? 'in-person seats' : 'seats'} close {bookingCutoffLabel(sel)} before the class starts.</span>}
                         </p>
                       )
                     })()}
@@ -666,7 +666,7 @@ function SlotModal({group,bookingMap,onBook,onCancel,bookPending,cancelPending,o
                           difference from one who missed it by a day. */}
                       <p className="mt-0.5 text-[11px] leading-relaxed" style={{color: 'var(--color-text-muted)'}}>
                         Seats closed at <strong>{fmtShortSlot(new Date(bookingClosedAt(sel)).toISOString())}</strong>,
-                        an hour before the class. Ask your admin if you still need a place.
+                        {' '}{bookingCutoffLabel(sel)} before the class. Ask your admin if you still need a place.
                       </p>
                     </div>
                   </div>
@@ -708,22 +708,10 @@ function SlotModal({group,bookingMap,onBook,onCancel,bookPending,cancelPending,o
                   </div>
                 )}
                 {selSt==='locked'&&(
-                  isOff && offlineDayOffset(sel.scheduledStart) === 0 ? (
-                    <div className="flex items-start gap-2 rounded-2xl px-4 py-3" style={{background:'rgba(99,102,241,0.06)',border:'1px solid rgba(99,102,241,0.18)'}}>
-                      <Lock size={14} style={{color: '#6366F1',flexShrink:0,marginTop:1}}/>
-                      <div>
-                        <p className="text-[12px] font-semibold" style={{color: '#4338CA'}}>Same-day registration closed</p>
-                        <p className="mt-0.5 text-[11px] leading-relaxed" style={{color: '#6366F1'}}>
-                          Bookings must be made at least <strong>1 day in advance</strong>. Register tomorrow for an upcoming session.
-                        </p>
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="flex items-start gap-2 rounded-2xl px-4 py-3" style={{background: 'var(--color-primary-light)',border:'1px solid rgba(217,119,6,0.25)'}}>
-                      <AlertCircle size={14} style={{color: '#D97706',flexShrink:0,marginTop:1}}/>
-                      <span className="text-xs" style={{color: '#92400E'}}>You already have a reservation. Cancel it first to pick a different time.</span>
-                    </div>
-                  )
+                  <div className="flex items-start gap-2 rounded-2xl px-4 py-3" style={{background: 'var(--color-primary-light)',border:'1px solid rgba(217,119,6,0.25)'}}>
+                    <AlertCircle size={14} style={{color: '#D97706',flexShrink:0,marginTop:1}}/>
+                    <span className="text-xs" style={{color: '#92400E'}}>You already have a reservation. Cancel it first to pick a different time.</span>
+                  </div>
                 )}
                 {selSt==='attended'&&(
                   <div className="flex items-center justify-center gap-2 rounded-2xl py-3 text-sm font-semibold"

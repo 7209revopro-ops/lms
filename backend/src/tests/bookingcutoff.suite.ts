@@ -1,20 +1,18 @@
 /* ─────────────────────────────────────────────────────────────
-   Booking closes an hour before the class starts.
+   Booking closes before the class starts — 15 minutes before an online
+   class, 5 hours before an in-person one.
 
-   A class at 11:00 stops accepting seats at 10:00. The hour is the point: a
-   seat taken at 10:58 is one the instructor cannot prepare for, a join link
-   the mail queue may not deliver in time, and a head-count that was wrong when
-   it was taken.
+   An online class at 11:00 stops accepting seats at 10:45; an in-person class
+   at 19:00 stops at 14:00, so the room can be set for the final head-count.
 
    What this does NOT change, asserted here so a later edit cannot quietly
    loosen any of it:
      · a student ALREADY booked keeps their seat and can still cancel;
      · an ADMIN may still seat someone late — a staff override is legitimate
-       and is the only way to handle a genuine exception;
-     · offline classes keep their own, stricter rule (no same-day booking).
+       and is the only way to handle a genuine exception.
 
-   The boundary is exercised to the second, because "an hour before" is the
-   sort of rule that is usually implemented as "an hour or so before".
+   The boundaries are exercised to the second, because "15 minutes before" is
+   the sort of rule that is usually implemented as "about 15 minutes before".
 
    Run: bun run test:bookingcutoff
 ───────────────────────────────────────────────────────────── */
@@ -47,7 +45,8 @@ const {
 } = await import('@/models/schema.ts')
 const { hashPassword } = await import('@/utils/hash.ts')
 const {
-  isBookingOpen, bookingClosesAt, BOOKING_CUTOFF_MS, minutesUntilBookingCloses,
+  isBookingOpen, bookingClosesAt, BOOKING_CUTOFF_MS, IN_PERSON_BOOKING_CUTOFF_MS,
+  minutesUntilBookingCloses, bookingCutoffPhrase,
 } = await import('@/utils/liveStatus.ts')
 
 await mongoose.connect(process.env.DATABASE_URL!)
@@ -145,26 +144,43 @@ try {
   /* ═══════════════════════════════════════════════ */
   section('A · the rule itself, to the second')
   {
-    /* The worked example from the request: a class at 11:00 closes at 10:00. */
+    /* Online: a class at 11:00 closes at 10:45. */
     const start = new Date('2026-09-12T11:00:00.000Z')
-    check('an 11:00 class closes at 10:00',
-      bookingClosesAt(start).toISOString() === '2026-09-12T10:00:00.000Z',
+    check('an online 11:00 class closes at 10:45',
+      bookingClosesAt(start).toISOString() === '2026-09-12T10:45:00.000Z',
       bookingClosesAt(start).toISOString())
+    check('and isOnline: true says the same',
+      bookingClosesAt(start, true).toISOString() === '2026-09-12T10:45:00.000Z',
+      bookingClosesAt(start, true).toISOString())
 
     const closes = bookingClosesAt(start).getTime()
     check('open one second before the deadline', isBookingOpen(start, closes - 1000))
-    /* Exactly at the deadline is CLOSED. Stated because "an hour before" is
+    /* Exactly at the deadline is CLOSED. Stated because "15 minutes before" is
        normally written as >= somewhere and > somewhere else, and the two
        disagree for exactly one instant. */
     check('CLOSED at the deadline itself', !isBookingOpen(start, closes))
     check('and closed one second after', !isBookingOpen(start, closes + 1000))
     check('wide open two hours ahead', isBookingOpen(start, closes - 2 * 60 * MIN))
 
-    check('the cut-off is one hour', BOOKING_CUTOFF_MS === 60 * MIN, String(BOOKING_CUTOFF_MS))
+    check('the online cut-off is 15 minutes', BOOKING_CUTOFF_MS === 15 * MIN, String(BOOKING_CUTOFF_MS))
     check('minutes-remaining counts down', minutesUntilBookingCloses(start, closes - 30 * MIN) === 30,
       String(minutesUntilBookingCloses(start, closes - 30 * MIN)))
     check('and goes negative once shut', minutesUntilBookingCloses(start, closes + 5 * MIN) === -5,
       String(minutesUntilBookingCloses(start, closes + 5 * MIN)))
+
+    /* In person: a class at 19:00 closes at 14:00. */
+    const room = new Date('2026-09-12T19:00:00.000Z')
+    check('an in-person 19:00 class closes at 14:00',
+      bookingClosesAt(room, false).toISOString() === '2026-09-12T14:00:00.000Z',
+      bookingClosesAt(room, false).toISOString())
+    const shut = bookingClosesAt(room, false).getTime()
+    check('in person: open one second before', isBookingOpen(room, shut - 1000, false))
+    check('in person: CLOSED at the deadline itself', !isBookingOpen(room, shut, false))
+    check('in person: still closed four hours out — the online rule does not apply',
+      !isBookingOpen(room, room.getTime() - 4 * 60 * MIN, false))
+    check('the in-person cut-off is 5 hours', IN_PERSON_BOOKING_CUTOFF_MS === 300 * MIN, String(IN_PERSON_BOOKING_CUTOFF_MS))
+    check('and the words for each', bookingCutoffPhrase(true) === '15 minutes' && bookingCutoffPhrase(false) === '5 hours',
+      `${bookingCutoffPhrase(true)} / ${bookingCutoffPhrase(false)}`)
   }
 
   /* ═══════════════════════════════════════════════ */
@@ -182,42 +198,66 @@ try {
   }
 
   /* ═══════════════════════════════════════════════ */
-  section('C · and shut inside the hour')
+  section('C · online: shut inside the last 15 minutes')
   {
     const s = await mkStudent('late')
     const jar = await login(s.email)
 
-    /* 59 minutes out — inside the hour but NOT yet live, which is the whole
-       window this change creates. The old rule would have allowed this. */
-    const cls = await mkClass(59 * MIN)
+    /* 14 minutes out — past the cut-off, and inside the window the schedule
+       already calls "live", though the class has not begun. */
+    const cls = await mkClass(14 * MIN)
     const r = await book(jar, String(cls._id))
-    check('a seat 59 minutes out is refused', r.status === 400, String(r.status))
+    check('a seat 14 minutes out is refused', r.status === 400, String(r.status))
     check('with BOOKING_CLOSED', code(r) === 'BOOKING_CLOSED', code(r))
     check('and nothing was booked',
       await ClassBookingModel.countDocuments({ userId: s._id, liveClassId: cls._id }) === 0)
 
     /* The message must describe THIS situation, not a different one.
 
-       A class 59 minutes away has not started and is not live, so saying
-       either is simply false — and it is the lie a student would act on, by
-       giving up on a class they still have an hour to prepare for. A mutation
-       run caught the weaker version of this assertion: forcing the "already
-       started" branch left it green, because the old check only looked for the
-       absence of the word "live". */
+       A class 14 minutes away has not started, so saying it has is simply
+       false — and it is the lie a student would act on. A mutation run caught
+       the weaker version of this assertion: forcing the "already started"
+       branch left it green, because the old check only looked for the absence
+       of the word "live". */
     const msg = String(r.body?.error?.message ?? '')
     check('the message does NOT claim the class has started — it has not',
       !/started|is live/i.test(msg), msg)
     check('it says booking closed', /closed/i.test(msg), msg)
+    check('and names the rule, 15 minutes', /15 minutes/.test(msg), msg)
     /* And names the deadline, so a student two minutes late can see it. */
     check('and names the time it closed', /\d/.test(msg) && msg.length > 40, msg)
     check('and carries the deadline for a client to render',
       typeof r.body?.error?.closedAt === 'string', String(r.body?.error?.closedAt))
 
-    /* 61 minutes out is still open — the boundary is real, not a rounded
-       "about an hour". */
-    const ok = await mkClass(61 * MIN)
+    /* 16 minutes out is still open — the boundary is real, not a rounded
+       "about 15 minutes". */
+    const ok = await mkClass(16 * MIN)
     const r2 = await book(jar, String(ok._id))
-    check('but 61 minutes out is still open', r2.status === 201 || r2.status === 200,
+    check('but 16 minutes out is still open', r2.status === 201 || r2.status === 200,
+      `${r2.status} ${code(r2)}`)
+  }
+
+  /* ═══════════════════════════════════════════════ */
+  section('C2 · in person: shut inside the last 5 hours')
+  {
+    const s = await mkStudent('room')
+    const jar = await login(s.email)
+    const inRoom = { isOnline: false, location: 'AL QUSAIS', room: 'Room 1' }
+
+    const cls = await mkClass(4 * 60 * MIN + 59 * MIN, inRoom)   // 4 h 59 min out
+    const r = await book(jar, String(cls._id))
+    check('a seat 4 h 59 min out is refused', r.status === 400 && code(r) === 'BOOKING_CLOSED',
+      `${r.status} ${code(r)}`)
+    const msg = String(r.body?.error?.message ?? '')
+    check('saying in-person seats close 5 hours before', /in-person/i.test(msg) && /5 hours/.test(msg), msg)
+    check('and nothing was booked',
+      await ClassBookingModel.countDocuments({ userId: s._id, liveClassId: cls._id }) === 0)
+
+    /* The same day is fine now, as long as it is 5 hours ahead — the old
+       rule refused any same-day in-person seat. */
+    const ok = await mkClass(5 * 60 * MIN + MIN, inRoom)          // 5 h 1 min out
+    const r2 = await book(jar, String(ok._id))
+    check('but 5 h 1 min out is still open', r2.status === 201 || r2.status === 200,
       `${r2.status} ${code(r2)}`)
   }
 
@@ -243,10 +283,10 @@ try {
     const cls = await mkClass(3 * 60 * MIN)
     await book(jar, String(cls._id))
 
-    /* Move the class so it is now inside the hour — the same shape as time
+    /* Move the class so it is now past the cut-off — the same shape as time
        passing, without waiting for it. */
     await LiveClassModel.updateOne({ _id: cls._id },
-      { $set: { scheduledStart: new Date(Date.now() + 20 * MIN) } })
+      { $set: { scheduledStart: new Date(Date.now() + 10 * MIN) } })
 
     const mine = await call('GET', '/bookings/me', { jar })
     const has = (mine.body?.data ?? []).some((b: any) =>
@@ -257,11 +297,11 @@ try {
     const booking = await ClassBookingModel.findOne({ userId: s._id, liveClassId: cls._id }).lean() as any
     check('and still booked', booking?.status === 'booked', String(booking?.status))
 
-    /* Cancelling inside the hour stays allowed. A student who cannot attend
+    /* Cancelling past the cut-off stays allowed. A student who cannot attend
        should free the seat, and refusing that would leave the head-count the
        cut-off exists to protect WORSE, not better. */
     const cancel = await call('DELETE', `/bookings/${String(booking._id)}`, { jar })
-    check('and they may still cancel inside the hour', cancel.status === 200, String(cancel.status))
+    check('and they may still cancel past the cut-off', cancel.status === 200, String(cancel.status))
   }
 
   /* ═══════════════════════════════════════════════ */
@@ -281,7 +321,7 @@ try {
     const r = await call('POST', '/admin/bookings/book-for-student', {
       jar: aJar, body: { liveClassId: String(online._id), studentId: String(s1._id) },
     })
-    check('an online class inside the hour still seats the student',
+    check('an online class past the cut-off still seats the student',
       r.status === 200 || r.status === 201,
       `${r.status} ${code(r)} ${String(r.body?.error?.message ?? '')}`)
     check('and the online booking exists',
@@ -296,7 +336,7 @@ try {
     const r2 = await call('POST', '/admin/bookings/book-for-student', {
       jar: aJar, body: { liveClassId: String(offline._id), studentId: String(s2._id) },
     })
-    check('but an offline class inside the hour still seats the student',
+    check('and an offline class past the cut-off still seats the student',
       r2.status === 200 || r2.status === 201,
       `${r2.status} ${code(r2)} ${String(r2.body?.error?.message ?? '')}`)
     check('and the booking exists',
@@ -320,9 +360,16 @@ try {
     check('the new session is in it', !!payload, String((Array.isArray(rows) ? rows : []).length))
     const closes = payload?.bookingClosesAt
     check('and carries bookingClosesAt', typeof closes === 'string', String(closes))
-    check('exactly one hour before its start',
-      new Date(payload?.scheduledStart).getTime() - new Date(closes).getTime() === 60 * MIN,
+    check('exactly 15 minutes before an online start',
+      new Date(payload?.scheduledStart).getTime() - new Date(closes).getTime() === 15 * MIN,
       `${payload?.scheduledStart} → ${closes}`)
+
+    const room = await mkClass(8 * 60 * MIN, { isOnline: false, location: 'AL QUSAIS', room: 'Room 1' })
+    const r2 = await call('GET', '/live-classes?per_page=100', { jar })
+    const p2 = ((r2.body?.data ?? []) as any[]).find((x: any) => String(x.id) === String(room._id))
+    check('and exactly 5 hours before an in-person start',
+      !!p2 && new Date(p2.scheduledStart).getTime() - new Date(p2.bookingClosesAt).getTime() === 300 * MIN,
+      `${p2?.scheduledStart} → ${p2?.bookingClosesAt}`)
   }
 
 } catch (err) {

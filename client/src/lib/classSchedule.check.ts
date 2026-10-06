@@ -11,7 +11,8 @@
    ───────────────────────────────────────────────────────────────────────── */
 import { buildCatalog, GENERAL_MODULE_ID, groupKeyOf, slotPattern,
          moduleFacets, showFacet, filterGroups, buildGroups,
-         groupByDay } from '@/lib/classSchedule'
+         groupByDay, getSlotStatus, bookingClosedAt, bookingCutoffLabel,
+         BOOKING_CUTOFF_MINS, IN_PERSON_BOOKING_CUTOFF_MINS } from '@/lib/classSchedule'
 import type { LiveClass } from '@/lib/api/liveClasses'
 import type { MyBooking } from '@/lib/api/bookings'
 
@@ -365,6 +366,45 @@ console.log('\nI. Sessions bucket by the STUDENT\'S day, soonest first')
     shifted[0]!.label === 'Today', shifted[0]!.label)
 
   check('I10 nothing in, nothing out', groupByDay([], NOON).length === 0)
+}
+
+/* ── J · Booking deadlines: 15 minutes before online, 5 hours before in person ──
+   The in-person rule used to be the calendar day (no booking on the day of
+   the class); it is now a time, and the same day is fine until 5 hours out. */
+{
+  const MIN = 60_000
+  const inMins   = (m: number) => new Date(Date.now() + m * MIN).toISOString()
+  const online   = (m: number, o: Row = {}) => row({ id: `on${m}`, scheduledStart: inMins(m), ...o })
+  const inPerson = (m: number, o: Row = {}) =>
+    row({ id: `ip${m}`, scheduledStart: inMins(m), isOnline: false, location: 'AL QUSAIS', room: 'Room 1', ...o })
+  const held = (lc: LiveClass) => ({ id: 'b1', status: 'booked', liveClassId: lc.id }) as unknown as MyBooking
+
+  check('J1 the fallback cut-offs are 15 minutes and 5 hours',
+    BOOKING_CUTOFF_MINS === 15 && IN_PERSON_BOOKING_CUTOFF_MINS === 300)
+  const on = online(120), ip = inPerson(600)
+  check('J2 without a server deadline, online closes 15 minutes before',
+    new Date(on.scheduledStart).getTime() - bookingClosedAt(on) === 15 * MIN)
+  check('J3 and in person 5 hours before',
+    new Date(ip.scheduledStart).getTime() - bookingClosedAt(ip) === 300 * MIN)
+  const sent = inPerson(600, { bookingClosesAt: inMins(1) })
+  check('J4 the server deadline wins when it is sent',
+    bookingClosedAt(sent) === new Date(sent.bookingClosesAt!).getTime())
+  check('J5 the rule in words', bookingCutoffLabel(on) === '15 minutes' && bookingCutoffLabel(ip) === '5 hours',
+    `${bookingCutoffLabel(on)} / ${bookingCutoffLabel(ip)}`)
+
+  check('J6 online: 16 minutes out is bookable', getSlotStatus(online(16), undefined, false) === 'bookable',
+    getSlotStatus(online(16), undefined, false))
+  check('J7 online: 14 minutes out is live, no longer bookable', getSlotStatus(online(14), undefined, false) === 'live',
+    getSlotStatus(online(14), undefined, false))
+  check('J8 in person: 5 h 1 min out is bookable, whatever the day', getSlotStatus(inPerson(301), undefined, false) === 'bookable',
+    getSlotStatus(inPerson(301), undefined, false))
+  check('J9 in person: 4 h 59 min out is closed', getSlotStatus(inPerson(299), undefined, false) === 'closed',
+    getSlotStatus(inPerson(299), undefined, false))
+  check('J10 in person: a seat already held stays booked past the cut-off',
+    getSlotStatus(inPerson(120), held(inPerson(120)), false) === 'booked',
+    getSlotStatus(inPerson(120), held(inPerson(120)), false))
+  check('J11 in person: a server deadline already passed closes it, however far off the class',
+    getSlotStatus(inPerson(24 * 60, { bookingClosesAt: inMins(-1) }), undefined, false) === 'closed')
 }
 
 console.log(`\nclassSchedule.check — ${pass} passed, ${fail} failed\n`)

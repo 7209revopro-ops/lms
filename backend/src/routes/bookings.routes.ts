@@ -18,7 +18,7 @@ import { ensureOrgSlugs, orgSlugFor } from '@/utils/orgSlugs.ts'
 import { callerOrgForRead } from '@/utils/tenancy.ts'
 import { labelGuestDoors, yourCohortFrom, moduleNumbers } from '@/controllers/liveClass.controller.ts'
 import { z } from 'zod'
-import { resolveLiveStatus, isBookingOpen, bookingClosesAt, studentJoinWindow } from '@/utils/liveStatus.ts'
+import { isBookingOpen, bookingClosesAt, bookingCutoffPhrase, studentJoinWindow } from '@/utils/liveStatus.ts'
 import { authenticate, requireEnrollmentApproval } from '@/middleware/auth.middleware.ts'
 import { validate } from '@/middleware/validate.middleware.ts'
 import { NotificationService } from '@/services/notification.service.ts'
@@ -167,29 +167,31 @@ router.post('/', authenticate, requireEnrollmentApproval, validate(createBooking
       res.status(400).json({ success: false, error: { code: 'SESSION_UNAVAILABLE', message: 'Session is no longer available for booking' } }); return
     }
 
-    /* Booking closes an hour before the class starts.
-
-       Checked BEFORE the live-window test below, and separately from it, so
-       the student is told the truth: between the cut-off and the start there
-       is a whole hour where the class is neither live nor bookable, and
-       "this class is live" would be a lie for most of it.
+    /* Booking closes before the class starts: 15 minutes before an online
+       class, 5 hours before an in-person one (utils/liveStatus.ts).
 
        Ordered ahead of the enrolment, module, cap and capacity gates on
        purpose — none of those can be fixed by the student at this point, and
-       the deadline is the one answer that explains why. */
-    const effectiveStatus = resolveLiveStatus(session.status, session.scheduledStart, session.durationMins)
-    if (!isBookingOpen(session.scheduledStart)) {
-      const started = Date.now() >= new Date(session.scheduledStart).getTime()
+       the deadline is the one answer that explains why.
+
+       "Already started" only when it has — the clock passed the start, or
+       the mentor opened the class early. The 15 minutes before an online
+       class are shown as "live" on the schedule, but saying the class had
+       started then would send a student away from one they could still
+       join on time had they booked earlier. */
+    if (!isBookingOpen(session.scheduledStart, Date.now(), session.isOnline)) {
+      const started = Date.now() >= new Date(session.scheduledStart).getTime() || session.status === 'live'
+      const closedAt = bookingClosesAt(session.scheduledStart, session.isOnline)
       res.status(400).json({
         success: false,
         error: {
           code: 'BOOKING_CLOSED',
-          message: started || effectiveStatus === 'live'
+          message: started
             ? 'Booking is closed — this class has already started.'
-            : `Booking closed at ${fmtDate(bookingClosesAt(session.scheduledStart))}. Seats must be reserved at least an hour before the class.`,
+            : `Booking closed at ${fmtDate(closedAt)}. ${session.isOnline === false ? 'In-person seats' : 'Seats'} must be reserved at least ${bookingCutoffPhrase(session.isOnline)} before the class.`,
           /* The deadline itself, so a client can render it rather than
              re-deriving a rule that only the server owns. */
-          closedAt: bookingClosesAt(session.scheduledStart).toISOString(),
+          closedAt: closedAt.toISOString(),
         },
       }); return
     }

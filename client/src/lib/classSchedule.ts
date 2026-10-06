@@ -47,18 +47,26 @@ export function isWithinLiveWindow(lc: LiveClass): boolean {
   return Date.now() >= s - LIVE_LEAD_MINS*60_000 && Date.now() < s + (lc.durationMins||60)*60_000
 }
 
-/* Booking closes an hour before an online class starts.
+/* Booking closes 15 minutes before an online class starts, and 5 hours before
+   an in-person one.
 
    The deadline comes from the server on every session. The local fallback is
    only for payloads written before that field existed — if the two ever
    disagree the SERVER is right, because it is the one that will refuse the
    booking, and a screen that offers a seat the API then rejects is worse than
    one that greys it out early. */
-export const BOOKING_CUTOFF_MINS = 60
+export const BOOKING_CUTOFF_MINS           = 15
+export const IN_PERSON_BOOKING_CUTOFF_MINS = 300
+const cutoffMins = (lc: LiveClass): number => (lc.isOnline === false ? IN_PERSON_BOOKING_CUTOFF_MINS : BOOKING_CUTOFF_MINS)
 export function bookingClosedAt(lc: LiveClass): number {
   return lc.bookingClosesAt
     ? new Date(lc.bookingClosesAt).getTime()
-    : new Date(lc.scheduledStart).getTime() - BOOKING_CUTOFF_MINS * 60_000
+    : new Date(lc.scheduledStart).getTime() - cutoffMins(lc) * 60_000
+}
+/** The rule in words, for the line under the Book button: "15 minutes", "5 hours". */
+export function bookingCutoffLabel(lc: LiveClass): string {
+  const mins = cutoffMins(lc)
+  return mins >= 60 && mins % 60 === 0 ? `${mins / 60} hour${mins === 60 ? '' : 's'}` : `${mins} minutes`
 }
 export function isBookingClosed(lc: LiveClass): boolean {
   return Date.now() >= bookingClosedAt(lc)
@@ -158,28 +166,24 @@ export function getSlotStatus(lc: LiveClass, booking: MyBooking|undefined, hasOt
 
   if (isOffline) {
     if (lc.status === 'ended') return ended()
-    const offset = offlineDayOffset(lc.scheduledStart)
-    if (offset < 0) return ended()   // past calendar day → ended
+    if (offlineDayOffset(lc.scheduledStart) < 0) return ended()   // past calendar day → ended
 
-    if (offset === 0) {
-      // Today — booking window closed; only show existing booking status, no new bookings
-      if (booking?.status === 'booked')   return 'booked'
-      if (booking?.status === 'attended') return 'attended'
-      if (booking?.status === 'missed')   return 'missed'
-      return 'locked'   // no booking or cancelled → same-day booking not allowed
-    }
-
-    // offset > 0: future day — normal booking logic (book 1+ day in advance)
+    /* Booking closes 5 hours before an in-person class — the server's
+       deadline, bookingClosedAt — so the same day is fine until then. A seat
+       already held is unaffected, exactly as online: the cut-off stops NEW
+       bookings, not existing ones. */
     if (booking) {
       if (booking.status === 'booked')    return 'booked'
       if (booking.status === 'attended')  return 'attended'
       if (booking.status === 'missed')    return 'missed'
       if (booking.status === 'cancelled') {
+        if (isBookingClosed(lc)) return 'closed'
         if (hasOther) return 'locked'
         if (isFull(lc)) return 'full'
         return 'bookable'
       }
     }
+    if (isBookingClosed(lc)) return 'closed'
     if (hasOther) return 'locked'
     if (isFull(lc)) return 'full'
     return 'bookable'

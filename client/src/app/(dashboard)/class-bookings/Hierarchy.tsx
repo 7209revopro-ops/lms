@@ -1100,10 +1100,7 @@ function SessionAction({
      recording are facts about what happened, not offers. `bookable` and
      `full` have already been downgraded to `locked` by the card. */
   if (barred && (shown === 'locked' || shown === 'closed')) {
-    const extra =
-        shown === 'closed' ? <> Seats for this date closed {fmtPassed(bookingClosedAt(lc), now)}.</>
-      : sameDay            ? <> In-person seats also close the day before class.</>
-      : null
+    const extra = shown === 'closed' ? <> Seats for this date closed {fmtPassed(bookingClosedAt(lc), now)}.</> : null
     return (
       <ActionNote icon={<Lock size={12} strokeWidth={2} />}
         title="Module access is off"
@@ -1202,36 +1199,28 @@ function SessionAction({
       /* THE DEADLINE, BEFORE THEY NEED IT. A student who learns about the
          cut-off by being refused has already lost the seat.
 
-         AND IT IS A DIFFERENT DEADLINE FOR AN IN-PERSON CLASS. getSlotStatus
-         never consults bookingClosedAt on the offline path: an in-person
-         session is bookable while its day offset is > 0 and locked the
-         instant it reaches 0, i.e. at local midnight. Printing "Book by 8:00
-         AM" on a class that stops being bookable eight hours earlier is the
-         card contradicting the lock it is about to enforce. */
+         One rule for both kinds of class, read from bookingClosedAt — the
+         server's deadline, 15 minutes before an online class and 5 hours
+         before an in-person one — so the card names the instant the status
+         it is explaining will flip. */
       let deadline: React.ReactNode
       let urgent = false
-      if (offline) {
-        deadline = offlineDayOffset(lc.scheduledStart) === 1
-          ? <span>Book <strong>today</strong> — in-person seats close at midnight</span>
-          : <span>In-person seats close at midnight the day before</span>
+      const closesAt = bookingClosedAt(lc)
+      const minsLeft = Math.round((closesAt - now) / 60_000)
+      if (minsLeft <= 0) {
+        /* getSlotStatus reads Date.now() and this line reads the server
+           clock, so the two can straddle the cut-off. Flooring a negative
+           remainder to "Closes in 1 min" turns that skew into a false
+           alarm; saying it is closing now does not. */
+        urgent = true
+        deadline = <span>Closing now — reserve immediately</span>
+      } else if (minsLeft <= 120) {
+        urgent = true
+        deadline = (
+          <span>Closes in <strong>{minsLeft < 60 ? `${minsLeft} min` : `${Math.floor(minsLeft / 60)}h ${minsLeft % 60}m`}</strong></span>
+        )
       } else {
-        const closesAt = bookingClosedAt(lc)
-        const minsLeft = Math.round((closesAt - now) / 60_000)
-        if (minsLeft <= 0) {
-          /* getSlotStatus reads Date.now() and this line reads the server
-             clock, so the two can straddle the cut-off. Flooring a negative
-             remainder to "Closes in 1 min" turns that skew into a false
-             alarm; saying it is closing now does not. */
-          urgent = true
-          deadline = <span>Closing now — reserve immediately</span>
-        } else if (minsLeft <= 120) {
-          urgent = true
-          deadline = (
-            <span>Closes in <strong>{minsLeft < 60 ? `${minsLeft} min` : `${Math.floor(minsLeft / 60)}h ${minsLeft % 60}m`}</strong></span>
-          )
-        } else {
-          deadline = <span>Book by <strong>{fmtDeadline(closesAt, now)}</strong></span>
-        }
+        deadline = <span>{offline ? 'In-person seats: book' : 'Book'} by <strong>{fmtDeadline(closesAt, now)}</strong></span>
       }
 
       return (
@@ -1280,13 +1269,6 @@ function SessionAction({
       )
 
     case 'locked': {
-      if (sameDay) {
-        return (
-          <ActionNote icon={<Lock size={12} strokeWidth={2} />}
-            title="Same-day registration closed"
-            body={<>In-person seats must be booked <strong>at least a day ahead</strong>. Pick a later date.</>} />
-        )
-      }
       /* NAME THE SEAT THEY ALREADY HOLD. The modal answered this structurally
          — it opened on the student's own reservation with the cancel button
          under it — and "cancel your other seat" is useless advice in a list
@@ -1361,10 +1343,11 @@ function SessionCard({
   const reduce = useReducedMotion()
 
   const offline = lc.isOnline === false
-  /* The in-person day rule, read once and used for both halves of it.
-     Deliberately computed with offlineDayOffset — the same device-zone reader
-     getSlotStatus uses — so the card's copy can never contradict the status
-     it is explaining. */
+  /* An in-person seat cannot be given back on the day of its class — the
+     room is already counted — so the cancel button is not offered then.
+     Booking has its own, separate deadline (5 hours before, getSlotStatus);
+     this is only the cancel rule. Read with offlineDayOffset, the same
+     device-zone reader the rest of the card uses. */
   const sameDay = offline && offlineDayOffset(lc.scheduledStart) === 0
 
   /* A module the admin turned off still LISTS its sessions and cannot book
