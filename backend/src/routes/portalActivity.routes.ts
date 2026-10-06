@@ -9,11 +9,19 @@ import {
   classAssignmentsForPortal,
 } from '@/services/portalActivity.service.ts'
 import { enrolmentsForPortal } from '@/services/portalEnrolments.service.ts'
+import {
+  enrolmentRequestsForPortal,
+  enrolmentRequestForPortal,
+  requestDocumentForPortal,
+  approveEnrolmentForPortal,
+  rejectEnrolmentForPortal,
+} from '@/services/portalEnrolmentRequests.service.ts'
 
 /* ─────────────────────────────────────────────────────
-   /service — the help desk, class assignments and students' courses, for the
-   commission portal (services/portalActivity.service.ts,
-   services/portalEnrolments.service.ts).
+   /service — the help desk, class assignments, students' courses and
+   enrolment requests, for the commission portal
+   (services/portalActivity.service.ts, services/portalEnrolments.service.ts,
+   services/portalEnrolmentRequests.service.ts).
 
    Mounted at /service after portal.routes.ts, whose secret check runs first for
    every /service request and lets through only a caller it knows — the Root
@@ -92,6 +100,40 @@ router.post('/class-assignments', checkedCaller, wrap(async (req, res) => {
 router.post('/enrolments', checkedCaller, wrap(async (req, res) => {
   const { emails, detail } = (req.body ?? {}) as { emails?: unknown; detail?: unknown }
   sendSuccess(res, await enrolmentsForPortal({ emails, detail }), 'Courses')
+}))
+
+/**
+ * Enrolment requests — the admin's Requests page: a CS's students' ({ emails },
+ * at most 500 at a time) or, with none, every Forex applicant's; by status,
+ * newest first, a page at a time.
+ */
+router.post('/enrolment-requests', checkedCaller, wrap(async (req, res) => {
+  const { status, emails, page, perPage } = (req.body ?? {}) as Record<string, unknown>
+  sendSuccess(res, await enrolmentRequestsForPortal({ status, emails, page, perPage }), 'Requests')
+}))
+
+/** One request, with the whole application — that student's ({ email }), else "not found". */
+router.post('/enrolment-requests/:userId', checkedCaller, wrap(async (req, res) => {
+  const { email } = (req.body ?? {}) as Record<string, unknown>
+  sendSuccess(res, await enrolmentRequestForPortal({ userId: req.params['userId'], email }), 'Request')
+}))
+
+/** A 5-minute link to their passport or ID scan ({ field: 'passport' | 'idDoc' }), as the admin opens one. */
+router.post('/enrolment-requests/:userId/document', checkedCaller, wrap(async (req, res) => {
+  const { email, field, byName, byEmail } = (req.body ?? {}) as Record<string, unknown>
+  sendSuccess(res, await requestDocumentForPortal({ userId: req.params['userId'], email, field, byName, byEmail }), 'Document')
+}))
+
+/** Let them in on Forex, as the admin's approve does — from the deciding CS's own LMS account, else the shared one. */
+router.post('/enrolment-requests/:userId/approve', checkedCaller, wrap(async (req, res) => {
+  const { email, byName, byEmail } = (req.body ?? {}) as Record<string, unknown>
+  sendSuccess(res, await approveEnrolmentForPortal({ userId: req.params['userId'], email, byName, byEmail }), 'Approved')
+}))
+
+/** Turn a waiting request away with the reason, as the admin's reject does. */
+router.post('/enrolment-requests/:userId/reject', checkedCaller, wrap(async (req, res) => {
+  const { email, reason, byName, byEmail } = (req.body ?? {}) as Record<string, unknown>
+  sendSuccess(res, await rejectEnrolmentForPortal({ userId: req.params['userId'], email, reason, byName, byEmail }), 'Rejected')
 }))
 
 export default router

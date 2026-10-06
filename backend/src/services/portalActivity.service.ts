@@ -379,19 +379,20 @@ type DeskRole = 'support' | 'admin' | 'sub_admin' | 'super_admin'
 
 /* An active LMS staff account by address, as the help desk's requester. No academy and no programme
    scope: the portal decides which students' tickets somebody may answer, and its students are in both. */
-async function staffAccount(email: string): Promise<{ id: string; role: DeskRole } | null> {
+async function staffAccount(email: string): Promise<{ id: string; role: DeskRole; name: string; email: string } | null> {
   if (!email) return null
-  const account = await UserModel.findOne({ email, role: { $in: STAFF_ROLES }, isActive: true }).select('_id role').lean() as { _id: unknown; role: string } | null
-  return account ? { id: idOf(account._id), role: account.role as DeskRole } : null
+  const account = await UserModel.findOne({ email, role: { $in: STAFF_ROLES }, isActive: true }).select('_id role name email').lean() as { _id: unknown; role: string; name?: string; email?: string } | null
+  return account ? { id: idOf(account._id), role: account.role as DeskRole, name: account.name ?? '', email: account.email ?? email } : null
 }
 
 /**
  * Who an answer from the portal comes from: the answering CS's own LMS account, when they have one as
  * staff under the address they use in the portal — the student then sees their CS's name, as on any
  * help-desk answer. Otherwise the shared support account, PORTAL_SUPPORT_USER_EMAIL, and the answer is
- * signed with the CS's name.
+ * signed with the CS's name. Enrolment decisions from the portal come from the same account
+ * (portalEnrolmentRequests.service.ts).
  */
-async function deskAccountFor(byEmail: string): Promise<{ id: string; role: DeskRole; own: boolean }> {
+export async function deskAccountFor(byEmail: string): Promise<{ id: string; role: DeskRole; name: string; email: string; own: boolean }> {
   const own = await staffAccount(byEmail.toLowerCase())
   if (own) return { ...own, own: true }
   const shared = await staffAccount(env.PORTAL_SUPPORT_USER_EMAIL.toLowerCase().trim())
