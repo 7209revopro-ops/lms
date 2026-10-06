@@ -41,6 +41,7 @@ import { wantsStaffEmail } from '@/utils/emailPrefs.ts'
 import { SCHEDULE_LINK } from '@/utils/clientLinks.ts'
 import { UserRepository } from '@/repositories/user.repository.ts'
 import { toSubAdminProgram } from '@/utils/programVocabulary.ts'
+import { studentJoinClosesAt } from '@/services/liveClassJoin.service.ts'
 import { env } from '@/config/env.ts'
 
 const notifSvc = new NotificationService()
@@ -863,14 +864,18 @@ export async function runAttendanceFinalization(): Promise<void> {
          rather than after. */
       attendanceFinalized: { $ne: true },
       scheduledStart: { $gte: earliest, $lt: new Date(now.getTime() - 15 * 60 * 1000) },
-    }).select('_id scheduledStart durationMins').lean()
+    }).select('_id scheduledStart durationMins type meetingUrl isOnline').lean()
 
-    /* 15-minute buffer past the class's OWN end time — long enough for a
-       trailing webhook delivery or a last click to land before a seat is
-       decided for good. */
+    /* Two conditions, both required. 15 minutes past the class's own end, so a
+       trailing webhook delivery lands first. AND past the moment the student's
+       join door actually shuts (a minute's margin for a click already in
+       flight) — a Meet link stays open 20 minutes after the end, and deciding
+       at 15 turned a student still allowed in into 'missed', whom the join gate
+       then refused as "You have not booked this class". */
     const ended = candidates.filter(c => {
       const endMs = new Date(c.scheduledStart).getTime() + c.durationMins * 60_000
-      return endMs + 15 * 60_000 < now.getTime()
+      const decideAfter = Math.max(endMs + 15 * 60_000, studentJoinClosesAt(c) + 60_000)
+      return decideAfter < now.getTime()
     })
 
     let attendedCount = 0, missedCount = 0

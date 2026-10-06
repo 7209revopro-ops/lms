@@ -325,6 +325,17 @@ export const MEET_WINDOW = (live: ILiveClass): StudentJoinWindow => {
   }
 }
 
+/** The last instant a booked student can still get into this class, by
+ *  whichever door it actually has — the Meet link (resolveMeetJoin) or the
+ *  in-app room (mintStudentTicket). Attendance finalization must not decide a
+ *  seat before this, or a student still allowed in is refused as "not booked". */
+export function studentJoinClosesAt(
+  live: Pick<ILiveClass, 'scheduledStart' | 'durationMins' | 'type' | 'meetingUrl'> & { isOnline?: boolean },
+): number {
+  const isMeet = live.type === 'external' && live.isOnline !== false && !!live.meetingUrl
+  return (isMeet ? MEET_WINDOW : LIVEKIT_WINDOW)(live as ILiveClass).closesAt
+}
+
 export async function assertStudentMayJoin(
   live: ILiveClass,
   ctx: JoinContext,

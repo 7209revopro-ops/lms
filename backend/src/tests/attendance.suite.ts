@@ -76,6 +76,7 @@ const {
 } = await import('@/models/schema.ts')
 const { hashPassword } = await import('@/utils/hash.ts')
 const { runAttendanceFinalization } = await import('@/jobs/reminders.job.ts')
+const { studentJoinClosesAt } = await import('@/services/liveClassJoin.service.ts')
 const { handleCltEvent } = await import('@/services/cltWebhook.service.ts')
 
 await mongoose.connect(process.env.DATABASE_URL!)
@@ -320,6 +321,91 @@ try {
 
     const row = await ClassBookingModel.findOne({ userId: s._id, liveClassId: lc._id }).lean() as any
     check('I2 no attendedAt was written for a refused join', !row?.attendedAt)
+  }
+
+  /* ═════════════════ J — the late-joiner gap ═════════════════
+     A Meet link stays open until 20 min after the class ends; finalization
+     used to decide at 15. A student who clicked Join at end+17 had already
+     been marked 'missed' and was refused "You have not booked this class"
+     while the page still said the link was open. */
+  section('J. A Meet class is not finalized while its join link is still open')
+  {
+    const lc = await externalClass(-47, 30)  // ended 17 min ago — past the old 15, inside the 20-min link
+    const late   = await student()
+    const absent = await student()
+    const bLate   = await booking(lc, late)
+    const bAbsent = await booking(lc, absent)
+
+    await runAttendanceFinalization()
+    const lateBefore = await ClassBookingModel.findById(bLate._id).lean() as any
+    check('J1 at end+17 the not-yet-joined seat is still "booked", not "missed"', lateBefore?.status === 'booked', lateBefore?.status)
+    const clsBefore = await LiveClassModel.findById(lc._id).lean() as any
+    check('J2 the class is not flagged finalized while its link is open', clsBefore?.attendanceFinalized === false)
+
+    const jar = await signInStudent(late.email, PW)
+    const joinRes = await call('POST', `/live-classes/${lc._id}/join`, { jar })
+    check('J3 the late student is let in, not refused as "not booked"', joinRes.status === 200 && !!joinRes.body?.data?.url, JSON.stringify(joinRes.body))
+
+    const fresh = await LiveClassModel.findById(lc._id).lean() as any
+    check('J4 the finalizer waits for exactly the instant the join gate reports',
+      new Date(joinRes.body?.data?.closesAt).getTime() === studentJoinClosesAt(fresh),
+      `${joinRes.body?.data?.closesAt} vs ${new Date(studentJoinClosesAt(fresh)).toISOString()}`)
+
+    await new Promise(r => setTimeout(r, 150))  // the attendance write is fire-and-forget
+
+    // The link closes and the one-minute in-flight margin passes.
+    await LiveClassModel.updateOne({ _id: lc._id }, { $set: { scheduledStart: new Date(Date.now() - 52 * 60_000) } })
+    await runAttendanceFinalization()
+
+    const lateAfter   = await ClassBookingModel.findById(bLate._id).lean() as any
+    const absentAfter = await ClassBookingModel.findById(bAbsent._id).lean() as any
+    check('J5 once the link has closed, the late joiner is marked attended', lateAfter?.status === 'attended', lateAfter?.status)
+    check('J6 ...and the student who never joined is marked missed', absentAfter?.status === 'missed', absentAfter?.status)
+    const clsAfter = await LiveClassModel.findById(lc._id).lean() as any
+    check('J7 ...and the class is flagged finalized', clsAfter?.attendanceFinalized === true)
+  }
+
+  /* ═════════════════ K — the exact Meet boundary ═════════════════ */
+  section('K. Meet boundary: undecided until one minute past the link closing')
+  {
+    const justClosed = await externalClass(-50.5, 30)  // ended 20.5 min ago — link shut, margin not yet passed
+    const sJust = await student()
+    const bJust = await booking(justClosed, sJust)
+    const pastMargin = await externalClass(-51.5, 30)  // ended 21.5 min ago
+    const sPast = await student()
+    const bPast = await booking(pastMargin, sPast)
+
+    await runAttendanceFinalization()
+
+    const rJust = await ClassBookingModel.findById(bJust._id).lean() as any
+    const rPast = await ClassBookingModel.findById(bPast._id).lean() as any
+    check('K1 end+20.5: still "booked" — a click already in flight can still land', rJust?.status === 'booked', rJust?.status)
+    check('K2 end+21.5: decided ("missed")', rPast?.status === 'missed', rPast?.status)
+  }
+
+  /* ═════════════════ L — in-app classes keep their own (shorter) timing ═════════════════
+     The in-app room closes at end+15, so the Meet rule must not delay it. */
+  section('L. An in-app class is finalized on its own timing, not the Meet link\'s')
+  {
+    const mkInternal = (endedMinAgo: number) => LiveClassModel.create({
+      title: `Session ${seq++}`, courseId: course._id, instructorId: teacher._id, organizationId: org._id,
+      scheduledStart: new Date(Date.now() - (30 + endedMinAgo) * 60_000), durationMins: 30,
+      type: 'internal', provider: 'livekit', cltRoomName: `att-room-l-${seq}`,
+      isOnline: true, status: 'ended', language: 'English', sessionCapacity: 30, bookedCount: 0,
+    })
+    const early = await mkInternal(15.5)  // room shut at end+15; margin not yet passed
+    const sEarly = await student()
+    const bEarly = await booking(early, sEarly)
+    const ready = await mkInternal(17)    // would still be waiting under the Meet rule (end+21)
+    const sReady = await student()
+    const bReady = await booking(ready, sReady)
+
+    await runAttendanceFinalization()
+
+    const rEarly = await ClassBookingModel.findById(bEarly._id).lean() as any
+    const rReady = await ClassBookingModel.findById(bReady._id).lean() as any
+    check('L1 end+15.5: still "booked"', rEarly?.status === 'booked', rEarly?.status)
+    check('L2 end+17: decided — not held back to the Meet link\'s end+21', rReady?.status === 'missed', rReady?.status)
   }
 
 } finally {
