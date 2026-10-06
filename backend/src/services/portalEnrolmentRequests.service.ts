@@ -10,10 +10,12 @@
      POST /service/enrolment-requests                   { status, emails?, page?, perPage? }
      POST /service/enrolment-requests/:userId           { email }  one, with the whole application
      POST /service/enrolment-requests/:userId/document  { email, field, byName, byEmail }  a 5-minute link to an ID scan
-     POST /service/enrolment-requests/:userId/approve   { email, byName, byEmail }
+     POST /service/enrolment-requests/:userId/approve   { email, byName, byEmail, courses? }
      POST /service/enrolment-requests/:userId/reject    { email, reason, byName, byEmail }
 
-   Approving lets them in on Forex ('4x-trading'), rejecting turns them away
+   Approving lets them in on Forex ('4x-trading') — and, with `courses`, puts
+   them on those Forex courses with the modules picked locked
+   (portalCourseAccess.service.ts) — rejecting turns them away
    with the reason — the same writes, emails and WhatsApp as the admin's
    approve and reject (keep the two in step) — from the deciding CS's own LMS
    staff account, else the shared PORTAL_SUPPORT_USER_EMAIL one, as the
@@ -31,11 +33,10 @@ import { financeRefusal } from '@/services/financeCustomerCheck.service.ts'
 import { sendEnrollmentApproved, sendEnrollmentCancelled } from '@/services/email.service.ts'
 import { sendEnrollmentApprovedWhatsApp } from '@/services/whatsapp.service.ts'
 import { isR2Configured, keyFromUrl, generatePresignedGetUrl, KYC_PREFIX } from '@/services/r2.service.ts'
+import { FOREX, planCourses, giveCourses, courseActorFor } from '@/services/portalCourseAccess.service.ts'
 import { env } from '@/config/env.ts'
 import { logger } from '@/utils/logger.ts'
 
-/** The programme the portal lets students in on: Forex. */
-const FOREX = '4x-trading'
 /** An application that names Forex, as the LMS reads one (utils/departmentScope.ts APPLICATION_PATTERN). */
 const FOREX_APPLICATION = /^\s*forex/i
 const MAX_EMAILS = 500
@@ -234,13 +235,27 @@ export async function requestDocumentForPortal(input: { userId: unknown; email: 
  * Let them in on Forex, as the admin's approve does: finance asked first while
  * that check is on, the programmes merged, a turned-away account made full
  * again, and the student told by email and WhatsApp. Already in on Forex:
- * nothing changes.
+ * nothing changes. With `courses`, they are put on those Forex courses too,
+ * each with the modules picked locked — every one checked first, so a course
+ * that cannot be given approves nobody.
  */
-export async function approveEnrolmentForPortal(input: { userId: unknown; email: unknown; byName: unknown; byEmail: unknown }) {
+type Approved = {
+  request: ReturnType<typeof requestOf>
+  /** Whose account it was decided from — theirs, or the shared one; absent when nothing needed deciding. */
+  from?: 'own' | 'shared'
+  /** Already in on Forex: nothing was changed but the courses. */
+  already?: boolean
+  courses?: { given: string[]; already: string[] }
+}
+
+export async function approveEnrolmentForPortal(input: { userId: unknown; email: unknown; byName: unknown; byEmail: unknown; courses?: unknown }): Promise<Approved> {
   const user = await studentsRequest(input.userId, input.email)
+  const plan = await planCourses(user, input.courses)
+  const giver = plan.length ? await courseActorFor(input.byName, input.byEmail) : null
   const current = categoriesOf(user)
   if (user.enrollmentStatus === 'approved' && current.includes(FOREX)) {
-    return { request: requestOf(user, await academiesOf([user])), already: true }
+    const courses = giver ? await giveCourses(user, plan, giver) : undefined
+    return { request: requestOf(user, await academiesOf([user])), already: true, ...(courses ? { courses } : {}) }
   }
   const email = String(user.email ?? '').toLowerCase()
   const refusal = await financeRefusal(email)
@@ -266,9 +281,10 @@ export async function approveEnrolmentForPortal(input: { userId: unknown; email:
   void sendEnrollmentApproved(email, user.name ?? '', categories.join(', ')).catch(() => {})
   void sendEnrollmentApprovedWhatsApp(user.enrollmentApplication?.phone, user.name ?? '', categories.join(', '), env.CLIENT_URL).catch(() => {})
   logger.info({ userId: idOf(user._id), by: decider.by, from: decider.account.own ? 'their own account' : 'the shared account' }, '[enrolment] approved from the commission portal')
+  const courses = giver ? await giveCourses(user, plan, giver) : undefined
 
   const fresh = await UserModel.findById(user._id).select(FIELDS).lean() as unknown as UserRow
-  return { request: requestOf(fresh, await academiesOf([fresh])), from: decider.account.own ? 'own' : 'shared' }
+  return { request: requestOf(fresh, await academiesOf([fresh])), from: decider.account.own ? 'own' : 'shared', ...(courses ? { courses } : {}) }
 }
 
 /**

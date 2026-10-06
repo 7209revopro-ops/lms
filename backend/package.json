@@ -22,6 +22,7 @@
     "test:portalactivity": "bun --no-env-file src/tests/portalactivity.suite.ts",
     "test:portalenrolmentrequests": "bun --no-env-file src/tests/portalenrolmentrequests.suite.ts",
     "test:portalstudentview": "bun --no-env-file src/tests/portalstudentview.suite.ts",
+    "test:portalcourseaccess": "bun --no-env-file src/tests/portalcourseaccess.suite.ts",
     "test:classcompletion": "bun --no-env-file src/tests/classcompletion.suite.ts",
     "check:seats": "bun src/scripts/check-seat-writes.ts",
     "check:languages": "bun src/scripts/check-languages.ts",

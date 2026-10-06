@@ -17,13 +17,14 @@ import {
   rejectEnrolmentForPortal,
 } from '@/services/portalEnrolmentRequests.service.ts'
 import { studentViewForPortal } from '@/services/portalStudentView.service.ts'
+import { courseAccessForPortal, giveCoursesForPortal, setModuleAccessForPortal } from '@/services/portalCourseAccess.service.ts'
 
 /* ─────────────────────────────────────────────────────
    /service — the help desk, class assignments, students' courses,
-   enrolment requests and "view as student", for the commission portal
-   (services/portalActivity.service.ts, services/portalEnrolments.service.ts,
-   services/portalEnrolmentRequests.service.ts,
-   services/portalStudentView.service.ts).
+   enrolment requests, "view as student" and course access, for the
+   commission portal (services/portalActivity.service.ts,
+   services/portalEnrolments.service.ts, services/portalEnrolmentRequests.service.ts,
+   services/portalStudentView.service.ts, services/portalCourseAccess.service.ts).
 
    Mounted at /service after portal.routes.ts, whose secret check runs first for
    every /service request and lets through only a caller it knows — the Root
@@ -126,10 +127,13 @@ router.post('/enrolment-requests/:userId/document', checkedCaller, wrap(async (r
   sendSuccess(res, await requestDocumentForPortal({ userId: req.params['userId'], email, field, byName, byEmail }), 'Document')
 }))
 
-/** Let them in on Forex, as the admin's approve does — from the deciding CS's own LMS account, else the shared one. */
+/**
+ * Let them in on Forex, as the admin's approve does — from the deciding CS's own LMS account, else the shared one —
+ * and with `courses` ([{ courseId, locked }]) put them on those Forex courses, the modules picked locked.
+ */
 router.post('/enrolment-requests/:userId/approve', checkedCaller, wrap(async (req, res) => {
-  const { email, byName, byEmail } = (req.body ?? {}) as Record<string, unknown>
-  sendSuccess(res, await approveEnrolmentForPortal({ userId: req.params['userId'], email, byName, byEmail }), 'Approved')
+  const { email, byName, byEmail, courses } = (req.body ?? {}) as Record<string, unknown>
+  sendSuccess(res, await approveEnrolmentForPortal({ userId: req.params['userId'], email, byName, byEmail, courses }), 'Approved')
 }))
 
 /** Turn a waiting request away with the reason, as the admin's reject does. */
@@ -146,6 +150,28 @@ router.post('/enrolment-requests/:userId/reject', checkedCaller, wrap(async (req
 router.post('/students/view', checkedCaller, wrap(async (req, res) => {
   const { email, byName, byEmail } = (req.body ?? {}) as Record<string, unknown>
   sendSuccess(res, await studentViewForPortal({ email, byName, byEmail }), 'View as student')
+}))
+
+/**
+ * Course access — the admin's Edit Student → Course Access, Forex only
+ * (services/portalCourseAccess.service.ts): their Forex courses, each module
+ * open or locked, and the ones of their academy they could be put on.
+ */
+router.post('/students/course-access', checkedCaller, wrap(async (req, res) => {
+  const { email } = (req.body ?? {}) as Record<string, unknown>
+  sendSuccess(res, await courseAccessForPortal({ email }), 'Course access')
+}))
+
+/** Put them on Forex courses ([{ courseId, locked }]), the modules picked locked — the admin's Add course. */
+router.post('/students/course-access/give', checkedCaller, wrap(async (req, res) => {
+  const { email, courses, byName, byEmail } = (req.body ?? {}) as Record<string, unknown>
+  sendSuccess(res, await giveCoursesForPortal({ email, courses, byName, byEmail }), 'Courses given')
+}))
+
+/** Open or lock one course's modules: `locked` is every module that should be locked. After /give, which it would swallow. */
+router.post('/students/course-access/:enrolmentId', checkedCaller, wrap(async (req, res) => {
+  const { email, locked, byName, byEmail } = (req.body ?? {}) as Record<string, unknown>
+  sendSuccess(res, await setModuleAccessForPortal({ email, enrolmentId: req.params['enrolmentId'], locked, byName, byEmail }), 'Modules')
 }))
 
 export default router
