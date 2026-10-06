@@ -276,6 +276,9 @@ export interface ClassBooking {
   status:      BookingStatus
   bookedAt:    string
   cancelledAt?: string
+  /** Set automatically when the student pressed Join / entered the room. */
+  attendedAt?:       string
+  attendanceSource?: 'click' | 'livekit'
 }
 
 export function useCreateLiveClass() {

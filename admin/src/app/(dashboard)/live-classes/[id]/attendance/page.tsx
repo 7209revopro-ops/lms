@@ -14,14 +14,16 @@ import {
 import { useLiveClassById } from '@/lib/api/liveClasses'
 import Spinner from '@/components/ui/Spinner'
 import { useToast } from '@/store/ui.store'
+import { hasJoined, joinedLabel, type JoinEvidence } from '@/lib/attendance'
 
 const STATUS_OPTIONS: { value: 'attended' | 'missed'; label: string; color: string; bg: string; border: string }[] = [
   { value: 'attended', label: 'Present', color: '#10B981', bg: 'rgba(16,185,129,0.15)',  border: 'rgba(16,185,129,0.35)' },
   { value: 'missed',   label: 'Absent',  color: '#EF4444', bg: 'rgba(239,68,68,0.15)',   border: 'rgba(239,68,68,0.35)'  },
 ]
 
-function statusBadge(status: BookingStatus) {
-  switch (status) {
+function statusBadge(b: JoinEvidence) {
+  if (hasJoined(b)) return { label: 'Joined', color: '#34D399', bg: 'rgba(52,211,153,0.15)' }
+  switch (b.status as BookingStatus) {
     case 'attended':  return { label: 'Present',   color: '#10B981', bg: 'rgba(16,185,129,0.15)' }
     case 'missed':    return { label: 'Absent',    color: '#EF4444', bg: 'rgba(239,68,68,0.15)'  }
     case 'cancelled': return { label: 'Cancelled', color: '#9CA3AF', bg: 'rgba(156,163,175,0.12)' }
@@ -38,12 +40,13 @@ function getModuleTitle(sectionId: unknown): string | null {
 }
 
 function exportCSV(rows: any[]) {
-  const header = ['Name', 'Email', 'Status', 'Booked At']
+  const header = ['Name', 'Email', 'Status', 'Booked At', 'Joined At']
   const csvRows = rows.map((b: any) => [
     b.userId?.name ?? '',
     b.userId?.email ?? '',
-    b.status ?? '',
+    hasJoined(b) ? 'joined' : (b.status ?? ''),
     b.bookedAt ? new Date(b.bookedAt).toLocaleString() : '',
+    b.attendedAt ? new Date(b.attendedAt).toLocaleString() : '',
   ])
   const csvContent = [header, ...csvRows]
     .map(row => row.map((cell: string) => `"${String(cell).replace(/"/g, '""')}"`).join(','))
@@ -83,6 +86,8 @@ export default function AttendancePage({ params }: { params: Promise<{ id: strin
   const attended   = rows.filter((b: any) => b.status === 'attended').length
   const missed     = rows.filter((b: any) => b.status === 'missed').length
   const cancelled  = rows.filter((b: any) => b.status === 'cancelled').length
+  const joined     = rows.filter((b: any) => hasJoined(b)).length
+  const zone       = zoneOf((session as any)?.organizationSlug)
   const total      = rows.length
 
   const courseName     = (session as any)?.course?.title ?? null
@@ -186,6 +191,14 @@ export default function AttendancePage({ params }: { params: Promise<{ id: strin
             <span className="text-xs" style={{ color: '#6EE7B7' }}>Attended</span>
             <span className="text-sm font-bold" style={{ color: '#10B981' }}>{attended}</span>
           </div>
+          {joined > 0 && (
+            <div className="flex items-center gap-3 rounded-xl px-4 py-2.5"
+              title="Pressed Join — marked Attended automatically once the join window closes"
+              style={{ background: 'rgba(52,211,153,0.10)', border: '1px solid rgba(52,211,153,0.25)' }}>
+              <span className="text-xs" style={{ color: '#6EE7B7' }}>Joined</span>
+              <span className="text-sm font-bold" style={{ color: '#34D399' }}>{joined}</span>
+            </div>
+          )}
           <div className="flex items-center gap-3 rounded-xl px-4 py-2.5"
             style={{ background: 'rgba(239,68,68,0.10)', border: '1px solid rgba(239,68,68,0.25)' }}>
             <span className="text-xs" style={{ color: '#FCA5A5' }}>Missed</span>
@@ -256,7 +269,8 @@ export default function AttendancePage({ params }: { params: Promise<{ id: strin
             </thead>
             <tbody>
               {rows.map((booking: any, i: number) => {
-                const badge      = statusBadge(booking.status as BookingStatus)
+                const badge      = statusBadge(booking)
+                const joinedText = joinedLabel(booking, zone)
                 const isPending  = attendanceMutation.isPending && attendanceMutation.variables?.id === booking.id
                 const bookingKey = booking.id || booking._id
                 const nameInitial = booking.userId?.name ? booking.userId.name.charAt(0).toUpperCase() : '?'
@@ -291,11 +305,14 @@ export default function AttendancePage({ params }: { params: Promise<{ id: strin
                     <td className="px-5 py-3">
                       <span className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-bold"
                         style={{ background: badge.bg, color: badge.color }}>
-                        {booking.status === 'attended' ? <CheckCircle size={11} />
+                        {booking.status === 'attended' || hasJoined(booking) ? <CheckCircle size={11} />
                           : booking.status === 'missed' ? <XCircle size={11} />
                           : null}
                         {badge.label}
                       </span>
+                      {joinedText && (
+                        <p className="mt-1 text-[11px]" style={{ color: dim }}>{joinedText}</p>
+                      )}
                     </td>
 
                     {/* Mark buttons */}

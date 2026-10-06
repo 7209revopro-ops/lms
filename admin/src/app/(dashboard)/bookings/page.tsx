@@ -23,6 +23,7 @@ import Spinner from '@/components/ui/Spinner'
 import { useToast } from '@/store/ui.store'
 import { datetimeLocalToISO } from '@/lib/timezone'
 import { CLASS_LANGUAGES } from '@/lib/languages'
+import { hasJoined, joinedLabel } from '@/lib/attendance'
 
 /* ─── Custom dark dropdown ───────────────────────────────── */
 interface SelectOption { value: string; label: string }
@@ -181,13 +182,19 @@ const STATUS_PAL: Record<BookingStatus, { bg: string; color: string; label: stri
   cancelled: { bg: 'rgba(255,255,255,0.06)', color: 'rgba(255,255,255,0.35)', label: 'Cancelled' },
 }
 
-function StatusBadge({ status }: { status: BookingStatus }) {
-  const p = STATUS_PAL[status]
+const JOINED_PAL = { bg: 'rgba(52,211,153,0.15)', color: '#34D399', label: 'Joined' }
+
+function StatusBadge({ booking }: { booking: ClassBooking }) {
+  const p    = hasJoined(booking) ? JOINED_PAL : STATUS_PAL[booking.status]
+  const note = joinedLabel(booking)
   return (
-    <span className="inline-flex items-center rounded-lg px-2.5 py-0.5 text-[11px] font-semibold"
-      style={{ background: p.bg, color: p.color }}>
-      {p.label}
-    </span>
+    <div>
+      <span className="inline-flex items-center rounded-lg px-2.5 py-0.5 text-[11px] font-semibold"
+        style={{ background: p.bg, color: p.color }}>
+        {p.label}
+      </span>
+      {note && <p className="mt-1 text-[10px]" style={{ color: 'rgba(255,255,255,0.35)' }}>{note}</p>}
+    </div>
   )
 }
 
@@ -462,7 +469,7 @@ function BookingRow({ booking, index, selectable, selected, onToggle }: {
 
       {/* Status */}
       <td className="py-3 px-3">
-        <StatusBadge status={booking.status} />
+        <StatusBadge booking={booking} />
       </td>
 
       {/* Actions */}
@@ -475,7 +482,7 @@ function BookingRow({ booking, index, selectable, selected, onToggle }: {
 
 /* ─── Export CSV ─────────────────────────────────────────── */
 function exportCSV(bookings: ClassBooking[], filename: string) {
-  const header = ['Student', 'Email', 'Session', 'Date', 'Time', 'Duration', 'Language', 'Course', 'Instructor', 'Status', 'Booked At', 'Cancelled At']
+  const header = ['Student', 'Email', 'Session', 'Date', 'Time', 'Duration', 'Language', 'Course', 'Instructor', 'Status', 'Booked At', 'Cancelled At', 'Joined At']
   const rows = bookings.map(b => {
     const lc = b.liveClassId as typeof b.liveClassId | null
     return [
@@ -488,9 +495,10 @@ function exportCSV(bookings: ClassBooking[], filename: string) {
       lc?.language ?? 'English',
       lc?.courseId?.title ?? '',
       lc?.instructorId?.name ?? '',
-      b.status,
+      hasJoined(b) ? 'joined' : b.status,
       new Date(b.bookedAt).toLocaleDateString('en-US'),
       b.cancelledAt ? new Date(b.cancelledAt).toLocaleDateString('en-US') : '',
+      b.attendedAt ? new Date(b.attendedAt).toLocaleString('en-US') : '',
     ].map(v => `"${String(v).replace(/"/g, '""')}"`)
   })
   const csv = [header.join(','), ...rows.map(r => r.join(','))].join('\n')
