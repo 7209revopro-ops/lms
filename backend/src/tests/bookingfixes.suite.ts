@@ -142,11 +142,12 @@ section('C. A class with no meeting URL must not mail /live-classes/undefined/wa
   const body = (await mails('nolink@bf.test', t0)).join('')
   check('C1 the at-time mail was sent', body.length > 0)
   check('C2 it contains NO "undefined" link', !body.includes('/live-classes/undefined/'), 'dead link present')
-  /* With a resolvable id the watch page IS the right destination; the
-     /class-bookings fallback exists only for the case where no id resolves.
+  /* The Join button is the student's join link (/j/<code>) — the /j page
+     then opens the class, or says there is no link to open. The old fallbacks
+     (watch page, /class-bookings) still count if no code could be made.
      Either way the student must end up somewhere real. */
-  check('C3 the link points at this class\'s real watch page',
-    body.includes(`/live-classes/${String(lc._id)}/watch`) || body.includes('/class-bookings'),
+  check('C3 the link points somewhere real: the join link, or this class\'s watch page',
+    /\/j\/[A-Za-z0-9_-]{20,}/.test(body) || body.includes(`/live-classes/${String(lc._id)}/watch`) || body.includes('/class-bookings'),
     body.match(/https?:\/\/client\.test[^"'\s<]*/)?.[0] ?? 'no client.test link found')
 }
 

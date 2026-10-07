@@ -1022,6 +1022,55 @@ export class AuthService {
     return { user: toSafeUser(user), tokens }
   }
 
+  /* ── Redeem a class join link (/j/<code>) ──────────
+     services/joinLink.service.ts. Answers which class to open, and signs the
+     student in when the browser has no session and the code has not signed
+     anyone in yet. `currentUserId` is the browser's own session, if any.
+       · unknown or past its 2 hours  → JOIN_LINK_EXPIRED
+       · signed in as somebody else   → JOIN_LINK_OTHER_ACCOUNT
+       · signed in as its student     → the class, nothing issued
+       · no session, unused           → the class, and a session (device-limited like every sign-in)
+       · no session, already used     → the class, nothing issued — the join call renews or asks to sign in */
+  async redeemJoinLink(
+    rawCode: string,
+    currentUserId: string | undefined,
+    meta?: SessionMeta,
+  ): Promise<{ liveClassId: string; inApp: boolean; user?: ReturnType<typeof toSafeUser>; tokens?: TokenPair }> {
+    const { AuthTokenModel, LiveClassModel } = await import('@/models/schema.ts')
+    const { hashJoinCode } = await import('@/services/joinLink.service.ts')
+    const expired = () => new AuthError('JOIN_LINK_EXPIRED',
+      'This join link has expired. Sign in with a code sent to your email, then open the class from My Bookings.', 400)
+
+    const doc = await AuthTokenModel.findOne({
+      tokenHash: hashJoinCode(String(rawCode ?? '')), purpose: 'join-link', expiresAt: { $gt: new Date() },
+    }).lean() as { _id: unknown; userId: unknown; liveClassId?: unknown; usedAt?: Date } | null
+    if (!doc?.liveClassId) throw expired()
+    const owner = String(doc.userId), liveClassId = String(doc.liveClassId)
+    /* An in-app class has no meeting link to hand over — the /j page sends
+       the student to its watch page instead, which records their join. */
+    const cls = await LiveClassModel.findById(liveClassId).select('type').lean() as { type?: string } | null
+    const inApp = cls?.type === 'internal'
+
+    if (currentUserId) {
+      if (currentUserId !== owner) {
+        throw new AuthError('JOIN_LINK_OTHER_ACCOUNT',
+          'This join link belongs to another student. Sign out first, or open your own link.', 403)
+      }
+      return { liveClassId, inApp }
+    }
+
+    /* Claimed atomically: two taps at once sign in once. */
+    const claimed = await AuthTokenModel.updateOne({ _id: doc._id, usedAt: { $exists: false } }, { $set: { usedAt: new Date() } })
+    if (claimed.modifiedCount === 0) return { liveClassId, inApp }
+
+    const user = await this.userRepo.findById(owner)
+    if (!user || !user.isActive) throw expired()
+    void this.userRepo.touchLastLogin(user.id)
+    const tokens = await this.#issueLoginTokens(user.id, user.email, user.role, meta, 'client')
+    logger.info({ userId: user.id, liveClassId }, 'Student signed in via class join link')
+    return { liveClassId, inApp, user: toSafeUser(user), tokens }
+  }
+
   /* ── Sign in somebody the Root portal vouches for ──
        The portal is the identity provider for this estate: a person signs in
        there once and opens each system from it. What arrives here is a

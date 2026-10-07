@@ -520,7 +520,7 @@ export const DeviceModel = mongoose.model<IDevice>('Device', DeviceSchema)
    AUTH TOKEN — used for password reset + email verify
 ───────────────────────────────────────────────────── */
 export type AuthTokenPurpose =
-  | 'reset-password' | 'verify-email' | 'otp-login' | 'login-link' | 'change-email'
+  | 'reset-password' | 'verify-email' | 'otp-login' | 'login-link' | 'change-email' | 'join-link'
 
 export interface IAuthToken extends Document {
   id:        string
@@ -529,6 +529,8 @@ export interface IAuthToken extends Document {
   purpose:   AuthTokenPurpose
   expiresAt: Date
   usedAt?:   Date
+  /* join-link only: the class the link opens (services/joinLink.service.ts). */
+  liveClassId?: Types.ObjectId
   createdAt: Date
   updatedAt: Date
 }
@@ -537,9 +539,10 @@ const AuthTokenSchema = new Schema<IAuthToken>(
   {
     userId:    { type: Schema.Types.ObjectId, ref: 'User', required: true },
     tokenHash: { type: String, required: true, unique: true },
-    purpose:   { type: String, enum: ['reset-password', 'verify-email', 'otp-login', 'login-link', 'change-email'], required: true },
+    purpose:   { type: String, enum: ['reset-password', 'verify-email', 'otp-login', 'login-link', 'change-email', 'join-link'], required: true },
     expiresAt: { type: Date, required: true },
     usedAt:    { type: Date },
+    liveClassId: { type: Schema.Types.ObjectId, ref: 'LiveClass' },
   },
   baseSchemaOptions,
 )

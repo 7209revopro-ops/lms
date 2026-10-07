@@ -40,6 +40,8 @@ const TEMPLATES: { name: string; params: string[]; buttonParam?: string; isNew?:
   { name: 'instructor_review_request_v1', params: ['Test Student', CLASS] },
   { name: 'class_starts_in_5_min',        params: ['Test Student', CLASS, 'Tue, 6 Oct', '1:00 PM'], buttonParam: `${CLASS_ID}/watch`, isNew: true },
   { name: 'class_has_started',            params: ['Test Student', CLASS], buttonParam: `${CLASS_ID}/watch`, isNew: true },
+  { name: 'class_starts_in_5_min_v2',     params: ['Test Student', CLASS, 'Tue, 6 Oct', '1:00 PM'], buttonParam: 'TESTCODE0000000000000000', isNew: true },
+  { name: 'class_has_started_v2',         params: ['Test Student', CLASS], buttonParam: 'TESTCODE0000000000000000', isNew: true },
   { name: 'mentor_class_in_10_min',       params: ['Test Mentor', CLASS, '02:00 PM GST', '12'], buttonParam: `${CLASS_ID}/join`, isNew: true },
 ]
 

@@ -170,6 +170,20 @@ export class AuthController {
     }
   }
 
+  /* ── POST /auth/join-link/redeem ──────────────────
+     A class join link from a reminder. Sets the session cookies only when it
+     signed the student in; always answers the class to open. */
+  redeemJoinLink = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    try {
+      const signedIn = req.user && req.user.role === 'student' ? req.user.id : undefined
+      const result = await this.service.redeemJoinLink(String(req.body.token), signedIn ?? (req.user ? `staff:${req.user.id}` : undefined), sessionMeta(req, res))
+      if (result.tokens) setAuthCookies(res, result.tokens)
+      sendSuccess(res, { liveClassId: result.liveClassId, inApp: result.inApp, signedIn: !!result.tokens })
+    } catch (err) {
+      next(err)
+    }
+  }
+
   /* ── POST /auth/login/2fa ───────────────────────── */
   loginTwoFactor = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     try {

@@ -358,7 +358,10 @@ section('C. The class-started notification lands on a page that works')
     mail = rows.find(r => /start/i.test(String(r.subject ?? ''))) ?? null
     if (!mail) await new Promise(r => setTimeout(r, 100))
   }
-  check('C9 the at-time EMAIL still carries the Meet URL', !!mail && String(mail?.html ?? mail?.text ?? '').includes(MEET),
+  /* The at-time email's Join button is the student's join link now — it signs
+     them in, records the join and opens the meeting — not the raw Meet URL. */
+  check('C9 the at-time EMAIL carries the join link, not the raw Meet URL',
+    !!mail && /\/j\/[A-Za-z0-9_-]{20,}/.test(String(mail?.html ?? mail?.text ?? '')) && !String(mail?.html ?? mail?.text ?? '').includes(MEET),
     String(mail?.subject))
 
   /* "honest about it once it is not": the row outlives the seat. */

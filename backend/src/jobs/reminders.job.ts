@@ -36,6 +36,7 @@ import {
 import {
   sendClassReminderTomorrowWhatsApp, sendClassStartingSoonWhatsApp,
   sendClassStartsIn5MinWhatsApp, sendClassHasStartedWhatsApp, sendMentorClassIn10MinWhatsApp,
+  sendClassStartsIn5MinV2WhatsApp, sendClassHasStartedV2WhatsApp,
   sendInstructorReviewRequestWhatsApp,
 } from '@/services/whatsapp.service.ts'
 import { wantsStaffEmail } from '@/utils/emailPrefs.ts'
@@ -44,6 +45,7 @@ import { UserRepository } from '@/repositories/user.repository.ts'
 import { toSubAdminProgram } from '@/utils/programVocabulary.ts'
 import { studentJoinClosesAt } from '@/services/liveClassJoin.service.ts'
 import { env } from '@/config/env.ts'
+import { mintJoinCode, joinLinkUrl } from '@/services/joinLink.service.ts'
 
 const notifSvc = new NotificationService()
 const userRepo = new UserRepository()
@@ -176,6 +178,20 @@ function fmtShortDay(d: Date, academySlug?: string | null): string {
    materialised (see getJoinUrl), so fall back to `_id`. */
 function classIdOf(lc: NonNullable<BookingWithRefs['liveClassId']>): string {
   return String(lc.id ?? (lc._id as { toString(): string } | undefined)?.toString() ?? '')
+}
+
+/* The student's one-time join code for an ONLINE class's 5-minute and
+   start-time reminders (services/joinLink.service.ts) — one per reminder,
+   shared by its email and WhatsApp. Null in person, and null if it cannot be
+   made: the reminder then goes out with its old link rather than not at all. */
+async function joinCodeFor(b: BookingWithClass, userId: string): Promise<string | null> {
+  if (b.liveClassId.isOnline === false) return null
+  const id = classIdOf(b.liveClassId)
+  if (!id || !userId) return null
+  try { return await mintJoinCode(userId, id) } catch (err) {
+    logger.warn({ err, userId, classId: id }, '[Reminders] join code not made — old link used')
+    return null
+  }
 }
 
 /* orgSlugFor() is synchronous, and on a cold cache it answers `undefined` —
@@ -444,7 +460,8 @@ export async function runFiveMinReminders(): Promise<void> {
     for (const b of due) {
       const userId  = b.userId.id ?? b.userId._id?.toString()
       const classAt = new Date(b.liveClassId.scheduledStart)
-      const joinUrl = getJoinUrl(b.liveClassId)
+      const code    = await joinCodeFor(b, userId)
+      const joinUrl = code ? joinLinkUrl(code) : getJoinUrl(b.liveClassId)
       const slug    = orgSlugFor((b.userId as { organizationId?: unknown }).organizationId)
       const phone   = b.userId.enrollmentApplication?.phone
 
@@ -453,11 +470,17 @@ export async function runFiveMinReminders(): Promise<void> {
           b.userId.email, b.userId.name, b.liveClassId.title, joinUrl, classAt, slug,
         ),
         undefined, slug,
-        /* Online: class_starts_in_5_min, whose Join button opens this class's
-           page. In person there is nothing to join, so the plain reminder as
-           before (class_starting_soon_v5, its fixed button to My Bookings). */
+        /* Online: class_starts_in_5_min_v2, its Join button the student's own
+           join link (signs in, records the join, opens the meeting); v1 with
+           the class page if no code could be made. In person there is nothing
+           to join: the plain reminder (class_starting_soon_v5). */
         b.liveClassId.isOnline === false
           ? () => sendClassStartingSoonWhatsApp(phone, b.liveClassId.title, '5')
+          : code
+          ? () => sendClassStartsIn5MinV2WhatsApp(
+              phone, b.userId.name, b.liveClassId.title,
+              fmtShortDay(classAt, slug), fmtTime(classAt, slug), code,
+            )
           : () => sendClassStartsIn5MinWhatsApp(
               phone, b.userId.name, b.liveClassId.title,
               fmtShortDay(classAt, slug), fmtTime(classAt, slug), classIdOf(b.liveClassId),
@@ -498,10 +521,12 @@ export async function runAtTimeReminders(): Promise<void> {
     for (const b of due) {
       const userId  = b.userId.id ?? b.userId._id?.toString()
       const classAt = new Date(b.liveClassId.scheduledStart)
-      const joinUrl = getJoinUrl(b.liveClassId)
+      const code    = await joinCodeFor(b, userId)
+      const joinUrl = code ? joinLinkUrl(code) : getJoinUrl(b.liveClassId)
 
-      /* The EMAIL carries the Meet link itself — that is the decision on
-         record. The in-app notice does not: a Notification row lives for ever
+      /* The EMAIL carries the student's join link — signs in, records the
+         join, opens the meeting (services/joinLink.service.ts); the raw Meet
+         link only if no code could be made. The in-app notice does not: a Notification row lives for ever
          and is read back by GET /notifications long after the join window,
          and after the student has cancelled the seat, so a raw URL in it is
          a way to obtain the link with no gate at all. The notice points at
@@ -518,6 +543,10 @@ export async function runAtTimeReminders(): Promise<void> {
            WhatsApp at its start, as before — there is nothing to join. */
         b.liveClassId.isOnline === false
           ? undefined
+          : code
+          ? () => sendClassHasStartedV2WhatsApp(
+              b.userId.enrollmentApplication?.phone, b.userId.name, b.liveClassId.title, code,
+            )
           : () => sendClassHasStartedWhatsApp(
               b.userId.enrollmentApplication?.phone, b.userId.name, b.liveClassId.title, classIdOf(b.liveClassId),
             ),

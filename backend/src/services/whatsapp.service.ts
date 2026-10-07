@@ -365,6 +365,34 @@ export async function sendClassHasStartedWhatsApp(
     { category: 'utility', buttonParam: `${liveClassId}/watch` })
 }
 
+/* class_starts_in_5_min_v2 / class_has_started_v2 — the same messages, but
+   the button is the student's own join link: the template's URL is
+   {CLIENT_URL}/j/ and each send adds the one-time code
+   (services/joinLink.service.ts). One tap signs them in, records the join
+   and opens the meeting. Same body params as v1; no send without a code. */
+export async function sendClassStartsIn5MinV2WhatsApp(
+  to: string | null | undefined, studentName: string, sessionTitle: string,
+  dateLabel: string, timeLabel: string, joinCode: string,
+): Promise<void> {
+  if (!joinCode) {
+    logger.warn({ templateName: 'class_starts_in_5_min_v2' }, 'WhatsApp join reminder skipped — no join code for its button')
+    return
+  }
+  await sendTemplate(to, 'class_starts_in_5_min_v2', [studentName || 'there', sessionTitle, dateLabel, timeLabel],
+    { category: 'utility', buttonParam: joinCode })
+}
+
+export async function sendClassHasStartedV2WhatsApp(
+  to: string | null | undefined, studentName: string, sessionTitle: string, joinCode: string,
+): Promise<void> {
+  if (!joinCode) {
+    logger.warn({ templateName: 'class_has_started_v2' }, 'WhatsApp join reminder skipped — no join code for its button')
+    return
+  }
+  await sendTemplate(to, 'class_has_started_v2', [studentName || 'there', sessionTitle],
+    { category: 'utility', buttonParam: joinCode })
+}
+
 /* mentor_class_in_10_min — to the class's MENTOR, about ten minutes before an
    online class: the class, its time and how many students are booked, with a
    Start button. The template's URL is {ADMIN_URL}/live-classes/ and the send
