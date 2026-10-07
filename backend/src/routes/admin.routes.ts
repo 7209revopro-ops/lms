@@ -1771,6 +1771,44 @@ const liveUpdateSchema = withCohortRules(z.object({
 
 router.get   ('/courses/:courseId/live-classes',          live.adminListForCourse)
 router.get   ('/live-classes',                            live.adminListAll)
+/* The academy's whole timetable, READ-ONLY — so a mentor can see the other
+   mentors' classes (Timetable → All mentors). Their own list above stays
+   narrowed to the classes they teach. Only what a timetable needs: never a
+   meeting or backup link, a stream key, or a student. The caller's academy;
+   cancelled classes left out. ?from=&to= (YYYY-MM-DD), default 5 weeks back
+   to 10 weeks ahead. */
+router.get('/live-classes/academy-schedule', requireInstructor, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { LiveClassModel } = await import('@/models/schema.ts')
+    const { Types } = await import('mongoose')
+    const caller = await callerOrgForRead(req)
+    if (caller.gone || !caller.org) { sendSuccess(res, []); return }
+    const q = req.query as Record<string, string | undefined>
+    const day = (v?: string) => (v && /^\d{4}-\d{2}-\d{2}$/.test(v) ? new Date(`${v}T00:00:00Z`) : null)
+    const from = day(q['from']) ?? new Date(Date.now() - 35 * 864e5)
+    const to   = day(q['to'])   ?? new Date(Date.now() + 70 * 864e5)
+    await ensureOrgSlugs()
+    const rows = await LiveClassModel.find({
+      organizationId: new Types.ObjectId(String(caller.org)),
+      status: { $ne: 'cancelled' },
+      scheduledStart: { $gte: from, $lt: to },
+    })
+      .select('title scheduledStart durationMins status type isOnline location room language instructorId courseId sectionId bookedCount sessionCapacity organizationId')
+      .populate('instructorId', 'name').populate('courseId', 'title').populate('sectionId', 'title')
+      .sort({ scheduledStart: 1 }).limit(3000).lean() as any[]
+    sendSuccess(res, rows.map(c => ({
+      id: String(c._id), title: c.title, scheduledStart: c.scheduledStart, durationMins: c.durationMins,
+      status: c.status, type: c.type, isOnline: c.isOnline !== false, location: c.location ?? undefined, room: c.room ?? undefined,
+      language: c.language ?? 'English',
+      instructorId: c.instructorId ? String(c.instructorId._id) : '', instructor: c.instructorId ? { id: String(c.instructorId._id), name: c.instructorId.name } : undefined,
+      courseId: c.courseId ? String(c.courseId._id) : '', course: c.courseId ? { id: String(c.courseId._id), title: c.courseId.title } : undefined,
+      sectionId: c.sectionId ? { id: String(c.sectionId._id), title: c.sectionId.title } : undefined,
+      bookedCount: c.bookedCount ?? 0, sessionCapacity: c.sessionCapacity ?? 0,
+      organizationSlug: orgSlugFor(c.organizationId) ?? null,
+      readOnly: true,
+    })))
+  } catch (err) { next(err) }
+})
 /* Registered BEFORE /live-classes/:id — Express matches routes in
    declaration order, and "no-shows" would otherwise be swallowed as an :id
    value by the dynamic route below. Gated to admin+ (not instructor): the

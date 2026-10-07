@@ -34,6 +34,8 @@ export interface GuestCohortInput {
 }
 
 export interface LiveClass {
+  /** Set on rows from the academy schedule (another mentor's class): view only, no links. */
+  readOnly?:      boolean
   id:             string
   courseId:       string
   course?:        { id: string; title: string; slug: string; thumbnailUrl?: string }
@@ -148,6 +150,17 @@ export function useAllLiveClasses(status: string = 'all') {
     queryFn:         () => apiGet<LiveClass[]>('/admin/live-classes', { status, limit: 1000 }),
     staleTime:       10_000,
     refetchInterval: 15_000,   // refresh so live status pulses update
+  })
+}
+
+/* GET /admin/live-classes/academy-schedule — every mentor's classes in the
+   caller's academy, READ-ONLY (no links, no students): Timetable → All mentors. */
+export function useAcademySchedule(enabled: boolean) {
+  return useQuery({
+    queryKey: ['admin', 'live-classes', 'academy-schedule'],
+    queryFn:  () => apiGet<LiveClass[]>('/admin/live-classes/academy-schedule'),
+    enabled,
+    staleTime: 30_000,
   })
 }
 
