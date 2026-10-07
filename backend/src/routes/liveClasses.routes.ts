@@ -110,6 +110,24 @@ router.get('/', authenticate, async (req: Request, res: Response, next: NextFunc
     if (caller.gone) { sendSuccess(res, []); return }
     const lcOrgFilter: Record<string, unknown> = {}
     andFilter(lcOrgFilter, servedClassFilter(caller.org, { includeUnowned: true }))
+    /* A Digital Marketing student — one whose ONLY programme is Digital
+       Marketing — sees Digital Marketing's schedule, not every programme's:
+       classes of Digital Marketing courses, plus any course they are actually
+       enrolled in (a bought AI Academy course keeps its classes). Everyone
+       else — other programmes, several programmes, no programme yet — still
+       sees the whole schedule. */
+    if (req.user!.role === 'student') {
+      const { UserModel, CourseModel } = await import('@/models/schema.ts')
+      const me = await UserModel.findById(userId).select('categories category').lean() as { categories?: string[]; category?: string } | null
+      const programmes = (me?.categories?.length ? me.categories : [me?.category]).filter(Boolean)
+      if (programmes.length === 1 && programmes[0] === 'digital-marketing') {
+        const [dmCourses, enrolled] = await Promise.all([
+          CourseModel.find({ program: 'digital-marketing' }).distinct('_id'),
+          EnrollmentModel.find({ userId: new Types.ObjectId(userId), status: { $ne: 'dropped' } }).distinct('courseId'),
+        ])
+        andFilter(lcOrgFilter, { courseId: { $in: [...dmCourses, ...enrolled] } })
+      }
+    }
     const classes = await LiveClassModel.find(lcOrgFilter)
       .populate('instructorId', 'id name avatarUrl')
       /* `description` and `level` because the catalogue's top screen is a
