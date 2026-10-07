@@ -7,7 +7,7 @@ import {
   CheckCircle2, XCircle, Search,
   BookOpen, User, GraduationCap, LayoutList, X,
   Download, TrendingUp, Users, AlertCircle,
-  Filter, ChevronDown, Check, Wifi, Building2, MapPin,
+  Filter, ChevronDown, Check, Wifi, Building2, MapPin, Headset,
 } from 'lucide-react'
 import {
   useAdminBookings, useAdminBookingStats, useUpdateAttendance, useCancelBooking, useBulkAttendance,
@@ -24,6 +24,7 @@ import { useToast } from '@/store/ui.store'
 import { datetimeLocalToISO } from '@/lib/timezone'
 import { CLASS_LANGUAGES } from '@/lib/languages'
 import { hasJoined, joinedLabel } from '@/lib/attendance'
+import { CsTag, csName, csTeam } from '@/components/ui/CsTag'
 
 /* ─── Custom dark dropdown ───────────────────────────────── */
 interface SelectOption { value: string; label: string }
@@ -403,6 +404,11 @@ function BookingRow({ booking, index, selectable, selected, onToggle }: {
         </div>
       </td>
 
+      {/* CS · Team — who looks after them in Tetra Commission */}
+      <td className="py-3 px-3 max-w-[200px]">
+        <CsTag cs={student.tetraCs} variant="cell" />
+      </td>
+
       {/* Session */}
       <td className="py-3 px-3">
         <div className="flex items-center gap-1.5 mb-0.5">
@@ -482,12 +488,14 @@ function BookingRow({ booking, index, selectable, selected, onToggle }: {
 
 /* ─── Export CSV ─────────────────────────────────────────── */
 function exportCSV(bookings: ClassBooking[], filename: string) {
-  const header = ['Student', 'Email', 'Session', 'Date', 'Time', 'Duration', 'Language', 'Course', 'Instructor', 'Status', 'Booked At', 'Cancelled At', 'Joined At']
+  const header = ['Student', 'Email', 'CS', 'CS Team', 'Session', 'Date', 'Time', 'Duration', 'Language', 'Course', 'Instructor', 'Status', 'Booked At', 'Cancelled At', 'Joined At']
   const rows = bookings.map(b => {
     const lc = b.liveClassId as typeof b.liveClassId | null
     return [
       (b.userId?.name ?? '(deleted student)'),
       (b.userId?.email ?? ''),
+      csName(b.userId?.tetraCs),
+      csTeam(b.userId?.tetraCs),
       lc?.title ?? '(deleted session)',
       lc ? new Date(lc.scheduledStart).toLocaleDateString('en-US') : '',
       lc ? fmtTime(lc.scheduledStart) : '',
@@ -834,6 +842,8 @@ export default function BookingsPage() {
 
   const TH_COLS = [
     { label: 'Student',    icon: <User size={10} />          },
+    /* Who looks after the student in Tetra Commission. */
+    { label: 'CS · Team',  icon: <Headset size={10} />       },
     { label: 'Session',    icon: <Clock size={10} />         },
     { label: 'Course',     icon: <BookOpen size={10} />      },
     { label: 'Instructor', icon: <GraduationCap size={10} /> },
@@ -1185,7 +1195,7 @@ export default function BookingsPage() {
                 <div className="rounded-2xl overflow-hidden"
                   style={{ background: 'rgba(255,255,255,0.025)', border: '1px solid rgba(255,255,255,0.07)' }}>
                   <div className="overflow-x-auto">
-                    <table className="w-full min-w-[720px]">
+                    <table className="w-full min-w-[880px]">
                       <thead>
                         <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.07)' }}>
                           {(() => {

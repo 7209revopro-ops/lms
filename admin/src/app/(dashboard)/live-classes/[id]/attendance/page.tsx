@@ -15,6 +15,7 @@ import { useLiveClassById } from '@/lib/api/liveClasses'
 import Spinner from '@/components/ui/Spinner'
 import { useToast } from '@/store/ui.store'
 import { hasJoined, joinedLabel, type JoinEvidence } from '@/lib/attendance'
+import { CsTag, csName, csTeam } from '@/components/ui/CsTag'
 
 const STATUS_OPTIONS: { value: 'attended' | 'missed'; label: string; color: string; bg: string; border: string }[] = [
   { value: 'attended', label: 'Present', color: '#10B981', bg: 'rgba(16,185,129,0.15)',  border: 'rgba(16,185,129,0.35)' },
@@ -40,10 +41,12 @@ function getModuleTitle(sectionId: unknown): string | null {
 }
 
 function exportCSV(rows: any[]) {
-  const header = ['Name', 'Email', 'Status', 'Booked At', 'Joined At']
+  const header = ['Name', 'Email', 'CS', 'CS Team', 'Status', 'Booked At', 'Joined At']
   const csvRows = rows.map((b: any) => [
     b.userId?.name ?? '',
     b.userId?.email ?? '',
+    csName(b.userId?.tetraCs),
+    csTeam(b.userId?.tetraCs),
     hasJoined(b) ? 'joined' : (b.status ?? ''),
     b.bookedAt ? new Date(b.bookedAt).toLocaleString() : '',
     b.attendedAt ? new Date(b.attendedAt).toLocaleString() : '',
@@ -297,6 +300,7 @@ export default function AttendancePage({ params }: { params: Promise<{ id: strin
                         <div>
                           <p className="font-semibold text-white">{booking.userId?.name ?? '—'}</p>
                           <p className="text-xs" style={{ color: dim }}>{booking.userId?.email ?? ''}</p>
+                          <CsTag cs={booking.userId?.tetraCs} />
                         </div>
                       </div>
                     </td>

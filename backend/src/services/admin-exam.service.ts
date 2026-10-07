@@ -120,7 +120,7 @@ export class AdminExamService {
   /* ── Every student's attempt on an exam (for the admin attempts table). ── */
   async listAttempts(examId: string): Promise<Array<{
     attemptId: string
-    student: { id: string; name: string; email: string }
+    student: { id: string; name: string; email: string; tetraCs?: unknown }
     status: string
     totalMarks: number | null
     maxMarks: number | null
@@ -132,18 +132,19 @@ export class AdminExamService {
     if (!Types.ObjectId.isValid(examId)) throw new ExamError('NOT_FOUND', 'Exam not found.', 404)
     const attempts = await ExamAttemptModel
       .find({ examId })
-      .populate('userId', 'name email')
+      .populate('userId', 'name email tetraCs')
       .sort({ updatedAt: -1 })
       .lean()
 
     return attempts.map((a) => {
-      const u = a.userId as unknown as { _id: Types.ObjectId; name?: string; email?: string } | null
+      const u = a.userId as unknown as { _id: Types.ObjectId; name?: string; email?: string; tetraCs?: unknown } | null
       return {
         attemptId: String(a._id),
         student: {
           id:    u ? String(u._id) : '',
           name:  u?.name ?? 'Unknown',
           email: u?.email ?? '',
+          tetraCs: u?.tetraCs ?? null,
         },
         status:      a.status,
         totalMarks:  a.totalMarks ?? null,
@@ -228,7 +229,7 @@ export class AdminExamService {
   async getAttemptDetail(examId: string, attemptId: string): Promise<{
     attempt: {
       id: string
-      student: { id: string; name: string; email: string }
+      student: { id: string; name: string; email: string; tetraCs?: unknown }
       status: string
       startedAt: Date | null
       submittedAt: Date | null
@@ -261,7 +262,7 @@ export class AdminExamService {
     if (!exam) throw new ExamError('NOT_FOUND', 'Exam not found.', 404)
 
     const attempt = await ExamAttemptModel.findOne({ _id: attemptId, examId })
-      .populate('userId', 'name email')
+      .populate('userId', 'name email tetraCs')
       .lean()
     if (!attempt) throw new ExamError('NOT_FOUND', 'Attempt not found.', 404)
 
@@ -285,11 +286,11 @@ export class AdminExamService {
       }
     })
 
-    const u = attempt.userId as unknown as { _id: Types.ObjectId; name?: string; email?: string } | null
+    const u = attempt.userId as unknown as { _id: Types.ObjectId; name?: string; email?: string; tetraCs?: unknown } | null
     return {
       attempt: {
         id:              String(attempt._id),
-        student:         { id: u ? String(u._id) : '', name: u?.name ?? 'Unknown', email: u?.email ?? '' },
+        student:         { id: u ? String(u._id) : '', name: u?.name ?? 'Unknown', email: u?.email ?? '', tetraCs: u?.tetraCs ?? null },
         status:          attempt.status,
         startedAt:       attempt.startedAt ?? null,
         submittedAt:     attempt.submittedAt ?? null,

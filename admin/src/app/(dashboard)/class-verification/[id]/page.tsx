@@ -138,7 +138,7 @@ export default function VerifyClassPage({ params }: { params: Promise<{ id: stri
                         {s.phone ? <a href={`tel:${s.phone}`} className="inline-flex items-center gap-1 hover:underline"><Phone size={11} />{s.phone}</a> : '—'}
                       </td>
                       <td className="px-4 py-2.5 text-xs" style={{ color: 'rgba(255,255,255,0.7)' }}>
-                        {s.cs ?? '—'}{s.team ? <span style={muted}> · {s.team}</span> : null}
+                        {s.cs ?? (s.csOpen ? 'No CS yet' : '—')}{s.team ? <span style={muted}> · {s.team}</span> : null}
                       </td>
                       <td className="px-4 py-2.5 text-xs" style={{ color: s.joinedAt ? '#34D399' : 'rgba(255,255,255,0.4)' }}>{joinedLabel(s)}</td>
                       <td className="px-4 py-2.5">

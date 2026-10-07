@@ -37,6 +37,8 @@ export interface VerifyStudent {
   phone: string | null
   cs: string | null
   team: string | null
+  /** Waiting in Delta Open Students — no CS yet. */
+  csOpen?: boolean
   studentCode: string | null
   status: 'booked' | 'attended' | 'missed'
   joinedAt: string | null

@@ -16,6 +16,7 @@ import { EditStudentModal } from '@/components/users/EditStudentModal'
 import { EditInstructorModal } from '@/components/instructors/EditInstructorModal'
 import { StudentHistoryModal } from '@/components/users/StudentHistoryModal'
 import { CrossAcademyBadge, crossAccent } from '@/components/ui/CrossAcademyBadge'
+import { CsTag } from '@/components/ui/CsTag'
 
 interface Props {
   role:  'student' | 'instructor'
@@ -116,10 +117,13 @@ export function UserTable({ role, label }: Props) {
 
       <div className="overflow-hidden rounded-2xl" style={{ border: '1px solid rgba(255,255,255,0.07)' }}>
         <div className="overflow-x-auto">
-        <table className="w-full min-w-[720px] border-collapse">
+        <table className={`w-full border-collapse ${role === 'student' ? 'min-w-[880px]' : 'min-w-[720px]'}`}>
           <thead>
             <tr style={{ background: 'rgba(255,255,255,0.03)', borderBottom: '1px solid rgba(255,255,255,0.07)' }}>
-              {['Name', 'Email', 'Category', 'Status', 'Joined', ''].map(h => (
+              {/* Students: who looks after them in Tetra Commission, beside their email. */}
+              {(role === 'student'
+                ? ['Name', 'Email', 'CS · Team', 'Category', 'Status', 'Joined', '']
+                : ['Name', 'Email', 'Category', 'Status', 'Joined', '']).map(h => (
                 <th key={h} className="px-4 py-3 text-left"
                   style={{ color: 'rgba(255,255,255,0.35)', fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.08em' }}>
                   {h}
@@ -129,14 +133,14 @@ export function UserTable({ role, label }: Props) {
           </thead>
           <tbody>
             {isLoading && (
-              <tr><td colSpan={6} className="px-4 py-12 text-center">
+              <tr><td colSpan={role === 'student' ? 7 : 6} className="px-4 py-12 text-center">
                 <div className="inline-flex items-center gap-2 text-sm" style={{ color: 'rgba(255,255,255,0.4)' }}>
                   <Spinner size={14} />Loading…
                 </div>
               </td></tr>
             )}
             {!isLoading && data?.docs.length === 0 && (
-              <tr><td colSpan={6} className="px-4 py-16 text-center text-sm" style={{ color: 'rgba(255,255,255,0.35)' }}>
+              <tr><td colSpan={role === 'student' ? 7 : 6} className="px-4 py-16 text-center text-sm" style={{ color: 'rgba(255,255,255,0.35)' }}>
                 No {label.toLowerCase()} found
               </td></tr>
             )}
@@ -361,6 +365,11 @@ function UserRow({ user, index, onEdit, onViewHistory }: {
           <span className="text-sm truncate max-w-[220px]">{user.email}</span>
         </div>
       </td>
+      {user.role === 'student' && (
+        <td className="px-4 py-3.5 max-w-[220px]">
+          <CsTag cs={user.tetraCs} variant="cell" />
+        </td>
+      )}
       <td className="px-4 py-3.5">
         {displayCats.length > 0 || enrolledOnly.length > 0 ? (
           <div className="flex flex-wrap gap-1">

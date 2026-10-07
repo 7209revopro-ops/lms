@@ -12,6 +12,7 @@ import { PageHeader } from '@/components/ui/PageHeader'
 import { Button } from '@/components/ui/button'
 import Spinner from '@/components/ui/Spinner'
 import { useToast } from '@/store/ui.store'
+import { csLabel } from '@/components/ui/CsTag'
 
 const cardStyle = { background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.07)' } as const
 
@@ -112,7 +113,7 @@ export default function AttemptDetailPage() {
 
       <PageHeader
         title={a.student.name}
-        subtitle={a.student.email}
+        subtitle={[a.student.email, csLabel(a.student.tetraCs) && `CS: ${csLabel(a.student.tetraCs)}`].filter(Boolean).join(' · ')}
         badge={{
           label: a.status === 'suspended' ? 'Suspended' : a.status === 'submitted' ? (a.graded ? 'Graded' : 'Submitted') : 'In progress',
           color: a.status === 'suspended' ? '#ef4444' : a.status === 'submitted' ? (a.graded ? '#10b981' : '#4d9bff') : '#f59e0b',

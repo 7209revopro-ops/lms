@@ -2,13 +2,14 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from '@/lib/axios'
 import type { PaginationMeta } from '@/types/index'
+import type { TetraCs } from '@/lib/api/tetraCs'
 
 export interface AdminReview {
   id:        string
   rating:    number
   comment?:  string
   createdAt: string
-  userId:    string | { id: string; name: string; avatarUrl?: string; email?: string }
+  userId:    string | { id: string; name: string; avatarUrl?: string; email?: string; tetraCs?: TetraCs | null }
   courseId:  string | { id: string; title: string; slug: string; thumbnailUrl?: string }
 }
 

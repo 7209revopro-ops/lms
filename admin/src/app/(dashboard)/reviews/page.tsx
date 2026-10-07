@@ -9,6 +9,7 @@ import { useAdminReviews, useDeleteReview, type AdminReview } from '@/lib/api/re
 import { useToast } from '@/store/ui.store'
 import Spinner from '@/components/ui/Spinner'
 import { AvatarImg } from '@/components/ui/AvatarImg'
+import { CsTag } from '@/components/ui/CsTag'
 
 function reviewer(r: AdminReview) {
   return typeof r.userId === 'object' && r.userId !== null ? r.userId : null
@@ -82,6 +83,7 @@ export default function ReviewsPage() {
                     {u?.email && (
                       <p className="truncate text-[11px]" style={{ color: 'rgba(255,255,255,0.35)' }}>{u.email}</p>
                     )}
+                    <CsTag cs={u?.tetraCs} />
                   </div>
                 </div>
                 <div className="flex items-center gap-0.5 flex-shrink-0">

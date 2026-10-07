@@ -17,6 +17,7 @@ import { useDocumentUrl } from '@/lib/api/documents'
 import { programLabel } from '@/lib/programs'
 import { useBackdropClose } from '@/hooks/useBackdropClose'
 import { AvatarImg } from '@/components/ui/AvatarImg'
+import { CsTag } from '@/components/ui/CsTag'
 
 function fmtDate(d?: string) {
   if (!d) return '—'
@@ -159,6 +160,7 @@ function ViewerDetailModal({ user, onClose }: { user: AdminUser; onClose: () => 
             <div>
               <h2 className="text-base font-bold text-white">{user.name}</h2>
               <p className="text-xs" style={{ color: 'rgba(255,255,255,0.4)' }}>{user.email}</p>
+              <CsTag cs={user.tetraCs} />
             </div>
           </div>
           <div className="flex items-center gap-2">
@@ -514,6 +516,7 @@ export default function ViewersPage() {
                         {!user.isActive && (
                           <span className="text-[10px] font-medium" style={{ color: '#EF4444' }}>Blocked</span>
                         )}
+                        <div style={{ maxWidth: 200 }}><CsTag cs={user.tetraCs} /></div>
                       </div>
                     </div>
                   </td>

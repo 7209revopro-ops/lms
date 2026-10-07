@@ -1,6 +1,7 @@
 'use client'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from '@/lib/axios'
+import type { TetraCs } from '@/lib/api/tetraCs'
 
 export type SupportStatus   = 'open' | 'pending' | 'resolved' | 'closed'
 export type SupportCategory = 'technical' | 'billing' | 'course' | 'account' | 'other'
@@ -14,7 +15,7 @@ export interface SupportMessage {
   createdAt:  string
 }
 
-export interface SupportUser { id: string; name: string; email: string; avatarUrl?: string }
+export interface SupportUser { id: string; name: string; email: string; avatarUrl?: string; tetraCs?: TetraCs | null }
 
 export interface SupportTicket {
   id:             string

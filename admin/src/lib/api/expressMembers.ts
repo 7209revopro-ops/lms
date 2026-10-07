@@ -1,6 +1,7 @@
 'use client'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { api } from '@/lib/axios'
+import type { TetraCs } from '@/lib/api/tetraCs'
 
 export type ExpressMemberStatus = 'all' | 'active' | 'blocked'
 
@@ -12,6 +13,8 @@ export interface ExpressMember {
   country?:  string
   isActive:  boolean
   createdAt: string
+  /** Their CS and CS team in Tetra Commission, where it has said. */
+  tetraCs?:  TetraCs | null
 }
 
 export interface ExpressMembersResponse {

@@ -12,6 +12,7 @@ import { useAdminBookForStudent } from '@/lib/api/adminBookings'
 import type { LiveClass } from '@/lib/api/liveClasses'
 import type { AdminUser } from '@/lib/api/users'
 import { useBackdropClose } from '@/hooks/useBackdropClose'
+import { CsTag } from '@/components/ui/CsTag'
 
 interface Props {
   live: LiveClass
@@ -184,6 +185,7 @@ export function BookForStudentModal({ live, onClose, onSuccess }: Props) {
                   <div className="min-w-0 flex-1">
                     <p className="text-xs font-semibold text-white truncate">{s.name}</p>
                     <p className="text-[11px] truncate" style={{ color: 'rgba(255,255,255,0.4)' }}>{s.email}</p>
+                    <CsTag cs={s.tetraCs} />
                   </div>
                 </button>
               ))}
@@ -218,6 +220,7 @@ export function BookForStudentModal({ live, onClose, onSuccess }: Props) {
               <div className="min-w-0 flex-1">
                 <p className="text-xs font-semibold text-white">{selectedStudent.name}</p>
                 <p className="text-[11px]" style={{ color: 'rgba(255,255,255,0.5)' }}>{selectedStudent.email}</p>
+                <CsTag cs={selectedStudent.tetraCs} />
               </div>
               <button
                 onClick={() => { setSelectedStudent(null); setSearch(''); setError(null) }}

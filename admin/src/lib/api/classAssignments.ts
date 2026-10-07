@@ -1,6 +1,7 @@
 'use client'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { api } from '@/lib/axios'
+import type { TetraCs } from '@/lib/api/tetraCs'
 
 /* ─────────────────────────────────────────────────────
    Post-class assignments — the reviewer's side.
@@ -28,7 +29,7 @@ export interface AssignmentReview {
   reviewedAt: string
 }
 
-interface Ref { id: string; title?: string; name?: string; email?: string; avatarUrl?: string; scheduledStart?: string }
+interface Ref { id: string; title?: string; name?: string; email?: string; avatarUrl?: string; scheduledStart?: string; tetraCs?: TetraCs | null }
 
 export interface ReviewAssignment {
   id:           string

@@ -18,6 +18,7 @@ import {
 } from '@/services/portalEnrolmentRequests.service.ts'
 import { studentViewForPortal } from '@/services/portalStudentView.service.ts'
 import { courseAccessForPortal, giveCoursesForPortal, setModuleAccessForPortal } from '@/services/portalCourseAccess.service.ts'
+import { studentCsFromPortal } from '@/services/portalStudentCs.service.ts'
 
 /* ─────────────────────────────────────────────────────
    /service — the help desk, class assignments, students' courses,
@@ -172,6 +173,21 @@ router.post('/students/course-access/give', checkedCaller, wrap(async (req, res)
 router.post('/students/course-access/:enrolmentId', checkedCaller, wrap(async (req, res) => {
   const { email, locked, byName, byEmail } = (req.body ?? {}) as Record<string, unknown>
   sendSuccess(res, await setModuleAccessForPortal({ email, enrolmentId: req.params['enrolmentId'], locked, byName, byEmail }), 'Modules')
+}))
+
+/**
+ * Who looks after each student in Tetra Commission — their CS and CS team —
+ * for the admin to show beside them (services/portalStudentCs.service.ts).
+ * Written by the commission portal only, which calls with the CRM's secret:
+ * the Root portal's is refused.
+ */
+router.post('/student-cs', checkedCaller, wrap(async (req, res) => {
+  if (req.caller !== 'crm') {
+    sendError(res, 'FORBIDDEN', 'Only the commission portal says who looks after a student', 403)
+    return
+  }
+  const { students } = (req.body ?? {}) as { students?: unknown }
+  sendSuccess(res, await studentCsFromPortal({ students }), 'CS')
 }))
 
 export default router

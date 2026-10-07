@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { api } from '@/lib/axios'
 import type { Course, CourseFormValues, PaginationMeta } from '@/types/index'
 import type { SalesCrm } from '@/lib/api/users'
+import type { TetraCs } from '@/lib/api/tetraCs'
 
 /* Strip null / undefined / empty-string / explicit `false` so the backend
    Zod query schema doesn't reject e.g. `level=` when the user picks "All". */
@@ -155,6 +156,8 @@ export interface CourseStudentRow {
   student: {
     id: string; name: string; email: string; phone?: string; avatarUrl?: string
     enrollmentStatus?: string; isActive?: boolean
+    /** Their CS and CS team in Tetra Commission, where it has said. */
+    tetraCs?: TetraCs | null
   }
 }
 

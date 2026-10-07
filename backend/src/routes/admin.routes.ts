@@ -1229,6 +1229,8 @@ router.get('/courses/:id/students', requireAnyAdmin,
                 id: '$student._id', name: '$student.name', email: '$student.email',
                 phone: '$student.phone', avatarUrl: '$student.avatarUrl',
                 enrollmentStatus: '$student.enrollmentStatus', isActive: '$student.isActive',
+                /* Their CS and CS team in Tetra Commission. */
+                tetraCs: '$student.tetraCs',
               },
             } },
           ],
@@ -3067,7 +3069,7 @@ router.get('/bookings', requireInstructor, requirePermission('bookings','list'),
     /* One spec, used by both ordering paths below, so they can never drift into
        returning differently-shaped rows. */
     const POPULATE = [
-      { path: 'userId', select: 'id name email avatarUrl' },
+      { path: 'userId', select: 'id name email avatarUrl tetraCs' },
       {
         path:     'liveClassId',
         select:   'id title scheduledStart durationMins language courseId sectionId instructorId isOnline location room',
@@ -3502,7 +3504,7 @@ router.patch('/bookings/:id/attendance', requireInstructor, requireDepartmentBoo
       { _id: id, status: { $in: ['booked', 'attended', 'missed'] } },
       { status },
       { new: true },
-    ).populate('userId', 'id name email').lean({ virtuals: true })
+    ).populate('userId', 'id name email tetraCs').lean({ virtuals: true })
     if (!booking) {
       res.status(400).json({
         success: false,
@@ -3589,7 +3591,7 @@ router.get('/class-verification/:id', requireInstructor, requireDepartmentLiveCl
     if (!c) { res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Class not found' } }); return }
     const seats = await ClassBookingModel.find({ liveClassId: c._id, status: { $in: ['booked', 'attended', 'missed'] } })
       .select('userId status attendedAt attendanceSource mentorNote')
-      .populate('userId', 'name email enrollmentApplication.phone commissionSync.mentorName commissionSync.team commissionSync.studentCode')
+      .populate('userId', 'name email enrollmentApplication.phone commissionSync.mentorName commissionSync.team commissionSync.studentCode tetraCs')
       .lean() as any[]
     const endMs = new Date(c.scheduledStart).getTime() + (c.durationMins ?? 60) * 60_000
     sendSuccess(res, {
@@ -3606,9 +3608,12 @@ router.get('/class-verification/:id', requireInstructor, requireDepartmentLiveCl
           bookingId: String(b._id),
           name: b.userId?.name ?? '(deleted student)', email: b.userId?.email ?? null,
           phone: b.userId?.enrollmentApplication?.phone ?? null,
-          cs: b.userId?.commissionSync?.mentorName || null,
-          team: b.userId?.commissionSync?.team || null,
-          studentCode: b.userId?.commissionSync?.studentCode || null,
+          /* As Tetra Commission says now (tetraCs, kept current by it), else what it
+             answered when this LMS first sent them — before it has said. */
+          cs: (b.userId?.tetraCs ? b.userId.tetraCs.name : b.userId?.commissionSync?.mentorName) || null,
+          team: (b.userId?.tetraCs ? b.userId.tetraCs.team : b.userId?.commissionSync?.team) || null,
+          csOpen: b.userId?.tetraCs?.open === true,
+          studentCode: b.userId?.tetraCs?.code || b.userId?.commissionSync?.studentCode || null,
           status: b.status, joinedAt: b.attendedAt ?? null, joinedVia: b.attendanceSource ?? null,
           note: b.mentorNote ?? '',
         }))
@@ -3750,7 +3755,7 @@ router.get('/reports/attendance', requireInstructor, requirePermission('reports'
       ]
     }
     const bookings = await ClassBookingModel.find(filter)
-      .populate('userId', 'id name email')
+      .populate('userId', 'id name email tetraCs')
       .populate('liveClassId', 'id title scheduledStart')
       .lean({ virtuals: true })
     // Aggregate per student
@@ -3993,7 +3998,7 @@ router.get('/live-classes/:id/homework/submissions', requireRole('super_admin', 
     const subFilter: Record<string, unknown> = { homeworkId: { $in: hwIds } }
     if (seats.userIds) subFilter['userId'] = { $in: seats.userIds }
     const submissions = await HomeworkSubmissionModel.find(subFilter)
-      .populate('userId', 'id name email')
+      .populate('userId', 'id name email tetraCs')
       .populate('homeworkId', 'id title')
       .populate('gradedBy', 'id name')
       .lean({ virtuals: true })
@@ -4055,7 +4060,7 @@ router.patch('/homework-submissions/:id/grade', requireRole('super_admin', 'admi
       id,
       { grade, feedback, status: 'graded', gradedAt: new Date(), gradedBy: req.user!.id },
       { new: true },
-    ).populate('userId', 'id name email').lean({ virtuals: true })
+    ).populate('userId', 'id name email tetraCs').lean({ virtuals: true })
     if (!sub) { res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Submission not found' } }); return }
     sendSuccess(res, sub, 'Submission graded')
   } catch (err) { next(err) }
@@ -4098,7 +4103,7 @@ router.get('/live-classes/:id/feedback', requireInstructor, requireDepartmentLiv
     const fbFilter: Record<string, unknown> = { liveClassId: new Types.ObjectId(liveClassId) }
     if (fbSeats.userIds) fbFilter['userId'] = { $in: fbSeats.userIds }
     const docs = await ClassFeedbackModel.find(fbFilter)
-      .populate('userId', 'id name email avatarUrl')
+      .populate('userId', 'id name email avatarUrl tetraCs')
       .sort({ createdAt: -1 })
       .lean({ virtuals: true })
     const avg = docs.length > 0 ? docs.reduce((s, d: any) => s + d.rating, 0) / docs.length : null

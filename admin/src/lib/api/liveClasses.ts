@@ -1,6 +1,7 @@
 'use client'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { api, apiGet, apiPost, apiPatch } from '@/lib/axios'
+import type { TetraCs } from '@/lib/api/tetraCs'
 
 export type LiveClassStatus = 'scheduled' | 'live' | 'ended' | 'cancelled'
 export type LiveClassType   = 'external' | 'internal'
@@ -259,7 +260,7 @@ export type BookingStatus = 'booked' | 'attended' | 'missed' | 'cancelled'
 
 export interface ClassBooking {
   id:          string
-  userId:      { id: string; name: string; email: string; avatarUrl?: string }
+  userId:      { id: string; name: string; email: string; avatarUrl?: string; tetraCs?: TetraCs | null }
   liveClassId: {
     id:             string
     title:          string

@@ -186,7 +186,7 @@ export class InstructorReviewService {
     const [docs, totalCount] = await Promise.all([
       InstructorReviewModel.find(filter)
         .select('rating comment createdAt studentId liveClassId')
-        .populate('studentId', 'name')
+        .populate('studentId', 'name tetraCs')
         .populate('liveClassId', 'title scheduledStart')
         .sort({ createdAt: -1 })
         .skip((page - 1) * perPage).limit(perPage)

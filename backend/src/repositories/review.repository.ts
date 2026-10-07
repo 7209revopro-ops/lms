@@ -66,7 +66,7 @@ export class ReviewRepository extends BaseRepository<IReview> {
         .sort({ createdAt: -1 })
         .skip((page - 1) * perPage)
         .limit(perPage)
-        .populate('userId',       'name avatarUrl email')
+        .populate('userId',       'name avatarUrl email tetraCs')
         .populate('courseId',     'title slug thumbnailUrl')
         .populate('instructorId', 'name avatarUrl')
         .exec(),

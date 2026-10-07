@@ -199,6 +199,19 @@ export interface IUser extends Document {
     sentAt?:        Date
     course?:        string
   }
+  /* Who looks after them in Tetra Commission, kept current by it — see
+     services/portalStudentCs.service.ts */
+  tetraCs?: {
+    /** Their CS (the primary mentor); "" while they wait in Delta Open Students. */
+    name?:  string
+    team?:  string
+    /** Their student code there. */
+    code?:  string
+    /** Waiting in Delta Open Students — no CS yet. */
+    open?:  boolean
+    /** When the commission portal last said so. */
+    at?:    Date
+  }
   /* Meta */
   lastLoginAt?:  Date
   createdAt:     Date
@@ -327,6 +340,19 @@ const UserSchema = new Schema<IUser>(
       reason:        { type: String },
       sentAt:        { type: Date },
       course:        { type: String },
+    },
+    /* Who looks after this student in Tetra Commission — their CS and CS team —
+       as it says now (the user, 2026-10-07: "show the cs name and team name …
+       every student showing area"). Written only by the commission portal,
+       through POST /service/student-cs, every few minutes for whoever changed.
+       Unlike commissionSync's mentorName and team, which are what it answered
+       once, when this LMS first sent the student there. */
+    tetraCs: {
+      name: { type: String },
+      team: { type: String },
+      code: { type: String },
+      open: { type: Boolean },
+      at:   { type: Date },
     },
   },
   baseSchemaOptions,

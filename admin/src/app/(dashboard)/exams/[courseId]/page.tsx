@@ -17,6 +17,7 @@ import { Button } from '@/components/ui/button'
 import Spinner from '@/components/ui/Spinner'
 import { useToast } from '@/store/ui.store'
 import { datetimeLocalToISO, isoToDatetimeLocal } from '@/lib/timezone'
+import { CsTag } from '@/components/ui/CsTag'
 
 /* ── Local editor state ─────────────────────────────
    A question with a stable client key so React keeps inputs focused while the
@@ -417,6 +418,7 @@ export default function ExamBuilderPage() {
                       <td className="py-2.5 pr-4">
                         <div className="text-white">{a.student.name}</div>
                         <div className="text-xs" style={{ color: 'rgba(255,255,255,0.4)' }}>{a.student.email}</div>
+                        <CsTag cs={a.student.tetraCs} />
                       </td>
                       <td className="py-2.5 pr-4"><StatusPill status={a.status} graded={a.graded} /></td>
                       <td className="py-2.5 pr-4 text-white">

@@ -205,7 +205,7 @@ export class OrderRepository {
     const [docs, totalCount] = await Promise.all([
       OrderModel
         .find(filter)
-        .populate('userId',   'name email')
+        .populate('userId',   'name email tetraCs')
         .populate('courseId', 'title slug')
         .sort({ createdAt: -1 })
         .skip((page - 1) * perPage)

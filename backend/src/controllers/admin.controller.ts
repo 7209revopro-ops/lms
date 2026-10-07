@@ -615,7 +615,7 @@ export class AdminController {
         filter['enrollmentStatus'] = status
       }
 
-      const projection = 'id name email avatarUrl category categories enrollmentStatus enrollmentApplication enrollmentCancellationReason rejectionReason approvedBy approvedByEmail approvedByName approvedByRole approvedAt rejectedByEmail rejectedAt isActive createdAt'
+      const projection = 'id name email avatarUrl category categories enrollmentStatus enrollmentApplication enrollmentCancellationReason rejectionReason approvedBy approvedByEmail approvedByName approvedByRole approvedAt rejectedByEmail rejectedAt isActive createdAt tetraCs'
 
       const [docs, totalCount] = await Promise.all([
         UserModel.find(filter).select(projection).sort({ createdAt: -1 })
@@ -665,7 +665,7 @@ export class AdminController {
          and no-one else's (plan.md §10). */
       andFilter(filter, await studentReachClause(req))
 
-      const projection = 'id name email avatarUrl enrollmentApplication isActive createdAt signupType'
+      const projection = 'id name email avatarUrl enrollmentApplication isActive createdAt signupType tetraCs'
       const [docs, totalCount] = await Promise.all([
         UserModel.find(filter).select(projection).sort({ createdAt: -1 })
           .skip((page - 1) * per_page).limit(per_page).lean({ virtuals: true }),
@@ -680,6 +680,7 @@ export class AdminController {
         country:   d.enrollmentApplication?.homeCountry ?? null,
         isActive:  d.isActive,
         createdAt: d.createdAt,
+        tetraCs:   d.tetraCs ?? null,
       }))
       sendSuccess(res, mapped, undefined, 200, buildPaginationMeta(totalCount, page, per_page))
     } catch (err) { next(err) }
