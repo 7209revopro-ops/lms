@@ -32,6 +32,7 @@ import {
   sendMentorNoShowAlert,
   sendMentorNoShowSelfAlert,
   sendInstructorReviewRequestEmail,
+  sendMentorVerifyRequest,
 } from '@/services/email.service.ts'
 import {
   sendClassReminderTomorrowWhatsApp, sendClassStartingSoonWhatsApp,
@@ -1021,6 +1022,96 @@ export async function runAttendanceFinalization(): Promise<void> {
   }
 }
 
+/* ── Mentor attendance verification ────────────────────────────────────────
+   After every class its mentor checks the attendance and reviews the class on
+   the admin site's Class Verification page (/class-verification/<id>):
+
+     request   once attendance is decided (attendanceFinalized)
+     reminder  2 hours after the end, if not yet verified
+     final     9 AM the next morning in the class's academy — from then it
+               shows as Overdue to admins
+
+   Each stage once (its timestamp). In-app and email; the email respects the
+   mentor's class-reminder preference. A class with nobody booked has nothing
+   to check: it is marked verified (no verifier) and asked about never.
+   Only classes from the last 3 days — a server that was down does not wake
+   mentors up about last month. */
+export const VERIFY_REMINDER_AFTER_END_MS = 2 * 60 * 60 * 1000
+
+/** 9:00 on the day after `endMs`, on the wall clock of `zone`. */
+export function nextMorningNine(endMs: number, zone: string): number {
+  const day = new Intl.DateTimeFormat('en-CA', { timeZone: zone, year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(endMs))
+  const [y, m, d] = day.split('-').map(Number) as [number, number, number]
+  const guess = Date.UTC(y, m - 1, d + 1, 9, 0, 0)
+  const p = Object.fromEntries(new Intl.DateTimeFormat('en-US', {
+    timeZone: zone, hourCycle: 'h23', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit',
+  }).formatToParts(new Date(guess)).map(x => [x.type, x.value]))
+  const wallAsUtc = Date.UTC(+p['year']!, +p['month']! - 1, +p['day']!, +p['hour']!, +p['minute']!, +p['second']!)
+  return guess - (wallAsUtc - guess)
+}
+
+export async function runMentorVerification(): Promise<void> {
+  try {
+    const { LiveClassModel, ClassBookingModel } = await import('@/models/schema.ts')
+    await warmSlugs()
+    const now = Date.now()
+    const classes = await LiveClassModel.find({
+      status: { $ne: 'cancelled' },
+      attendanceFinalized: true,
+      verifiedAt: { $exists: false },
+      scheduledStart: { $gte: new Date(now - 3 * 24 * 60 * 60 * 1000), $lt: new Date(now) },
+      $or: [{ verifyRequestedAt: { $exists: false } }, { verifyReminderAt: { $exists: false } }, { verifyFinalReminderAt: { $exists: false } }],
+    })
+      .populate<{ instructorId: { id: string; name: string; email: string } }>('instructorId', 'name email role emailPrefs')
+      .lean({ virtuals: true })
+
+    for (const cls of classes) {
+      const c = cls as any
+      const id = String(c.id ?? c._id)
+      try {
+        const seats = await ClassBookingModel.countDocuments({ liveClassId: c._id, status: { $in: ['booked', 'attended', 'missed'] } })
+        if (seats === 0) {
+          await LiveClassModel.updateOne({ _id: c._id }, { $set: { verifyRequestedAt: new Date(), verifiedAt: new Date() } })
+          continue
+        }
+        const endMs = new Date(c.scheduledStart).getTime() + (c.durationMins ?? 60) * 60_000
+        const { zone } = academyClock(new Date(endMs), orgSlugFor(c.organizationId))
+        let stage: 'request' | 'reminder' | 'final' | null = null
+        let field = ''
+        if (!c.verifyRequestedAt) { stage = 'request'; field = 'verifyRequestedAt' }
+        else if (!c.verifyReminderAt && now >= endMs + VERIFY_REMINDER_AFTER_END_MS) { stage = 'reminder'; field = 'verifyReminderAt' }
+        else if (c.verifyReminderAt && !c.verifyFinalReminderAt && now >= nextMorningNine(endMs, zone)) { stage = 'final'; field = 'verifyFinalReminderAt' }
+        if (!stage) continue
+
+        const mentor = c.instructorId as { id?: string; _id?: unknown; name?: string; email?: string } | null
+        const mentorId = String(mentor?.id ?? mentor?._id ?? '')
+        if (mentorId) {
+          await notifSvc.create(mentorId, {
+            kind:  'class-reminder',
+            title: stage === 'final' ? 'Attendance overdue' : 'Verify attendance',
+            body:  stage === 'request'
+              ? `"${c.title}" has ended — check its attendance and review the class.`
+              : stage === 'reminder'
+                ? `"${c.title}" — attendance still not verified.`
+                : `"${c.title}" — attendance is overdue and visible to your admins.`,
+            link:  `/class-verification/${id}`,
+          }).catch(err => logger.warn({ err, classId: id }, '[Verify] in-app notice failed'))
+          if (mentor?.email && wantsStaffEmail(mentor as never, 'classReminder')) {
+            await sendMentorVerifyRequest(mentor.email, mentor.name ?? 'Mentor', c.title,
+              `${env.ADMIN_URL}/class-verification/${id}`, stage, seats)
+              .catch(err => logger.warn({ err, classId: id }, '[Verify] email failed'))
+          }
+        }
+        await LiveClassModel.updateOne({ _id: c._id }, { $set: { [field]: new Date() } })
+      } catch (err) {
+        logger.error({ err, classId: id }, '[Verify] mentor verification step failed')
+      }
+    }
+  } catch (err) {
+    logger.error({ err }, '[Verify] mentor verification job error')
+  }
+}
+
 /* ── Instructor-review request dispatch ──────────────────────────────────
    Runs strictly downstream of runAttendanceFinalization: it only considers
    classes whose attendance has ALREADY been decided (attendanceFinalized),
@@ -1189,6 +1280,9 @@ export function startReminderJobs(): void {
      only picks up classes the OTHER job already finalized; it is never the
      bottleneck. */
   cron.schedule('*/15 * * * *', exclusive('review-request-dispatch', runReviewRequestDispatch))
+
+  // Every 15 min — ask each class's mentor to verify attendance + review it; remind at +2 h and 9 AM next day
+  cron.schedule('*/15 * * * *', exclusive('mentor-verification', runMentorVerification))
 
   // Every 5 min — a Meet class past its timetable end: has Google Meet recorded it ending?
   cron.schedule('*/5 * * * *', exclusive('meet-class-end', () => runMeetClassEnd()))

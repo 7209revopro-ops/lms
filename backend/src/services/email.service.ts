@@ -813,6 +813,44 @@ export async function sendMentorJoinReminder(
   })
 }
 
+/* After a class: ask its mentor to check attendance and review the class on
+   the admin site's Class Verification page (reminders.job.ts
+   runMentorVerification) — once when attendance is decided, a reminder 2
+   hours after the end, and a last one the next morning. */
+export async function sendMentorVerifyRequest(
+  to: string,
+  name: string,
+  liveTitle: string,
+  link: string,
+  stage: 'request' | 'reminder' | 'final',
+  studentCount: number,
+): Promise<void> {
+  const subject = stage === 'request'
+    ? `✅ Verify attendance — "${liveTitle}"`
+    : stage === 'reminder'
+      ? `Reminder: verify attendance for "${liveTitle}"`
+      : `Overdue: attendance for "${liveTitle}" is still not verified`
+  const lead = stage === 'request'
+    ? `Your class <strong>${escapeHtml(liveTitle)}</strong> has ended. Please check the attendance of its ${studentCount} student${studentCount === 1 ? '' : 's'} and add a short review of the class.`
+    : stage === 'reminder'
+      ? `The attendance for <strong>${escapeHtml(liveTitle)}</strong> has not been verified yet. It takes a minute.`
+      : `The attendance for <strong>${escapeHtml(liveTitle)}</strong> is still not verified and now shows as overdue to your admins.`
+  const html = wrap(subject, `
+    <h2 style="margin:0 0 16px;font-size:20px;font-weight:700;color:#0D0F1A">${stage === 'final' ? 'Attendance overdue' : 'Verify attendance'}</h2>
+    <p>Hi ${escapeHtml(name)},</p>
+    <p>${lead}</p>
+    <p style="margin:24px 0">
+      <a href="${escapeHtml(sanitiseUrl(link))}" style="display:inline-block;background:linear-gradient(135deg,#10B981,#059669);color:#fff;font-weight:700;padding:14px 28px;border-radius:12px;text-decoration:none;font-size:15px">
+        Verify attendance →
+      </a>
+    </p>
+  `)
+  await sender.send({
+    to, subject, html,
+    text: `Hi ${name},\n\n${lead.replace(/<[^>]+>/g, '')}\n\nVerify attendance: ${link}`,
+  })
+}
+
 export async function sendMentorNoShowAlert(
   to: string,
   recipientName: string,

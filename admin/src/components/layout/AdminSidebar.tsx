@@ -8,7 +8,7 @@ import {
   LayoutDashboard, BookOpen, Users, GraduationCap,
   Tag, Star, Settings, ChevronLeft, ChevronRight, LogOut, X,
   ShoppingBag, Ticket, Map, ClipboardList, Video, CalendarDays, BarChart3, ShieldCheck, UserCog, LifeBuoy,
-  ClipboardCheck, Film, MonitorSmartphone, FileCheck2, Megaphone, Mail, UserX, Award, MessageCircle, MessagesSquare,
+  ClipboardCheck, Film, MonitorSmartphone, FileCheck2, Megaphone, Mail, UserX, Award, MessageCircle, MessagesSquare, ListChecks,
 } from 'lucide-react'
 import { useStaffUnread } from '@/lib/api/chat'
 import { useUIStore } from '@/store/ui.store'
@@ -27,6 +27,7 @@ const adminNavItems = [
   { label: 'Courses',        href: '/courses',                icon: BookOpen },
   { label: 'Learning Paths', href: '/learning-paths',   icon: Map },
   { label: 'Live Classes',   href: '/live-classes',     icon: Video },
+  { label: 'Class Verification', href: '/class-verification', icon: ListChecks },
   { label: 'Instructor Attendance', href: '/instructor-attendance', icon: UserX },
   { label: 'Instructor Reviews', href: '/instructor-reviews', icon: Award },
   { label: 'Recordings',     href: '/recordings',        icon: Film },
@@ -60,6 +61,7 @@ const scopedAdminNavItems = [
   { label: 'Devices',    href: '/devices',                icon: MonitorSmartphone },
   { label: 'Courses',          href: '/courses',                icon: BookOpen },
   { label: 'Live Classes',     href: '/live-classes',           icon: Video },
+  { label: 'Class Verification', href: '/class-verification', icon: ListChecks },
   { label: 'Instructor Attendance', href: '/instructor-attendance', icon: UserX },
   { label: 'Instructor Reviews', href: '/instructor-reviews', icon: Award },
   { label: 'Recordings',       href: '/recordings',             icon: Film },
@@ -73,6 +75,7 @@ const scopedAdminNavItems = [
 const instructorNavItems = [
   { label: 'My Courses',    href: '/courses',            icon: BookOpen },
   { label: 'Live Classes',  href: '/live-classes',       icon: Video },
+  { label: 'Class Verification', href: '/class-verification', icon: ListChecks },
   { label: 'Bookings',      href: '/bookings',           icon: CalendarDays },
   { label: 'Availability',  href: '/availability',       icon: CalendarDays },
   { label: 'Assignments',   href: '/assignments',        icon: ClipboardCheck },
