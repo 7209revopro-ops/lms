@@ -414,6 +414,38 @@ export async function sendTodaysClassesWhatsApp(
     { category: 'utility', buttonParam: signinCode })
 }
 
+/* class_cancelled_v1 / class_rescheduled_v1 / class_mentor_changed_v1 — to a
+   student who BOOKED the class, sent with the change's email when the
+   critical-mail buffer flushes (jobs/criticalmail.job.ts), so a burst of edits
+   is one message. Button: their sign-in link — the schedule after a
+   cancellation (to book another), My Bookings otherwise. No send without a code. */
+export async function sendClassCancelledWhatsApp(
+  to: string | null | undefined, studentName: string, sessionTitle: string,
+  dateLabel: string, timeLabel: string, signinCode: string,
+): Promise<void> {
+  if (!signinCode) return
+  await sendTemplate(to, 'class_cancelled_v1', [studentName || 'there', sessionTitle, dateLabel, timeLabel],
+    { category: 'utility', buttonParam: signinCode })
+}
+
+export async function sendClassRescheduledWhatsApp(
+  to: string | null | undefined, studentName: string, sessionTitle: string,
+  wasLabel: string, nowLabel: string, signinCode: string,
+): Promise<void> {
+  if (!signinCode) return
+  await sendTemplate(to, 'class_rescheduled_v1', [studentName || 'there', sessionTitle, wasLabel, nowLabel],
+    { category: 'utility', buttonParam: signinCode })
+}
+
+export async function sendClassMentorChangedWhatsApp(
+  to: string | null | undefined, studentName: string, sessionTitle: string,
+  whenLabel: string, newMentorName: string, signinCode: string,
+): Promise<void> {
+  if (!signinCode) return
+  await sendTemplate(to, 'class_mentor_changed_v1', [studentName || 'there', sessionTitle, whenLabel, newMentorName || 'another mentor'],
+    { category: 'utility', buttonParam: signinCode })
+}
+
 /* mentor_class_in_10_min — to the class's MENTOR, about ten minutes before an
    online class: the class, its time and how many students are booked, with a
    Start button. The template's URL is {ADMIN_URL}/live-classes/ and the send

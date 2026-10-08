@@ -314,9 +314,12 @@ export async function flushCriticalMail(opts: {
   const { UserModel } = await import('@/models/schema.ts')
   const recipients = await UserModel
     .find({ _id: { $in: [...new Set(rows.map(r => String(r.userId)))] } })
-    .select('organizationId').lean() as any[]
+    .select('organizationId enrollmentApplication.phone').lean() as any[]
   const slugByUser = new Map<string, string | undefined>(
     recipients.map(u => [String(u._id), orgSlugFor(u.organizationId)]),
+  )
+  const phoneByUser = new Map<string, string | undefined>(
+    recipients.map(u => [String(u._id), u.enrollmentApplication?.phone]),
   )
 
   /* The cap is read from the database ONCE per student per flush and then
@@ -437,6 +440,13 @@ export async function flushCriticalMail(opts: {
       await CriticalMailModel.updateOne({ _id: row._id }, { $set: { sentAt: now } })
       sentTodayBy.set(userId, alreadySent + 1)
       tally.sent++
+      /* The same notice on WhatsApp, once the mail is out — never a reason
+         to fail or retry the mail. */
+      const phone = phoneByUser.get(userId)
+      if (phone) {
+        await sendWhatsAppFor(row, phone, slug).catch(err =>
+          logger.warn({ err, userId, kind: row.kind }, '[CriticalMail] WhatsApp failed'))
+      }
     } catch (err) {
       /* Release the claim as well as leaving sentAt null, or the row would be
          locked out until it went stale five minutes later. */
@@ -496,6 +506,28 @@ async function sendOne(row: any, senders: CriticalSenders, academySlug?: string 
     newStart,
     academySlug,
   )
+}
+
+/* "Tue, 13 Oct" and "05:00 PM GST" in the student's academy clock. */
+function shortDay(d: Date, academySlug?: string | null): string {
+  return d.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', timeZone: academyClock(d, academySlug).zone })
+    .replace(/^(\w{3}) /, '$1, ')
+}
+
+async function sendWhatsAppFor(row: any, phone: string, academySlug?: string | null): Promise<void> {
+  const { mintSigninCode } = await import('@/services/signinLink.service.ts')
+  const wa = await import('@/services/whatsapp.service.ts')
+  const oldStart = row.oldStart ? new Date(row.oldStart) : new Date()
+  const newStart = row.newStart ? new Date(row.newStart) : new Date()
+  const full = (d: Date) => `${shortDay(d, academySlug)}, ${academyClock(d, academySlug).time}`
+  const userId = String(row.userId), name = row.name ?? '', title = String(row.title)
+  if (row.kind === 'cancelled') {
+    const code = await mintSigninCode(userId, '/class-bookings')
+    return wa.sendClassCancelledWhatsApp(phone, name, title, shortDay(oldStart, academySlug), academyClock(oldStart, academySlug).time, code)
+  }
+  const code = await mintSigninCode(userId, '/my-bookings')
+  if (row.kind === 'rescheduled') return wa.sendClassRescheduledWhatsApp(phone, name, title, full(oldStart), full(newStart), code)
+  return wa.sendClassMentorChangedWhatsApp(phone, name, title, full(newStart), row.newInstructorName ?? '', code)
 }
 
 export function startCriticalMailJob(): void {

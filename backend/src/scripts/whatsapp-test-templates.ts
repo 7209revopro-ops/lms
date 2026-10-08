@@ -12,6 +12,7 @@
      bun src/scripts/whatsapp-test-templates.ts --send --only class_has_started,class_starts_in_5_min
      bun src/scripts/whatsapp-test-templates.ts --send --only mentor_class_in_10_min
      bun src/scripts/whatsapp-test-templates.ts --send --only new_class_scheduled_v1,todays_classes_v1
+     bun src/scripts/whatsapp-test-templates.ts --send --only class_cancelled_v1,class_rescheduled_v1,class_mentor_changed_v1
      bun src/scripts/whatsapp-test-templates.ts --send --class <liveClassId>   (join buttons open that class)
 
    Needs WHATSAPP_API_KEY and WHATSAPP_PHONE_NUMBER_ID — run it where WhatsApp
@@ -45,6 +46,9 @@ const TEMPLATES: { name: string; params: string[]; buttonParam?: string; isNew?:
   { name: 'class_has_started_v2',         params: ['Test Student', CLASS], buttonParam: 'TESTCODE0000000000000000', isNew: true },
   { name: 'mentor_class_in_10_min',       params: ['Test Mentor', CLASS, '02:00 PM GST', '12'], buttonParam: `${CLASS_ID}/join`, isNew: true },
   { name: 'new_class_scheduled_v1',       params: ['Test Student', 'MARKET BREAK-OUT TRADING PROGRAM', CLASS, 'Tue, 6 Oct', '02:00 PM GST'], buttonParam: 'TESTCODE0000000000000000', isNew: true },
+  { name: 'class_cancelled_v1',           params: ['Test Student', CLASS, 'Tue, 13 Oct', '05:00 PM GST'], buttonParam: 'TESTCODE0000000000000000', isNew: true },
+  { name: 'class_rescheduled_v1',         params: ['Test Student', CLASS, 'Tue, 13 Oct, 05:00 PM GST', 'Wed, 14 Oct, 07:00 PM GST'], buttonParam: 'TESTCODE0000000000000000', isNew: true },
+  { name: 'class_mentor_changed_v1',      params: ['Test Student', CLASS, 'Tue, 13 Oct, 05:00 PM GST', 'Test Mentor'], buttonParam: 'TESTCODE0000000000000000', isNew: true },
   { name: 'todays_classes_v1',            params: ['Test Student', `10:00 AM ${CLASS} · 02:00 PM IM 3 (GST)`], buttonParam: 'TESTCODE0000000000000000', isNew: true },
 ]
 
