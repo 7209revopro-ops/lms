@@ -9,6 +9,7 @@ import {
 import { useCurrentUser } from '@/lib/api/user'
 import { useToast } from '@/store/ui.store'
 import Spinner from '@/components/ui/Spinner'
+import { CsTag } from '@/components/ui/CsTag'
 
 function timeAgo(iso: string): string {
   const then = new Date(iso).getTime()
@@ -206,6 +207,7 @@ export default function DevicesPage() {
                       {d.email} · {d.label ?? 'Unknown device'}{d.ip ? ` · ${d.ip}` : ''} · requested {timeAgo(d.createdAt)}
                       {atLimit && ' · already has 2 approved'}
                     </p>
+                    <CsTag cs={d.tetraCs} />
                   </div>
                   <div className="flex shrink-0 items-center gap-2">
                     <button
@@ -254,6 +256,7 @@ export default function DevicesPage() {
                     <td className="px-4 py-3 align-top">
                       <p className="text-[13px] font-medium text-white">{d.name ?? d.email}</p>
                       <p className="text-[12px] text-gray-500">{d.email}{d.phone ? ` · ${d.phone}` : ''}</p>
+                      <CsTag cs={d.tetraCs} />
                     </td>
                     <td className="px-4 py-3 align-top text-[13px] text-gray-700">
                       {d.label ?? 'Unknown device'}

@@ -365,6 +365,106 @@ export async function sendClassHasStartedWhatsApp(
     { category: 'utility', buttonParam: `${liveClassId}/watch` })
 }
 
+/* class_starts_in_5_min_v2 / class_has_started_v2 — the same messages, but
+   the button is the student's own join link: the template's URL is
+   {CLIENT_URL}/j/ and each send adds the one-time code
+   (services/joinLink.service.ts). One tap signs them in, records the join
+   and opens the meeting. Same body params as v1; no send without a code. */
+export async function sendClassStartsIn5MinV2WhatsApp(
+  to: string | null | undefined, studentName: string, sessionTitle: string,
+  dateLabel: string, timeLabel: string, joinCode: string,
+): Promise<void> {
+  if (!joinCode) {
+    logger.warn({ templateName: 'class_starts_in_5_min_v2' }, 'WhatsApp join reminder skipped — no join code for its button')
+    return
+  }
+  await sendTemplate(to, 'class_starts_in_5_min_v2', [studentName || 'there', sessionTitle, dateLabel, timeLabel],
+    { category: 'utility', buttonParam: joinCode })
+}
+
+export async function sendClassHasStartedV2WhatsApp(
+  to: string | null | undefined, studentName: string, sessionTitle: string, joinCode: string,
+): Promise<void> {
+  if (!joinCode) {
+    logger.warn({ templateName: 'class_has_started_v2' }, 'WhatsApp join reminder skipped — no join code for its button')
+    return
+  }
+  await sendTemplate(to, 'class_has_started_v2', [studentName || 'there', sessionTitle],
+    { category: 'utility', buttonParam: joinCode })
+}
+
+/* new_class_scheduled_v1 / todays_classes_v1 — their button is the student's
+   own sign-in link: the template's URL is {CLIENT_URL}/s/ and each send adds
+   the one-time code (services/signinLink.service.ts), which signs them in and
+   opens the schedule or My Bookings. No send without a code. */
+export async function sendNewClassScheduledWhatsApp(
+  to: string | null | undefined, studentName: string, courseTitle: string,
+  sessionTitle: string, dateLabel: string, timeLabel: string, signinCode: string,
+): Promise<void> {
+  if (!signinCode) return
+  await sendTemplate(to, 'new_class_scheduled_v1', [studentName || 'there', courseTitle, sessionTitle, dateLabel, timeLabel],
+    { category: 'utility', buttonParam: signinCode })
+}
+
+export async function sendTodaysClassesWhatsApp(
+  to: string | null | undefined, studentName: string, classesLine: string, signinCode: string,
+): Promise<void> {
+  if (!signinCode || !classesLine) return
+  await sendTemplate(to, 'todays_classes_v1', [studentName || 'there', classesLine],
+    { category: 'utility', buttonParam: signinCode })
+}
+
+/* class_cancelled_v1 / class_rescheduled_v1 / class_mentor_changed_v1 — to a
+   student who BOOKED the class, sent with the change's email when the
+   critical-mail buffer flushes (jobs/criticalmail.job.ts), so a burst of edits
+   is one message. Button: their sign-in link — the schedule after a
+   cancellation (to book another), My Bookings otherwise. No send without a code. */
+export async function sendClassCancelledWhatsApp(
+  to: string | null | undefined, studentName: string, sessionTitle: string,
+  dateLabel: string, timeLabel: string, signinCode: string,
+): Promise<void> {
+  if (!signinCode) return
+  await sendTemplate(to, 'class_cancelled_v1', [studentName || 'there', sessionTitle, dateLabel, timeLabel],
+    { category: 'utility', buttonParam: signinCode })
+}
+
+export async function sendClassRescheduledWhatsApp(
+  to: string | null | undefined, studentName: string, sessionTitle: string,
+  wasLabel: string, nowLabel: string, signinCode: string,
+): Promise<void> {
+  if (!signinCode) return
+  await sendTemplate(to, 'class_rescheduled_v1', [studentName || 'there', sessionTitle, wasLabel, nowLabel],
+    { category: 'utility', buttonParam: signinCode })
+}
+
+export async function sendClassMentorChangedWhatsApp(
+  to: string | null | undefined, studentName: string, sessionTitle: string,
+  whenLabel: string, newMentorName: string, signinCode: string,
+): Promise<void> {
+  if (!signinCode) return
+  await sendTemplate(to, 'class_mentor_changed_v1', [studentName || 'there', sessionTitle, whenLabel, newMentorName || 'another mentor'],
+    { category: 'utility', buttonParam: signinCode })
+}
+
+/* mentor_class_in_10_min — to the class's MENTOR, about ten minutes before an
+   online class: the class, its time and how many students are booked, with a
+   Start button. The template's URL is {ADMIN_URL}/live-classes/ and the send
+   adds `<classId>/join` — the admin page that records the mentor as joined
+   (the no-show jobs read that) and then opens the room. Same guards as the
+   student join reminders above: a fixed 4 body params, and no send at all
+   without a class id. */
+export async function sendMentorClassIn10MinWhatsApp(
+  to: string | null | undefined, mentorName: string, sessionTitle: string,
+  timeLabel: string, bookedCount: number, liveClassId: string,
+): Promise<void> {
+  if (!liveClassId) {
+    logger.warn({ templateName: 'mentor_class_in_10_min' }, 'WhatsApp mentor reminder skipped — no class id for its button')
+    return
+  }
+  await sendTemplate(to, 'mentor_class_in_10_min', [mentorName || 'there', sessionTitle, timeLabel, String(Math.max(0, bookedCount || 0))],
+    { category: 'utility', buttonParam: `${liveClassId}/join` })
+}
+
 /* First WhatsApp template aimed at STAFF rather than students — every other
    function in this file notifies a student. Sent to a support ticket's
    org admin(s), programme sub_admin(s), and every super_admin (see

@@ -160,8 +160,11 @@ section('B. The 5-minute reminder carries the Google Meet link')
   check('B1 the 5-minute email is sent', !!mail, String(await mailCount(student.email)))
 
   /* The whole point of this one: a link they can press. */
-  check('B2 the Google Meet URL is in the body',
-    String(mail?.html ?? '').includes(MEET), String(mail?.html ?? '').slice(0, 160))
+  /* The Join button is the student's own join link now (services/joinLink.service.ts):
+     signs in, records the join, opens the meeting — not the raw Meet URL. */
+  check('B2 the Join button is the student\'s join link, not the raw Meet URL',
+    /http:\/\/localhost:3000\/j\/[A-Za-z0-9_-]{20,}/.test(String(mail?.html ?? '')) && !String(mail?.html ?? '').includes(MEET),
+    String(mail?.html ?? '').slice(0, 160))
 
   const row = await ClassBookingModel.findById(booking._id).lean() as any
   check('B3 the booking is flagged', row?.reminder5MinSent === true, String(row?.reminder5MinSent))
@@ -177,8 +180,9 @@ section('C. The at-start reminder carries the Google Meet link')
 
   const mail = await mailFor(student.email, /Class Has Started/i)
   check('C1 the at-start email is sent', !!mail, String(await mailCount(student.email)))
-  check('C2 the Google Meet URL is in the body',
-    String(mail?.html ?? '').includes(MEET), String(mail?.html ?? '').slice(0, 160))
+  check('C2 the Join button is the student\'s join link, not the raw Meet URL',
+    /http:\/\/localhost:3000\/j\/[A-Za-z0-9_-]{20,}/.test(String(mail?.html ?? '')) && !String(mail?.html ?? '').includes(MEET),
+    String(mail?.html ?? '').slice(0, 160))
 
   const row = await ClassBookingModel.findById(booking._id).lean() as any
   check('C3 the booking is flagged', row?.reminderAtTimeSent === true, String(row?.reminderAtTimeSent))
@@ -207,9 +211,10 @@ section('E. A session with no Meet link still gets somewhere to go')
 
   const mail = await mailFor(student.email, /Starts in 5 Minutes/i)
   check('E1 the email is still sent', !!mail)
-  /* Falls back to the in-app watch page rather than an empty href. */
-  check('E2 it links to the watch page instead',
-    /\/live-classes\/[^"']+\/watch/.test(String(mail?.html ?? '')),
+  /* No Meet URL: still the join link — the /j page then reports there is no
+     link to open (or, for an in-app class, opens its watch page). */
+  check('E2 it still links to the join link, never an empty href',
+    /\/j\/[A-Za-z0-9_-]{20,}/.test(String(mail?.html ?? '')),
     String(mail?.html ?? '').slice(0, 200))
 }
 

@@ -37,6 +37,7 @@ const {
   whatsappBackoffFor, MAX_WHATSAPP_ATTEMPTS, classify, WhatsAppApiError, CreatyvotWhatsAppSender,
   sendEnrollmentApprovedWhatsApp, sendBookingConfirmedWhatsApp, sendClassReminderTomorrowWhatsApp,
   sendClassStartingSoonWhatsApp, sendClassStartsIn5MinWhatsApp, sendClassHasStartedWhatsApp,
+  sendMentorClassIn10MinWhatsApp,
 } = await import('@/services/whatsapp.service.ts')
 const { drainWhatsAppOutboxOnce } = await import('@/jobs/whatsappOutbox.job.ts')
 const { normalizeWhatsAppNumber } = await import('@/utils/normalizeWhatsAppNumber.ts')
@@ -263,6 +264,18 @@ try {
   await sendClassHasStartedWhatsApp('919876543210', '', 'Y', 'abc123')
   const anon = await WhatsAppOutboxModel.findOne({ templateName: 'class_has_started', 'params.1': 'Y' }).lean() as any
   check('a missing name never reaches Meta as an empty param', anon?.params?.[0] === 'there', JSON.stringify(anon?.params))
+
+  /* The mentor's 10-minute message: its button opens the ADMIN site's join
+     page, which records the mentor as joined before opening the room. */
+  await sendMentorClassIn10MinWhatsApp('919876543210', 'Moiz', 'MBT 4 · Hindi/English batch', '02:00 PM GST', 12, 'abc123')
+  const mentor10 = await WhatsAppOutboxModel.findOne({ templateName: 'mentor_class_in_10_min' }).lean() as any
+  check('sendMentorClassIn10MinWhatsApp queues the 4 BODY params [name, class, time, booked]',
+    JSON.stringify(mentor10?.params) === JSON.stringify(['Moiz', 'MBT 4 · Hindi/English batch', '02:00 PM GST', '12']), JSON.stringify(mentor10?.params))
+  check('and its Start button opens the join page: <id>/join', mentor10?.buttonParam === 'abc123/join', mentor10?.buttonParam)
+  const mentorBefore = await WhatsAppOutboxModel.countDocuments({ templateName: 'mentor_class_in_10_min' })
+  await sendMentorClassIn10MinWhatsApp('919876543210', 'Moiz', 'X', '02:00 PM GST', 3, '')
+  check('and with no class id it is not sent at all',
+    await WhatsAppOutboxModel.countDocuments({ templateName: 'mentor_class_in_10_min' }) === mentorBefore)
 
   section('K · a title with newlines/injection characters cannot corrupt a template param')
   await sendClassReminderTomorrowWhatsApp('919876543210', 'Live\n\n\nQ&A     Session\t\ttitle', 'Tomorrow at 7pm')

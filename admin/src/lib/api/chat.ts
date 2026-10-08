@@ -2,6 +2,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useInfiniteQuery, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from '@/lib/axios'
+import type { TetraCs } from '@/lib/api/tetraCs'
 
 /* Admin side of the chat — plan.md §11. Instructors reply to students who
    wrote to them; a super admin reads everything, read-only. Polling (§11.3):
@@ -13,7 +14,8 @@ export interface ChatMessage {
   /** Client-only: a refusal no retry can fix (403/404/409/422) — no "tap to retry". */
   fatal?: boolean
 }
-export interface ChatPerson { id: string; name: string; avatarUrl?: string; email?: string }
+/** Staff also get a student's CS and CS team in Tetra Commission. */
+export interface ChatPerson { id: string; name: string; avatarUrl?: string; email?: string; tetraCs?: TetraCs | null }
 export interface ChatConversation {
   id: string; student: ChatPerson | null; instructor: ChatPerson | null
   lastMessageAt: string; lastMessagePreview: string; lastSenderRole: 'student' | 'instructor'

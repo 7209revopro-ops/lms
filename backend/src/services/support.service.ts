@@ -211,7 +211,7 @@ export class SupportService {
       .find(query)
       .sort({ lastMessageAt: -1 })
       .limit(200)
-      .populate('userId', 'name email avatarUrl')
+      .populate('userId', 'name email avatarUrl tetraCs')
       .exec()
   }
 
@@ -382,7 +382,7 @@ export class SupportService {
   private async populate(ticketId: string): Promise<ISupportTicket> {
     return SupportTicketModel
       .findById(ticketId)
-      .populate('userId', 'name email avatarUrl')
+      .populate('userId', 'name email avatarUrl tetraCs')
       .populate('messages.senderId', 'name avatarUrl role')
       .exec() as unknown as ISupportTicket
   }

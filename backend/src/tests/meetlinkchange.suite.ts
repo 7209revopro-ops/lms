@@ -208,53 +208,66 @@ section('B. The pasted link replaces the generated one')
   check('B2 the generated room is gone', row?.meetingUrl !== GENERATED, String(row?.meetingUrl))
 }
 
-/* ═════════════════ C — reminders sent AFTER the edit ═════════════════ */
-section('C. A reminder that fires after the edit carries the pasted link')
+/* ═════════════════ C / D — reminders carry a JOIN LINK, resolved on the tap ═════════════════
+   Reminder emails used to carry the raw meeting URL, so a mail sent before an
+   admin swapped the room pointed at the old one, and nothing corrected it.
+   They now carry the student's join link (/j/<code>, services/joinLink.service.ts),
+   which reads the class's CURRENT link when it is tapped — so the swap reaches
+   everyone, including mail already sent. C and D assert exactly that. */
+const codeIn = (html: string) => html.match(/\/j\/([A-Za-z0-9_-]{20,})/)?.[1]
+async function roomBehind(code: string | undefined, lcId: unknown, studentId: unknown): Promise<string | undefined> {
+  if (!code) return undefined
+  /* The join checks the seat AND an enrolment; this suite seats students without one. */
+  const { EnrollmentModel } = await import('@/models/schema.ts')
+  const cls = await LiveClassModel.findById(lcId).select('courseId').lean() as { courseId?: unknown } | null
+  await EnrollmentModel.updateOne({ userId: studentId, courseId: cls?.courseId }, { $setOnInsert: { status: 'active' } }, { upsert: true })
+  /* Into the join window, then tap the link from a browser with no session. */
+  await LiveClassModel.updateOne({ _id: lcId }, { $set: { scheduledStart: new Date(Date.now() - 60 * 1000) } })
+  const jar: Jar = new Map()
+  const r = await call('POST', '/auth/join-link/redeem', jar, { token: code })
+  if (r.status !== 200) return `redeem ${r.status} ${r.body?.error?.code ?? ''}`
+  const j = await call('POST', `/live-classes/${lcId}/join`, jar)
+  return j.body?.data?.url ?? `join ${j.status} ${j.body?.error?.code ?? ''}`
+}
+
+section('C. A reminder sent AFTER the edit opens the pasted room')
 {
-  /* This is the good case, and the one most people assume is the only case:
-     the reminder reads meetingUrl when it runs, so it picks up the edit. */
   const { student, lc } = await classWithSeat(5)
   await call('PATCH', `/admin/live-classes/${lc._id}`, adminJar, { meetingUrl: PASTED })
 
   await runFiveMinReminders()
   const mail = await mailFor(student.email, /Starts in 5 Minutes/i)
+  const html = String(mail?.html ?? '')
   check('C1 the 5-minute email is sent', !!mail)
-  check('C2 it carries the PASTED link', String(mail?.html ?? '').includes(PASTED),
-    String(mail?.html ?? '').slice(0, 200))
-  check('C3 and not the generated one', !String(mail?.html ?? '').includes(GENERATED))
+  check('C2 it carries a join link, not a raw meeting URL', !!codeIn(html) && !html.includes(PASTED) && !html.includes(GENERATED),
+    html.slice(0, 200))
+  const room = await roomBehind(codeIn(html), lc._id, student._id)
+  check('C3 and the link opens the PASTED room', room === PASTED, String(room))
 }
 
-/* ═════════════════ D — reminders sent BEFORE the edit ═════════════════ */
-section('D. A reminder already sent keeps the OLD link, and nobody is told')
+section('D. A reminder sent BEFORE the edit also opens the new room — nothing stale to correct')
 {
-  /* The sharp edge. The student was mailed before the admin changed anything,
-     so they are holding a link to a room that is no longer the class — and
-     because A proved no notification fires, nothing ever tells them. */
+  /* The old sharp edge: the student was mailed before the admin changed the
+     room. With a join link the mail names no room at all, so the swap still
+     reaches them. */
   const { student, lc } = await classWithSeat(5)
 
   await runFiveMinReminders()
   const first = await mailFor(student.email, /Starts in 5 Minutes/i)
-  check('D1 the first email went with the generated link',
-    String(first?.html ?? '').includes(GENERATED), String(first?.html ?? '').slice(0, 160))
+  const firstHtml = String(first?.html ?? '')
+  check('D1 the first email went out with a join link, naming no room',
+    !!codeIn(firstHtml) && !firstHtml.includes(GENERATED), firstHtml.slice(0, 160))
 
   /* Admin swaps the room after the mail is out. */
   await call('PATCH', `/admin/live-classes/${lc._id}`, adminJar, { meetingUrl: PASTED })
   await new Promise(x => setTimeout(x, 1200))
 
   const mails = await EmailOutboxModel.countDocuments({ to: student.email })
-  check('D2 no follow-up email corrects it', mails === 1, `${mails} emails`)
+  check('D2 no follow-up email is needed — and none is sent', mails === 1, `${mails} emails`)
 
-  /* The at-time reminder is the student's next chance, and it DOES read the
-     new value — so the room they are told to join changes between one mail
-     and the next, with no explanation in either. */
-  await LiveClassModel.updateOne({ _id: lc._id },
-    { $set: { scheduledStart: new Date(Date.now() - 60 * 1000) } })
-  await runAtTimeReminders()
-  const second = await mailFor(student.email, /Class Has Started/i)
-  check('D3 the later email carries the NEW link',
-    String(second?.html ?? '').includes(PASTED), String(second?.html ?? '').slice(0, 160))
-  check('D4 so the student received two different rooms, uncorrected',
-    String(first?.html ?? '').includes(GENERATED) && String(second?.html ?? '').includes(PASTED))
+  const room = await roomBehind(codeIn(firstHtml), lc._id, student._id)
+  check('D3 the link in the EARLIER email opens the NEW room', room === PASTED, String(room))
+  check('D4 so no student is ever holding a link to the old room', room !== GENERATED)
 }
 
 /* ═════════════════ E — the contrast ═════════════════ */

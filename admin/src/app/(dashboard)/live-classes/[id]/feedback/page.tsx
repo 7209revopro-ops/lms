@@ -7,10 +7,12 @@ import Link from 'next/link'
 import { useQuery } from '@tanstack/react-query'
 import { apiGet } from '@/lib/axios'
 import Spinner from '@/components/ui/Spinner'
+import { CsTag } from '@/components/ui/CsTag'
+import type { TetraCs } from '@/lib/api/tetraCs'
 
 interface FeedbackItem {
   _id:    string
-  userId: { id: string; name: string; email: string }
+  userId: { id: string; name: string; email: string; tetraCs?: TetraCs | null }
   rating: number
   comment?: string
   createdAt: string
@@ -105,6 +107,7 @@ export default function FeedbackPage({ params }: { params: Promise<{ id: string 
                 <div className="min-w-0 flex-1">
                   <p className="text-sm font-bold" style={{ color: '#0D0F1A' }}>{fb.userId?.name ?? '—'}</p>
                   <p className="text-xs" style={{ color: '#9CA3AF' }}>{fb.userId?.email ?? ''}</p>
+                  <CsTag cs={fb.userId?.tetraCs} />
                 </div>
                 <div className="flex flex-col items-end gap-1">
                   <StarRow rating={fb.rating} />

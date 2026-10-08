@@ -1,6 +1,7 @@
 'use client'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { api } from '@/lib/axios'
+import type { TetraCs } from '@/lib/api/tetraCs'
 
 export interface AdminStats {
   totalCourses:     number
@@ -101,7 +102,7 @@ export function useRevenueTimeseries(days = 30) {
 /* ─── Admin orders ───────────────────────────────── */
 export interface AdminOrder {
   id:                      string
-  userId:                  string | { id: string; name: string; email: string }
+  userId:                  string | { id: string; name: string; email: string; tetraCs?: TetraCs | null }
   courseId:                string | { id: string; title: string; slug: string }
   amount:                  number   // cents
   currency:                string

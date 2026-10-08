@@ -9,6 +9,8 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { apiGet, api } from '@/lib/axios'
 import { datetimeLocalToISO } from '@/lib/timezone'
 import Spinner from '@/components/ui/Spinner'
+import { CsTag } from '@/components/ui/CsTag'
+import type { TetraCs } from '@/lib/api/tetraCs'
 
 /* ── Types ────────────────────────────────────────────── */
 interface Homework {
@@ -24,7 +26,7 @@ interface Homework {
 interface Submission {
   id:             string
   homeworkId:     { id: string; title: string }
-  userId:         { id: string; name: string; email: string }
+  userId:         { id: string; name: string; email: string; tetraCs?: TetraCs | null }
   submissionText?: string
   submissionUrl?:  string
   grade?:          number
@@ -241,6 +243,7 @@ export default function HomeworkPage() {
                     <div className="min-w-0 flex-1">
                       <p className="text-sm font-bold" style={{ color: '#0D0F1A' }}>{sub.userId.name}</p>
                       <p className="text-xs" style={{ color: '#9CA3AF' }}>{sub.userId.email}</p>
+                      <CsTag cs={sub.userId.tetraCs} />
                     </div>
                     <div className="flex items-center gap-2">
                       <span className="rounded-full px-2 py-0.5 text-[10px] font-bold"

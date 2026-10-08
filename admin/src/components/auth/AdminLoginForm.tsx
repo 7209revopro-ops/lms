@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, type FormEvent } from 'react'
-import { useRouter } from 'next/navigation'
+import { useRouter, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
@@ -9,6 +9,7 @@ import { z } from 'zod'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Mail, Lock, Eye, EyeOff, ArrowRight, ArrowLeft, AlertCircle, Shield } from 'lucide-react'
 import { api } from '@/lib/axios'
+import { safeReturnPath } from '@/lib/returnPath'
 import Spinner from '@/components/ui/Spinner'
 
 const schema = z.object({
@@ -48,6 +49,7 @@ function extractErrorMessage(err: unknown): string {
 
 export function AdminLoginForm() {
   const router   = useRouter()
+  const searchParams = useSearchParams()
   const [showPw, setShowPw] = useState(false)
   const [error,  setError]  = useState<string | null>(null)
   /* 2FA challenge step — set when the backend answers with twoFactorRequired */
@@ -61,7 +63,9 @@ export function AdminLoginForm() {
 
   /* ── Post-login handling (shared by password + 2FA paths) ── */
   const completeLogin = () => {
-    router.replace('/')
+    /* Back to the page that sent them here (?from=, this site's own pages
+       only — lib/returnPath), else the dashboard. */
+    router.replace(safeReturnPath(searchParams.get('from')))
     router.refresh()
   }
 

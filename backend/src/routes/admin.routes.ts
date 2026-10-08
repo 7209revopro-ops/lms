@@ -1229,6 +1229,8 @@ router.get('/courses/:id/students', requireAnyAdmin,
                 id: '$student._id', name: '$student.name', email: '$student.email',
                 phone: '$student.phone', avatarUrl: '$student.avatarUrl',
                 enrollmentStatus: '$student.enrollmentStatus', isActive: '$student.isActive',
+                /* Their CS and CS team in Tetra Commission. */
+                tetraCs: '$student.tetraCs',
               },
             } },
           ],
@@ -1769,6 +1771,100 @@ const liveUpdateSchema = withCohortRules(z.object({
 
 router.get   ('/courses/:courseId/live-classes',          live.adminListForCourse)
 router.get   ('/live-classes',                            live.adminListAll)
+/* The academy's whole timetable, READ-ONLY — so a mentor can see the other
+   mentors' classes (Timetable → All mentors). Their own list above stays
+   narrowed to the classes they teach. Only what a timetable needs: never a
+   meeting or backup link, a stream key, or a student. The caller's academy;
+   cancelled classes left out. ?from=&to= (YYYY-MM-DD), default 5 weeks back
+   to 10 weeks ahead. */
+/* ── Mentor Calendar, for instructors too (Tetra Commission's user, 2026-10-08) ──────────────────────
+   Every mentor's free hours, classes and booked sessions — the same answer the portals' Mentor Calendar
+   reads (/service/mentors) — and sessions booked here by whoever is signed in. Booking, clashes, Meet
+   links and the emails are the portal path's own (services/portal.service.ts); the caller's academy is
+   the organization, and an instructor changes or cancels only what they booked (an admin anything). */
+async function mentorCalendarOrg(req: Request): Promise<string> {
+  const caller = await callerOrgForRead(req)
+  if (caller.gone) throw Object.assign(new Error('Your account is gone'), { statusCode: 401 })
+  if (caller.org) return String(caller.org)
+  const asked = typeof req.query['org'] === 'string' ? req.query['org'] : ''
+  if (asked) return asked
+  const { OrganizationModel } = await import('@/models/schema.ts')
+  const orgs = await OrganizationModel.find().select('_id').limit(2).lean() as any[]
+  if (orgs.length === 1) return String(orgs[0]._id)
+  throw Object.assign(new Error('Say which academy (?org=)'), { statusCode: 400 })
+}
+const actorOf = (req: Request) => ({ actorEmail: String(req.user?.email ?? ''), actorIsRootAdmin: req.user?.role !== 'instructor' })
+
+router.get('/mentor-calendar', requireInstructor, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { listMentorsForPortal } = await import('@/services/portal.service.ts')
+    const q = req.query as Record<string, string | undefined>
+    sendSuccess(res, await listMentorsForPortal({ remoteOrgId: await mentorCalendarOrg(req), from: q['from'], to: q['to'] }))
+  } catch (err) { next(err) }
+})
+
+router.post('/mentor-calendar/meetings', requireInstructor, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { createMentorMeetingForPortal } = await import('@/services/portal.service.ts')
+    const body = (req.body ?? {}) as Record<string, unknown>
+    sendSuccess(res, await createMentorMeetingForPortal({ ...body, remoteOrgId: await mentorCalendarOrg(req), bookedByEmail: String(req.user?.email ?? '') } as any), 'Meeting booked')
+  } catch (err) { next(err) }
+})
+
+router.get('/mentor-calendar/meetings/:id', requireInstructor, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { getMentorMeetingForPortal } = await import('@/services/portal.service.ts')
+    sendSuccess(res, await getMentorMeetingForPortal({ remoteOrgId: await mentorCalendarOrg(req), meetingId: String(req.params['id'] ?? ''), ...actorOf(req) }))
+  } catch (err) { next(err) }
+})
+
+router.patch('/mentor-calendar/meetings/:id', requireInstructor, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { updateMentorMeetingForPortal } = await import('@/services/portal.service.ts')
+    const body = (req.body ?? {}) as Record<string, unknown>
+    sendSuccess(res, await updateMentorMeetingForPortal({ ...body, remoteOrgId: await mentorCalendarOrg(req), meetingId: String(req.params['id'] ?? ''), ...actorOf(req) } as any), 'Meeting updated')
+  } catch (err) { next(err) }
+})
+
+router.post('/mentor-calendar/meetings/:id/cancel', requireInstructor, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { cancelMentorMeetingForPortal } = await import('@/services/portal.service.ts')
+    sendSuccess(res, await cancelMentorMeetingForPortal({ remoteOrgId: await mentorCalendarOrg(req), meetingId: String(req.params['id'] ?? ''), ...actorOf(req) }), 'Meeting cancelled')
+  } catch (err) { next(err) }
+})
+
+router.get('/live-classes/academy-schedule', requireInstructor, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { LiveClassModel } = await import('@/models/schema.ts')
+    const { Types } = await import('mongoose')
+    const caller = await callerOrgForRead(req)
+    if (caller.gone || !caller.org) { sendSuccess(res, []); return }
+    const q = req.query as Record<string, string | undefined>
+    const day = (v?: string) => (v && /^\d{4}-\d{2}-\d{2}$/.test(v) ? new Date(`${v}T00:00:00Z`) : null)
+    const from = day(q['from']) ?? new Date(Date.now() - 35 * 864e5)
+    const to   = day(q['to'])   ?? new Date(Date.now() + 70 * 864e5)
+    await ensureOrgSlugs()
+    const rows = await LiveClassModel.find({
+      organizationId: new Types.ObjectId(String(caller.org)),
+      status: { $ne: 'cancelled' },
+      scheduledStart: { $gte: from, $lt: to },
+    })
+      .select('title scheduledStart durationMins status type isOnline location room language instructorId courseId sectionId bookedCount sessionCapacity organizationId')
+      .populate('instructorId', 'name').populate('courseId', 'title').populate('sectionId', 'title')
+      .sort({ scheduledStart: 1 }).limit(3000).lean() as any[]
+    sendSuccess(res, rows.map(c => ({
+      id: String(c._id), title: c.title, scheduledStart: c.scheduledStart, durationMins: c.durationMins,
+      status: c.status, type: c.type, isOnline: c.isOnline !== false, location: c.location ?? undefined, room: c.room ?? undefined,
+      language: c.language ?? 'English',
+      instructorId: c.instructorId ? String(c.instructorId._id) : '', instructor: c.instructorId ? { id: String(c.instructorId._id), name: c.instructorId.name } : undefined,
+      courseId: c.courseId ? String(c.courseId._id) : '', course: c.courseId ? { id: String(c.courseId._id), title: c.courseId.title } : undefined,
+      sectionId: c.sectionId ? { id: String(c.sectionId._id), title: c.sectionId.title } : undefined,
+      bookedCount: c.bookedCount ?? 0, sessionCapacity: c.sessionCapacity ?? 0,
+      organizationSlug: orgSlugFor(c.organizationId) ?? null,
+      readOnly: true,
+    })))
+  } catch (err) { next(err) }
+})
 /* Registered BEFORE /live-classes/:id — Express matches routes in
    declaration order, and "no-shows" would otherwise be swallowed as an :id
    value by the dynamic route below. Gated to admin+ (not instructor): the
@@ -3067,7 +3163,7 @@ router.get('/bookings', requireInstructor, requirePermission('bookings','list'),
     /* One spec, used by both ordering paths below, so they can never drift into
        returning differently-shaped rows. */
     const POPULATE = [
-      { path: 'userId', select: 'id name email avatarUrl' },
+      { path: 'userId', select: 'id name email avatarUrl tetraCs' },
       {
         path:     'liveClassId',
         select:   'id title scheduledStart durationMins language courseId sectionId instructorId isOnline location room',
@@ -3502,7 +3598,7 @@ router.patch('/bookings/:id/attendance', requireInstructor, requireDepartmentBoo
       { _id: id, status: { $in: ['booked', 'attended', 'missed'] } },
       { status },
       { new: true },
-    ).populate('userId', 'id name email').lean({ virtuals: true })
+    ).populate('userId', 'id name email tetraCs').lean({ virtuals: true })
     if (!booking) {
       res.status(400).json({
         success: false,
@@ -3511,6 +3607,159 @@ router.patch('/bookings/:id/attendance', requireInstructor, requireDepartmentBoo
     }
     res.locals['attendanceMarked'] = { status, from: existing.status, bookingIds: [id] }
     sendSuccess(res, { ...(booking as any), id: (booking as any).id ?? String((booking as any)._id) }, 'Attendance updated')
+  } catch (err) { next(err) }
+})
+
+/* ─────────────────────────────────────────────────────
+   CLASS VERIFICATION — the mentor's attendance check and class review after
+   every class (reminders.job.ts runMentorVerification asks for it).
+     GET  /admin/class-verification          list (mentor: their own classes)
+     GET  /admin/class-verification/:id      one class: students, CS, attendance, review
+     POST /admin/class-verification/:id      submit marks + review → verified
+   Status: verified (verifiedAt) · overdue (the 9 AM-next-day reminder went out)
+   · pending (asked, not yet overdue).
+─────────────────────────────────────────────────────── */
+const verifyStatusOf = (c: { verifiedAt?: unknown; verifyFinalReminderAt?: unknown }) =>
+  c.verifiedAt ? 'verified' : c.verifyFinalReminderAt ? 'overdue' : 'pending'
+
+router.get('/class-verification', requireInstructor, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { LiveClassModel, ClassBookingModel, CourseModel } = await import('@/models/schema.ts')
+    const { Types } = await import('mongoose')
+    const q = req.query as Record<string, string | undefined>
+    const base: Record<string, unknown> = { verifyRequestedAt: { $exists: true }, status: { $ne: 'cancelled' } }
+    if (req.user!.role === 'instructor') base['instructorId'] = new Types.ObjectId(req.user!.id)
+    else {
+      if (req.user!.organizationId && Types.ObjectId.isValid(req.user!.organizationId)) base['organizationId'] = new Types.ObjectId(req.user!.organizationId)
+      if (q['mentorId'] && Types.ObjectId.isValid(q['mentorId'])) base['instructorId'] = new Types.ObjectId(q['mentorId'])
+      if (req.user!.categoryScope) {
+        const ids = (await CourseModel.find({ program: req.user!.categoryScope }).select('_id').lean()).map(c => c._id)
+        base['courseId'] = { $in: ids }
+      }
+    }
+    const day = (v?: string) => (v && /^\d{4}-\d{2}-\d{2}$/.test(v) ? new Date(`${v}T00:00:00Z`) : null)
+    const from = day(q['from']), to = day(q['to'])
+    if (from || to) base['scheduledStart'] = { ...(from ? { $gte: from } : {}), ...(to ? { $lt: new Date(to.getTime() + 864e5) } : {}) }
+
+    const byStatus: Record<string, Record<string, unknown>> = {
+      verified: { verifiedAt: { $exists: true } },
+      overdue:  { verifiedAt: { $exists: false }, verifyFinalReminderAt: { $exists: true } },
+      pending:  { verifiedAt: { $exists: false }, verifyFinalReminderAt: { $exists: false } },
+    }
+    const [pending, overdue, verified] = await Promise.all(['pending', 'overdue', 'verified'].map(k => LiveClassModel.countDocuments({ ...base, ...byStatus[k] })))
+    const status = q['status'] && byStatus[q['status']] ? q['status'] : 'pending'
+    const classes = await LiveClassModel.find({ ...base, ...byStatus[status] })
+      .select('title scheduledStart durationMins isOnline language instructorId courseId verifyRequestedAt verifyFinalReminderAt verifiedAt verifiedBy mentorReview')
+      .populate('instructorId', 'name').populate('courseId', 'title').populate('verifiedBy', 'name')
+      .sort({ scheduledStart: status === 'verified' ? -1 : 1 }).limit(300).lean() as any[]
+    const tallies = await ClassBookingModel.aggregate([
+      { $match: { liveClassId: { $in: classes.map(c => c._id) }, status: { $in: ['booked', 'attended', 'missed'] } } },
+      { $group: { _id: { c: '$liveClassId', s: '$status' }, n: { $sum: 1 } } },
+    ]) as { _id: { c: unknown; s: string }; n: number }[]
+    const tally = (id: unknown, st: string) => tallies.filter(t => String(t._id.c) === String(id) && (st === 'all' || t._id.s === st)).reduce((a, t) => a + t.n, 0)
+    sendSuccess(res, {
+      counts: { pending, overdue, verified },
+      rows: classes.map(c => ({
+        id: String(c._id), title: c.title, scheduledStart: c.scheduledStart, durationMins: c.durationMins,
+        isOnline: c.isOnline !== false, language: c.language ?? null,
+        mentor: c.instructorId ? { id: String(c.instructorId._id), name: c.instructorId.name } : null,
+        course: c.courseId ? { id: String(c.courseId._id), title: c.courseId.title } : null,
+        status: verifyStatusOf(c), verifiedAt: c.verifiedAt ?? null, verifiedBy: c.verifiedBy?.name ?? null,
+        rating: c.mentorReview?.rating ?? null,
+        students: tally(c._id, 'all'), attended: tally(c._id, 'attended'), missed: tally(c._id, 'missed'),
+      })),
+    })
+  } catch (err) { next(err) }
+})
+
+router.get('/class-verification/:id', requireInstructor, requireDepartmentLiveClass('id'), async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const id = String(req.params['id'] ?? '')
+    if (!(await callerMayManageSession(req, id))) {
+      res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Class not found' } }); return
+    }
+    const { LiveClassModel, ClassBookingModel } = await import('@/models/schema.ts')
+    const c = await LiveClassModel.findById(id)
+      .select('title scheduledStart durationMins isOnline language location room status instructorId courseId verifyRequestedAt verifyFinalReminderAt verifiedAt verifiedBy mentorReview')
+      .populate('instructorId', 'name').populate('courseId', 'title').populate('verifiedBy', 'name').lean() as any
+    if (!c) { res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Class not found' } }); return }
+    const seats = await ClassBookingModel.find({ liveClassId: c._id, status: { $in: ['booked', 'attended', 'missed'] } })
+      .select('userId status attendedAt attendanceSource mentorNote')
+      .populate('userId', 'name email enrollmentApplication.phone commissionSync.mentorName commissionSync.team commissionSync.studentCode tetraCs')
+      .lean() as any[]
+    const endMs = new Date(c.scheduledStart).getTime() + (c.durationMins ?? 60) * 60_000
+    sendSuccess(res, {
+      id: String(c._id), title: c.title, scheduledStart: c.scheduledStart, durationMins: c.durationMins,
+      isOnline: c.isOnline !== false, language: c.language ?? null, location: c.location ?? null, room: c.room ?? null,
+      mentor: c.instructorId ? { id: String(c.instructorId._id), name: c.instructorId.name } : null,
+      course: c.courseId ? { id: String(c.courseId._id), title: c.courseId.title } : null,
+      ended: Date.now() >= endMs,
+      status: c.verifyRequestedAt ? verifyStatusOf(c) : (c.verifiedAt ? 'verified' : 'pending'),
+      verifiedAt: c.verifiedAt ?? null, verifiedBy: c.verifiedBy?.name ?? null,
+      review: { rating: c.mentorReview?.rating ?? null, topics: c.mentorReview?.topics ?? '', issues: c.mentorReview?.issues ?? '' },
+      students: seats
+        .map(b => ({
+          bookingId: String(b._id),
+          name: b.userId?.name ?? '(deleted student)', email: b.userId?.email ?? null,
+          phone: b.userId?.enrollmentApplication?.phone ?? null,
+          /* As Tetra Commission says now (tetraCs, kept current by it), else what it
+             answered when this LMS first sent them — before it has said. */
+          cs: (b.userId?.tetraCs ? b.userId.tetraCs.name : b.userId?.commissionSync?.mentorName) || null,
+          team: (b.userId?.tetraCs ? b.userId.tetraCs.team : b.userId?.commissionSync?.team) || null,
+          csOpen: b.userId?.tetraCs?.open === true,
+          studentCode: b.userId?.tetraCs?.code || b.userId?.commissionSync?.studentCode || null,
+          status: b.status, joinedAt: b.attendedAt ?? null, joinedVia: b.attendanceSource ?? null,
+          note: b.mentorNote ?? '',
+        }))
+        .sort((a, b) => a.name.localeCompare(b.name)),
+    })
+  } catch (err) { next(err) }
+})
+
+const verifySubmitSchema = z.object({
+  marks:  z.array(z.object({
+    bookingId: z.string().regex(/^[0-9a-f]{24}$/i),
+    status:    z.enum(['attended', 'missed']),
+    note:      z.string().trim().max(500).optional(),
+  })).max(500),
+  rating: z.number().int().min(1).max(5),
+  topics: z.string().trim().max(2000).optional(),
+  issues: z.string().trim().max(2000).optional(),
+})
+
+router.post('/class-verification/:id', requireInstructor, requireDepartmentLiveClass('id'), validate(verifySubmitSchema),
+  audit('class.verify', 'LiveClass', r => String(r.params['id'] ?? ''), r => ({ marks: (r.body.marks ?? []).length, rating: r.body.rating })),
+  async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const id = String(req.params['id'] ?? '')
+    if (!(await callerMayManageSession(req, id))) {
+      res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Class not found' } }); return
+    }
+    const { LiveClassModel, ClassBookingModel } = await import('@/models/schema.ts')
+    const { Types } = await import('mongoose')
+    const c = await LiveClassModel.findById(id).select('scheduledStart durationMins status verifyRequestedAt').lean() as any
+    if (!c || c.status === 'cancelled') {
+      res.status(400).json({ success: false, error: { code: 'CLASS_CANCELLED', message: 'This class was cancelled — there is nothing to verify.' } }); return
+    }
+    if (Date.now() < new Date(c.scheduledStart).getTime() + (c.durationMins ?? 60) * 60_000) {
+      res.status(400).json({ success: false, error: { code: 'CLASS_NOT_ENDED', message: 'Attendance can be verified once the class has ended.' } }); return
+    }
+    const body = req.body as z.infer<typeof verifySubmitSchema>
+    let updated = 0
+    for (const m of body.marks) {
+      /* Only this class's live seats — never a cancelled one (the attendance route's own rule). */
+      const r = await ClassBookingModel.updateOne(
+        { _id: new Types.ObjectId(m.bookingId), liveClassId: c._id, status: { $in: ['booked', 'attended', 'missed'] } },
+        { $set: { status: m.status, mentorNote: m.note ?? '' } },
+      )
+      updated += r.matchedCount
+    }
+    await LiveClassModel.updateOne({ _id: c._id }, { $set: {
+      verifiedAt: new Date(), verifiedBy: new Types.ObjectId(req.user!.id),
+      mentorReview: { rating: body.rating, topics: body.topics ?? '', issues: body.issues ?? '' },
+      verifyRequestedAt: c.verifyRequestedAt ?? new Date(),
+    } })
+    sendSuccess(res, { verified: true, marked: updated }, 'Attendance verified')
   } catch (err) { next(err) }
 })
 
@@ -3600,7 +3849,7 @@ router.get('/reports/attendance', requireInstructor, requirePermission('reports'
       ]
     }
     const bookings = await ClassBookingModel.find(filter)
-      .populate('userId', 'id name email')
+      .populate('userId', 'id name email tetraCs')
       .populate('liveClassId', 'id title scheduledStart')
       .lean({ virtuals: true })
     // Aggregate per student
@@ -3843,7 +4092,7 @@ router.get('/live-classes/:id/homework/submissions', requireRole('super_admin', 
     const subFilter: Record<string, unknown> = { homeworkId: { $in: hwIds } }
     if (seats.userIds) subFilter['userId'] = { $in: seats.userIds }
     const submissions = await HomeworkSubmissionModel.find(subFilter)
-      .populate('userId', 'id name email')
+      .populate('userId', 'id name email tetraCs')
       .populate('homeworkId', 'id title')
       .populate('gradedBy', 'id name')
       .lean({ virtuals: true })
@@ -3905,7 +4154,7 @@ router.patch('/homework-submissions/:id/grade', requireRole('super_admin', 'admi
       id,
       { grade, feedback, status: 'graded', gradedAt: new Date(), gradedBy: req.user!.id },
       { new: true },
-    ).populate('userId', 'id name email').lean({ virtuals: true })
+    ).populate('userId', 'id name email tetraCs').lean({ virtuals: true })
     if (!sub) { res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Submission not found' } }); return }
     sendSuccess(res, sub, 'Submission graded')
   } catch (err) { next(err) }
@@ -3948,7 +4197,7 @@ router.get('/live-classes/:id/feedback', requireInstructor, requireDepartmentLiv
     const fbFilter: Record<string, unknown> = { liveClassId: new Types.ObjectId(liveClassId) }
     if (fbSeats.userIds) fbFilter['userId'] = { $in: fbSeats.userIds }
     const docs = await ClassFeedbackModel.find(fbFilter)
-      .populate('userId', 'id name email avatarUrl')
+      .populate('userId', 'id name email avatarUrl tetraCs')
       .sort({ createdAt: -1 })
       .lean({ virtuals: true })
     const avg = docs.length > 0 ? docs.reduce((s, d: any) => s + d.rating, 0) / docs.length : null

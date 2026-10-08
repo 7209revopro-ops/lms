@@ -10,7 +10,7 @@ import {
   AlertCircle, CalendarDays, Monitor, Pencil, Video,
   Building2, MapPin,
 } from 'lucide-react'
-import { useAllLiveClasses, useCreateLiveClass, type LiveClass, type LiveClassType } from '@/lib/api/liveClasses'
+import { useAllLiveClasses, useAcademySchedule, useCreateLiveClass, type LiveClass, type LiveClassType } from '@/lib/api/liveClasses'
 import { useCourses } from '@/lib/api/courses'
 import { useCourseOutline } from '@/lib/api/outline'
 import { useProgramInstructors, useDropInstructorOutside } from '@/lib/api/users'
@@ -62,11 +62,14 @@ interface SlotDraft {
 
 /* ── Event detail popover ──────────────────────────── */
 function EventPopover({
-  live, onClose, onEdit,
+  live, onClose, onEdit, readOnly = false,
 }: {
   live:    LiveClass
   onClose: () => void
   onEdit:  (l: LiveClass) => void
+  /* Another mentor's class, from Timetable → All mentors: details only — no
+     Go Live, Edit or course link (the server sends no links for it either). */
+  readOnly?: boolean
 }) {
   const backdrop = useBackdropClose(onClose)
   const router = useRouter()
@@ -153,9 +156,20 @@ function EventPopover({
           )}
         </div>
 
+        {readOnly && (
+          <div className="mt-1.5 space-y-1.5 text-xs" style={{ color: 'rgba(255,255,255,0.5)' }}>
+            {live.instructor?.name && <p className="flex items-center gap-2"><Users size={11} style={{ color: '#818CF8' }} />{live.instructor.name}</p>}
+            <p className="flex items-center gap-2"><Users size={11} style={{ color: '#818CF8' }} />{live.bookedCount ?? 0} of {live.sessionCapacity ?? 0} booked</p>
+          </div>
+        )}
+
         <SharedAcademiesChip live={live} />
 
-        <div className="mt-4 flex flex-wrap gap-2">
+        {readOnly ? (
+          <p className="mt-4 rounded-xl px-3 py-2 text-xs" style={{ background: 'rgba(255,255,255,0.04)', color: 'rgba(255,255,255,0.45)' }}>
+            Another mentor's class — view only.
+          </p>
+        ) : <div className="mt-4 flex flex-wrap gap-2">
           {isHost && live.type === 'internal' && (live.status === 'scheduled' || live.status === 'live') && (
             <Button
               variant={live.status === 'live' ? 'destructive' : 'default'}
@@ -188,7 +202,7 @@ function EventPopover({
               <ExternalLink size={11} />Course
             </Link>
           )}
-        </div>
+        </div>}
       </motion.div>
     </motion.div>
   )
@@ -563,12 +577,33 @@ export default function TimetablePage() {
     Array.from({ length: 6 }, (_, wi) => calDays.slice(wi * 7, wi * 7 + 7))
   , [calDays])
 
-  const { data: allClasses, isLoading } = useAllLiveClasses('all')
+  const { data: allClasses, isLoading: ownLoading } = useAllLiveClasses('all')
+
+  /* A mentor's own list is just their classes; "All mentors" swaps in the
+     academy's whole timetable, read-only (GET /admin/live-classes/academy-schedule).
+     Their own classes in it open with the full popover, from their own list. */
+  const isMentor = me?.role === 'instructor'
+  const [view, setView] = useState<'mine' | 'all'>('mine')
+  const [mentorFilter, setMentorFilter] = useState('')
+  const showAll = isMentor && view === 'all'
+  const academy = useAcademySchedule(showAll)
+  const isLoading = ownLoading || (showAll && academy.isLoading)
+  const academyMentors = useMemo(() => {
+    const m = new Map<string, string>()
+    for (const c of academy.data ?? []) if (c.instructor?.id) m.set(c.instructor.id, c.instructor.name)
+    return [...m].sort((a, b) => a[1].localeCompare(b[1]))
+  }, [academy.data])
+  const classes = useMemo(() => showAll
+    ? (academy.data ?? []).filter(c => !mentorFilter || c.instructor?.id === mentorFilter || c.instructorId === mentorFilter)
+    : (allClasses ?? [])
+  , [showAll, academy.data, allClasses, mentorFilter])
+  /* The full row for one of the caller's own classes; null → another mentor's (view only). */
+  const ownRow = (l: LiveClass) => (allClasses ?? []).find(c => c.id === l.id) ?? null
 
   const getSessionsForDay = (day: Date) =>
-    (allClasses ?? []).filter(l => sameDay(new Date(l.scheduledStart), day))
+    classes.filter(l => sameDay(new Date(l.scheduledStart), day))
 
-  const liveNowCount = (allClasses ?? []).filter(l => l.status === 'live').length
+  const liveNowCount = classes.filter(l => l.status === 'live').length
 
   /* Same integers the grid is built from, not a formatted Date — see the note
      in ../page.tsx. Formatting renders in the zone Intl resolves while
@@ -659,6 +694,26 @@ export default function TimetablePage() {
               <ChevronRight size={14} />
             </Button>
           </div>
+
+          {isMentor && (
+            <div className="flex h-8 overflow-hidden rounded-xl" style={{ border: '1px solid rgba(255,255,255,0.10)' }}>
+              {(['mine', 'all'] as const).map(v => (
+                <button key={v} type="button" onClick={() => setView(v)}
+                  className="px-3 text-xs font-semibold transition-colors"
+                  style={{ background: view === v ? 'rgba(255,255,255,0.10)' : 'transparent', color: view === v ? '#fff' : 'rgba(255,255,255,0.45)' }}>
+                  {v === 'mine' ? 'My classes' : 'All mentors'}
+                </button>
+              ))}
+            </div>
+          )}
+          {showAll && (
+            <select value={mentorFilter} onChange={e => setMentorFilter(e.target.value)}
+              className="h-8 rounded-xl px-2 text-xs text-white outline-none"
+              style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.10)' }}>
+              <option value="" style={{ background: '#0D0F1A' }}>All mentors</option>
+              {academyMentors.map(([id, name]) => <option key={id} value={id} style={{ background: '#0D0F1A' }}>{name}</option>)}
+            </select>
+          )}
 
           <Link href="/live-classes"
             className="flex h-8 items-center gap-1.5 rounded-xl px-3 text-xs font-semibold transition-colors hover:bg-white/10"
@@ -790,7 +845,8 @@ export default function TimetablePage() {
         {selected && (
           <EventPopover
             key="popover"
-            live={selected}
+            live={selected.readOnly ? (ownRow(selected) ?? selected) : selected}
+            readOnly={!!selected.readOnly && !ownRow(selected)}
             onClose={() => setSelected(null)}
             onEdit={l => { setSelected(null); setEditTarget(l) }}
           />

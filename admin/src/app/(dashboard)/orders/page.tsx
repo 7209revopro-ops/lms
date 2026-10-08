@@ -7,6 +7,7 @@ import { useAdminOrders, useGatewayBreakdown, type AdminOrder } from '@/lib/api/
 import { api } from '@/lib/axios'
 import { useQueryClient } from '@tanstack/react-query'
 import Spinner from '@/components/ui/Spinner'
+import { CsTag } from '@/components/ui/CsTag'
 
 const STATUS_TABS = ['all', 'pending', 'paid', 'refunded', 'cancelled'] as const
 type StatusTab = typeof STATUS_TABS[number]
@@ -194,6 +195,7 @@ export default function AdminOrdersPage() {
                       <div>
                         <p className="font-medium text-white">{user?.name ?? '—'}</p>
                         <p className="text-[10px]" style={{ color: 'rgba(255,255,255,0.35)' }}>{user?.email ?? ''}</p>
+                        <CsTag cs={user?.tetraCs} />
                       </div>
                     </td>
                     <td className="px-4 py-3">

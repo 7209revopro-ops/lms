@@ -4,6 +4,7 @@ import { useState, useCallback, useRef } from 'react'
 import { Zap, Search, Users, Shield, ShieldOff, Trash2, ChevronLeft, ChevronRight, Globe, X, AlertTriangle } from 'lucide-react'
 import { useExpressMembers, useToggleExpressMember, useDeleteExpressMember, type ExpressMember, type ExpressMemberStatus } from '@/lib/api/expressMembers'
 import { AvatarImg } from '@/components/ui/AvatarImg'
+import { CsTag } from '@/components/ui/CsTag'
 
 /* ── Avatar initials helper ────────────────────── */
 function Initials({ name, avatarUrl }: { name: string; avatarUrl?: string }) {
@@ -251,7 +252,10 @@ export default function ExpressMembersPage() {
                       <td className="px-4 py-3">
                         <div className="flex items-center gap-2.5">
                           <Initials name={member.name} avatarUrl={member.avatarUrl} />
-                          <span className="text-sm font-medium text-gray-800">{member.name}</span>
+                          <div className="min-w-0">
+                            <span className="text-sm font-medium text-gray-800">{member.name}</span>
+                            <div><CsTag cs={member.tetraCs} /></div>
+                          </div>
                         </div>
                       </td>
                       <td className="px-4 py-3">

@@ -23,6 +23,7 @@ import { useDocumentUrl } from '@/lib/api/documents'
 import { programLabel } from '@/lib/programs'
 import { AvatarImg } from '@/components/ui/AvatarImg'
 import { useBackdropClose } from '@/hooks/useBackdropClose'
+import { CsTag } from '@/components/ui/CsTag'
 
 /* ── Custom dark course picker (avoids native white dropdown) ── */
 function CourseSelect({
@@ -436,6 +437,7 @@ export function EditStudentModal({ user, onClose, onSuccess }: Props) {
                 Edit Student
               </h2>
               <p className="mt-0.5 truncate text-xs" style={{ color: 'rgba(255,255,255,0.4)' }}>{user.email}</p>
+              <CsTag cs={user.tetraCs} className="mt-0.5" />
             </div>
             <Button
               type="button"

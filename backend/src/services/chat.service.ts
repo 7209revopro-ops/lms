@@ -270,10 +270,11 @@ export async function unreadTotal(userId: Id, role: 'student' | 'instructor'): P
 
 /* ── Lists ───────────────────────────────────────────── */
 
-const PERSON = 'name avatarUrl email'
+const PERSON = 'name avatarUrl email tetraCs'
 const toConv = (c: any, viewer: 'student' | 'instructor' | 'oversight') => ({
   id: String(c._id),
-  student:    c.studentId    ? { id: String(c.studentId._id ?? c.studentId), name: c.studentId.name, avatarUrl: c.studentId.avatarUrl, ...(viewer !== 'student' ? { email: c.studentId.email } : {}) } : null,
+  /* Staff also see the student's email and their CS and CS team in Tetra Commission. */
+  student:    c.studentId    ? { id: String(c.studentId._id ?? c.studentId), name: c.studentId.name, avatarUrl: c.studentId.avatarUrl, ...(viewer !== 'student' ? { email: c.studentId.email, tetraCs: c.studentId.tetraCs ?? null } : {}) } : null,
   instructor: c.instructorId ? { id: String(c.instructorId._id ?? c.instructorId), name: c.instructorId.name, avatarUrl: c.instructorId.avatarUrl } : null,
   lastMessageAt: c.lastMessageAt, lastMessagePreview: c.lastMessagePreview, lastSenderRole: c.lastSenderRole,
   unread: viewer === 'student' ? c.studentUnread : viewer === 'instructor' ? c.instructorUnread : 0,

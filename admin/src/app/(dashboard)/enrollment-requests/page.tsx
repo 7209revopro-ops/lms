@@ -47,6 +47,7 @@ const ROLE_LABEL: Record<string, string> = {
 
 // Scope now has ONE source for every staff role — see lib/programScope.ts.
 import { categoryScopeOf } from '@/lib/programScope'
+import { CsTag } from '@/components/ui/CsTag'
 
 /* ── Category badge (plain) ─────────────────────────── */
 function CategoryBadge({ cat }: { cat: ProgramCategory }) {
@@ -354,6 +355,7 @@ function ApproveDialog({ user, scopeCategory, onClose, onConfirm, loading }: {
           <p className="text-[10px] font-semibold uppercase tracking-widest" style={{ color: '#4ADE80' }}>Approve Student</p>
           <h2 className="mt-0.5 text-base font-bold text-white">{user.name}</h2>
           <p className="text-xs" style={{ color: 'rgba(255,255,255,0.4)' }}>{user.email}</p>
+          <CsTag cs={user.tetraCs} />
         </div>
         <div className="p-5 space-y-4">
           {!financeOff && <FinanceStatus email={user.email} check={finance} />}
@@ -423,6 +425,7 @@ function RejectDialog({ user, isRevoke, onClose, onConfirm, loading }: {
           </p>
           <h2 className="mt-0.5 text-base font-bold text-white">{user.name}</h2>
           <p className="text-xs" style={{ color: 'rgba(255,255,255,0.4)' }}>{user.email}</p>
+          <CsTag cs={user.tetraCs} />
         </div>
         <div className="p-5">
           <div className="mb-4 flex items-center gap-2 rounded-xl p-3"
@@ -796,6 +799,7 @@ function ApplicationDetailModal({ user, scopeCategory, onClose, onApprove, onRej
             <div>
               <h2 className="text-base font-bold text-white">{user.name}</h2>
               <p className="text-xs" style={{ color: 'rgba(255,255,255,0.4)' }}>{user.email}</p>
+              <CsTag cs={user.tetraCs} />
             </div>
           </div>
           <button onClick={onClose} className="rounded-lg p-1.5 transition-colors hover:bg-white/[0.08]" style={{ color: 'rgba(255,255,255,0.5)' }}>
@@ -1447,6 +1451,7 @@ export default function EnrollmentRequestsPage() {
                         <div className="min-w-0">
                           <p className="truncate text-sm font-semibold text-white" style={{ maxWidth: 180 }}>{m.name}</p>
                           <p className="truncate text-xs" style={{ color: 'rgba(255,255,255,0.4)', maxWidth: 200 }}>{m.email}</p>
+                          <div style={{ maxWidth: 200 }}><CsTag cs={m.tetraCs} /></div>
                         </div>
                       </div>
                     </td>
@@ -1595,6 +1600,7 @@ export default function EnrollmentRequestsPage() {
                         <div className="min-w-0">
                           <p className="truncate text-sm font-semibold text-white" style={{ maxWidth: 180 }}>{r.name}</p>
                           <p className="truncate text-xs" style={{ color: 'rgba(255,255,255,0.4)', maxWidth: 200 }}>{r.email}</p>
+                          <div style={{ maxWidth: 200 }}><CsTag cs={r.tetraCs} /></div>
                         </div>
                       </div>
                     </td>

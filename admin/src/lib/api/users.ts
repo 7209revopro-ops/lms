@@ -4,6 +4,7 @@ import { useEffect } from 'react'
 import { api } from '@/lib/axios'
 import type { PaginationMeta } from '@/types/index'
 import type { EnrollmentApplication } from './enrollmentRequests'
+import type { TetraCs } from '@/lib/api/tetraCs'
 
 /* ── Enrollment (student course access) ─────────────── */
 /* Which sales CRM sold an enrolment finance created: Delta's Sales CRM, the
@@ -106,6 +107,8 @@ export interface AdminUser {
   createdAt:        string
   updatedAt:        string
   customRoleId?:    string | { id: string; name: string }
+  /** Their CS and CS team in Tetra Commission, where it has said. */
+  tetraCs?:         TetraCs | null
 }
 
 export const userKeys = {

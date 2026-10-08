@@ -1,6 +1,7 @@
 'use client'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { api } from '@/lib/axios'
+import type { TetraCs } from '@/lib/api/tetraCs'
 
 export type DeviceStatus = 'pending' | 'approved' | 'revoked'
 
@@ -10,6 +11,8 @@ export interface DeviceView {
   name:       string | null
   email:      string
   phone:      string | null
+  /** Their CS and CS team in Tetra Commission, where it has said. */
+  tetraCs?:   TetraCs | null
   status:     DeviceStatus
   isMain:     boolean
   label:      string | null

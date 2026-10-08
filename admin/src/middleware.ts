@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import type { NextRequest } from 'next/server'
 import { PUBLIC_PATHS } from '@/lib/publicPaths'
+import { safeReturnPath, returnParamFor } from '@/lib/returnPath'
 
 /**
  * Admin middleware — cookie-based auth guard.
@@ -39,16 +40,21 @@ export function middleware(req: NextRequest) {
   const sessionExpired = req.nextUrl.searchParams.get('session') === 'expired'
 
   if (pathname === '/login' && hasToken && !sessionExpired) {
-    return NextResponse.redirect(new URL('/', req.url))
+    /* To the page that sent them to /login, if it said (lib/returnPath). */
+    return NextResponse.redirect(new URL(safeReturnPath(req.nextUrl.searchParams.get('from')), req.url))
   }
 
   /* Unauthenticated users visiting any protected route → login.
      Forward ?sso= so SSO auto-login works when Root ERP opens the
-     root URL with ?sso=TOKEN (middleware would otherwise drop the param). */
+     root URL with ?sso=TOKEN (middleware would otherwise drop the param).
+     Otherwise carry the page as ?from=, so signing in lands back on it —
+     a mentor's WhatsApp "Start class" link must survive a sign-in. */
   if (!PUBLIC_PATHS.has(pathname) && !hasToken) {
     const loginUrl = new URL('/login', req.url)
     const ssoParam = req.nextUrl.searchParams.get('sso')
     if (ssoParam) loginUrl.searchParams.set('sso', ssoParam)
+    const from = ssoParam ? null : returnParamFor(pathname, req.nextUrl.search)
+    if (from) loginUrl.searchParams.set('from', from)
     return NextResponse.redirect(loginUrl)
   }
 
@@ -56,5 +62,5 @@ export function middleware(req: NextRequest) {
 }
 
 export const config = {
-  matcher: ['/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)'],
+  matcher: ['/((?!_next/static|_next/image|favicon.ico|manifest.webmanifest|app-sw.js|offline.html|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)'],
 }

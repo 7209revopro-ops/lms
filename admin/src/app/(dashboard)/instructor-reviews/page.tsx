@@ -11,6 +11,7 @@ import {
 } from '@/lib/api/instructorReviews'
 import { AvatarImg } from '@/components/ui/AvatarImg'
 import Spinner from '@/components/ui/Spinner'
+import { CsTag } from '@/components/ui/CsTag'
 
 function fmtDate(iso: string): string {
   return new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
@@ -83,6 +84,7 @@ function ReviewsDrawer({ instructorId }: { instructorId: string }) {
                     <div className="flex items-center gap-2">
                       <StarRow rating={r.rating} />
                       <span className="text-xs font-semibold text-white">{r.studentId?.name ?? 'Student'}</span>
+                      <CsTag cs={r.studentId?.tetraCs} />
                     </div>
                     {r.liveClassId && (
                       <p className="mt-0.5 truncate text-[11px]" style={{ color: 'rgba(255,255,255,0.35)' }}>

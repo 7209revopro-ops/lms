@@ -199,6 +199,19 @@ export interface IUser extends Document {
     sentAt?:        Date
     course?:        string
   }
+  /* Who looks after them in Tetra Commission, kept current by it — see
+     services/portalStudentCs.service.ts */
+  tetraCs?: {
+    /** Their CS (the primary mentor); "" while they wait in Delta Open Students. */
+    name?:  string
+    team?:  string
+    /** Their student code there. */
+    code?:  string
+    /** Waiting in Delta Open Students — no CS yet. */
+    open?:  boolean
+    /** When the commission portal last said so. */
+    at?:    Date
+  }
   /* Meta */
   lastLoginAt?:  Date
   createdAt:     Date
@@ -327,6 +340,19 @@ const UserSchema = new Schema<IUser>(
       reason:        { type: String },
       sentAt:        { type: Date },
       course:        { type: String },
+    },
+    /* Who looks after this student in Tetra Commission — their CS and CS team —
+       as it says now (the user, 2026-10-07: "show the cs name and team name …
+       every student showing area"). Written only by the commission portal,
+       through POST /service/student-cs, every few minutes for whoever changed.
+       Unlike commissionSync's mentorName and team, which are what it answered
+       once, when this LMS first sent the student there. */
+    tetraCs: {
+      name: { type: String },
+      team: { type: String },
+      code: { type: String },
+      open: { type: Boolean },
+      at:   { type: Date },
     },
   },
   baseSchemaOptions,
@@ -520,7 +546,7 @@ export const DeviceModel = mongoose.model<IDevice>('Device', DeviceSchema)
    AUTH TOKEN — used for password reset + email verify
 ───────────────────────────────────────────────────── */
 export type AuthTokenPurpose =
-  | 'reset-password' | 'verify-email' | 'otp-login' | 'login-link' | 'change-email'
+  | 'reset-password' | 'verify-email' | 'otp-login' | 'login-link' | 'change-email' | 'join-link' | 'signin-link'
 
 export interface IAuthToken extends Document {
   id:        string
@@ -529,6 +555,10 @@ export interface IAuthToken extends Document {
   purpose:   AuthTokenPurpose
   expiresAt: Date
   usedAt?:   Date
+  /* join-link only: the class the link opens (services/joinLink.service.ts). */
+  liveClassId?: Types.ObjectId
+  /* signin-link only: the page it opens once signed in (services/signinLink.service.ts). */
+  nextPath?: string
   createdAt: Date
   updatedAt: Date
 }
@@ -537,9 +567,11 @@ const AuthTokenSchema = new Schema<IAuthToken>(
   {
     userId:    { type: Schema.Types.ObjectId, ref: 'User', required: true },
     tokenHash: { type: String, required: true, unique: true },
-    purpose:   { type: String, enum: ['reset-password', 'verify-email', 'otp-login', 'login-link', 'change-email'], required: true },
+    purpose:   { type: String, enum: ['reset-password', 'verify-email', 'otp-login', 'login-link', 'change-email', 'join-link', 'signin-link'], required: true },
     expiresAt: { type: Date, required: true },
     usedAt:    { type: Date },
+    liveClassId: { type: Schema.Types.ObjectId, ref: 'LiveClass' },
+    nextPath:    { type: String, maxlength: 300 },
   },
   baseSchemaOptions,
 )
@@ -1184,6 +1216,16 @@ export interface ILiveClass extends Document {
 
   /* Instructor reminder tracking */
   reminderInstructor15MinSent: boolean
+  /* The mentor's 10-minute WhatsApp (mentor_class_in_10_min) — once per class. */
+  mentorWhatsApp10MinSent: boolean
+  /* Mentor's attendance check + class review after the class (Class
+     Verification page, reminders.job.ts runMentorVerification). */
+  verifyRequestedAt?:     Date
+  verifyReminderAt?:      Date     // +2 h after the end
+  verifyFinalReminderAt?: Date     // 9 AM next morning — from here it shows as Overdue
+  verifiedAt?:            Date
+  verifiedBy?:            Types.ObjectId
+  mentorReview?: { rating?: number; topics?: string; issues?: string }
 
   /* Mentor no-show detection.
      instructorJoinedAt is set two different ways depending on `type`:
@@ -1336,6 +1378,17 @@ const LiveClassSchema = new Schema<ILiveClass>(
     room:              { type: String, maxlength: 100 },
     rescheduledReason:           { type: String, maxlength: 2000 },
     reminderInstructor15MinSent: { type: Boolean, default: false },
+    mentorWhatsApp10MinSent:     { type: Boolean, default: false },
+    verifyRequestedAt:           { type: Date },
+    verifyReminderAt:            { type: Date },
+    verifyFinalReminderAt:       { type: Date },
+    verifiedAt:                  { type: Date },
+    verifiedBy:                  { type: Schema.Types.ObjectId, ref: 'User' },
+    mentorReview: {
+      rating: { type: Number, min: 1, max: 5 },
+      topics: { type: String, maxlength: 2000 },
+      issues: { type: String, maxlength: 2000 },
+    },
     instructorJoinedAt:          { type: Date },
     mentorReminderSent:          { type: Boolean, default: false },
     mentorNoShowAlertSent:       { type: Boolean, default: false },
@@ -2500,6 +2553,7 @@ export type AuditAction =
      `settings.finance-check`, whether approving asks finance first. */
   | 'settings.device-limit'
   | 'settings.finance-check'
+  | 'class.verify'
 
 export interface IAuditLog extends Document {
   id:         string
@@ -3010,6 +3064,8 @@ export interface IClassBooking extends Document {
      booking/enrolment/module/academy/time-window checks to get here, so it
      is the strongest signal available for a provider the LMS never hears
      from again, just not as strong as an actual room-join event. */
+  /* The mentor's note on this student, from Class Verification. */
+  mentorNote?: string
   attendanceSource?: 'livekit' | 'click'
 
   /* WHICH DOOR THIS SEAT CAME THROUGH.
@@ -3044,6 +3100,7 @@ export interface IClassBooking extends Document {
   reminderDayOfSent:      boolean
   reminderPreSessionSent: boolean   // 30-min reminder (no link)
   reminder5MinSent:       boolean   // 5-min reminder (with link)
+  todaysWhatsAppSent?:    boolean   // in the morning "today's classes" WhatsApp
   reminderAtTimeSent:     boolean   // at-time reminder (with link)
   createdAt:   Date
   updatedAt:   Date
@@ -3057,6 +3114,7 @@ const ClassBookingSchema = new Schema<IClassBooking>(
     bookedAt:    { type: Date, default: Date.now },
     attendedAt:       { type: Date },
     attendanceSource: { type: String, enum: ['livekit', 'click'] },
+    mentorNote:       { type: String, maxlength: 500 },
     cancelledAt: { type: Date },
     seatPoolKind:       { type: String, enum: ['flat', 'host', 'guest', 'overflow'] },
     seatOrganizationId: { type: Schema.Types.ObjectId, ref: 'Organization', index: true },
@@ -3066,6 +3124,7 @@ const ClassBookingSchema = new Schema<IClassBooking>(
     reminderDayOfSent:      { type: Boolean, default: false },
     reminderPreSessionSent: { type: Boolean, default: false },
     reminder5MinSent:       { type: Boolean, default: false },
+    todaysWhatsAppSent:     { type: Boolean, default: false },
     reminderAtTimeSent:     { type: Boolean, default: false },
   },
   baseSchemaOptions,
@@ -3535,6 +3594,7 @@ export interface IClassImport extends Document {
   undoneAt?:      Date
   undoneBy?:      Types.ObjectId
   summariesSentAt?: Date
+  studentsNotifiedAt?: Date
   createdAt:      Date
   updatedAt:      Date
 }
@@ -3593,6 +3653,7 @@ const ClassImportSchema = new Schema<IClassImport>(
     undoneAt:       { type: Date },
     undoneBy:       { type: Schema.Types.ObjectId, ref: 'User' },
     summariesSentAt: { type: Date },
+    studentsNotifiedAt: { type: Date },
   },
   baseSchemaOptions,
 )

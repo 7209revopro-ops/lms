@@ -1,6 +1,7 @@
 'use client'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { api, apiGet, apiPost, apiPatch } from '@/lib/axios'
+import type { TetraCs } from '@/lib/api/tetraCs'
 
 export type LiveClassStatus = 'scheduled' | 'live' | 'ended' | 'cancelled'
 export type LiveClassType   = 'external' | 'internal'
@@ -33,6 +34,8 @@ export interface GuestCohortInput {
 }
 
 export interface LiveClass {
+  /** Set on rows from the academy schedule (another mentor's class): view only, no links. */
+  readOnly?:      boolean
   id:             string
   courseId:       string
   course?:        { id: string; title: string; slug: string; thumbnailUrl?: string }
@@ -150,6 +153,17 @@ export function useAllLiveClasses(status: string = 'all') {
   })
 }
 
+/* GET /admin/live-classes/academy-schedule — every mentor's classes in the
+   caller's academy, READ-ONLY (no links, no students): Timetable → All mentors. */
+export function useAcademySchedule(enabled: boolean) {
+  return useQuery({
+    queryKey: ['admin', 'live-classes', 'academy-schedule'],
+    queryFn:  () => apiGet<LiveClass[]>('/admin/live-classes/academy-schedule'),
+    enabled,
+    staleTime: 30_000,
+  })
+}
+
 /* GET /admin/live-classes/:id — single class, used by monitor page */
 export function useLiveClassById(id: string | undefined) {
   return useQuery({
@@ -259,7 +273,7 @@ export type BookingStatus = 'booked' | 'attended' | 'missed' | 'cancelled'
 
 export interface ClassBooking {
   id:          string
-  userId:      { id: string; name: string; email: string; avatarUrl?: string }
+  userId:      { id: string; name: string; email: string; avatarUrl?: string; tetraCs?: TetraCs | null }
   liveClassId: {
     id:             string
     title:          string

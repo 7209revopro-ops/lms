@@ -1,6 +1,7 @@
 'use client'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { api } from '@/lib/axios'
+import type { TetraCs } from '@/lib/api/tetraCs'
 
 export type EnrollmentRequestStatus = 'pending' | 'approved' | 'rejected' | 'cancelled'
 export type ProgramCategory = '4x-trading' | 'digital-marketing' | 'ai' | 'jura'
@@ -56,6 +57,8 @@ export interface EnrollmentRequest {
   isActive:               boolean
   createdAt:              string
   enrollmentApplication?: EnrollmentApplication
+  /** Their CS and CS team in Tetra Commission, where it has said. */
+  tetraCs?:               TetraCs | null
 }
 
 const KEYS = {

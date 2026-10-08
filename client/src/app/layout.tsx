@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from 'next'
 import { Bricolage_Grotesque, DM_Sans, JetBrains_Mono } from 'next/font/google'
 import { Providers } from './providers'
+import { PwaRegister } from '@/components/PwaRegister'
 import './globals.css'
 
 /* ─── Fonts ─────────────────────────────────────── */
@@ -82,7 +83,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <head>
         <script dangerouslySetInnerHTML={{ __html: THEME_BOOT }} />
       </head>
-      <body><Providers>{children}</Providers></body>
+      <body><Providers>{children}</Providers><PwaRegister /></body>
     </html>
   )
 }

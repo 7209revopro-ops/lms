@@ -10,7 +10,7 @@ const GUEST_ONLY = ['/login', '/register']
 /* `/imp/enter` redeems an impersonation handoff code. It must be reachable
    with no session: the super admin arriving from the admin portal has no
    client cookie yet, and bouncing them to /login would discard the code. */
-const PUBLIC = ['/forgot-password', '/reset-password', '/verify-email', '/imp/enter', '/continue']
+const PUBLIC = ['/forgot-password', '/reset-password', '/verify-email', '/imp/enter', '/continue', '/j', '/s']
 
 /* A live client-portal impersonation rides its own cookie, so a super admin
    arriving with only that one is authenticated as far as routing is concerned.
@@ -66,6 +66,6 @@ export function middleware(req: NextRequest) {
 
 export const config = {
   matcher: [
-    '/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)',
+    '/((?!_next/static|_next/image|favicon.ico|manifest.webmanifest|app-sw.js|offline.html|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)',
   ],
 }

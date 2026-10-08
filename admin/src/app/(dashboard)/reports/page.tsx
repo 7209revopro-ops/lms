@@ -11,10 +11,12 @@ import { useCurrentUser } from '@/lib/api/user'
 import { useQuery } from '@tanstack/react-query'
 import { apiGet } from '@/lib/axios'
 import Spinner from '@/components/ui/Spinner'
+import { CsTag, csName, csTeam } from '@/components/ui/CsTag'
+import type { TetraCs } from '@/lib/api/tetraCs'
 
 /* ── Types ─────────────────────────────────────────────── */
 interface AttendanceRow {
-  user:     { id: string; name: string; email: string , _id?:string}
+  user:     { id: string; name: string; email: string , _id?:string; tetraCs?: TetraCs | null }
   total:    number
   attended: number
   missed:   number
@@ -60,10 +62,11 @@ function useMentorScheduleReport(mentorId: string, from: string, to: string) {
 
 /* ── CSV export ────────────────────────────────────────── */
 function downloadCsv(rows: AttendanceRow[]) {
-  const header = 'Name,Email,Total,Attended,Missed,Pending,Attendance %'
+  const header = 'Name,Email,CS,CS Team,Total,Attended,Missed,Pending,Attendance %'
+  const quote  = (v: string) => `"${v.replace(/"/g, '""')}"`
   const lines  = rows.map(r => {
     const pct = r.total > 0 ? Math.round((r.attended / r.total) * 100) : 0
-    return `"${r.user.name}","${r.user.email}",${r.total},${r.attended},${r.missed},${r.booked},${pct}%`
+    return `"${r.user.name}","${r.user.email}",${quote(csName(r.user.tetraCs))},${quote(csTeam(r.user.tetraCs))},${r.total},${r.attended},${r.missed},${r.booked},${pct}%`
   })
   const csv  = [header, ...lines].join('\n')
   const blob = new Blob([csv], { type: 'text/csv' })
@@ -289,6 +292,7 @@ export default function ReportsPage() {
                       <td className="px-4 py-3">
                         <p className="font-semibold text-sm" style={{ color: '#0D0F1A' }}>{row.user.name}</p>
                         <p className="text-xs" style={{ color: '#9CA3AF' }}>{row.user.email}</p>
+                        <CsTag cs={row.user.tetraCs} />
                       </td>
                       <td className="px-4 py-3">
                         <span className="inline-flex items-center gap-1 text-xs font-semibold" style={{ color: '#10B981' }}>

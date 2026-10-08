@@ -2,7 +2,7 @@ import { Router } from 'express'
 import { z } from 'zod'
 import { AuthController } from '@/controllers/auth.controller.ts'
 import { validate } from '@/middleware/validate.middleware.ts'
-import { authenticate } from '@/middleware/auth.middleware.ts'
+import { authenticate, optionalAuthenticate } from '@/middleware/auth.middleware.ts'
 import { authRateLimit, refreshRateLimit, impersonationRateLimit } from '@/middleware/rateLimit.middleware.ts'
 import { documentRef, requiredDocumentRef } from '@/utils/documentRef.ts'
 import totpRoutes from './totp.routes.ts'
@@ -108,6 +108,10 @@ router.post('/otp/request',      authRateLimit, validate(otpRequestSchema), auth
 router.post('/otp/verify',       authRateLimit, validate(otpVerifySchema),  auth.verifyLoginOtp)
 /* One-click invite/login link → session (redeemed by the client's /auth/continue). */
 router.post('/login-link/redeem', authRateLimit, validate(loginLinkSchema), auth.redeemLoginLink)
+/* A class join link (/j/<code>): sign in if needed, answer which class to open. */
+/* A sign-in link (/s/<code>) from a WhatsApp message: sign in if needed, answer the page to open. */
+router.post('/signin-link/redeem', authRateLimit, optionalAuthenticate, validate(z.object({ token: z.string().min(10).max(100) })), auth.redeemSigninLink)
+router.post('/join-link/redeem',  authRateLimit, optionalAuthenticate, validate(z.object({ token: z.string().min(10).max(100) })), auth.redeemJoinLink)
 /* The admin portal's second factor lives beside its own login, at
    /api/v1/admin/auth/login/2fa (see admin.routes.ts). */
 router.post('/refresh',          refreshRateLimit, auth.refresh)

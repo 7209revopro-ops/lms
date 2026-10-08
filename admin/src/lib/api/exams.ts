@@ -1,6 +1,7 @@
 'use client'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { api } from '@/lib/axios'
+import type { TetraCs } from '@/lib/api/tetraCs'
 
 /* ─── Types ──────────────────────────────────────── */
 export type ExamQuestionType = 'mcq' | 'true_false' | 'short' | 'essay'
@@ -56,7 +57,7 @@ export interface ExamUpsertPayload {
 
 export interface ExamAttemptRow {
   attemptId: string
-  student:   { id: string; name: string; email: string }
+  student:   { id: string; name: string; email: string; tetraCs?: TetraCs | null }
   status:    'in_progress' | 'submitted' | 'suspended'
   totalMarks: number | null
   maxMarks:   number | null
@@ -69,7 +70,7 @@ export interface ExamAttemptRow {
 export interface AttemptDetail {
   attempt: {
     id: string
-    student: { id: string; name: string; email: string }
+    student: { id: string; name: string; email: string; tetraCs?: TetraCs | null }
     status: 'in_progress' | 'submitted' | 'suspended'
     startedAt: string | null
     submittedAt: string | null

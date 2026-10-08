@@ -7,6 +7,7 @@ import { MessageCircle, Search, ArrowLeft, Send, Check, CheckCheck, Clock, Alert
 import { useChatThread, type ChatConversation, type ChatMessage, type ConversationList } from '@/lib/api/chat'
 import { AvatarImg } from '@/components/ui/AvatarImg'
 import Spinner from '@/components/ui/Spinner'
+import { CsTag } from '@/components/ui/CsTag'
 
 /* The chat UI for both admin doors (plan.md §11.6):
      mode 'staff'     — an instructor's own inbox: students who wrote to them, reply
@@ -113,6 +114,7 @@ function Thread({ conv, mode, onBack }: { conv: ChatConversation; mode: 'staff' 
         <div className="min-w-0">
           <p className="truncate text-sm font-bold text-white">{title}</p>
           <p className="truncate text-[11px]" style={{ color: muted }}>{conv.student?.email ?? ''}</p>
+          <CsTag cs={conv.student?.tetraCs} />
         </div>
         {mode === 'oversight' && (
           <span className="ml-auto inline-flex shrink-0 items-center gap-1 rounded-lg px-2 py-1 text-[11px] font-semibold"
@@ -259,6 +261,7 @@ export function ChatPanel({ list, mode, emptyText, search, onSearch }: {
                   {mode === 'oversight' && (
                     <p className="truncate text-[11px]" style={{ color: '#60A5FA' }}>with {c.instructor?.name ?? 'Instructor'}</p>
                   )}
+                  <CsTag cs={c.student?.tetraCs} />
                   <div className="mt-0.5 flex items-center justify-between gap-2">
                     <span className="truncate text-xs" style={{ color: muted, fontWeight: unread ? 600 : 400 }}>
                       {c.lastSenderRole === 'instructor' ? (mode === 'staff' ? 'You: ' : 'Instructor: ') : ''}{c.lastMessagePreview}

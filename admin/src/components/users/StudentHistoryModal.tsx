@@ -13,6 +13,7 @@ import Spinner from '@/components/ui/Spinner'
 import { AvatarImg } from '@/components/ui/AvatarImg'
 import { useBackdropClose } from '@/hooks/useBackdropClose'
 import { SalesCrmBadge } from '@/components/ui/SalesCrmBadge'
+import { CsTag } from '@/components/ui/CsTag'
 
 const BOOKING_STATUS_STYLE: Record<string, { bg: string; color: string; label: string }> = {
   booked:    { bg: 'rgba(16,185,129,0.12)',  color: '#34D399', label: 'Upcoming' },
@@ -133,6 +134,8 @@ export function StudentHistoryModal({ user, onClose }: Props) {
                     {user.isActive ? <CheckCircle2 size={10} /> : <XCircle size={10} />}
                     {user.isActive ? 'Active' : 'Inactive'}
                   </span>
+                  {/* Who looks after them in Tetra Commission. */}
+                  <CsTag cs={user.tetraCs} variant="chip" />
                 </div>
               </div>
             </div>

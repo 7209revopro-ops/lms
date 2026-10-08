@@ -9,6 +9,7 @@ import {
 import { useCourseStudents, type EnrollmentSource } from '@/lib/api/courses'
 import Spinner from '@/components/ui/Spinner'
 import { SalesCrmBadge } from '@/components/ui/SalesCrmBadge'
+import { CsTag, csName, csTeam } from '@/components/ui/CsTag'
 
 /* ─────────────────────────────────────────────────────
    Who is on this course, and how they got here.
@@ -75,9 +76,10 @@ export function CourseStudentsPanel({ courseId, onClose }: {
   const exportCsv = () => {
     const rows = data?.rows ?? []
     if (!rows.length) return
-    const head = ['Name', 'Email', 'Phone', 'Source', 'Status', 'Progress %', 'Enrolled']
+    const head = ['Name', 'Email', 'Phone', 'CS', 'CS Team', 'Source', 'Status', 'Progress %', 'Enrolled']
     const body = rows.map(r => [
       r.student.name, r.student.email, r.student.phone ?? '',
+      csName(r.student.tetraCs), csTeam(r.student.tetraCs),
       SOURCE_META[r.source]?.label ?? r.source, r.status,
       String(r.progressPercent ?? 0),
       new Date(r.enrolledAt).toISOString().slice(0, 10),
@@ -213,6 +215,7 @@ export function CourseStudentsPanel({ courseId, onClose }: {
                       <p className="text-[11px]" style={{ color: 'rgba(255,255,255,0.40)' }}>
                         {r.student.email}
                       </p>
+                      <CsTag cs={r.student.tetraCs} />
                     </td>
                     <td className="px-3 py-3">
                       {/* How they got in, and — for a sale finance enrolled — which CRM sold it. */}

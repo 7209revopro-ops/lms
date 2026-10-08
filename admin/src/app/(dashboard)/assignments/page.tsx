@@ -14,6 +14,7 @@ import {
 } from '@/lib/api/classAssignments'
 import { useCurrentUser } from '@/lib/api/user'
 import { useToast } from '@/store/ui.store'
+import { CsTag } from '@/components/ui/CsTag'
 
 function fmtSize(b: number) {
   if (b < 1024) return `${b} B`
@@ -252,6 +253,7 @@ function ReviewCard({ a }: { a: ReviewAssignment }) {
           <p className="truncate text-sm font-bold" style={{ color: '#0D0F1A' }}>{a.title}</p>
           <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px]" style={{ color: '#6B7280' }}>
             <span className="flex items-center gap-1"><User size={10} />{a.studentId?.name ?? 'Student'}</span>
+            <CsTag cs={a.studentId?.tetraCs} />
             <span className="flex items-center gap-1"><Calendar size={10} />{a.liveClassId?.title ?? 'Class'}</span>
             {a.instructorId?.name && (
               <span className="flex items-center gap-1 font-semibold" style={{ color: '#0057b8' }} title="Mentor who teaches this class">

@@ -1865,7 +1865,7 @@ export class LiveClassService {
       const rows = await EnrollmentModel
         .find({ courseId: door.courseId, status: { $ne: 'dropped' } })
         .limit(200)
-        .populate('userId', '_id email name isActive')
+        .populate('userId', '_id email name isActive enrollmentApplication.phone')
         .exec()
       if (rows.length === 200) {
         logger.warn(
@@ -1985,6 +1985,26 @@ export class LiveClassService {
         })
       } catch (err) {
         logger.warn({ err, userId: u._id.toString() }, 'live-class in-app notification failed')
+      }
+
+      /* WhatsApp (new_class_scheduled_v1) to every enrolled student with a
+         phone whose module is open to them — not blocked on their enrolment —
+         and only for a class still ahead. Its button is their own sign-in link
+         to the schedule, where they book. Best-effort, like the rest. */
+      const phone = (u as { enrollmentApplication?: { phone?: string } }).enrollmentApplication?.phone
+      const blocked = (e.blockedLessons ?? []).map(String).includes(String(door.sectionId ?? ''))
+      if (phone && !blocked && new Date(live.scheduledStart).getTime() > Date.now()) {
+        try {
+          const { mintSigninCode } = await import('@/services/signinLink.service.ts')
+          const { sendNewClassScheduledWhatsApp } = await import('@/services/whatsapp.service.ts')
+          const clock = academyClock(live.scheduledStart, orgSlugFor(door.organizationId))
+          const day = new Date(live.scheduledStart).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', timeZone: clock.zone })
+            .replace(/^(\w{3}) /, '$1, ')
+          const code = await mintSigninCode(u._id.toString(), '/class-bookings')
+          await sendNewClassScheduledWhatsApp(phone, u.name, doorCourseTitle, live.title, day, clock.time, code)
+        } catch (err) {
+          logger.warn({ err, userId: u._id.toString() }, 'new-class WhatsApp failed')
+        }
       }
 
       /* The gate. A student who has not reached this module has the

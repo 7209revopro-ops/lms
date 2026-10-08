@@ -253,7 +253,7 @@ export class ClassAssignmentService {
     if (status && ['pending', 'approved', 'rejected'].includes(status)) filter['status'] = status
 
     return ClassAssignmentModel.find(filter)
-      .populate('studentId', 'name email avatarUrl')
+      .populate('studentId', 'name email avatarUrl tetraCs')
       .populate('instructorId', 'name email avatarUrl')
       .populate('liveClassId', 'title scheduledStart')
       .populate('courseId', 'title slug')

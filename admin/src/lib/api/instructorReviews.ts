@@ -2,6 +2,7 @@
 import { useQuery } from '@tanstack/react-query'
 import { api } from '@/lib/axios'
 import type { PaginationMeta } from '@/types/index'
+import type { TetraCs } from '@/lib/api/tetraCs'
 
 export interface InstructorLeaderboardRow {
   instructorId:   string
@@ -18,7 +19,7 @@ export interface InstructorReviewRow {
   rating:    number
   comment?:  string
   createdAt: string
-  studentId:   { _id: string; name: string } | null
+  studentId:   { _id: string; name: string; tetraCs?: TetraCs | null } | null
   liveClassId: { _id: string; title: string; scheduledStart: string } | null
 }
 

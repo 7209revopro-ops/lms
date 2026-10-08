@@ -16,6 +16,7 @@ import {
 } from '@/lib/api/support'
 import { useCurrentUser } from '@/lib/api/user'
 import Spinner from '@/components/ui/Spinner'
+import { CsTag } from '@/components/ui/CsTag'
 
 /* ─── helpers ──────────────────────────────────────── */
 const fmtDate = (iso: string) => {
@@ -105,6 +106,7 @@ function TicketRow({ ticket, active, onClick }: { ticket: SupportTicket; active:
             )}
           </div>
           <p className="truncate text-xs" style={{ color: 'rgba(255,255,255,0.40)' }}>{user?.name ?? 'Unknown'}</p>
+          <CsTag cs={user?.tetraCs} />
           <div className="mt-1.5 flex items-center gap-1.5 flex-wrap">
             <StatusBadge status={ticket.status} />
             <ProgramBadge program={ticket.program} />
@@ -154,6 +156,7 @@ function ThreadPanel({ ticketId, onClose }: { ticketId: string; onClose: () => v
               <span className="text-xs" style={{ color: 'rgba(255,255,255,0.42)' }}>
                 {user?.name ?? 'Unknown'} · {user?.email}
               </span>
+              <CsTag cs={user?.tetraCs} variant="chip" />
             </div>
             <div className="mt-2 flex items-center gap-1.5 flex-wrap">
               <ProgramBadge program={ticket.program} />
