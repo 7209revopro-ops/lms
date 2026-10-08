@@ -1777,6 +1777,62 @@ router.get   ('/live-classes',                            live.adminListAll)
    meeting or backup link, a stream key, or a student. The caller's academy;
    cancelled classes left out. ?from=&to= (YYYY-MM-DD), default 5 weeks back
    to 10 weeks ahead. */
+/* ── Mentor Calendar, for instructors too (Tetra Commission's user, 2026-10-08) ──────────────────────
+   Every mentor's free hours, classes and booked sessions — the same answer the portals' Mentor Calendar
+   reads (/service/mentors) — and sessions booked here by whoever is signed in. Booking, clashes, Meet
+   links and the emails are the portal path's own (services/portal.service.ts); the caller's academy is
+   the organization, and an instructor changes or cancels only what they booked (an admin anything). */
+async function mentorCalendarOrg(req: Request): Promise<string> {
+  const caller = await callerOrgForRead(req)
+  if (caller.gone) throw Object.assign(new Error('Your account is gone'), { statusCode: 401 })
+  if (caller.org) return String(caller.org)
+  const asked = typeof req.query['org'] === 'string' ? req.query['org'] : ''
+  if (asked) return asked
+  const { OrganizationModel } = await import('@/models/schema.ts')
+  const orgs = await OrganizationModel.find().select('_id').limit(2).lean() as any[]
+  if (orgs.length === 1) return String(orgs[0]._id)
+  throw Object.assign(new Error('Say which academy (?org=)'), { statusCode: 400 })
+}
+const actorOf = (req: Request) => ({ actorEmail: String(req.user?.email ?? ''), actorIsRootAdmin: req.user?.role !== 'instructor' })
+
+router.get('/mentor-calendar', requireInstructor, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { listMentorsForPortal } = await import('@/services/portal.service.ts')
+    const q = req.query as Record<string, string | undefined>
+    sendSuccess(res, await listMentorsForPortal({ remoteOrgId: await mentorCalendarOrg(req), from: q['from'], to: q['to'] }))
+  } catch (err) { next(err) }
+})
+
+router.post('/mentor-calendar/meetings', requireInstructor, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { createMentorMeetingForPortal } = await import('@/services/portal.service.ts')
+    const body = (req.body ?? {}) as Record<string, unknown>
+    sendSuccess(res, await createMentorMeetingForPortal({ ...body, remoteOrgId: await mentorCalendarOrg(req), bookedByEmail: String(req.user?.email ?? '') } as any), 'Meeting booked')
+  } catch (err) { next(err) }
+})
+
+router.get('/mentor-calendar/meetings/:id', requireInstructor, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { getMentorMeetingForPortal } = await import('@/services/portal.service.ts')
+    sendSuccess(res, await getMentorMeetingForPortal({ remoteOrgId: await mentorCalendarOrg(req), meetingId: String(req.params['id'] ?? ''), ...actorOf(req) }))
+  } catch (err) { next(err) }
+})
+
+router.patch('/mentor-calendar/meetings/:id', requireInstructor, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { updateMentorMeetingForPortal } = await import('@/services/portal.service.ts')
+    const body = (req.body ?? {}) as Record<string, unknown>
+    sendSuccess(res, await updateMentorMeetingForPortal({ ...body, remoteOrgId: await mentorCalendarOrg(req), meetingId: String(req.params['id'] ?? ''), ...actorOf(req) } as any), 'Meeting updated')
+  } catch (err) { next(err) }
+})
+
+router.post('/mentor-calendar/meetings/:id/cancel', requireInstructor, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { cancelMentorMeetingForPortal } = await import('@/services/portal.service.ts')
+    sendSuccess(res, await cancelMentorMeetingForPortal({ remoteOrgId: await mentorCalendarOrg(req), meetingId: String(req.params['id'] ?? ''), ...actorOf(req) }), 'Meeting cancelled')
+  } catch (err) { next(err) }
+})
+
 router.get('/live-classes/academy-schedule', requireInstructor, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { LiveClassModel } = await import('@/models/schema.ts')
