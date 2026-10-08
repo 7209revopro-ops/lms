@@ -546,7 +546,7 @@ export const DeviceModel = mongoose.model<IDevice>('Device', DeviceSchema)
    AUTH TOKEN — used for password reset + email verify
 ───────────────────────────────────────────────────── */
 export type AuthTokenPurpose =
-  | 'reset-password' | 'verify-email' | 'otp-login' | 'login-link' | 'change-email' | 'join-link'
+  | 'reset-password' | 'verify-email' | 'otp-login' | 'login-link' | 'change-email' | 'join-link' | 'signin-link'
 
 export interface IAuthToken extends Document {
   id:        string
@@ -557,6 +557,8 @@ export interface IAuthToken extends Document {
   usedAt?:   Date
   /* join-link only: the class the link opens (services/joinLink.service.ts). */
   liveClassId?: Types.ObjectId
+  /* signin-link only: the page it opens once signed in (services/signinLink.service.ts). */
+  nextPath?: string
   createdAt: Date
   updatedAt: Date
 }
@@ -565,10 +567,11 @@ const AuthTokenSchema = new Schema<IAuthToken>(
   {
     userId:    { type: Schema.Types.ObjectId, ref: 'User', required: true },
     tokenHash: { type: String, required: true, unique: true },
-    purpose:   { type: String, enum: ['reset-password', 'verify-email', 'otp-login', 'login-link', 'change-email', 'join-link'], required: true },
+    purpose:   { type: String, enum: ['reset-password', 'verify-email', 'otp-login', 'login-link', 'change-email', 'join-link', 'signin-link'], required: true },
     expiresAt: { type: Date, required: true },
     usedAt:    { type: Date },
     liveClassId: { type: Schema.Types.ObjectId, ref: 'LiveClass' },
+    nextPath:    { type: String, maxlength: 300 },
   },
   baseSchemaOptions,
 )
@@ -3097,6 +3100,7 @@ export interface IClassBooking extends Document {
   reminderDayOfSent:      boolean
   reminderPreSessionSent: boolean   // 30-min reminder (no link)
   reminder5MinSent:       boolean   // 5-min reminder (with link)
+  todaysWhatsAppSent?:    boolean   // in the morning "today's classes" WhatsApp
   reminderAtTimeSent:     boolean   // at-time reminder (with link)
   createdAt:   Date
   updatedAt:   Date
@@ -3120,6 +3124,7 @@ const ClassBookingSchema = new Schema<IClassBooking>(
     reminderDayOfSent:      { type: Boolean, default: false },
     reminderPreSessionSent: { type: Boolean, default: false },
     reminder5MinSent:       { type: Boolean, default: false },
+    todaysWhatsAppSent:     { type: Boolean, default: false },
     reminderAtTimeSent:     { type: Boolean, default: false },
   },
   baseSchemaOptions,
@@ -3589,6 +3594,7 @@ export interface IClassImport extends Document {
   undoneAt?:      Date
   undoneBy?:      Types.ObjectId
   summariesSentAt?: Date
+  studentsNotifiedAt?: Date
   createdAt:      Date
   updatedAt:      Date
 }
@@ -3647,6 +3653,7 @@ const ClassImportSchema = new Schema<IClassImport>(
     undoneAt:       { type: Date },
     undoneBy:       { type: Schema.Types.ObjectId, ref: 'User' },
     summariesSentAt: { type: Date },
+    studentsNotifiedAt: { type: Date },
   },
   baseSchemaOptions,
 )

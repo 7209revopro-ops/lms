@@ -37,7 +37,7 @@ import {
 import {
   sendClassReminderTomorrowWhatsApp, sendClassStartingSoonWhatsApp,
   sendClassStartsIn5MinWhatsApp, sendClassHasStartedWhatsApp, sendMentorClassIn10MinWhatsApp,
-  sendClassStartsIn5MinV2WhatsApp, sendClassHasStartedV2WhatsApp,
+  sendClassStartsIn5MinV2WhatsApp, sendClassHasStartedV2WhatsApp, sendTodaysClassesWhatsApp,
   sendInstructorReviewRequestWhatsApp,
 } from '@/services/whatsapp.service.ts'
 import { wantsStaffEmail } from '@/utils/emailPrefs.ts'
@@ -389,6 +389,77 @@ export async function runDayOfReminders(): Promise<void> {
     if (due.length) logger.info(`[Reminders] Day-of: dispatched ${due.length} reminders`)
   } catch (err) {
     logger.error({ err }, '[Reminders] day-of job error')
+  }
+}
+
+/* ── Today's classes (WhatsApp) ───────────────────────── */
+/* At 8 AM in each academy, every student of that academy with a phone and a
+   class BOOKED today gets ONE WhatsApp (todays_classes_v1) listing them —
+   "10:00 AM MBT 1 · 02:00 PM IM 3 (GST)" — its button their own sign-in link
+   to My Bookings. A student's academy decides their 8 AM and their "today".
+   Flag: ClassBooking.todaysWhatsAppSent, so a re-run sends nothing twice. */
+export async function runTodaysClassesWhatsApp(academySlug: string, now = new Date()): Promise<void> {
+  try {
+    const { ClassBookingModel, LiveClassModel } = await import('@/models/schema.ts')
+    const { zoneForAcademy, zoneTag } = await import('@/utils/academyClock.ts')
+    const { zoneDateKey, zoneDayBounds } = await import('@/utils/zoneDay.ts')
+    const { mintSigninCode } = await import('@/services/signinLink.service.ts')
+    await warmSlugs()
+    const zone = zoneForAcademy(academySlug)
+    const { start, end } = zoneDayBounds(zoneDateKey(now, zone), zone)
+
+    const classes = await LiveClassModel.find({
+      scheduledStart: { $gte: new Date(Math.max(start.getTime(), now.getTime())), $lt: end },
+      status: { $ne: 'cancelled' },
+    }).select('_id title scheduledStart').lean<Array<{ _id: unknown; title: string; scheduledStart: Date }>>()
+    if (!classes.length) return
+    const classById = new Map(classes.map(c => [String(c._id), c]))
+
+    const bookings = await ClassBookingModel.find({
+      liveClassId: { $in: classes.map(c => c._id) },
+      status: 'booked',
+      todaysWhatsAppSent: { $ne: true },
+    }).populate<{ userId: { _id: unknown; name?: string; isActive?: boolean; organizationId?: unknown; enrollmentApplication?: { phone?: string } } | null }>(
+      'userId', 'name isActive organizationId enrollmentApplication.phone',
+    ).lean()
+
+    type Row = { user: NonNullable<(typeof bookings)[number]['userId']>; bookingIds: unknown[]; classes: Array<{ title: string; scheduledStart: Date }> }
+    const perStudent = new Map<string, Row>()
+    for (const b of bookings) {
+      const u = b.userId
+      if (!u || u.isActive === false) continue
+      /* No academy on the account → the default one (Dubai), like every clock here. */
+      if ((orgSlugFor(u.organizationId) ?? 'dubai') !== academySlug) continue
+      const cls = classById.get(String(b.liveClassId))
+      if (!cls) continue
+      const k = String(u._id)
+      const row = perStudent.get(k) ?? { user: u, bookingIds: [], classes: [] }
+      row.bookingIds.push(b._id); row.classes.push(cls)
+      perStudent.set(k, row)
+    }
+
+    let sent = 0
+    for (const [userId, row] of perStudent) {
+      const phone = row.user.enrollmentApplication?.phone
+      if (phone) {
+        const line = row.classes
+          .sort((a, b) => new Date(a.scheduledStart).getTime() - new Date(b.scheduledStart).getTime())
+          .map(c => `${new Date(c.scheduledStart).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true, timeZone: zone })} ${c.title}`)
+          .join(' · ')
+          .slice(0, 900) + ` (${zoneTag(zone)})`
+        try {
+          const code = await mintSigninCode(userId, '/my-bookings', now.getTime())
+          await sendTodaysClassesWhatsApp(phone, row.user.name ?? '', line, code)
+          sent++
+        } catch (err) {
+          logger.warn({ err, userId }, "[Reminders] today's classes WhatsApp failed")
+        }
+      }
+      await ClassBookingModel.updateMany({ _id: { $in: row.bookingIds } }, { $set: { todaysWhatsAppSent: true } })
+    }
+    if (sent) logger.info(`[Reminders] Today's classes (${academySlug}): ${sent} WhatsApp messages`)
+  } catch (err) {
+    logger.error({ err, academySlug }, "[Reminders] today's classes job error")
   }
 }
 
@@ -1247,6 +1318,11 @@ export function startReminderJobs(): void {
 
   // Every day at 7:00am — day-of reminders
   cron.schedule('0 7 * * *', exclusive('day-of', runDayOfReminders))
+
+  // 8:00 AM in each academy — the "today's classes" WhatsApp. The server's
+  // clock is Dubai's, so Bangalore's 8 AM (IST) is 6:30 here.
+  cron.schedule('0 8 * * *', exclusive('todays-classes-dubai', () => runTodaysClassesWhatsApp('dubai')))
+  cron.schedule('30 6 * * *', exclusive('todays-classes-bangalore', () => runTodaysClassesWhatsApp('bangalore')))
 
   // Every 5 min — pre-session reminders (25–35 min window, NO link).
   // Must run at the window's resolution; an hourly job would miss most sessions

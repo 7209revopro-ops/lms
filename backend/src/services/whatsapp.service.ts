@@ -393,6 +393,27 @@ export async function sendClassHasStartedV2WhatsApp(
     { category: 'utility', buttonParam: joinCode })
 }
 
+/* new_class_scheduled_v1 / todays_classes_v1 — their button is the student's
+   own sign-in link: the template's URL is {CLIENT_URL}/s/ and each send adds
+   the one-time code (services/signinLink.service.ts), which signs them in and
+   opens the schedule or My Bookings. No send without a code. */
+export async function sendNewClassScheduledWhatsApp(
+  to: string | null | undefined, studentName: string, courseTitle: string,
+  sessionTitle: string, dateLabel: string, timeLabel: string, signinCode: string,
+): Promise<void> {
+  if (!signinCode) return
+  await sendTemplate(to, 'new_class_scheduled_v1', [studentName || 'there', courseTitle, sessionTitle, dateLabel, timeLabel],
+    { category: 'utility', buttonParam: signinCode })
+}
+
+export async function sendTodaysClassesWhatsApp(
+  to: string | null | undefined, studentName: string, classesLine: string, signinCode: string,
+): Promise<void> {
+  if (!signinCode || !classesLine) return
+  await sendTemplate(to, 'todays_classes_v1', [studentName || 'there', classesLine],
+    { category: 'utility', buttonParam: signinCode })
+}
+
 /* mentor_class_in_10_min — to the class's MENTOR, about ten minutes before an
    online class: the class, its time and how many students are booked, with a
    Start button. The template's URL is {ADMIN_URL}/live-classes/ and the send

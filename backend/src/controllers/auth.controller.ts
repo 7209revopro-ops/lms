@@ -170,6 +170,20 @@ export class AuthController {
     }
   }
 
+  /* ── POST /auth/signin-link/redeem ────────────────
+     A sign-in link from a WhatsApp message. Sets the session cookies only when
+     it signed the student in; always answers the page to open. */
+  redeemSigninLink = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    try {
+      const signedIn = req.user && req.user.role === 'student' ? req.user.id : undefined
+      const result = await this.service.redeemSigninLink(String(req.body.token), signedIn ?? (req.user ? `staff:${req.user.id}` : undefined), sessionMeta(req, res))
+      if (result.tokens) setAuthCookies(res, result.tokens)
+      sendSuccess(res, { next: result.next, signedIn: !!result.tokens })
+    } catch (err) {
+      next(err)
+    }
+  }
+
   /* ── POST /auth/join-link/redeem ──────────────────
      A class join link from a reminder. Sets the session cookies only when it
      signed the student in; always answers the class to open. */

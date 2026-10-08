@@ -109,6 +109,8 @@ router.post('/otp/verify',       authRateLimit, validate(otpVerifySchema),  auth
 /* One-click invite/login link → session (redeemed by the client's /auth/continue). */
 router.post('/login-link/redeem', authRateLimit, validate(loginLinkSchema), auth.redeemLoginLink)
 /* A class join link (/j/<code>): sign in if needed, answer which class to open. */
+/* A sign-in link (/s/<code>) from a WhatsApp message: sign in if needed, answer the page to open. */
+router.post('/signin-link/redeem', authRateLimit, optionalAuthenticate, validate(z.object({ token: z.string().min(10).max(100) })), auth.redeemSigninLink)
 router.post('/join-link/redeem',  authRateLimit, optionalAuthenticate, validate(z.object({ token: z.string().min(10).max(100) })), auth.redeemJoinLink)
 /* The admin portal's second factor lives beside its own login, at
    /api/v1/admin/auth/login/2fa (see admin.routes.ts). */

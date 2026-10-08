@@ -1022,6 +1022,43 @@ export class AuthService {
     return { user: toSafeUser(user), tokens }
   }
 
+  /* ── Redeem a sign-in link (/s/<code>) ──────────────
+     services/signinLink.service.ts. Answers the page to open, and signs the
+     student in when the browser has no session and the code has not signed
+     anyone in yet. Same shape as redeemJoinLink below. */
+  async redeemSigninLink(
+    rawCode: string,
+    currentUserId: string | undefined,
+    meta?: SessionMeta,
+  ): Promise<{ next: string; user?: ReturnType<typeof toSafeUser>; tokens?: TokenPair }> {
+    const { AuthTokenModel } = await import('@/models/schema.ts')
+    const { hashSigninCode, safeNextPath } = await import('@/services/signinLink.service.ts')
+    const expired = () => new AuthError('SIGNIN_LINK_EXPIRED',
+      'This link has expired. Sign in with a code sent to your email instead.', 400)
+
+    const doc = await AuthTokenModel.findOne({
+      tokenHash: hashSigninCode(String(rawCode ?? '')), purpose: 'signin-link', expiresAt: { $gt: new Date() },
+    }).lean() as { _id: unknown; userId: unknown; nextPath?: string } | null
+    if (!doc) throw expired()
+    const owner = String(doc.userId), next = safeNextPath(doc.nextPath ?? '/my-bookings')
+
+    if (currentUserId) {
+      if (currentUserId !== owner) {
+        throw new AuthError('SIGNIN_LINK_OTHER_ACCOUNT', 'This link belongs to another student. Sign out first, or open your own link.', 403)
+      }
+      return { next }
+    }
+    const claimed = await AuthTokenModel.updateOne({ _id: doc._id, usedAt: { $exists: false } }, { $set: { usedAt: new Date() } })
+    if (claimed.modifiedCount === 0) return { next }
+
+    const user = await this.userRepo.findById(owner)
+    if (!user || !user.isActive) throw expired()
+    void this.userRepo.touchLastLogin(user.id)
+    const tokens = await this.#issueLoginTokens(user.id, user.email, user.role, meta, 'client')
+    logger.info({ userId: user.id, next }, 'Student signed in via sign-in link')
+    return { next, user: toSafeUser(user), tokens }
+  }
+
   /* ── Redeem a class join link (/j/<code>) ──────────
      services/joinLink.service.ts. Answers which class to open, and signs the
      student in when the browser has no session and the code has not signed

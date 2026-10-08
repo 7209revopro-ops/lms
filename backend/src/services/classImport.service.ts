@@ -830,6 +830,7 @@ export class ClassImportService {
       await fresh.save()
 
       if (!fresh.summariesSentAt && fresh.failed === 0) await this.sendSummaries(fresh)
+      if (!fresh.studentsNotifiedAt && fresh.failed === 0) await this.notifyStudents(fresh)
     } finally {
       running.delete(jobId)
     }
@@ -889,6 +890,69 @@ export class ClassImportService {
       }
     }
     await ClassImportModel.updateOne({ _id: job._id }, { $set: { summariesSentAt: new Date() } })
+  }
+
+  /* Enrolled students hear about an import ONCE per course — never once per
+     class: one WhatsApp (new_class_scheduled_v1, its button their own sign-in
+     link to the schedule) and one line in their daily digest email. Only the
+     classes still ahead whose module is open to them (not blocked on their
+     enrolment) count; a student with none hears nothing. */
+  private async notifyStudents(job: HydratedDocument<IClassImport>): Promise<void> {
+    const { EnrollmentModel, CourseModel, ClassImportModel } = await import('@/models/schema.ts')
+    const { queueDigestItem } = await import('@/jobs/digest.job.ts')
+    const { mintSigninCode } = await import('@/services/signinLink.service.ts')
+    const { sendNewClassScheduledWhatsApp } = await import('@/services/whatsapp.service.ts')
+    const now = Date.now()
+    const ahead = job.items.filter(i => i.status === 'created' && new Date(i.scheduledStart).getTime() > now)
+    if (ahead.length) {
+      await ensureOrgSlugs().catch(() => {})
+      const zone = zoneForAcademy(orgSlugFor(job.organizationId) ?? null)
+      const day  = (d: Date) => new Date(d).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', timeZone: zone }).replace(/^(\w{3}) /, '$1, ')
+      const time = (d: Date) => `${new Date(d).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', timeZone: zone })} ${zoneTag(zone)}`
+      const byCourse = new Map<string, typeof ahead>()
+      for (const it of ahead) {
+        const k = String(it.courseId ?? job.courseId)
+        byCourse.set(k, [...(byCourse.get(k) ?? []), it])
+      }
+      for (const [courseId, its] of byCourse) {
+        try {
+          const course = await CourseModel.findById(courseId).select('title').lean<{ title?: string }>()
+          const courseTitle = course?.title ?? 'your course'
+          const rows = await EnrollmentModel.find({ courseId, status: { $ne: 'dropped' } })
+            .select('userId blockedLessons')
+            .populate('userId', '_id email name isActive enrollmentApplication.phone')
+            .lean<Array<{ blockedLessons?: unknown[]; userId?: { _id: Types.ObjectId; name?: string; isActive?: boolean; enrollmentApplication?: { phone?: string } } | null }>>()
+          for (const e of rows) {
+            const u = e.userId
+            if (!u || u.isActive === false) continue
+            const blocked = new Set((e.blockedLessons ?? []).map(String))
+            const open = its.filter(i => !i.sectionId || !blocked.has(String(i.sectionId)))
+              .sort((a, b) => new Date(a.scheduledStart).getTime() - new Date(b.scheduledStart).getTime())
+            if (!open.length) continue
+            const first = open[0]!
+            const what = open.length === 1 ? first.title : `${first.title} + ${open.length - 1} more class${open.length > 2 ? 'es' : ''}`
+            const userId = String(u._id)
+            try {
+              await queueDigestItem({
+                userId, kind: 'new-session',
+                title: `${open.length} new session${open.length > 1 ? 's' : ''} in ${courseTitle}`,
+                body:  `Starting with "${first.title}" — ${day(first.scheduledStart)}, ${time(first.scheduledStart)}`,
+                link:  '/class-bookings',
+              })
+            } catch (err) { logger.warn({ err, userId }, '[ClassImport] student digest failed') }
+            const phone = u.enrollmentApplication?.phone
+            if (!phone) continue
+            try {
+              const code = await mintSigninCode(userId, '/class-bookings')
+              await sendNewClassScheduledWhatsApp(phone, u.name ?? '', courseTitle, what, day(first.scheduledStart), time(first.scheduledStart), code)
+            } catch (err) { logger.warn({ err, userId }, '[ClassImport] student WhatsApp failed') }
+          }
+        } catch (err) {
+          logger.error({ err, courseId }, '[ClassImport] student notifications failed')
+        }
+      }
+    }
+    await ClassImportModel.updateOne({ _id: job._id }, { $set: { studentsNotifiedAt: new Date() } })
   }
 
   /* ── Resume an interrupted or partly failed job ── */
