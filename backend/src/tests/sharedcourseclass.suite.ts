@@ -96,6 +96,11 @@ try {
   const aDoc = await M.LiveClassModel.findById(idOf(a)).lean() as any
   check('…it belongs to Bangalore, no guests', String(aDoc?.organizationId) === String(blr._id) && !(aDoc?.guestCohorts ?? []).length)
 
+  const aEdit = await call('PATCH', `/admin/live-classes/${idOf(a)}`, { jar: BA, body: { title: 'MBT 1 · Bangalore evening' } })
+  check('…and the Bangalore admin can edit it', aEdit.status === 200, why(aEdit))
+  const aDubai = await call('PATCH', `/admin/live-classes/${idOf(a)}`, { jar: DA, body: { title: 'Dubai takeover' } })
+  check("…the Dubai admin cannot edit Bangalore's class", aDubai.status === 403 || aDubai.status === 404, why(aDubai))
+
   section('B · "Both academies"')
   const b = await call('POST', '/admin/live-classes', { jar: DA, body: body({ instructorId: String(dTeach._id), sectionId: String(sec._id), bothAcademies: true }) })
   check('201', b.status === 201, why(b))

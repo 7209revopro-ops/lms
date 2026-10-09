@@ -1679,7 +1679,10 @@ export class LiveClassController {
            session already belongs to is a no-op the caller has already been
            cleared for by #canManage. */
         if (dto['courseId'] !== currentCourse) {
-          await this.sections.assertCourseEditable(
+          /* Readable, not editable: the other academy's admins may move their
+             class onto a course shared by both academies. Instructors must
+             still own it. */
+          await this.sections.assertCourseReadable(
             dto['courseId'], req.user!.id, req.user!.role, req.user!.categoryScope,
           )
         }

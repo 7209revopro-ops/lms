@@ -4072,9 +4072,14 @@ async function assertLiveClassEditable(liveClassId: string, req: Request): Promi
   const { LiveClassModel } = await import('@/models/schema.ts')
   const { Types }          = await import('mongoose')
   if (!Types.ObjectId.isValid(liveClassId)) return false
-  const session = await LiveClassModel.findById(liveClassId).select('courseId instructorId').lean()
+  const session = await LiveClassModel.findById(liveClassId).select('courseId instructorId organizationId').lean()
   if (!session) return false
   if (String(session.instructorId) === req.user!.id) return true
+  /* Staff of the class's OWN academy manage it even when its course is a
+     shared one owned by the other academy (Course.sharedAcademies) — for an
+     ordinary class the course check below gives them the same answer. */
+  if (req.user!.role !== 'instructor' && session.organizationId && req.user!.organizationId
+      && String(session.organizationId) === String(req.user!.organizationId)) return true
   await sectionSvc.assertCourseEditable(String(session.courseId), req.user!.id, req.user!.role, req.user!.categoryScope)
   return true
 }
