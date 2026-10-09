@@ -36,6 +36,7 @@ import { reserveSeat, releaseSeat, seatStampFrom } from '@/services/seatPool.ser
 import { ensureOrgSlugs, orgSlugFor } from '@/utils/orgSlugs.ts'
 import { academyClock } from '@/utils/academyClock.ts'
 import { documentRef } from '@/utils/documentRef.ts'
+import { wrongAcademyCopy, wrongAcademyMessage } from '@/utils/academyCourseCopy.ts'
 import { UserService } from '@/services/user.service.ts'
 import { adminListDevices, adminApproveDevice, adminRevokeDevice } from '@/services/device.service.ts'
 import { deviceLimitMeta, setDeviceLimitEnabled, financeCheckMeta, setFinanceCheckEnabled, isFinanceCheckEnabled } from '@/services/settings.service.ts'
@@ -512,6 +513,19 @@ router.post ('/users', requirePermission('users','create'),          validate(us
             code: 'ORGANIZATION_NOT_FOUND', message: 'That academy does not exist.',
           } })
           return
+        }
+      }
+
+      /* No enrolling the new account in the OTHER academy's copy of a course
+         its own academy runs — checked before the account exists, so a
+         refusal leaves nothing half-made. */
+      if (orgId && userDto.role === 'student' && courses?.length) {
+        for (const c of courses as Array<{ courseId: string }>) {
+          const own = await wrongAcademyCopy(orgId, String(c.courseId ?? ''))
+          if (own) {
+            res.status(409).json({ success: false, error: { code: 'WRONG_ACADEMY_COPY', message: wrongAcademyMessage(own) } })
+            return
+          }
         }
       }
 
@@ -1323,6 +1337,16 @@ router.post('/users/:id/enrollments', requireAnyAdmin, requireSameOrgUser('id'),
         const ok = !!scope && await courseMatchesScope(courseId, scope) && await studentMatchesScope(userId, scope)
         if (!ok) {
           res.status(403).json({ success: false, error: { code: 'FORBIDDEN', message: 'You can only enroll students who are in your own program into courses within your own program.' } })
+          return
+        }
+      }
+      /* The OTHER academy's copy of a course the student's own academy runs. */
+      {
+        const { UserModel } = await import('@/models/schema.ts')
+        const student = await UserModel.findById(userId).select('organizationId role').lean<{ organizationId?: unknown; role?: string }>()
+        const own = student?.role === 'student' ? await wrongAcademyCopy(student.organizationId, courseId) : null
+        if (own) {
+          res.status(409).json({ success: false, error: { code: 'WRONG_ACADEMY_COPY', message: wrongAcademyMessage(own) } })
           return
         }
       }
