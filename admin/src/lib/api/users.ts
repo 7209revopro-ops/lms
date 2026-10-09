@@ -32,7 +32,7 @@ export interface StudentEnrollment {
     feeMinor:       number
     paidMinor:      number
     balanceMinor:   number
-    bonus?:         { given: boolean; amountMinor: number } | null
+    bonus?:         { given: boolean; amountMinor: number; currency?: string } | null
     receipt?:       { url: string; name?: string; mimeType?: string } | null
     recordedAt?:    string
   }

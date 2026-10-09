@@ -216,7 +216,7 @@ export function StudentHistoryModal({ user, onClose }: Props) {
                             {e.feeSummary.bonus && (
                               <span className="inline-flex items-center gap-1">
                                 <Gift size={10} />
-                                Bonus {e.feeSummary.bonus.given ? <b className="text-white">{fmtMoney(e.feeSummary.bonus.amountMinor, e.feeSummary.currency)}</b> : 'none'}
+                                Bonus {e.feeSummary.bonus.given ? <b className="text-white">{fmtMoney(e.feeSummary.bonus.amountMinor, e.feeSummary.bonus.currency ?? e.feeSummary.currency)}</b> : 'none'}
                               </span>
                             )}
                             {e.feeSummary.receipt?.url && (

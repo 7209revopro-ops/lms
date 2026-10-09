@@ -810,7 +810,8 @@ export interface EnrollmentFeeSummary {
   feeMinor:      number
   paidMinor:     number
   balanceMinor:  number
-  bonus?:        { given: boolean; amountMinor: number } | null
+  /* currency: the bonus's own — USD from the sales CRMs since 2026-10-09; absent, the fee's. */
+  bonus?:        { given: boolean; amountMinor: number; currency?: string } | null
   receipt?:      { url: string; name?: string; mimeType?: string } | null
   recordedAt:    Date
 }
@@ -869,7 +870,7 @@ const EnrollmentSchema = new Schema<IEnrollment>(
           paidMinor:     { type: Number, required: true, min: 0 },
           balanceMinor:  { type: Number, required: true, min: 0 },
           bonus: {
-            type: new Schema({ given: { type: Boolean, required: true }, amountMinor: { type: Number, default: 0, min: 0 } }, { _id: false }),
+            type: new Schema({ given: { type: Boolean, required: true }, amountMinor: { type: Number, default: 0, min: 0 }, currency: { type: String, maxlength: 3 } }, { _id: false }),
             default: null,
           },
           receipt: {

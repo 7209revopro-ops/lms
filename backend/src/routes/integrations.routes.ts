@@ -210,7 +210,7 @@ const financeEnrolmentSchema = z.object({
     feeMinor:     z.number().int().min(0),
     paidMinor:    z.number().int().min(0),
     balanceMinor: z.number().int().min(0),
-    bonus: z.object({ given: z.boolean(), amountMinor: z.number().int().min(0) }).nullable().optional(),
+    bonus: z.object({ given: z.boolean(), amountMinor: z.number().int().min(0), currency: z.string().regex(/^[A-Z]{3}$/).optional() }).nullable().optional(),
     receipt: z.object({
       url:      z.string().url().max(2048),
       name:     z.string().max(200).optional(),
