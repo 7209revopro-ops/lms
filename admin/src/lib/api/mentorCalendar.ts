@@ -22,6 +22,21 @@ export function useMentorCalendar(from: string, to: string) {
   })
 }
 
+/* One class with its Info — who booked, cancelled, joined and reviewed, and when it started and ended (2026-10-09). */
+export interface ClassInfoStudent { name: string; status: string; bookedAt: string; cancelledAt: string; joinedAt: string; review: { rating: number; comment: string; at: string } | null }
+export interface ClassInfoEvent { at: string; kind: string; who: string; rating?: number; comment?: string }
+export interface MentorClassInfo {
+  id: string; title: string; courseTitle: string; instructorName: string; startsAt: string; durationMins: number; status: string
+  booked: number; capacity: number; timezone: string; students?: ClassInfoStudent[]; timeline?: ClassInfoEvent[]
+}
+export function useMentorClass(id: string | null) {
+  return useQuery({
+    queryKey: ['admin', 'mentor-calendar', 'class', id],
+    queryFn: () => apiGet<MentorClassInfo>(`/admin/mentor-calendar/classes/${encodeURIComponent(id!)}`),
+    enabled: !!id,
+  })
+}
+
 export interface BookMeetingInput {
   mentorEmail: string; title: string; kind: 'staff' | 'student' | 'client'; scheduledStart: string; durationMins: number
   attendees: { name: string; email: string }[]; inPerson: boolean; location?: string; notes?: string
