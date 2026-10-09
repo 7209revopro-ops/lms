@@ -5,7 +5,11 @@ import { apiGet, apiPost } from '@/lib/axios'
 /* Mentor Calendar — every mentor's free hours, classes and booked sessions, and sessions booked from here
    (GET/POST /admin/mentor-calendar…, the same answer the portals' Mentor Calendar reads). */
 export interface MentorSlot { dayOfWeek: number; startTime: string; endTime: string }
-export interface MentorClass { id: string; title: string | null; startsAt: string; durationMins: number; status: string; booked: number; capacity: number; mine: boolean }
+export interface MentorClass {
+  id: string; title: string | null; startsAt: string; durationMins: number; status: string; booked: number; capacity: number; mine: boolean
+  /** The course and module it is a class of — this academy's classes only; absent from an older server. */
+  courseId?: string | null; course?: string | null; moduleId?: string | null; module?: string | null
+}
 export interface MentorMeeting { id: string; title: string; kind: string; startsAt: string; durationMins: number; attendeeNames: string[]; bookedByEmail: string; inPerson: boolean; location: string }
 export interface CalendarMentor { id: string; name: string; email: string; shared: boolean; slots: MentorSlot[]; classes: MentorClass[]; meetings: MentorMeeting[] }
 export interface MentorCalendar { timezone: string; from: string; to: string; mentors: CalendarMentor[] }

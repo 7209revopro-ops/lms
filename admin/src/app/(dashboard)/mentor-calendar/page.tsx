@@ -10,7 +10,8 @@ import { useMentorCalendar, useBookMeeting, useCancelMeeting, type CalendarMento
 /* Mentor Calendar (Tetra Commission's user, 2026-10-08): every mentor's week — the hours they set as free,
    their classes and the sessions booked with them — for instructors as well as admins, and a session booked
    with any mentor from here. The LMS checks clashes and sends the emails, as from the portals; an instructor
-   cancels only what they booked. */
+   cancels only what they booked. Sessions can be searched by title (a booked session by who is on it too) and
+   classes narrowed to a course and its module (2026-10-09); booked sessions have no course, so they stay. */
 
 const DAY_MS = 864e5
 const weekStart = (d: Date) => { const x = new Date(d); x.setHours(0, 0, 0, 0); x.setDate(x.getDate() - ((x.getDay() + 6) % 7)); return x }
@@ -22,6 +23,9 @@ export default function MentorCalendarPage() {
   const [onlyMe, setOnlyMe] = useState(false)
   const [query, setQuery] = useState('')
   const [booking, setBooking] = useState<CalendarMentor | null>(null)
+  const [find, setFind] = useState('')          // a session's title, its course or module, or who a booked one is with
+  const [course, setCourse] = useState('')      // courseId
+  const [mod, setMod] = useState('')      // moduleId, within the course
   const start = useMemo(() => { const s = weekStart(new Date()); s.setDate(s.getDate() + offset * 7); return s }, [offset])
   const days = useMemo(() => Array.from({ length: 7 }, (_, i) => new Date(start.getTime() + i * DAY_MS)), [start])
   const { data, isLoading, error } = useMentorCalendar(new Date(start.getTime() - DAY_MS).toISOString(), new Date(start.getTime() + 8 * DAY_MS).toISOString())
@@ -39,6 +43,27 @@ export default function MentorCalendarPage() {
     return [...mine, ...rest]
   }, [data, myEmail, onlyMe, query])
 
+  // The courses and modules of this week's classes, for the two filters.
+  const { courses, modules } = useMemo(() => {
+    const cs = new Map<string, string>(), ms = new Map<string, string>()
+    for (const m of data?.mentors ?? []) for (const c of m.classes) {
+      if (c.courseId) cs.set(c.courseId, c.course || 'Course')
+      if (c.courseId === course && c.moduleId) ms.set(c.moduleId, c.module || 'Module')
+    }
+    const sorted = (m: Map<string, string>) => [...m].sort((a, b) => a[1].localeCompare(b[1]))
+    return { courses: sorted(cs), modules: sorted(ms) }
+  }, [data, course])
+  const needle = find.trim().toLowerCase()
+  const filtering = !!(needle || course)
+  const has = (...vs: (string | null | undefined)[]) => vs.some(v => String(v ?? '').toLowerCase().includes(needle))
+  const classShown = (c: CalendarMentor['classes'][number]) =>
+    (!course || c.courseId === course) && (!mod || c.moduleId === mod) && (!needle || (c.mine && has(c.title, c.course, c.module)))
+  // Booked sessions belong to no course: the course and module leave them be, the search does not.
+  const meetingShown = (v: CalendarMentor['meetings'][number]) => !needle || has(v.title, ...v.attendeeNames)
+  const shownMentors = filtering
+    ? mentors.filter(m => m.classes.some(c => c.status !== 'cancelled' && classShown(c)) || m.meetings.some(meetingShown))
+    : mentors
+
   return (
     <div className="space-y-6">
       <PageHeader title="Mentor Calendar" subtitle={`Every mentor's free hours, classes and booked sessions — book a session with anyone. Times ${tz.replace('_', ' ')}.`} />
@@ -49,11 +74,23 @@ export default function MentorCalendarPage() {
         <button type="button" onClick={() => setOnlyMe(v => !v)} className={`rounded-lg px-3 py-2 text-sm ${onlyMe ? 'bg-blue-600 text-white' : 'border border-white/10 hover:bg-white/5'}`}>{onlyMe ? 'Only me — show everyone' : 'Only me'}</button>
         {!onlyMe && <input value={query} onChange={e => setQuery(e.target.value)} placeholder="Find a mentor…" className="min-w-[200px] flex-1 rounded-lg border border-white/10 bg-transparent px-3 py-2 text-sm outline-none" />}
       </div>
+      <div className="flex flex-wrap items-center gap-2">
+        <input value={find} onChange={e => setFind(e.target.value)} placeholder="Search sessions — title, course, module, who it's with…" className="min-w-[240px] flex-1 rounded-lg border border-white/10 bg-transparent px-3 py-2 text-sm outline-none" />
+        <select value={course} onChange={e => { setCourse(e.target.value); setMod('') }} className="rounded-lg border border-white/10 bg-transparent px-3 py-2 text-sm" aria-label="Course">
+          <option value="">All courses</option>
+          {courses.map(([id, title]) => <option key={id} value={id}>{title}</option>)}
+        </select>
+        <select value={mod} onChange={e => setMod(e.target.value)} disabled={!course || !modules.length} className="rounded-lg border border-white/10 bg-transparent px-3 py-2 text-sm disabled:opacity-40" aria-label="Module">
+          <option value="">{course && !modules.length ? 'No modules' : 'All modules'}</option>
+          {modules.map(([id, title]) => <option key={id} value={id}>{title}</option>)}
+        </select>
+        {filtering && <button type="button" onClick={() => { setFind(''); setCourse(''); setMod('') }} className="rounded-lg border border-white/10 px-3 py-2 text-sm hover:bg-white/5">Clear</button>}
+      </div>
 
       {isLoading && <div className="flex justify-center py-12"><Spinner /></div>}
       {error && <p className="text-sm text-rose-400">{(error as Error).message || 'The calendar did not load'}</p>}
 
-      {mentors.map(m => (
+      {shownMentors.map(m => (
         <div key={m.id} className="rounded-2xl border border-white/10 p-4">
           <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
             <p className="font-semibold">{m.name}{m.email.toLowerCase() === myEmail && <span className="ml-2 text-xs text-blue-400">you</span>}{m.shared && <span className="ml-2 text-xs opacity-60">lent</span>}</p>
@@ -63,13 +100,13 @@ export default function MentorCalendarPage() {
             {days.map(d => {
               const key = dayKey(d)
               const slots = m.slots.filter(s => s.dayOfWeek === d.getDay())
-              const classes = m.classes.filter(c => dayKey(c.startsAt) === key && c.status !== 'cancelled')
-              const meetings = m.meetings.filter(v => dayKey(v.startsAt) === key)
+              const classes = m.classes.filter(c => dayKey(c.startsAt) === key && c.status !== 'cancelled' && classShown(c))
+              const meetings = m.meetings.filter(v => dayKey(v.startsAt) === key && meetingShown(v))
               return (
                 <div key={key} className="min-h-[72px] rounded-lg border border-white/5 p-2 text-[11px]">
                   <p className="mb-1 font-medium opacity-70">{d.toLocaleDateString(undefined, { weekday: 'short', day: 'numeric' })}</p>
                   {slots.map((s, i) => <p key={i} className="mb-1 rounded bg-emerald-500/10 px-1 text-emerald-400">{s.startTime}–{s.endTime}</p>)}
-                  {classes.map(c => <p key={c.id} className="mb-1 rounded bg-blue-500/10 px-1 text-blue-300" title={c.mine ? `${c.booked}/${c.capacity} booked` : 'Another academy'}>{at(c.startsAt)} {c.mine ? (c.title || 'Class') : 'Booked elsewhere'}</p>)}
+                  {classes.map(c => <p key={c.id} className="mb-1 rounded bg-blue-500/10 px-1 text-blue-300" title={c.mine ? `${c.booked}/${c.capacity} booked` : 'Another academy'}>{at(c.startsAt)} {c.mine ? (c.title || 'Class') : 'Booked elsewhere'}{c.mine && c.course && <span className="block opacity-60">{c.course}{c.module ? ` · ${c.module}` : ''}</span>}</p>)}
                   {meetings.map(v => (
                     <p key={v.id} className="mb-1 flex items-start justify-between gap-1 rounded bg-violet-500/10 px-1 text-violet-300" title={`${v.title} · ${v.attendeeNames.join(', ')}${v.inPerson ? ` · in person, ${v.location}` : ''}`}>
                       <span>{at(v.startsAt)} {v.title}</span>
@@ -84,7 +121,7 @@ export default function MentorCalendarPage() {
           </div>
         </div>
       ))}
-      {!isLoading && !mentors.length && <p className="text-sm opacity-60">No mentors to show.</p>}
+      {!isLoading && !shownMentors.length && <p className="text-sm opacity-60">{filtering ? 'Nothing this week matches — clear the search or filters.' : 'No mentors to show.'}</p>}
       {booking && <BookDialog mentor={booking} tz={tz} onClose={() => setBooking(null)} />}
     </div>
   )
