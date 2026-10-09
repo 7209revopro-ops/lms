@@ -607,6 +607,16 @@ export function AddStudentModal({ open, onClose }: Props) {
                                   <div className="min-w-0 flex-1">
                                     <p className="truncate text-xs font-semibold text-white">
                                       {course.title}
+                                      {/* Same-name courses exist per academy — say whose, and flag
+                                          one outside the academy this student is being created in. */}
+                                      {isSuper && course.organizationId && (
+                                        <span className="ml-1.5 text-[10px] font-normal" style={{ color: 'rgba(255,255,255,0.45)' }}>
+                                          · {orgs?.find(o => o.id === course.organizationId)?.name ?? ''}
+                                        </span>
+                                      )}
+                                      {isSuper && orgId && course.organizationId && course.organizationId !== orgId && (
+                                        <span className="ml-1.5 text-[10px] font-semibold" style={{ color: '#F59E0B' }}>other academy</span>
+                                      )}
                                     </p>
                                     {hasRestrictions && (
                                       <p className="text-[10px]" style={{ color: '#F87171' }}>

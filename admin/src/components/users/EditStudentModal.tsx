@@ -17,6 +17,8 @@ import {
 } from '@/lib/api/users'
 import { useCourseOutline } from '@/lib/api/outline'
 import { useCourses } from '@/lib/api/courses'
+import { useOrganizations } from '@/lib/api/organizations'
+import { useCurrentUser } from '@/lib/api/user'
 import { useToast } from '@/store/ui.store'
 import { Button, MotionButton } from '@/components/ui/button'
 import { useDocumentUrl } from '@/lib/api/documents'
@@ -31,7 +33,7 @@ function CourseSelect({
 }: {
   value: string
   onChange: (v: string) => void
-  courses: { id: string; title: string }[]
+  courses: { id: string; title: string; note?: string }[]
   placeholder?: string
 }) {
   const [open, setOpen] = useState(false)
@@ -82,6 +84,7 @@ function CourseSelect({
                 style={{ color: c.id === value ? '#0057b8' : 'rgba(255,255,255,0.8)' }}
               >
                 {c.title}
+                {c.note && <span className="ml-1.5 text-[10px] font-semibold" style={{ color: '#F59E0B' }}>{c.note}</span>}
               </button>
             ))}
           </motion.div>
@@ -285,9 +288,31 @@ export function EditStudentModal({ user, onClose, onSuccess }: Props) {
     })
   }, [enrollments])
 
-  /* Courses the student is NOT yet enrolled in */
+  /* Courses the student is NOT yet enrolled in.
+
+     Each academy can have a course of the same name ("MARKET BREAK-OUT TRADING
+     PROGRAM" in Dubai and in Bangalore), and a super admin's list holds both —
+     so each one names its academy, the student's own academy comes first, and
+     another academy's course is flagged. A Dubai student was enrolled in the
+     Bangalore copies this way and saw every course twice. */
+  const { data: me } = useCurrentUser()
+  const isSuper = me?.role === 'super_admin'
+  const { data: orgs = [] } = useOrganizations(isSuper)
+  const academyOf = new Map(orgs.map(o => [o.id, o.name]))
   const enrolledCourseIds = new Set((enrollments ?? []).map(e => e.courseId?.id))
-  const unenrolledCourses = allCourses.filter(c => !enrolledCourseIds.has(c.id))
+  const otherAcademy = (c: { organizationId?: string }) =>
+    !!c.organizationId && !!user.organizationId && c.organizationId !== user.organizationId
+  const unenrolledCourses = allCourses
+    .filter(c => !enrolledCourseIds.has(c.id))
+    .sort((a, b) => Number(otherAcademy(a)) - Number(otherAcademy(b)))
+    .map(c => {
+      const academy = isSuper && c.organizationId ? academyOf.get(c.organizationId) : undefined
+      return {
+        id: c.id,
+        title: academy ? `${c.title} · ${academy}` : c.title,
+        ...(otherAcademy(c) ? { note: 'other academy' } : {}),
+      }
+    })
 
   const [appOpen, setAppOpen] = useState(false)
 
