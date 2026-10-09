@@ -15,6 +15,13 @@ import type { RegisterDto, LoginDto, TokenPair, UserRole } from '@/types/index.t
 import type { SafeUser } from '@/models/types.ts'
 import { toSafeUser } from '@/models/types.ts'
 
+/* How many times one join link (/j) or sign-in link (/s) may sign its student
+   in, within its lifetime. More than once because the first tap often opens in
+   an app's built-in browser (Gmail, WhatsApp) and the student then opens it in
+   their real browser — or the first attempt failed. Still only ever its own
+   student, refused over another student's session, and device-limited. */
+export const LINK_MAX_SIGNINS = 3
+
 /* ─── Domain error class ────────────────────────────
    Thrown by service, caught by controller → next(err)
    → mapped to HTTP response by errorMiddleware
@@ -1024,8 +1031,8 @@ export class AuthService {
 
   /* ── Redeem a sign-in link (/s/<code>) ──────────────
      services/signinLink.service.ts. Answers the page to open, and signs the
-     student in when the browser has no session and the code has not signed
-     anyone in yet. Same shape as redeemJoinLink below. */
+     student in when the browser has no session and the code has sign-ins
+     left. Same shape as redeemJoinLink below. */
   async redeemSigninLink(
     rawCode: string,
     currentUserId: string | undefined,
@@ -1048,7 +1055,10 @@ export class AuthService {
       }
       return { next }
     }
-    const claimed = await AuthTokenModel.updateOne({ _id: doc._id, usedAt: { $exists: false } }, { $set: { usedAt: new Date() } })
+    const claimed = await AuthTokenModel.updateOne(
+      { _id: doc._id, $or: [{ useCount: { $lt: LINK_MAX_SIGNINS } }, { useCount: { $exists: false } }] },
+      { $inc: { useCount: 1 }, $set: { usedAt: new Date() } },
+    )
     if (claimed.modifiedCount === 0) return { next }
 
     const user = await this.userRepo.findById(owner)
@@ -1066,8 +1076,8 @@ export class AuthService {
        · unknown or past its 2 hours  → JOIN_LINK_EXPIRED
        · signed in as somebody else   → JOIN_LINK_OTHER_ACCOUNT
        · signed in as its student     → the class, nothing issued
-       · no session, unused           → the class, and a session (device-limited like every sign-in)
-       · no session, already used     → the class, nothing issued — the join call renews or asks to sign in */
+       · no session, uses left        → the class, and a session (device-limited like every sign-in)
+       · no session, all uses spent   → the class, nothing issued — the join call renews or asks to sign in */
   async redeemJoinLink(
     rawCode: string,
     currentUserId: string | undefined,
@@ -1096,8 +1106,11 @@ export class AuthService {
       return { liveClassId, inApp }
     }
 
-    /* Claimed atomically: two taps at once sign in once. */
-    const claimed = await AuthTokenModel.updateOne({ _id: doc._id, usedAt: { $exists: false } }, { $set: { usedAt: new Date() } })
+    /* Claimed atomically, one use per sign-in, up to LINK_MAX_SIGNINS. */
+    const claimed = await AuthTokenModel.updateOne(
+      { _id: doc._id, $or: [{ useCount: { $lt: LINK_MAX_SIGNINS } }, { useCount: { $exists: false } }] },
+      { $inc: { useCount: 1 }, $set: { usedAt: new Date() } },
+    )
     if (claimed.modifiedCount === 0) return { liveClassId, inApp }
 
     const user = await this.userRepo.findById(owner)

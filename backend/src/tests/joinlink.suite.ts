@@ -5,7 +5,8 @@
    Over HTTP, against a real database:
      A. redeeming with no session signs the student in, and the join that
         follows records the join and returns the meeting link;
-     B. a second tap with no session signs nobody in, but still names the class;
+     B. taps 2 and 3 with no session sign in too (3 sign-ins per link); a 4th
+        signs nobody in, but still names the class;
      C. the student's own session: the class, nothing issued; another
         student's session: refused;
      D. unknown, or past its 2 hours: refused;
@@ -102,10 +103,17 @@ try {
   check('and records the join for attendance (attendedAt, source click)', !!bk?.attendedAt && bk?.attendanceSource === 'click',
     JSON.stringify({ s: bk?.status, a: bk?.attendedAt, src: bk?.attendanceSource }))
 
-  section('B · a second tap with no session signs nobody in')
-  const r2 = await call('POST', '/auth/join-link/redeem', { jar: new Map(), body: { token: code } })
-  check('still names the class', r2.status === 200 && r2.body?.data?.liveClassId === String(live._id), why(r2))
-  check('but issues no session', r2.body?.data?.signedIn === false && !r2.cookies.some(c => c.startsWith('lms_at=')), r2.cookies.join(' | '))
+  section('B · up to 3 sign-ins per link, then the class only')
+  /* Same phone (its device cookie), a browser with no session — e.g. the
+     link first opened inside Gmail, then again in the real browser. */
+  const sameDevice = (): Jar => new Map(jar.has('lms_device') ? [['lms_device', jar.get('lms_device')!]] : [])
+  for (const n of [2, 3]) {
+    const rn = await call('POST', '/auth/join-link/redeem', { jar: sameDevice(), body: { token: code } })
+    check(`tap ${n}: signs in`, rn.status === 200 && rn.body?.data?.signedIn === true && rn.cookies.some(c => c.startsWith('lms_at=')), why(rn))
+  }
+  const r2 = await call('POST', '/auth/join-link/redeem', { jar: sameDevice(), body: { token: code } })
+  check('tap 4: still names the class', r2.status === 200 && r2.body?.data?.liveClassId === String(live._id), why(r2))
+  check('tap 4: but issues no session', r2.body?.data?.signedIn === false && !r2.cookies.some(c => c.startsWith('lms_at=')), r2.cookies.join(' | '))
 
   section("C · the student's own session, and somebody else's")
   const r3 = await call('POST', '/auth/join-link/redeem', { jar, body: { token: code } })

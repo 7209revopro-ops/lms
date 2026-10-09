@@ -278,3 +278,17 @@ select:focus, select:focus-visible {
     transition-duration: 0.01ms !important;
   }
 }
+
+
+/* ── Sign-in screens: never a white page ─────────────────────────────────
+   Their entrance animations (framer-motion) are rendered by the server at
+   opacity 0 and faded in by JavaScript. If that JavaScript fails to load, the
+   form stays invisible while still taking input. So until AuthReady marks the
+   page as running, anything still at opacity 0 inside .auth-shell is revealed
+   after 2s — a CSS animation, which needs no JavaScript and outranks the
+   inline style. Once React runs the attribute is set and this never applies,
+   so the real animations (and anything meant to stay hidden) are untouched. */
+@keyframes auth-reveal { to { opacity: 1; transform: none; } }
+html:not([data-auth-ready]) .auth-shell [style*="opacity:0"] {
+  animation: auth-reveal 0.3s ease-out 2s forwards;
+}

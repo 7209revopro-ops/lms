@@ -555,6 +555,9 @@ export interface IAuthToken extends Document {
   purpose:   AuthTokenPurpose
   expiresAt: Date
   usedAt?:   Date
+  /* join-link / signin-link: how many times it has signed somebody in (a
+     link signs in up to LINK_MAX_SIGNINS times — auth.service.ts). */
+  useCount?: number
   /* join-link only: the class the link opens (services/joinLink.service.ts). */
   liveClassId?: Types.ObjectId
   /* signin-link only: the page it opens once signed in (services/signinLink.service.ts). */
@@ -570,6 +573,7 @@ const AuthTokenSchema = new Schema<IAuthToken>(
     purpose:   { type: String, enum: ['reset-password', 'verify-email', 'otp-login', 'login-link', 'change-email', 'join-link', 'signin-link'], required: true },
     expiresAt: { type: Date, required: true },
     usedAt:    { type: Date },
+    useCount:  { type: Number },
     liveClassId: { type: Schema.Types.ObjectId, ref: 'LiveClass' },
     nextPath:    { type: String, maxlength: 300 },
   },

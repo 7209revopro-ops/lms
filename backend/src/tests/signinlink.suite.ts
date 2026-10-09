@@ -6,7 +6,8 @@
 
    Over HTTP, against a real database:
      A. redeeming with no session signs the student in and names the page;
-     B. a second tap with no session signs nobody in, but still names the page;
+     B. taps 2 and 3 with no session sign in too (3 sign-ins per link); a 4th
+        signs nobody in, but still names the page;
      C. the student's own session: the page, nothing issued; another
         student's session: refused;
      D. unknown, or past its 24 hours: refused; a foreign page is never kept;
@@ -109,8 +110,14 @@ try {
   const me = await call('GET', '/auth/me', { jar: jarA })
   check('that session is priya', String(me.body?.data?.id ?? me.body?.data?._id ?? me.body?.data?.user?.id ?? '') === String(priya._id), why(me))
 
-  section('B · a second tap with no session: nobody signed in, page still named')
-  const jarB: Jar = new Map()
+  section('B · up to 3 sign-ins per link, then the page only')
+  const sameDevice = (): Jar => new Map(jarA.has('lms_device') ? [['lms_device', jarA.get('lms_device')!]] : [])
+  for (const n of [2, 3]) {
+    const jn = sameDevice()
+    const bn = await call('POST', '/auth/signin-link/redeem', { jar: jn, body: { token: code } })
+    check(`tap ${n}: signs in`, bn.status === 200 && bn.body?.data?.signedIn === true && jn.has('lms_at'), why(bn) + JSON.stringify(bn.body?.data))
+  }
+  const jarB: Jar = sameDevice()
   const b = await call('POST', '/auth/signin-link/redeem', { jar: jarB, body: { token: code } })
   check('200, signedIn false, next kept', b.status === 200 && b.body?.data?.signedIn === false && b.body?.data?.next === '/class-bookings', why(b) + JSON.stringify(b.body?.data))
   check('no session cookie', !jarB.has('lms_at'))
