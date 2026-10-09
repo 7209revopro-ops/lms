@@ -300,8 +300,8 @@ export function EditStudentModal({ user, onClose, onSuccess }: Props) {
   const { data: orgs = [] } = useOrganizations(isSuper)
   const academyOf = new Map(orgs.map(o => [o.id, o.name]))
   const enrolledCourseIds = new Set((enrollments ?? []).map(e => e.courseId?.id))
-  const otherAcademy = (c: { organizationId?: string }) =>
-    !!c.organizationId && !!user.organizationId && c.organizationId !== user.organizationId
+  const otherAcademy = (c: { organizationId?: string; sharedAcademies?: boolean }) =>
+    !c.sharedAcademies && !!c.organizationId && !!user.organizationId && c.organizationId !== user.organizationId
   const unenrolledCourses = allCourses
     .filter(c => !enrolledCourseIds.has(c.id))
     .sort((a, b) => Number(otherAcademy(a)) - Number(otherAcademy(b)))
@@ -309,7 +309,7 @@ export function EditStudentModal({ user, onClose, onSuccess }: Props) {
       const academy = isSuper && c.organizationId ? academyOf.get(c.organizationId) : undefined
       return {
         id: c.id,
-        title: academy ? `${c.title} · ${academy}` : c.title,
+        title: c.sharedAcademies ? `${c.title} · Both academies` : academy ? `${c.title} · ${academy}` : c.title,
         ...(otherAcademy(c) ? { note: 'other academy' } : {}),
       }
     })

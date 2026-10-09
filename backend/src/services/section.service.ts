@@ -44,6 +44,20 @@ export class SectionService {
      This one guard fronts ~24 call sites across courses, sections, lessons,
      quizzes, assignments, grading, transcripts, live classes and homework, so
      the tenancy rule lives here rather than being repeated at every caller. */
+  /* READ access to a course's outline: whoever may edit it, plus the OTHER
+     academy's admins on a course shared by both academies — they enrol their
+     own students in it and block modules per student, so they must see the
+     modules. Instructors, and content editing, stay with assertCourseEditable. */
+  async assertCourseReadable(courseId: string, userId: string, role: string, categoryScope?: string): Promise<void> {
+    try {
+      await this.assertCourseEditable(courseId, userId, role, categoryScope)
+    } catch (err) {
+      if (!(err instanceof OutlineError) || err.statusCode !== 403 || role === 'instructor') throw err
+      const course = await this.courseRepo.findById_(courseId)
+      if (!(course as { sharedAcademies?: boolean } | null)?.sharedAcademies) throw err
+    }
+  }
+
   async assertCourseEditable(courseId: string, userId: string, role: string, categoryScope?: string): Promise<void> {
     if (!Types.ObjectId.isValid(courseId)) {
       throw new OutlineError('INVALID_ID', 'Invalid course id', 400)

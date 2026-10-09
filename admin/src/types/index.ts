@@ -7,6 +7,8 @@ export interface Course {
       the course's, so without this the form cannot tell which academy to leave
       OUT of the guest list. */
   organizationId?: string
+  /** Serves both academies: the other academy sees it in its catalogue and pickers. */
+  sharedAcademies?: boolean
   id:            string
   title:         string
   slug:          string
@@ -54,6 +56,8 @@ export interface CourseFormValues {
   program:      '4x-trading' | 'digital-marketing' | 'ai' | 'jura' | ''
   /** Which academy owns the course. Super admins choose; others inherit. */
   organizationId?: string
+  /** Serve both academies — super admins only. */
+  sharedAcademies?: boolean
 }
 
 export interface Category { id: string; name: string; slug: string }

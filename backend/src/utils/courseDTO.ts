@@ -38,6 +38,8 @@ export interface CourseDTO {
      Not sensitive: tenancy already means a caller only ever sees courses of an
      academy they belong to, so this names an academy they are already in. */
   organizationId?: string
+  /** Serves both academies — see ICourse.sharedAcademies. */
+  sharedAcademies: boolean
   categoryId?:    string
   program?:       '4x-trading' | 'digital-marketing' | 'ai' | 'jura'
   enrolledCount:  number
@@ -80,6 +82,7 @@ export function toCourseDTO(course: ICourse, lessonCount?: number): CourseDTO {
     updatedAt:     json['updatedAt']     as string | Date,
     instructorId:  '',
     organizationId: json['organizationId'] ? String(json['organizationId']) : undefined,
+    sharedAcademies: json['sharedAcademies'] === true,
   }
 
   const inst = json.instructorId

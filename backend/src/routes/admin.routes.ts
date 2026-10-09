@@ -154,6 +154,8 @@ const courseCreateSchema = z.object({
   /* Which academy the course belongs to. Super admins only — see the resolver
      in createCourse; everyone else's is their own. */
   organizationId: z.string().optional(),
+  /* Serve both academies. Super admins only — dropped for anyone else. */
+  sharedAcademies: z.boolean().optional(),
 })
 
 const courseUpdateSchema = courseCreateSchema.partial().extend({
@@ -1175,14 +1177,15 @@ router.get('/courses/:id/students', requireAnyAdmin,
       /* Tenancy first: a course belonging to another academy must not leak its
          roster, and the roster is the part that names real people. */
       const course = await CourseModel.findById(courseId)
-        .select('title organizationId program').lean() as
-          { title?: string; organizationId?: unknown; program?: string } | null
+        .select('title organizationId program sharedAcademies').lean() as
+          { title?: string; organizationId?: unknown; program?: string; sharedAcademies?: boolean } | null
       if (!course) {
         res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Course not found' } })
         return
       }
       if (!isFullAdmin(req.user!.role)) {
         const sameOrg = !course.organizationId
+          || (course as { sharedAcademies?: boolean }).sharedAcademies === true
           || String(course.organizationId) === String(req.user!.organizationId ?? '')
         if (!sameOrg) {
           res.status(403).json({ success: false, error: { code: 'FORBIDDEN', message: 'This course belongs to another academy.' } })
@@ -1214,6 +1217,13 @@ router.get('/courses/:id/students', requireAnyAdmin,
            separately instead and reported as `orphaned`. */
         { $unwind: { path: '$student', preserveNullAndEmptyArrays: true } },
       ]
+
+      /* A course shared by both academies: the OTHER academy's staff see only
+         their own students on it — the home academy's roster stays private. */
+      if (req.user!.role !== 'super_admin' && course.organizationId && req.user!.organizationId
+          && String(course.organizationId) !== String(req.user!.organizationId)) {
+        pipeline.push({ $match: { 'student.organizationId': new Types.ObjectId(String(req.user!.organizationId)) } })
+      }
 
       /* Search runs after the join because it looks at the student, not the
          enrolment. */

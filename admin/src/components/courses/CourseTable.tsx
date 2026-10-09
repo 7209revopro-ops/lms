@@ -252,6 +252,7 @@ function CourseCard({ course, index, checked, onToggle, onDelete }: {
 
         {/* Title */}
         <h3 className="line-clamp-2 text-sm font-semibold leading-snug text-white">{course.title}</h3>
+        {course.sharedAcademies && <BothAcademiesBadge />}
 
         {/* Instructor */}
         {course.instructor && (
@@ -332,6 +333,7 @@ function CourseRow({ course, index, checked, onToggle, onDelete }: {
           </div>
           <div className="min-w-0">
             <p className="truncate text-sm font-semibold text-white max-w-[220px]">{course.title}</p>
+            {course.sharedAcademies && <BothAcademiesBadge />}
             <div className="mt-1 flex flex-wrap items-center gap-1.5">
               {lv && (
                 <span className="rounded-md px-1.5 py-0.5 text-[10px] font-semibold" style={{ background: lv.bg, color: lv.color }}>
@@ -445,6 +447,14 @@ const PROGRAM_STYLE: Record<string, { bg: string; color: string }> = {
   'jura':              { bg: 'rgba(139,92,246,0.12)', color: '#8B5CF6' },
   'digital-marketing': { bg: 'rgba(52,211,153,0.12)',  color: '#34D399' },
   'ai':                { bg: 'rgba(167,139,250,0.12)', color: '#A78BFA' },
+}
+
+/* A course shared by Dubai and Bangalore. */
+function BothAcademiesBadge() {
+  return (
+    <span className="mt-1 inline-block rounded-full px-2 py-0.5 text-[10px] font-semibold"
+      style={{ background: 'rgba(74,222,128,0.12)', color: '#4ADE80' }}>Both academies</span>
+  )
 }
 
 export function CourseTable() {

@@ -112,8 +112,11 @@ export class CourseRepository extends BaseRepository<ICourse> {
 
     if (params.program) filter['program'] = params.program
 
+    /* The academy's own courses, plus any course shared by both academies. */
     if (params.organizationId && Types.ObjectId.isValid(params.organizationId)) {
-      filter['organizationId'] = new Types.ObjectId(params.organizationId)
+      filter['$and'] = [...((filter['$and'] as unknown[]) ?? []), {
+        $or: [{ organizationId: new Types.ObjectId(params.organizationId) }, { sharedAcademies: true }],
+      }]
     }
 
     /* When using $text and no explicit sort, rank by relevance score.
@@ -199,8 +202,11 @@ export class CourseRepository extends BaseRepository<ICourse> {
 
     if (params.program) filter['program'] = params.program
 
+    /* The academy's own courses, plus any course shared by both academies. */
     if (params.organizationId && Types.ObjectId.isValid(params.organizationId)) {
-      filter['organizationId'] = new Types.ObjectId(params.organizationId)
+      filter['$and'] = [...((filter['$and'] as unknown[]) ?? []), {
+        $or: [{ organizationId: new Types.ObjectId(params.organizationId) }, { sharedAcademies: true }],
+      }]
     }
 
     const sort = resolveSort(params.sort)

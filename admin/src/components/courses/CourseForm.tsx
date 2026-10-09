@@ -46,6 +46,7 @@ const schema = z.object({
   categoryId:   z.string(),
   program:      z.enum(['4x-trading', 'digital-marketing', 'ai', 'jura', '']),
   organizationId: z.string().optional(),
+  sharedAcademies: z.boolean().optional(),
 })
 
 type Values = z.infer<typeof schema>
@@ -199,6 +200,7 @@ export function CourseForm({ course }: CourseFormProps) {
       categoryId:   course?.categoryId   ?? '',
       program:      course?.program       ?? '',
       organizationId: (course as { organizationId?: string } | undefined)?.organizationId ?? '',
+      sharedAcademies: course?.sharedAcademies ?? false,
     },
   })
 
@@ -520,6 +522,29 @@ export function CourseForm({ course }: CourseFormProps) {
                       options={(orgs ?? []).map(o => ({ value: o.id, label: o.name }))} />
                   )} />
                 </Field>
+              )}
+
+              {/* Both academies — one course instead of a copy per academy. The
+                  academy above stays its home: it edits the course; the other
+                  academy sees it in its catalogue and enrols its own students. */}
+              {isSuper && (
+                <div className="flex items-center justify-between rounded-2xl p-4"
+                  style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.08)' }}>
+                  <div className="pr-4">
+                    <p className="text-sm font-semibold text-white">Both academies</p>
+                    <p className="mt-0.5 text-xs" style={{ color: 'rgba(255,255,255,0.4)' }}>
+                      Show this course to Dubai and Bangalore. The academy above edits it; the other academy can enrol its students.
+                    </p>
+                  </div>
+                  <Controller name="sharedAcademies" control={control} render={({ field }) => (
+                    <button type="button" onClick={() => field.onChange(!field.value)}
+                      className="relative h-6 w-11 flex-shrink-0 rounded-full transition-all"
+                      style={{ background: field.value ? '#4ADE80' : 'rgba(255,255,255,0.12)' }}>
+                      <motion.div animate={{ x: field.value ? 22 : 2 }} transition={{ type: 'spring', stiffness: 500, damping: 30 }}
+                        className="absolute top-0.5 h-5 w-5 rounded-full bg-white" />
+                    </button>
+                  )} />
+                </div>
               )}
 
               <Field label="Program *">

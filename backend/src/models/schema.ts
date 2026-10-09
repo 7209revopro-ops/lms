@@ -636,6 +636,10 @@ export interface ICourse extends Document {
   programId?:      Types.ObjectId
   instructorId:    Types.ObjectId
   categoryId?:     Types.ObjectId
+  /* One course for BOTH academies (super admin sets it). Its home academy
+     (organizationId) still owns and edits it; the other academy sees it in
+     the catalogue, the admin lists and the enrol pickers. */
+  sharedAcademies?: boolean
   organizationId?: Types.ObjectId
   /* Denormalized stats */
   enrolledCount:  number
@@ -665,6 +669,7 @@ const CourseSchema = new Schema<ICourse>(
     programId:     { type: Schema.Types.ObjectId, ref: 'Program' },
     instructorId:   { type: Schema.Types.ObjectId, ref: 'User', required: true },
     categoryId:     { type: Schema.Types.ObjectId, ref: 'Category' },
+    sharedAcademies: { type: Boolean, default: false, index: true },
     organizationId: { type: Schema.Types.ObjectId, ref: 'Organization' },
     enrolledCount:  { type: Number, default: 0 },
     ratingAvg:     { type: Number, default: 0 },

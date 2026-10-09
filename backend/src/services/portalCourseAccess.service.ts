@@ -65,7 +65,8 @@ async function studentByEmail(email: unknown): Promise<CourseStudent> {
 const forexCoursesFor = (student: CourseStudent): Record<string, unknown> => ({
   status: 'published',
   program: FOREX,
-  organizationId: student.organizationId ?? { $exists: false },
+  /* Their academy's own, or one shared by both academies. */
+  $or: [{ organizationId: student.organizationId ?? { $exists: false } }, { sharedAcademies: true }],
 })
 
 /** Each course's modules, in the order the student sees them — as the fee rule counts them (paymentAccess.service.ts). */

@@ -611,10 +611,10 @@ export function AddStudentModal({ open, onClose }: Props) {
                                           one outside the academy this student is being created in. */}
                                       {isSuper && course.organizationId && (
                                         <span className="ml-1.5 text-[10px] font-normal" style={{ color: 'rgba(255,255,255,0.45)' }}>
-                                          · {orgs?.find(o => o.id === course.organizationId)?.name ?? ''}
+                                          · {course.sharedAcademies ? 'Both academies' : orgs?.find(o => o.id === course.organizationId)?.name ?? ''}
                                         </span>
                                       )}
-                                      {isSuper && orgId && course.organizationId && course.organizationId !== orgId && (
+                                      {isSuper && orgId && !course.sharedAcademies && course.organizationId && course.organizationId !== orgId && (
                                         <span className="ml-1.5 text-[10px] font-semibold" style={{ color: '#F59E0B' }}>other academy</span>
                                       )}
                                     </p>

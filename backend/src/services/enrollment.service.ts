@@ -44,7 +44,8 @@ export class EnrollmentService {
     if (course.organizationId) {
       const self       = await UserModel.findById(userId).select('role organizationId').exec()
       const callerOrg  = self?.organizationId?.toString()
-      if (self?.role !== 'super_admin' && callerOrg && callerOrg !== course.organizationId.toString()) {
+      const shared = (course as { sharedAcademies?: boolean }).sharedAcademies === true
+      if (!shared && self?.role !== 'super_admin' && callerOrg && callerOrg !== course.organizationId.toString()) {
         throw new EnrollmentError(
           'FORBIDDEN',
           'This course belongs to another organization',

@@ -22,8 +22,9 @@ const sameTitle = (t: string) => new RegExp(`^\\s*${t.trim().replace(/[.*+?^${}(
 export async function wrongAcademyCopy(studentOrgId: unknown, courseId: string): Promise<OwnAcademyCopy | null> {
   if (!studentOrgId || !Types.ObjectId.isValid(String(studentOrgId)) || !Types.ObjectId.isValid(courseId)) return null
   const { CourseModel, OrganizationModel } = await import('@/models/schema.ts')
-  const course = await CourseModel.findById(courseId).select('title organizationId').lean<{ title?: string; organizationId?: Types.ObjectId }>()
-  if (!course?.title || !course.organizationId || String(course.organizationId) === String(studentOrgId)) return null
+  const course = await CourseModel.findById(courseId).select('title organizationId sharedAcademies').lean<{ title?: string; organizationId?: Types.ObjectId; sharedAcademies?: boolean }>()
+  /* A course shared by both academies is the right one for either. */
+  if (!course?.title || !course.organizationId || course.sharedAcademies || String(course.organizationId) === String(studentOrgId)) return null
   const own = await CourseModel.findOne({
     organizationId: new Types.ObjectId(String(studentOrgId)),
     title:          sameTitle(course.title),

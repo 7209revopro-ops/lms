@@ -133,6 +133,7 @@ export class AdminController {
         instructorId?: string
         program?:      '4x-trading' | 'digital-marketing' | 'ai' | 'jura'
         organizationId?: string
+        sharedAcademies?: boolean
       }
 
       const tags = typeof dto.tags === 'string'
@@ -218,6 +219,8 @@ export class AdminController {
         categoryId:     dto.categoryId,
         program:        scope ?? dto.program,
         organizationId,
+        /* Serving both academies is a super admin's decision. */
+        ...(isSuper && typeof dto.sharedAcademies === 'boolean' ? { sharedAcademies: dto.sharedAcademies } : {}),
       })
       sendSuccess(res, toCourseDTO(course, 0), 'Course created', 201)
     } catch (err) { next(err) }
@@ -237,6 +240,8 @@ export class AdminController {
       /* Category-scoped admins cannot override their program scope */
       const scope = req.user!.categoryScope
       if (scope) dto['program'] = scope
+      /* Serving both academies is a super admin's decision. */
+      if (req.user!.role !== 'super_admin') delete dto['sharedAcademies']
       const tags = typeof dto['tags'] === 'string'
         ? (dto['tags'] as string).split(',').map(t => t.trim()).filter(Boolean)
         : (dto['tags'] as string[] | undefined)
@@ -1155,7 +1160,7 @@ export class AdminController {
   getOutline = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     try {
       const courseId = String(req.params['id'] ?? '')
-      await this.sectionService.assertCourseEditable(courseId, req.user!.id, req.user!.role, req.user!.categoryScope)
+      await this.sectionService.assertCourseReadable(courseId, req.user!.id, req.user!.role, req.user!.categoryScope)
       const [sections, lessons] = await Promise.all([
         this.sectionRepo.findByCourseOrdered(courseId),
         this.lessonRepo.findByCourseOrdered(courseId),
