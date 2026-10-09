@@ -17,6 +17,7 @@ import { useProgramInstructors } from '@/lib/api/users'
 import { isoToDatetimeLocal, datetimeLocalToISO, zoneOf, foreignZoneTag } from '@/lib/timezone'
 import Spinner from '@/components/ui/Spinner'
 import { GuestCohortsField, cohortsProblem } from '@/components/live-classes/GuestCohortsField'
+import { AcademiesSwitch } from '@/components/live-classes/AcademiesSwitch'
 import type { GuestCohortInput } from '@/lib/api/liveClasses'
 import { useCurrentUser } from '@/lib/api/user'
 import { CLASS_LANGUAGES, withFlagAndNative } from '@/lib/languages'
@@ -123,6 +124,13 @@ export function EditLiveClassModal({ live, onClose, onSuccess }: Props) {
     seatFloor:      Number(c.seatFloor ?? 0),
   }))
   const [cohorts, setCohorts] = useState<GuestCohortInput[]>(storedCohorts)
+  /* A course shared by both academies uses the simple switch instead of the
+     guest-academy panel: "Both academies" = the other academy is a guest
+     through this same course. */
+  const courseShared = !!(courses.find(c => c.id === activeCourseId) as { sharedAcademies?: boolean } | undefined)?.sharedAcademies
+  const initialBoth  = storedCohorts.length > 0 && storedCohorts.every(c => c.courseId === activeCourseId)
+  const [bothAcademies, setBothAcademies] = useState(initialBoth)
+  const switchChanged = courseShared && bothAcademies !== initialBoth
   /* SHARING A CLASS FOR THE FIRST TIME *FROM HERE* NEEDS AN OVERFLOW.
      Once a class has pools the backend refuses overflowSeats outright
      (OVERFLOW_NOT_EDITABLE) — moving seats around an allocated class goes
@@ -217,11 +225,12 @@ export function EditLiveClassModal({ live, onClose, onSuccess }: Props) {
              every ordinary edit of every class — and the server's gate, which
              fires on a list that DIFFERS from what is stored, would start
              refusing title changes. */
-          ...(canShareAcrossOrgs ? { guestCohorts: cohorts } : {}),
+          ...(canShareAcrossOrgs && switchChanged ? { bothAcademies } : {}),
+          ...(canShareAcrossOrgs && !switchChanged ? { guestCohorts: cohorts } : {}),
           /* Only on the first sharing, and only when there is something to
              share with — the server refuses an overflow with no cohort behind
              it, and refuses any overflow at all once the class is allocated. */
-          ...(canShareAcrossOrgs && !alreadyAllocated && cohorts.length > 0
+          ...(canShareAcrossOrgs && !switchChanged && !alreadyAllocated && cohorts.length > 0
             ? { overflowSeats: overflow } : {}),
         },
       })
@@ -695,7 +704,11 @@ export function EditLiveClassModal({ live, onClose, onSuccess }: Props) {
             )}
           </div>
 
-          {(canShareAcrossOrgs || cohorts.length > 0) && (
+          {canShareAcrossOrgs && courseShared && (storedCohorts.length === 0 || initialBoth) && (
+            <AcademiesSwitch value={bothAcademies} onChange={setBothAcademies} />
+          )}
+
+          {!(courseShared && (storedCohorts.length === 0 || initialBoth)) && (canShareAcrossOrgs || cohorts.length > 0) && (
             <GuestCohortsField
               value={cohorts}
               onChange={setCohorts}

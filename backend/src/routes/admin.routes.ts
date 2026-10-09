@@ -1183,7 +1183,10 @@ router.get('/courses/:id/students', requireAnyAdmin,
         res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Course not found' } })
         return
       }
-      if (!isFullAdmin(req.user!.role)) {
+      /* Every role below super_admin — an academy `admin` included. This used
+         to be skipped for `admin`, so one academy's admin could read the
+         other's course rosters. */
+      if (req.user!.role !== 'super_admin') {
         const sameOrg = !course.organizationId
           || (course as { sharedAcademies?: boolean }).sharedAcademies === true
           || String(course.organizationId) === String(req.user!.organizationId ?? '')
@@ -1751,6 +1754,9 @@ const withCohortRules = (o: z.ZodTypeAny) => o
   .refine((v: any) => !(v.isOnline === false && (v.guestCohorts ?? []).length),
     { path: ['guestCohorts'],
       message: 'An in-person class cannot be shared with another academy' })
+  .refine((v: any) => !(v.isOnline === false && v.bothAcademies === true),
+    { path: ['bothAcademies'],
+      message: 'An in-person class cannot be shared with another academy' })
 
 const liveCreateSchema = withCohortRules(z.object({
   courseId:        z.string().min(1),
@@ -1776,6 +1782,8 @@ const liveCreateSchema = withCohortRules(z.object({
   room:            z.string().max(100).optional(),
   guestCohorts:    cohortsField,
   overflowSeats:   overflowField,
+  /* Course shared by both academies: open the class to the other one too. */
+  bothAcademies:   z.boolean().optional(),
 }))
 const liveUpdateSchema = withCohortRules(z.object({
   title:           z.string().min(3).max(255).trim().optional(),
@@ -1801,6 +1809,7 @@ const liveUpdateSchema = withCohortRules(z.object({
   rescheduleReason:  z.string().max(2000).optional(),
   guestCohorts:      cohortsField,
   overflowSeats:     overflowField,
+  bothAcademies:     z.boolean().optional(),
 }))
 
 router.get   ('/courses/:courseId/live-classes',          live.adminListForCourse)

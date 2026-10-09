@@ -1169,6 +1169,8 @@ export class LiveClassController {
       room?:            string
       guestCohorts?:    Array<{ organizationId: string; courseId: string; sectionId?: string; seatFloor: number }>
       overflowSeats?:   number
+      /* Shared course: open the class to the other academy too. */
+      bothAcademies?:   boolean
       /* Pins the host academy instead of inheriting the caller's. Only repeat
          uses it — see the note at its call site. */
       organizationId?:  string
@@ -1307,6 +1309,11 @@ export class LiveClassController {
       throw new LiveClassError('CROSS_ACADEMY_FORBIDDEN',
         'Only an admin or super admin can share a class with another academy', 403)
     }
+    const wantsBoth = dto.bothAcademies === true && !wantsCohorts
+    if (wantsBoth && !CAN_SHARE_ACROSS_ORGS.has(req.user?.role ?? '')) {
+      throw new LiveClassError('CROSS_ACADEMY_FORBIDDEN',
+        'Only an admin or super admin can share a class with another academy', 403)
+    }
 
     const live = await this.service.create({
       courseId:        dto.courseId,
@@ -1341,6 +1348,7 @@ export class LiveClassController {
          byte-for-byte path it took before this feature existed. */
       ...(wantsCohorts ? { guestCohorts: dto.guestCohorts } : {}),
       ...(wantsCohorts && dto.overflowSeats != null ? { overflowSeats: dto.overflowSeats } : {}),
+      ...(wantsBoth ? { bothAcademies: true } : {}),
     }).catch((err: unknown) => {
       /* The meeting was made — and the instructor already invited — before the
          class was validated. Withdraw the invite rather than leave them a
@@ -1616,7 +1624,34 @@ export class LiveClassController {
          incoming set against what is actually stored rather than against the
          mere presence of a key. */
       const { LiveClassModel: LCM } = await import('@/models/schema.ts')
-      const oldForCohorts = await LCM.findById(id).select('guestCohorts').lean()
+      const oldForCohorts = await LCM.findById(id)
+        .select('guestCohorts courseId sectionId organizationId hostSeatsLeft sessionCapacity bookedCount').lean()
+      /* "Both academies" on a shared course's class, as the edit form sends it:
+         the cohorts it means are worked out here and then go through exactly
+         the guestCohorts path below — same permission rule, same seat rules. */
+      if (typeof dto['bothAcademies'] === 'boolean' && !Array.isArray(dto['guestCohorts']) && oldForCohorts) {
+        const cur = oldForCohorts as any
+        if (dto['bothAcademies']) {
+          const sectionId = typeof dto['sectionId'] === 'string' ? (dto['sectionId'] || undefined) : (cur.sectionId ? String(cur.sectionId) : undefined)
+          const courseId  = typeof dto['courseId'] === 'string' && dto['courseId'] ? dto['courseId'] : String(cur.courseId)
+          const wanted = await this.service.bothAcademiesCohorts(courseId, sectionId, cur.organizationId)
+          /* Keep a cohort already there as it is (its floor, its seats). */
+          const stored = (cur.guestCohorts ?? []) as Array<Record<string, unknown>>
+          dto['guestCohorts'] = wanted.map(w => {
+            const had = stored.find(s => String(s['organizationId']) === w.organizationId)
+            return had ? { organizationId: String(had['organizationId']), courseId: String(had['courseId']),
+              ...(had['sectionId'] ? { sectionId: String(had['sectionId']) } : {}), seatFloor: Number(had['seatFloor'] ?? 0) } : w
+          })
+          /* First time this class is shared: the whole free room becomes the
+             common overflow, as at create. */
+          if (typeof cur.hostSeatsLeft !== 'number' && (dto['guestCohorts'] as unknown[]).length) {
+            const cap = typeof dto['sessionCapacity'] === 'number' ? dto['sessionCapacity'] : (cur.sessionCapacity ?? 30)
+            dto['overflowSeats'] = Math.max(0, cap - (cur.bookedCount ?? 0))
+          }
+        } else {
+          dto['guestCohorts'] = []
+        }
+      }
       if (typeof dto['title']             === 'string')  data.title             = dto['title']
       if (typeof dto['description']       === 'string')  data.description       = dto['description']
       if (typeof dto['scheduledStart']    === 'string')  data.scheduledStart    = new Date(dto['scheduledStart'])

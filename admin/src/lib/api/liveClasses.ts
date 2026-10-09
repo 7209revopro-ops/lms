@@ -223,9 +223,13 @@ export interface CreateLiveClassInput {
   /** Seats promised to nobody, which any academy may draw on once its own
       floor is gone. Only meaningful alongside guestCohorts. */
   overflowSeats?:   number
+  /** A course shared by both academies: open this class to the other academy
+      too (the server builds the guest entry). Admin or super admin. */
+  bothAcademies?:   boolean
 }
 
 export interface UpdateLiveClassInput {
+  bothAcademies?:    boolean
   /* Sending the stored set unchanged is a no-op any editor may perform;
      CHANGING it is a super admin's decision. */
   guestCohorts?:     GuestCohortInput[]

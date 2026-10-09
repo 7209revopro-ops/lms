@@ -336,10 +336,12 @@ export class LiveClassService {
         throw new LiveClassError('COHORT_NOT_FOUND', 'Academy not found', 404)
       }
 
-      const courseDoc = await CourseModel.findById(course).select('organizationId').lean()
+      const courseDoc = await CourseModel.findById(course).select('organizationId sharedAcademies').lean()
       /* 404, and the SAME code a missing academy gets: a Dubai admin must not
-         learn which Bangalore course ids exist by reading the difference. */
-      if (!courseDoc || String((courseDoc as { organizationId?: unknown }).organizationId ?? '') !== org) {
+         learn which Bangalore course ids exist by reading the difference.
+         A course shared by both academies is every academy's course. */
+      const sharedCourse = (courseDoc as { sharedAcademies?: boolean } | null)?.sharedAcademies === true
+      if (!courseDoc || (!sharedCourse && String((courseDoc as { organizationId?: unknown }).organizationId ?? '') !== org)) {
         throw new LiveClassError('COHORT_NOT_FOUND', 'Course not found', 404)
       }
 
@@ -353,6 +355,24 @@ export class LiveClassService {
   }
 
   /* ── Admin/instructor create ──────────────────────── */
+  /* The guest cohorts that open a class to every OTHER academy through the
+     same shared course (and module): no floor — create() puts the whole room
+     in the common overflow. Refused for a course that is not shared. */
+  async bothAcademiesCohorts(
+    courseId: string, sectionId: string | undefined, hostOrgId: unknown,
+  ): Promise<Array<{ organizationId: string; courseId: string; sectionId?: string; seatFloor: number }>> {
+    const { CourseModel, OrganizationModel } = await import('@/models/schema.ts')
+    const course = Types.ObjectId.isValid(courseId)
+      ? await CourseModel.findById(courseId).select('sharedAcademies').lean<{ sharedAcademies?: boolean }>()
+      : null
+    if (!course?.sharedAcademies) {
+      throw new LiveClassError('COURSE_NOT_SHARED',
+        'Only a course set to "Both academies" can have classes for both academies.', 400)
+    }
+    const others = await OrganizationModel.find(hostOrgId ? { _id: { $ne: hostOrgId } } : {}).select('_id').lean<Array<{ _id: Types.ObjectId }>>()
+    return others.map(o => ({ organizationId: String(o._id), courseId, ...(sectionId ? { sectionId } : {}), seatFloor: 0 }))
+  }
+
   async create(input: {
     courseId:         string
     instructorId:     string
@@ -385,6 +405,9 @@ export class LiveClassService {
        nothing reads them for entitlement until CROSS_ORG_CLASSES is on. */
     guestCohorts?:    Array<{ organizationId: string; courseId: string; sectionId?: string; seatFloor: number }>
     overflowSeats?:   number
+    /* A course shared by both academies: open this class to the other
+       academy too (bothAcademiesCohorts). Ignored when guestCohorts is given. */
+    bothAcademies?:   boolean
   }): Promise<ILiveClass> {
     if (!Types.ObjectId.isValid(input.courseId)) {
       throw new LiveClassError('INVALID_COURSE_ID', 'Invalid course id', 400)
@@ -420,7 +443,10 @@ export class LiveClassService {
        intended one and guessing would move somebody's class between academies
        silently. */
     const courseOrgId = (course as { organizationId?: Types.ObjectId }).organizationId
-    if (classOrgId && courseOrgId && String(classOrgId) !== String(courseOrgId)) {
+    /* …unless the course is shared by both academies: then either academy
+       schedules its own classes from it (Course.sharedAcademies). */
+    const courseShared = (course as { sharedAcademies?: boolean }).sharedAcademies === true
+    if (!courseShared && classOrgId && courseOrgId && String(classOrgId) !== String(courseOrgId)) {
       throw new LiveClassError('COURSE_WRONG_ACADEMY',
         'That course belongs to another academy. Switch to that academy, or pick one of this one\'s courses.',
         400)
@@ -501,7 +527,15 @@ export class LiveClassService {
     if (classOrgId) (doc as any).organizationId = classOrgId
     /* GUEST COHORTS. Validated before the allocation is computed, so a bad
        cohort never reaches the arithmetic. */
-    const cohorts = input.guestCohorts ?? []
+    let cohorts = input.guestCohorts ?? []
+    let overflowSeats = input.overflowSeats
+    /* "Both academies": the other academy comes in through the SAME shared
+       course and module, with no floor of its own — the whole room is the
+       common overflow, so either academy's students may take any seat. */
+    if (input.bothAcademies && cohorts.length === 0) {
+      cohorts = await this.bothAcademiesCohorts(input.courseId, input.sectionId, classOrgId)
+      if (cohorts.length) overflowSeats = (doc.sessionCapacity ?? 30) as number
+    }
     if (cohorts.length > 0) {
       await this.#assertCohortsUsable(cohorts, classOrgId)
 
@@ -515,7 +549,7 @@ export class LiveClassService {
       }
 
       const capacity = (doc.sessionCapacity ?? 30) as number
-      const overflow = Math.max(0, Math.trunc(input.overflowSeats ?? 0))
+      const overflow = Math.max(0, Math.trunc(overflowSeats ?? 0))
       const floors   = cohorts.reduce((n, c) => n + Math.max(0, Math.trunc(c.seatFloor ?? 0)), 0)
       const host     = capacity - floors - overflow
       if (host < 0) {

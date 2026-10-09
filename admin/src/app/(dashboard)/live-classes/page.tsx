@@ -18,6 +18,7 @@ import { datetimeLocalToISO, isoToDatetimeLocal, getActiveTimeZone, zoneOf, fore
 import { useCourses } from '@/lib/api/courses'
 import { useCourseOutline } from '@/lib/api/outline'
 import { GuestCohortsField, cohortsProblem } from '@/components/live-classes/GuestCohortsField'
+import { AcademiesSwitch } from '@/components/live-classes/AcademiesSwitch'
 import type { GuestCohortInput } from '@/lib/api/liveClasses'
 import { useOrgStore } from '@/store/org.store'
 import { useUsers, useProgramInstructors, useDropInstructorOutside } from '@/lib/api/users'
@@ -1351,6 +1352,8 @@ function QuickCreateModal({ onClose, onSuccess, categoryProgram }: { onClose: ()
   const canShareAcrossOrgs = isSuper || me?.role === 'admin'
   const activeOrgId = useOrgStore((st: { activeOrgId: string | null }) => st.activeOrgId)
   const [cohorts,  setCohorts]  = useState<GuestCohortInput[]>([])
+  /* A course shared by both academies: this academy only (default), or both. */
+  const [bothAcademies, setBothAcademies] = useState(false)
   const [overflow, setOverflow] = useState(0)
 
   const { data: outline } = useCourseOutline(courseId)
@@ -1390,7 +1393,8 @@ function QuickCreateModal({ onClose, onSuccess, categoryProgram }: { onClose: ()
   })
   useDropInstructorOutside(instructorsQuery.isSuccess ? instructors : undefined, instructorId, setInstructorId)
 
-  const handleCourseChange = (id: string) => { setCourseId(id); setSectionId('') }
+  const handleCourseChange = (id: string) => { setCourseId(id); setSectionId(''); setBothAcademies(false) }
+  const courseShared = !!(courses.find(c => c.id === courseId) as { sharedAcademies?: boolean } | undefined)?.sharedAcademies
 
   const base   = 'w-full rounded-xl px-3 py-2 text-sm text-white outline-none placeholder:text-white/30'
   const iStyle = { background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.09)' } as const
@@ -1425,6 +1429,7 @@ function QuickCreateModal({ onClose, onSuccess, categoryProgram }: { onClose: ()
         ...(canShareAcrossOrgs && cohorts.length
           ? { guestCohorts: cohorts, overflowSeats: overflow }
           : {}),
+        ...(canShareAcrossOrgs && courseShared && bothAcademies && !cohorts.length ? { bothAcademies: true } : {}),
       })
       onSuccess()
     } catch (err: any) {
@@ -1604,7 +1609,11 @@ function QuickCreateModal({ onClose, onSuccess, categoryProgram }: { onClose: ()
             />
           </div>
 
-          {canShareAcrossOrgs && (
+          {canShareAcrossOrgs && courseShared && !cohorts.length && (
+            <AcademiesSwitch value={bothAcademies} onChange={setBothAcademies} />
+          )}
+
+          {canShareAcrossOrgs && !bothAcademies && (
             <GuestCohortsField
               value={cohorts}
               onChange={setCohorts}
