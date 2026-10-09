@@ -2,8 +2,8 @@
 /* ─────────────────────────────────────────────────────
    Which sales CRM sold an enrolment.
 
-   Finance enrols the students three CRMs sell — Delta's Sales CRM, the Remote
-   CRM and Draw — and says which, so staff here see the same tag finance and
+   Finance enrols the students four CRMs sell — Delta's Sales CRM, the Remote
+   CRM, Draw and the Banglore CRM — and says which, so staff here see the same tag finance and
    Tetra Commission show. A fact about the sale, not about how the student got
    in: that is the enrolment's `source`, and these are all 'purchase'.
 
@@ -17,6 +17,7 @@ export const SALES_CRM_META: Record<SalesCrm, { label: string; color: string }> 
   delta:  { label: 'Sales CRM',  color: '#38BDF8' },
   remote: { label: 'Remote CRM', color: '#FB923C' },
   draw:   { label: 'Draw',       color: '#E879F9' },
+  banglore: { label: 'Banglore CRM', color: '#2DD4BF' },
 }
 
 export function SalesCrmBadge({ crm, size = 'sm' }: { crm?: SalesCrm | null; size?: 'sm' | 'md' }) {

@@ -1775,6 +1775,13 @@ export class OrderService {
     amountMinor?: number
     /** The order's currency, where the caller knows it; otherwise the academy's. */
     currency?: string
+    /**
+     * The academy the student belongs to, where the caller knows better than
+     * the course does (a Banglore CRM sale is a Bangalore student whatever
+     * academy runs the course). Given to a new account, or to one with none;
+     * an account that already belongs to an academy keeps it.
+     */
+    userOrganizationId?: unknown
   }): Promise<{
     userId: string
     created: boolean
@@ -1797,6 +1804,8 @@ export class OrderService {
     const org = organizationId
       ? await OrganizationModel.findById(organizationId as string).select('slug currency').lean()
       : null
+    /* The student's own academy: the caller's, else the course's. */
+    const userOrgId = input.userOrganizationId ?? organizationId
 
     let user = await UserModel.findOne({ email })
     let created = false
@@ -1805,7 +1814,7 @@ export class OrderService {
         name: input.name?.trim() || email.split('@')[0],
         email,
         role: 'student',
-        ...(organizationId ? { organizationId } : {}),
+        ...(userOrgId ? { organizationId: userOrgId } : {}),
         ...(input.phone ? { enrollmentApplication: { phone: input.phone.trim() } } : {}),
       })
       created = true
@@ -1815,8 +1824,8 @@ export class OrderService {
       if (input.phone && !(user as { enrollmentApplication?: { phone?: string } }).enrollmentApplication?.phone) {
         set['enrollmentApplication.phone'] = input.phone.trim()
       }
-      if (organizationId && !(user as { organizationId?: unknown }).organizationId) {
-        set['organizationId'] = organizationId
+      if (userOrgId && !(user as { organizationId?: unknown }).organizationId) {
+        set['organizationId'] = userOrgId
       }
       if (Object.keys(set).length) await UserModel.updateOne({ _id: user._id }, { $set: set })
     }
@@ -1951,6 +1960,28 @@ export class OrderService {
        sends only `amount`, in whole units — stored as it came, that showed
        AED 5,200 as AED 52.00 and counted it a hundredth in revenue. */
     const amountMinor = input.amountMinor ?? Math.round((input.amount ?? 0) * 100)
+
+    /* A Banglore CRM sale is a Bangalore-academy student, whichever academy
+       runs the course (2026-10-09) — the other CRMs' students still take the
+       course's academy, as before. Only a new account, or one with no academy,
+       is put there: an existing student who already belongs to another academy
+       (a Dubai student buying again through the Banglore CRM) is left where
+       they are, because moving them would take them out of that academy's
+       lists, reports and staff's reach without anybody deciding it. */
+    let userOrganizationId: unknown
+    if (input.salesCrm === 'banglore') {
+      const { OrganizationModel } = await import('@/models/schema.ts')
+      const bangalore = await OrganizationModel.findOne({ slug: 'bangalore' }).select('_id').lean()
+      if (bangalore?._id) userOrganizationId = bangalore._id
+      else logger.warn({ externalId: input.externalId }, 'Banglore CRM enrolment: no organisation with slug "bangalore" — the course\'s academy is used')
+      const existing = await UserModel.findOne({ email: input.email.toLowerCase().trim() }).select('organizationId').lean()
+      const theirs = (existing as { organizationId?: unknown } | null)?.organizationId
+      if (bangalore?._id && theirs && String(theirs) !== String(bangalore._id)) {
+        logger.warn({ externalId: input.externalId, userId: String(existing!._id) },
+          'Banglore CRM enrolment for a student of another academy — left in their academy, not moved to Bangalore')
+      }
+    }
+
     const result = await this.provisionManualPurchase({
       email: input.email,
       courseSlug: input.courseSlug,
@@ -1958,6 +1989,7 @@ export class OrderService {
       ...(input.name ? { name: input.name } : {}),
       ...(input.phone ? { phone: input.phone } : {}),
       ...(input.currency ? { currency: input.currency } : {}),
+      ...(userOrganizationId ? { userOrganizationId } : {}),
     })
 
     let access: AccessSummary | undefined

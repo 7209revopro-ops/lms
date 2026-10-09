@@ -9,7 +9,7 @@ import type { TetraCs } from '@/lib/api/tetraCs'
 /* ── Enrollment (student course access) ─────────────── */
 /* Which sales CRM sold an enrolment finance created: Delta's Sales CRM, the
    Remote CRM or Draw. Same codes as finance and the Root portal. */
-export type SalesCrm = 'delta' | 'remote' | 'draw'
+export type SalesCrm = 'delta' | 'remote' | 'draw' | 'banglore'
 
 export interface StudentEnrollment {
   _id:              string

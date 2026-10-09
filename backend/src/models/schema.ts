@@ -791,9 +791,10 @@ export type PaymentAccessStatus = typeof PAYMENT_ACCESS_STATUSES[number]
      delta   Delta's Sales CRM
      remote  the Remote CRM
      draw    Draw
+     banglore  the Banglore CRM (its students are Bangalore-academy students)
    A tag for staff, not a source: `source` above says how somebody was enrolled
    ('purchase' for all of these). Absent on enrolments made any other way. */
-export const SALES_CRMS = ['delta', 'remote', 'draw'] as const
+export const SALES_CRMS = ['delta', 'remote', 'draw', 'banglore'] as const
 export type SalesCrm = typeof SALES_CRMS[number]
 
 /* An enrolment's money as Delta Finance approved it: the course fee, what was

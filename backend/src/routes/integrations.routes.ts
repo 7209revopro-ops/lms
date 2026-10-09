@@ -217,8 +217,10 @@ const financeEnrolmentSchema = z.object({
       mimeType: z.string().max(100).optional(),
     }).nullable().optional(),
   }).optional(),
-  /* Which sales CRM sold it — Delta's Sales CRM, the Remote CRM or Draw — kept
-     on the enrolment as a tag for staff. Absent from an older finance. */
+  /* Which sales CRM sold it — Delta's Sales CRM, the Remote CRM, Draw or the
+     Banglore CRM — kept on the enrolment as a tag for staff. Absent from an
+     older finance. A Banglore CRM student is made a Bangalore-academy student
+     (see provisionFinanceEnrolment). */
   crm: z.enum(SALES_CRMS).optional(),
 })
 
