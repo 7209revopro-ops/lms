@@ -16,6 +16,8 @@
         and flags whether `meetings.space.settings` is among them.
      3. Reads the live access type of the most recent live-class meetings via
         the Meet API and reports OPEN vs knock-required.
+     With --upcoming, step 3 checks EVERY class still ahead (not cancelled)
+     instead of the most recent N — the whole current schedule.
      4. With --reopen, re-applies OPEN to any that are not (best-effort; a room
         hosted by an internal instructor can only be changed with that
         instructor's own auth, which this reports rather than guesses at).
@@ -26,6 +28,8 @@
      bun src/scripts/verify-meet-access.ts
      bun src/scripts/verify-meet-access.ts --limit=20
      bun src/scripts/verify-meet-access.ts --reopen
+     bun src/scripts/verify-meet-access.ts --upcoming            (every upcoming class, read-only)
+     bun src/scripts/verify-meet-access.ts --upcoming --reopen   (open all of them)
 ───────────────────────────────────────────────────────────── */
 import mongoose from 'mongoose'
 import { google } from 'googleapis'
@@ -37,6 +41,7 @@ for (const a of process.argv.slice(2)) {
 }
 const LIMIT  = Number(args.get('limit') ?? 15)
 const REOPEN = args.has('reopen')
+const UPCOMING = args.has('upcoming')
 
 const CLIENT_ID     = process.env['GOOGLE_CLIENT_ID']
 const CLIENT_SECRET = process.env['GOOGLE_CLIENT_SECRET']
@@ -83,11 +88,20 @@ try {
 /* ── 2. the real access type of recent meetings ── */
 await mongoose.connect(process.env['DATABASE_URL'] ?? 'mongodb://localhost:27017/lms')
 const { LiveClassModel } = await import('@/models/schema.ts')
-const classes = await LiveClassModel.find({ googleMeetCode: { $exists: true, $nin: [null, ''] } })
-  .sort({ scheduledStart: -1 }).limit(LIMIT)
-  .select('title scheduledStart googleMeetCode instructorId').lean()
+const classes = UPCOMING
+  ? await LiveClassModel.find({
+      googleMeetCode: { $exists: true, $nin: [null, ''] },
+      scheduledStart: { $gte: new Date() },
+      status: { $ne: 'cancelled' },
+    }).sort({ scheduledStart: 1 })
+      .select('title scheduledStart googleMeetCode instructorId').lean()
+  : await LiveClassModel.find({ googleMeetCode: { $exists: true, $nin: [null, ''] } })
+      .sort({ scheduledStart: -1 }).limit(LIMIT)
+      .select('title scheduledStart googleMeetCode instructorId').lean()
 
-console.log(`\n  Checking the ${classes.length} most recent Meet-backed classes against the live Meet API:\n`)
+console.log(UPCOMING
+  ? `\n  Checking all ${classes.length} upcoming Meet-backed classes against the live Meet API:\n`
+  : `\n  Checking the ${classes.length} most recent Meet-backed classes against the live Meet API:\n`)
 const meet = google.meet({ version: 'v2', auth: oauth })
 const tally: Record<string, number> = {}
 const notOpen: { code: string; title: string; access: string }[] = []
