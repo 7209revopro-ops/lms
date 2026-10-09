@@ -46,7 +46,7 @@ import { UserRepository } from '@/repositories/user.repository.ts'
 import { toSubAdminProgram } from '@/utils/programVocabulary.ts'
 import { studentJoinClosesAt } from '@/services/liveClassJoin.service.ts'
 import { env } from '@/config/env.ts'
-import { mintJoinCode, joinLinkUrl } from '@/services/joinLink.service.ts'
+import { mintJoinCode, joinLinkUrl, joinLinkPath, meetCodeOf } from '@/services/joinLink.service.ts'
 
 const notifSvc = new NotificationService()
 const userRepo = new UserRepository()
@@ -533,7 +533,9 @@ export async function runFiveMinReminders(): Promise<void> {
       const userId  = b.userId.id ?? b.userId._id?.toString()
       const classAt = new Date(b.liveClassId.scheduledStart)
       const code    = await joinCodeFor(b, userId)
-      const joinUrl = code ? joinLinkUrl(code) : getJoinUrl(b.liveClassId)
+      // A Meet class's link carries its meeting code too: the /j page's way straight in when joining is slow.
+      const meet    = meetCodeOf(b.liveClassId.meetingUrl)
+      const joinUrl = code ? joinLinkUrl(code, meet) : getJoinUrl(b.liveClassId)
       const slug    = orgSlugFor((b.userId as { organizationId?: unknown }).organizationId)
       const phone   = b.userId.enrollmentApplication?.phone
 
@@ -551,7 +553,7 @@ export async function runFiveMinReminders(): Promise<void> {
           : code
           ? () => sendClassStartsIn5MinV2WhatsApp(
               phone, b.userId.name, b.liveClassId.title,
-              fmtShortDay(classAt, slug), fmtTime(classAt, slug), code,
+              fmtShortDay(classAt, slug), fmtTime(classAt, slug), joinLinkPath(code, meet),
             )
           : () => sendClassStartsIn5MinWhatsApp(
               phone, b.userId.name, b.liveClassId.title,
@@ -594,7 +596,7 @@ export async function runAtTimeReminders(): Promise<void> {
       const userId  = b.userId.id ?? b.userId._id?.toString()
       const classAt = new Date(b.liveClassId.scheduledStart)
       const code    = await joinCodeFor(b, userId)
-      const joinUrl = code ? joinLinkUrl(code) : getJoinUrl(b.liveClassId)
+      const joinUrl = code ? joinLinkUrl(code, meetCodeOf(b.liveClassId.meetingUrl)) : getJoinUrl(b.liveClassId)
 
       /* The EMAIL carries the student's join link — signs in, records the
          join, opens the meeting (services/joinLink.service.ts); the raw Meet

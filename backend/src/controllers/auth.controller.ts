@@ -198,6 +198,15 @@ export class AuthController {
     }
   }
 
+  /* ── POST /auth/join-link/fallback — the /j page went straight to the meeting; record the join ── */
+  joinLinkFallback = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    try {
+      sendSuccess(res, await this.service.recordJoinLinkFallback(String(req.body.token)))
+    } catch (err) {
+      next(err)
+    }
+  }
+
   /* ── POST /auth/login/2fa ───────────────────────── */
   loginTwoFactor = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     try {

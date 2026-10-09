@@ -11,13 +11,16 @@
         student's session: refused;
      D. unknown, or past its 2 hours: refused;
      E. before the room opens: the join says "too early" with the seconds to wait;
-     F. the 5-minute job puts a fresh code in the email and in WhatsApp v2.
+     F. the 5-minute job puts a fresh code in the email and in WhatsApp v2 —
+        with the Meet code (?m=) for a Google Meet class, never another link's;
+     I. the 30-second way straight in: the join recorded from the code, only
+        where the ordinary join would have been allowed.
    Run: bun --no-env-file src/tests/joinlink.suite.ts
 ───────────────────────────────────────────────────────────── */
 import nodePath from 'node:path'
 import nodeOs from 'node:os'
 
-process.env.DATABASE_URL = 'mongodb://localhost:27017/lms_joinlink'
+process.env.DATABASE_URL = process.env.JOINLINK_DB_URL || 'mongodb://localhost:27017/lms_joinlink'
 process.env.NODE_ENV     = 'test'
 process.env.PORT         = '0'
 process.env.RATE_LIMIT_AUTH_MAX = '900'
@@ -44,7 +47,7 @@ mongoose.set('autoIndex', false)
 const app = (await import('@/app.ts')).default
 const M = await import('@/models/schema.ts')
 const { hashPassword } = await import('@/utils/hash.ts')
-const { mintJoinCode, hashJoinCode, JOIN_LINK_TTL_MS } = await import('@/services/joinLink.service.ts')
+const { mintJoinCode, hashJoinCode, JOIN_LINK_TTL_MS, meetCodeOf } = await import('@/services/joinLink.service.ts')
 const { runFiveMinReminders } = await import('@/jobs/reminders.job.ts')
 
 await mongoose.connect(process.env.DATABASE_URL!)
@@ -149,7 +152,8 @@ try {
   await new Promise(r => setTimeout(r, 400))
   check('one code made for the booking', await M.AuthTokenModel.countDocuments({ purpose: 'join-link', liveClassId: soon._id }) === before + 1)
   const wa = await M.WhatsAppOutboxModel.findOne({ templateName: 'class_starts_in_5_min_v2' }).lean() as any
-  check('WhatsApp v2 sent, its button the code', !!wa && typeof wa.buttonParam === 'string' && wa.buttonParam.length >= 20 && !wa.buttonParam.includes('/'), JSON.stringify(wa?.buttonParam))
+  check('WhatsApp v2 sent, its button the code with the Meet code', !!wa && typeof wa.buttonParam === 'string' && wa.buttonParam.length >= 20 && !wa.buttonParam.includes('/')
+    && wa.buttonParam.endsWith('?m=abc-defg-hij'), JSON.stringify(wa?.buttonParam))
   const fs = await import('node:fs')
   const mails = fs.existsSync(process.env.EMAIL_LOG_DIR!) ? fs.readdirSync(process.env.EMAIL_LOG_DIR!).map(f => fs.readFileSync(nodePath.join(process.env.EMAIL_LOG_DIR!, f), 'utf8')) : []
   check('the email Join button is the same join link', !!wa && mails.some(m => m.includes(`https://lms.example.test/j/${wa.buttonParam}`)), `${mails.length} mails`)
@@ -191,6 +195,27 @@ try {
     const hj = await call('POST', `/live-classes/${cls._id}/join`, { jar: laptop })
     check('and opens the class', hj.status === 200 && !!hj.body?.data?.url, why(hj))
   }
+
+  check('only a Google Meet link gives a code', meetCodeOf('https://meet.google.com/ABC-defg-hij?authuser=0') === 'abc-defg-hij'
+    && meetCodeOf('https://zoom.us/j/123456789?pwd=x') === null && meetCodeOf('https://meet.google.com/lookup/abc') === null && meetCodeOf(undefined) === null)
+
+  section('I · the 30-second way straight in: the join recorded from the code')
+  const now2 = await mkClass(-1 * MIN)
+  await M.ClassBookingModel.create({ userId: ravi._id, liveClassId: now2._id, status: 'booked' })
+  const fb = await call('POST', '/auth/join-link/fallback', { body: { token: await mintJoinCode(String(ravi._id), String(now2._id)) } })
+  const rb = await M.ClassBookingModel.findOne({ userId: ravi._id, liveClassId: now2._id }).lean() as any
+  check('no session needed: recorded, attended by click', fb.status === 200 && fb.body?.data?.recorded === true && !!rb?.attendedAt && rb?.attendanceSource === 'click', why(fb))
+  check('...and no session is issued', !fb.cookies.some(c => c.startsWith('lms_at=')), fb.cookies.join(' | '))
+  const unknownFb = await call('POST', '/auth/join-link/fallback', { body: { token: 'not-a-real-code-at-all' } })
+  check('an unknown code: nothing recorded, no error', unknownFb.status === 200 && unknownFb.body?.data?.recorded === false, why(unknownFb))
+  const early2 = await mkClass(20 * MIN)
+  await M.ClassBookingModel.create({ userId: ravi._id, liveClassId: early2._id, status: 'booked' })
+  const fbEarly = await call('POST', '/auth/join-link/fallback', { body: { token: await mintJoinCode(String(ravi._id), String(early2._id)) } })
+  const rbEarly = await M.ClassBookingModel.findOne({ userId: ravi._id, liveClassId: early2._id }).lean() as any
+  check('before the room opens: not recorded', fbEarly.body?.data?.recorded === false && !rbEarly?.attendedAt, why(fbEarly))
+  const noSeat = await mkClass(-1 * MIN)
+  const fbNoSeat = await call('POST', '/auth/join-link/fallback', { body: { token: await mintJoinCode(String(ravi._id), String(noSeat._id)) } })
+  check('no seat booked: not recorded', fbNoSeat.body?.data?.recorded === false, why(fbNoSeat))
 } catch (err) {
   fail++
   lines.push(`  FAIL  suite threw — ${(err as Error).message}\n${(err as Error).stack}`)

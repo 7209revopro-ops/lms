@@ -11,6 +11,12 @@
    it is made. It signs in once: a second tap with no session finds the class
    but issues nothing, and the join call then renews the browser's own session
    or sends them to sign in and back. Only its SHA-256 is stored.
+
+   A Google Meet class's link also carries the meeting code (?m=abc-defg-hij,
+   the user, 2026-10-09): the /j page shows it, and when signing in and joining
+   take more than 30 seconds it goes straight into the meeting — telling the
+   LMS first (POST /auth/join-link/fallback), which records the join from the
+   code after the same checks as the ordinary join.
 ───────────────────────────────────────────────────────────── */
 import { createHash, randomBytes } from 'node:crypto'
 import { Types } from 'mongoose'
@@ -33,7 +39,18 @@ export async function mintJoinCode(userId: string, liveClassId: string, now = Da
   return raw
 }
 
-export function joinLinkUrl(raw: string): string {
+/** A Google Meet link's meeting code (abc-defg-hij), else null — only Meet's are carried in a join link. */
+export function meetCodeOf(url: unknown): string | null {
+  const m = /^https?:\/\/meet\.google\.com\/([a-z]{3}-[a-z]{4}-[a-z]{3})(?:[/?#]|$)/i.exec(String(url ?? '').trim())
+  return m ? m[1]!.toLowerCase() : null
+}
+
+/** What follows /j/ — the code, and the Meet code when there is one. The WhatsApp Join button takes exactly this. */
+export function joinLinkPath(raw: string, meetCode?: string | null): string {
+  return meetCode ? `${raw}?m=${meetCode}` : raw
+}
+
+export function joinLinkUrl(raw: string, meetCode?: string | null): string {
   const base = (process.env['CLIENT_URL'] ?? 'http://localhost:3000').replace(/\/+$/, '')
-  return `${base}/j/${raw}`
+  return `${base}/j/${joinLinkPath(raw, meetCode)}`
 }

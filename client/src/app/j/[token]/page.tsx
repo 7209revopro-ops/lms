@@ -25,6 +25,14 @@
      · the "taking too long?" links are in the server-rendered HTML and appear
        by CSS alone after a few seconds, so they show up even when this page's
        JavaScript never arrives.
+
+   STRAIGHT INTO THE MEETING (the user, 2026-10-09). A Google Meet class's link
+   carries its meeting code (?m=abc-defg-hij): shown while this works, offered
+   as a plain link in the "taking too long?" panel, and after 30 seconds still
+   signing in or opening — or with the server unreachable — the page goes
+   straight to the meeting, telling the LMS first (POST /auth/join-link/fallback,
+   which records the join from the code after the ordinary join's checks). Not
+   while counting down to the start, and never after the LMS has said no.
 ───────────────────────────────────────────────────────────── */
 import { use, useEffect, useRef, useState } from 'react'
 import Link from 'next/link'
@@ -59,13 +67,44 @@ async function withRetry<T>(call: () => Promise<T>, onRetry: (attempt: number) =
   }
 }
 
+/** A Google Meet code, as the link carries it. */
+const MEET_CODE = /^[a-z]{3}-[a-z]{4}-[a-z]{3}$/
+const STRAIGHT_IN_MS = 30_000
+
 const NETWORK_MESSAGE = 'We could not reach the server. Check your internet connection and try again.'
 
-export default function JoinLinkPage({ params }: { params: Promise<{ token: string }> }) {
+export default function JoinLinkPage({ params, searchParams }: {
+  params: Promise<{ token: string }>
+  searchParams: Promise<{ m?: string | string[] }>
+}) {
   const { token } = use(params)
+  // Read on the server too, so the plain "open the meeting" link is in the HTML even if this script never runs.
+  const rawMeet = use(searchParams).m
+  const meetGuess = String(Array.isArray(rawMeet) ? rawMeet[0] : rawMeet ?? '').trim().toLowerCase()
+  const meet = MEET_CODE.test(meetGuess) ? meetGuess : null
+  const meetUrl = meet ? `https://meet.google.com/${meet}` : null
+  const left = useRef(false)  // on the way to the class already — the way straight in stands down
+  /* Straight to the meeting, the join recorded on the way (fire and forget: this page is leaving). */
+  const straightIn = () => {
+    if (!meetUrl || left.current) return
+    left.current = true
+    void fetch('/api/v1/auth/join-link/fallback', {
+      method: 'POST', keepalive: true, credentials: 'same-origin',
+      headers: { 'content-type': 'application/json' }, body: JSON.stringify({ token }),
+    }).catch(() => {})
+    window.location.replace(meetUrl)
+  }
   const [view, setView] = useState<View>({ kind: 'working', label: 'Signing you in…' })
   const [now, setNow] = useState(() => Date.now())
   const ran = useRef(false)   // the code signs in once — guard StrictMode's double effect
+
+  /* Still signing in or opening after 30 seconds: straight into the meeting. */
+  useEffect(() => {
+    if (view.kind !== 'working' || !meetUrl) return
+    const t = setTimeout(straightIn, STRAIGHT_IN_MS)
+    return () => clearTimeout(t)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [view.kind, meetUrl])
 
   useEffect(() => {
     if (view.kind !== 'wait') return
@@ -81,6 +120,8 @@ export default function JoinLinkPage({ params }: { params: Promise<{ token: stri
 
     const fail = (title: string, err: unknown, fallback: string) => {
       const r = errorOf(err)
+      // The server cannot be reached at all: the meeting can — go straight in rather than stop here.
+      if (!r && meetUrl) { straightIn(); return }
       setView({ kind: 'error', title, message: r ? (r.data?.error?.message ?? fallback) : NETWORK_MESSAGE })
     }
 
@@ -92,6 +133,8 @@ export default function JoinLinkPage({ params }: { params: Promise<{ token: stri
           n => setView({ kind: 'working', label: `Opening your class… (try ${n})` }),
         )
         gone = true
+        if (left.current) return
+        left.current = true
         window.location.replace(res.data.data.url)
       } catch (err) {
         const r = errorOf(err)
@@ -122,7 +165,7 @@ export default function JoinLinkPage({ params }: { params: Promise<{ token: stri
           n => setView({ kind: 'working', label: `Signing you in… (try ${n})` }),
         )
         /* An in-app class has no meeting link: its watch page is the room. */
-        if (res.data.data.inApp) { gone = true; window.location.replace(`/live-classes/${res.data.data.liveClassId}/watch`); return }
+        if (res.data.data.inApp) { gone = true; left.current = true; window.location.replace(`/live-classes/${res.data.data.liveClassId}/watch`); return }
         await join(res.data.data.liveClassId)
       } catch (err) {
         fail('Join link problem', err, 'This join link is invalid or has expired.')
@@ -165,11 +208,18 @@ export default function JoinLinkPage({ params }: { params: Promise<{ token: stri
     return card(<Spinner size={24} />, view.label, (
       <>
         This takes a moment.
+        {meet && <> Meeting code <strong className="font-mono">{meet}</strong> — after 30 seconds you&apos;re taken straight in.</>}
         {/* Revealed by CSS after 10 s — no JavaScript needed, so it appears
             even if the page never finishes loading. */}
         <style>{'@keyframes jlReveal{to{opacity:1;visibility:visible}}.jl-late{opacity:0;visibility:hidden;animation:jlReveal .3s ease-out 10s forwards}'}</style>
         <div className="jl-late mt-5 flex flex-col items-center gap-2">
           <p className="text-xs">Taking longer than usual? Your connection may be slow.</p>
+          {meetUrl && (
+            <a href={meetUrl} onClick={(e) => { e.preventDefault(); straightIn() }}
+              className="inline-flex items-center gap-1.5 rounded-xl px-5 py-2.5 text-sm font-bold text-white" style={{ background: 'var(--color-primary)' }}>
+              <Video size={14} />Open the meeting directly
+            </a>
+          )}
           {ways}
         </div>
       </>

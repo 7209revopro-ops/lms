@@ -1133,6 +1133,45 @@ export class AuthService {
     return { liveClassId, inApp, user: toSafeUser(user), tokens }
   }
 
+  /* ── A join link's way straight into the meeting (the user, 2026-10-09) ──
+       Signing in and joining took more than 30 seconds, so the /j page is
+       sending the student straight to the Google Meet code in their link —
+       and tells this first, so the join is still recorded for attendance.
+       The code names the student and the class; the ordinary join's checks
+       (seat, enrolment, module, academy, account, the time window) run here
+       too, so nothing is recorded that the Join button would have refused.
+       Never an error the page has to handle: it has already left. */
+  async recordJoinLinkFallback(rawCode: string): Promise<{ recorded: boolean }> {
+    const { AuthTokenModel, UserModel } = await import('@/models/schema.ts')
+    const { hashJoinCode } = await import('@/services/joinLink.service.ts')
+    const { resolveMeetJoin } = await import('@/services/liveClassJoin.service.ts')
+    const { meetingDisplayName } = await import('@/utils/meetingIdentity.ts')
+    const doc = await AuthTokenModel.findOne({
+      tokenHash: hashJoinCode(String(rawCode ?? '')), purpose: 'join-link', expiresAt: { $gt: new Date() },
+    }).lean() as { userId: unknown; liveClassId?: unknown } | null
+    if (!doc?.liveClassId) return { recorded: false }
+    const me = await UserModel.findById(doc.userId)
+      .select('name email role enrollmentStatus isActive organizationId').lean() as {
+        _id: unknown; name?: string; email: string; role: string; enrollmentStatus?: string; isActive?: boolean; organizationId?: unknown
+      } | null
+    if (!me || me.isActive === false) return { recorded: false }
+    try {
+      await resolveMeetJoin(String(doc.liveClassId), {
+        userId: String(me._id),
+        name: meetingDisplayName({ name: me.name, email: me.email }, 'Student'),
+        email: me.email,
+        role: me.role,
+        ...(me.organizationId ? { organizationId: String(me.organizationId) } : {}),
+        ...(me.enrollmentStatus ? { enrollmentStatus: me.enrollmentStatus } : {}),
+        isActive: true,
+      })
+      logger.info({ userId: String(me._id), liveClassId: String(doc.liveClassId) }, 'Join recorded from a join link that went straight to the meeting')
+      return { recorded: true }
+    } catch {
+      return { recorded: false }
+    }
+  }
+
   /* ── Sign in somebody the Root portal vouches for ──
        The portal is the identity provider for this estate: a person signs in
        there once and opens each system from it. What arrives here is a
