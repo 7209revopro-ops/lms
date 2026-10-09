@@ -35,6 +35,7 @@ export interface EnrollmentApplication {
 export interface ImpersonationState {
   actorEmail?: string
   readOnly:    boolean
+  mode?:       'read' | 'write'
 }
 
 export interface CurrentUser {

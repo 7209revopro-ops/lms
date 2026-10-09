@@ -73,7 +73,9 @@ export function ImpersonationBanner() {
       {imp.actorEmail && (
         <span style={{ opacity: 0.85 }}>· signed in as {imp.actorEmail}</span>
       )}
-      <span style={{ opacity: 0.85 }}>· read-only</span>
+      {imp.readOnly === false
+        ? <span style={{ opacity: 0.95 }}>· read &amp; write — changes you make are recorded as you</span>
+        : <span style={{ opacity: 0.85 }}>· read-only</span>}
       <button
         onClick={exit}
         disabled={exiting}

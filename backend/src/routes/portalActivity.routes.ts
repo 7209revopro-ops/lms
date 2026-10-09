@@ -149,8 +149,8 @@ router.post('/enrolment-requests/:userId/reject', checkedCaller, wrap(async (req
  * code for the student app (services/portalStudentView.service.ts).
  */
 router.post('/students/view', checkedCaller, wrap(async (req, res) => {
-  const { email, byName, byEmail } = (req.body ?? {}) as Record<string, unknown>
-  sendSuccess(res, await studentViewForPortal({ email, byName, byEmail }), 'View as student')
+  const { email, byName, byEmail, mode } = (req.body ?? {}) as Record<string, unknown>
+  sendSuccess(res, await studentViewForPortal({ email, byName, byEmail, mode }), 'View as student')
 }))
 
 /**

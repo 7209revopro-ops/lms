@@ -418,7 +418,9 @@ export class AuthController {
       const impersonation = req.user!.impersonationId
         ? {
             actorEmail: req.user!.impersonatorEmail,
-            readOnly:   true,
+            /* false only for a session started read & write (auth.middleware.ts denyImpersonatedWrite) */
+            readOnly:   req.user!.impersonationMode !== 'write',
+            mode:       req.user!.impersonationMode ?? 'read',
           }
         : undefined
 

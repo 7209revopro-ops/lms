@@ -26,6 +26,7 @@ export interface AuthUser {
   impersonatorId?:    string
   impersonatorEmail?: string
   impersonationId?:   string   // the ImpersonationSession being used
+  impersonationMode?: 'read' | 'write'   // that session's mode — 'write' lets the client portal change things (audited)
   /* A custom role assigned to this account (P-10). Only NARROWS what the base
      role already permits — see requirePermission(). Undefined for almost
      everyone, which is why resolving the matrix costs nothing in practice. */

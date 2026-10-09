@@ -491,6 +491,8 @@ export class AdminController {
       }
 
       const ttl = process.env['IMPERSONATION_EXPIRES_IN']?.trim() || '30m'
+      /* Read only unless asked for read & write (the user, 2026-10-09) — see auth.middleware.ts denyImpersonatedWrite. */
+      const mode: 'read' | 'write' = (req.body as { mode?: unknown } | undefined)?.mode === 'write' ? 'write' : 'read'
 
       const { ImpersonationSessionModel, ImpersonationHandoffModel } =
         await import('@/models/schema.ts')
@@ -514,6 +516,7 @@ export class AdminController {
         expiresAt:      new Date(Date.now() + toSeconds(ttl) * 1000),
         ip:             (req.ip ?? req.socket?.remoteAddress) || undefined,
         userAgent:      req.headers['user-agent'] || undefined,
+        mode,
       })
 
       /* Hashed at rest: the raw code is a bearer secret for its 60 seconds, and
@@ -536,6 +539,7 @@ export class AdminController {
         /* The admin app opens this; the code never touches the admin's storage. */
         clientUrl:       `${clientBase}/imp/enter?code=${code}`,
         user: { id: String(target._id), name: target.name, email: target.email },
+        mode,
       }, 'Impersonation handoff created')
     } catch (err) { next(err) }
   }

@@ -89,7 +89,7 @@ async function applyImpersonation(
 
   const { ImpersonationSessionModel } = await import('@/models/schema.ts')
   const session = await ImpersonationSessionModel.findById(payload.isn)
-    .select('revokedAt expiresAt actorId actorEmail').lean()
+    .select('revokedAt expiresAt actorId actorEmail mode').lean()
 
   if (!session) {
     sendError(res, 'IMPERSONATION_INVALID', 'This impersonation session is not valid.', 401)
@@ -110,11 +110,12 @@ async function applyImpersonation(
   req.user!.impersonatorId    = String(session.actorId)
   req.user!.impersonatorEmail = session.actorEmail
   req.user!.impersonationId   = String(payload.isn)
+  req.user!.impersonationMode = (session as { mode?: string }).mode === 'write' ? 'write' : 'read'
   return true
 }
 
 /* ─────────────────────────────────────────────────────
-   Client-portal impersonation is READ-ONLY
+   Client-portal impersonation is READ-ONLY — unless started read & write (below)
    ─────────────────────────────────────────────────────
    Anything written while impersonating is attributed to the STUDENT: a booking
    they did not make, an assignment they did not submit, an order they did not
@@ -131,9 +132,70 @@ async function applyImpersonation(
 ───────────────────────────────────────────────────── */
 const READ_METHODS = new Set(['GET', 'HEAD', 'OPTIONS'])
 
+/* ── READ & WRITE sessions (the user, 2026-10-09) ─────────────────────
+   A session started in 'write' mode (admin Users → View as student → Read &
+   write; the commission portal's "Act as student") may change things for the
+   student — book a seat, submit work, send a message — with two guards:
+
+     · these stay refused even then: the account's own security (password,
+       email, 2FA, sessions, deactivating or deleting it), payments and
+       orders, and identity documents;
+     · every write is audited as user.impersonate.write — the operator, the
+       student, the method, the path and the answer's status — so a change
+       made this way can always be told from the student's own. */
+const IMPERSONATION_WRITE_BLOCKED: RegExp[] = [
+  /^\/auth\/me\/(password|email|enrollment-docs|complete-registration)(\/|$)/,
+  /^\/auth\/(confirm-email-change|resend-verification|logout-all|deactivate|account)(\/|$)/,
+  /^\/auth\/(2fa|sessions)(\/|$)/,
+  /^\/(checkout|orders|coupons)(\/|$)/,
+  /^\/uploads\/(kyc|signup-doc)(\/|$)/,
+]
+
+/** The request's path under /api/v1, without the query. */
+const apiPath = (req: Request) => (req.originalUrl || req.url || '').split('?')[0]!.replace(/^\/api\/v1(?=\/)/, '')
+
+export function impersonatedWriteBlocked(path: string): boolean {
+  return IMPERSONATION_WRITE_BLOCKED.some(rx => rx.test(path))
+}
+
+function auditImpersonatedWrite(req: Request, res: Response): void {
+  const u = req.user!
+  const path = apiPath(req)
+  res.once('finish', () => {
+    void (async () => {
+      const { AuditLogModel } = await import('@/models/schema.ts')
+      await AuditLogModel.create({
+        actorId:    u.impersonatorId,
+        actorEmail: u.impersonatorEmail ?? '',
+        actorRole:  'impersonator',
+        action:     'user.impersonate.write',
+        entity:     'User',
+        entityId:   u.id,
+        meta:       { method: req.method, path, status: res.statusCode, sessionId: u.impersonationId, studentEmail: u.email },
+        ip:         (req.ip ?? req.socket?.remoteAddress) || undefined,
+        userAgent:  req.headers['user-agent'] || undefined,
+        ...(u.organizationId ? { organizationId: u.organizationId } : {}),
+      })
+    })().catch(() => { /* the trail must never break the request it records */ })
+  })
+}
+
 function denyImpersonatedWrite(req: Request, res: Response): boolean {
   if (!req.user?.impersonationId) return true
   if (READ_METHODS.has(req.method)) return true
+  if (req.user.impersonationMode === 'write') {
+    if (!impersonatedWriteBlocked(apiPath(req))) {
+      auditImpersonatedWrite(req, res)
+      return true
+    }
+    sendError(
+      res,
+      'IMPERSONATION_WRITE_BLOCKED',
+      "Not while acting as the student: their password, email, login security, account, payments and ID documents are theirs to change.",
+      403,
+    )
+    return false
+  }
   sendError(
     res,
     'IMPERSONATION_READ_ONLY',

@@ -2417,6 +2417,12 @@ export interface IImpersonationSession extends Document {
   revokedBy?:     Types.ObjectId
   ip?:            string
   userAgent?:     string
+  /* 'read' (the default, and every session before 2026-10-09): the client portal refuses every write.
+     'write': changes are allowed — except the account's own security, deleting it, payments and ID documents
+     (auth.middleware.ts IMPERSONATION_WRITE_BLOCKED) — and each one is audited as user.impersonate.write,
+     naming the operator. Started as 'write' only on purpose (admin Users → View as student → Read & write, or
+     the commission portal's "Act as student"). */
+  mode?:          'read' | 'write'
   createdAt:      Date
   updatedAt:      Date
 }
@@ -2433,6 +2439,7 @@ const ImpersonationSessionSchema = new Schema<IImpersonationSession>(
     revokedBy:      { type: Schema.Types.ObjectId, ref: 'User' },
     ip:             { type: String },
     userAgent:      { type: String },
+    mode:           { type: String, enum: ['read', 'write'], default: 'read' },
   },
   baseSchemaOptions,
 )
@@ -2550,6 +2557,7 @@ export type AuditAction =
   | 'user.delete'     | 'user.impersonate' | 'user.reset2fa'
   | 'user.impersonate.revoke'
   | 'user.impersonate.client'
+  | 'user.impersonate.write'
   | 'recording.view'
   | 'booking.cancel'
   | 'booking.bulkAttendance'

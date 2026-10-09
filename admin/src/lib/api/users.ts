@@ -253,13 +253,16 @@ export interface ClientImpersonationHandoff {
   impersonationId: string
   clientUrl:       string
   user:            { id: string; name: string; email: string }
+  mode?:           'read' | 'write'
 }
 
+/* mode 'write' — read & write (2026-10-09): the student portal lets the operator change things, except the student's
+   security, payments and ID documents, and records every change as theirs (backend auth.middleware.ts). */
 export function useImpersonateClient() {
   return useMutation({
-    mutationFn: async (userId: string): Promise<ClientImpersonationHandoff> => {
+    mutationFn: async ({ userId, mode = 'read' }: { userId: string; mode?: 'read' | 'write' }): Promise<ClientImpersonationHandoff> => {
       const res = await api.post<{ success: true; data: ClientImpersonationHandoff }>(
-        `/admin/users/${userId}/impersonate-client`,
+        `/admin/users/${userId}/impersonate-client`, { mode },
       )
       return res.data.data
     },

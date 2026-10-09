@@ -4,7 +4,7 @@ import { useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
   Search, Mail, Calendar, CheckCircle2, XCircle,
-  ChevronLeft, ChevronRight, MoreHorizontal, ShieldCheck, ShieldOff, ArrowUp, ArrowDown, Pencil, Eye,
+  ChevronLeft, ChevronRight, MoreHorizontal, ShieldCheck, ShieldOff, ArrowUp, ArrowDown, Pencil, Eye, PenLine,
 } from 'lucide-react'
 import { useUsers, useUpdateUser, useImpersonateClient, type AdminUser } from '@/lib/api/users'
 import { useCurrentUser } from '@/lib/api/user'
@@ -227,17 +227,22 @@ function UserRow({ user, index, onEdit, onViewHistory }: {
      drawn there. */
   const isLent = user.role === 'instructor' && !!user.sharedAcrossOrgs
 
-  const viewAsStudent = async () => {
+  const viewAsStudent = async (mode: 'read' | 'write' = 'read') => {
     setMenuOpen(false)
-    if (!confirm(
-      `Open the student portal as ${user.name}?
+    if (!confirm(mode === 'write'
+      ? `Act as ${user.name} in the student portal — READ & WRITE?
 
 ` +
-      'The session is READ-ONLY, lasts 30 minutes, and is recorded against your account. ' +
-      'It opens in a new tab and does not affect your own sessions.',
+        'You can book, submit and send messages as them; their password, email, payments and ID documents stay locked. ' +
+        'Every change you make is recorded as yours. Lasts 30 minutes and opens in a new tab.'
+      : `Open the student portal as ${user.name}?
+
+` +
+        'The session is READ-ONLY, lasts 30 minutes, and is recorded against your account. ' +
+        'It opens in a new tab and does not affect your own sessions.',
     )) return
     try {
-      const handoff = await viewAs.mutateAsync(user.id)
+      const handoff = await viewAs.mutateAsync({ userId: user.id, mode })
       /* Opened immediately in the click handler's own turn — a popup blocker
          would eat a window opened later from an async continuation. */
       const opened = window.open(handoff.clientUrl, '_blank', 'noopener,noreferrer')
@@ -437,12 +442,20 @@ function UserRow({ user, index, onEdit, onViewHistory }: {
                 className="absolute right-2 top-10 z-40 w-52 rounded-2xl p-1.5 z-50"
                 style={{ background: '#13141C', border: '1px solid rgba(255,255,255,0.07)', boxShadow: '0 16px 40px rgba(0,0,0,0.45)' }}>
                 {canViewAsStudent && (
-                  <button onClick={viewAsStudent} disabled={viewAs.isPending}
-                    className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-xs font-semibold transition-colors hover:bg-white/[0.05] disabled:opacity-40"
-                    style={{ color: '#60A5FA' }}>
-                    {viewAs.isPending ? <Spinner size={12} /> : <Eye size={12} />}
-                    View as student
-                  </button>
+                  <>
+                    <button onClick={() => void viewAsStudent('read')} disabled={viewAs.isPending}
+                      className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-xs font-semibold transition-colors hover:bg-white/[0.05] disabled:opacity-40"
+                      style={{ color: '#60A5FA' }}>
+                      {viewAs.isPending ? <Spinner size={12} /> : <Eye size={12} />}
+                      View as student · read only
+                    </button>
+                    <button onClick={() => void viewAsStudent('write')} disabled={viewAs.isPending}
+                      className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-xs font-semibold transition-colors hover:bg-white/[0.05] disabled:opacity-40"
+                      style={{ color: '#FBBF24' }}>
+                      {viewAs.isPending ? <Spinner size={12} /> : <PenLine size={12} />}
+                      Act as student · read &amp; write
+                    </button>
+                  </>
                 )}
                 <button onClick={() => setActive(!user.isActive)}
                   className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-xs font-semibold transition-colors hover:bg-white/[0.05]"

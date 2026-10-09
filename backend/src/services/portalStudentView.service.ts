@@ -39,8 +39,12 @@ function oneEmail(raw: unknown): string {
   return email
 }
 
-export async function studentViewForPortal(input: { email: unknown; byName: unknown; byEmail: unknown }) {
+export async function studentViewForPortal(input: { email: unknown; byName: unknown; byEmail: unknown; mode?: unknown }) {
   const email = oneEmail(input.email)
+  /* "Act as student" (the user, 2026-10-09): read & write — auth.middleware.ts denyImpersonatedWrite lets it change
+     things except the account's security, payments and ID documents, and audits each change as the person. The
+     portal decides who may ask for it. */
+  const mode: 'read' | 'write' = input.mode === 'write' ? 'write' : 'read'
   const student = await UserModel.findOne({ email, role: 'student' }).select('_id name email isActive organizationId').lean() as
     { _id: unknown; name?: string; email: string; isActive?: boolean; organizationId?: unknown } | null
   if (!student) throw new PortalError('NOT_FOUND', 'This student has no account in the LMS', 404)
@@ -62,6 +66,7 @@ export async function studentViewForPortal(input: { email: unknown; byName: unkn
     organizationId: student.organizationId,
     expiresAt: new Date(Date.now() + toSeconds(ttl) * 1000),
     userAgent: `Tetra Commission — ${by.name || actorEmail}`.slice(0, 300),
+    mode,
   })
 
   // Hashed at rest: the raw code is a bearer secret for its 60 seconds, and a database read should not yield one.
@@ -79,7 +84,7 @@ export async function studentViewForPortal(input: { email: unknown; byName: unkn
     action: 'user.impersonate.client',
     entity: 'User',
     entityId: String(student._id),
-    meta: { via: 'tetra-commission', byName: by.name, byEmail: by.email, from: account.own ? 'own' : 'shared', sessionId: String(session._id) },
+    meta: { via: 'tetra-commission', byName: by.name, byEmail: by.email, from: account.own ? 'own' : 'shared', sessionId: String(session._id), mode },
     userAgent: 'Tetra Commission',
     organizationId: student.organizationId,
   })
@@ -90,5 +95,6 @@ export async function studentViewForPortal(input: { email: unknown; byName: unkn
     expiresIn: HANDOFF_TTL_MS / 1000,
     sessionExpiresAt: session.expiresAt.toISOString(),
     from: account.own ? 'own' : 'shared',
+    mode,
   }
 }
