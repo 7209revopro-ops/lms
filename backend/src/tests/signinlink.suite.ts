@@ -214,6 +214,28 @@ try {
   sent = await outbox('todays_classes_v1')
   const an = sent.find(s => s.to.endsWith('9526288116'))
   check('bangalore run: anil, in IST', !!an && an.params?.[1] === '11:30 AM MBT 1 · Morning (IST)', JSON.stringify(an?.params))
+
+  section('L · the answer was lost: tapping again signs in again; a pending laptop spends no sign-in')
+  {
+    const kiran = await mkStudent('kiran', { phone: '+919500000001' })
+    const c1 = await mintSigninCode(String(kiran._id), '/my-bookings')
+    const first: Jar = new Map()
+    const l1 = await call('POST', '/auth/signin-link/redeem', { jar: first, body: { token: c1 } })
+    check('first tap signs in', l1.status === 200 && first.has('lms_at'), `${l1.status}`)
+    const lost: Jar = new Map([['lms_device', first.get('lms_device')!]])
+    const l2 = await call('POST', '/auth/signin-link/redeem', { jar: lost, body: { token: c1 } })
+    check('the same browser retrying is signed in again', l2.status === 200 && lost.has('lms_at'), `${l2.status}`)
+
+    const c2 = await mintSigninCode(String(kiran._id), '/my-bookings')
+    const laptop: Jar = new Map()
+    const p1 = await call('POST', '/auth/signin-link/redeem', { jar: laptop, body: { token: c2 } })
+    check('a second device is refused while pending', p1.status === 403 && p1.body?.error?.code === 'DEVICE_PENDING', `${p1.status} ${p1.body?.error?.code}`)
+    const tok = await M.AuthTokenModel.findOne({ tokenHash: hashSigninCode(c2) }).lean() as any
+    check('and no sign-in is spent by that refusal', !tok?.useCount && !tok?.usedAt, `useCount=${tok?.useCount}`)
+    await M.DeviceModel.updateOne({ userId: kiran._id, deviceId: laptop.get('lms_device') }, { $set: { status: 'approved', approvedAt: new Date() } })
+    const p2 = await call('POST', '/auth/signin-link/redeem', { jar: laptop, body: { token: c2 } })
+    check('once approved, the same link signs the laptop in', p2.status === 200 && laptop.has('lms_at'), `${p2.status} ${p2.body?.error?.code ?? ''}`)
+  }
 } catch (err) {
   fail++
   lines.push(`  FAIL  suite threw — ${(err as Error).message}\n${(err as Error).stack}`)

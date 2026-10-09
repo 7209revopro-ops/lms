@@ -101,7 +101,10 @@ api.interceptors.response.use(
 
     isRefreshing = true
     try {
-      await axios.post('/api/v1/auth/refresh', null, { withCredentials: true })
+      /* Bounded like every other call. Without a timeout a refresh stalled on
+         a poor connection never settled, and every request queued behind it
+         (refreshQueue) waited with it — a page simply spun. */
+      await axios.post('/api/v1/auth/refresh', null, { withCredentials: true, timeout: 15_000 })
       isRefreshing = false
       drainQueue(true)
       return api(original)

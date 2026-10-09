@@ -1045,7 +1045,7 @@ export class AuthService {
 
     const doc = await AuthTokenModel.findOne({
       tokenHash: hashSigninCode(String(rawCode ?? '')), purpose: 'signin-link', expiresAt: { $gt: new Date() },
-    }).lean() as { _id: unknown; userId: unknown; nextPath?: string } | null
+    }).lean() as { _id: unknown; userId: unknown; nextPath?: string; useCount?: number } | null
     if (!doc) throw expired()
     const owner = String(doc.userId), next = safeNextPath(doc.nextPath ?? '/my-bookings')
 
@@ -1055,16 +1055,19 @@ export class AuthService {
       }
       return { next }
     }
+    const user = await this.userRepo.findById(owner)
+    if (!user || !user.isActive) throw expired()
+    /* Device gate BEFORE a use is spent — see redeemJoinLink. */
+    if ((doc.useCount ?? 0) < LINK_MAX_SIGNINS) await this.#enforceDeviceForLogin(user.id, user.role, meta)
+
     const claimed = await AuthTokenModel.updateOne(
       { _id: doc._id, $or: [{ useCount: { $lt: LINK_MAX_SIGNINS } }, { useCount: { $exists: false } }] },
       { $inc: { useCount: 1 }, $set: { usedAt: new Date() } },
     )
     if (claimed.modifiedCount === 0) return { next }
 
-    const user = await this.userRepo.findById(owner)
-    if (!user || !user.isActive) throw expired()
     void this.userRepo.touchLastLogin(user.id)
-    const tokens = await this.#issueLoginTokens(user.id, user.email, user.role, meta, 'client')
+    const tokens = await this.#issueTokens(user.id, user.email, user.role, meta, 'client')
     logger.info({ userId: user.id, next }, 'Student signed in via sign-in link')
     return { next, user: toSafeUser(user), tokens }
   }
@@ -1090,7 +1093,7 @@ export class AuthService {
 
     const doc = await AuthTokenModel.findOne({
       tokenHash: hashJoinCode(String(rawCode ?? '')), purpose: 'join-link', expiresAt: { $gt: new Date() },
-    }).lean() as { _id: unknown; userId: unknown; liveClassId?: unknown; usedAt?: Date } | null
+    }).lean() as { _id: unknown; userId: unknown; liveClassId?: unknown; usedAt?: Date; useCount?: number } | null
     if (!doc?.liveClassId) throw expired()
     const owner = String(doc.userId), liveClassId = String(doc.liveClassId)
     /* An in-app class has no meeting link to hand over — the /j page sends
@@ -1106,6 +1109,17 @@ export class AuthService {
       return { liveClassId, inApp }
     }
 
+    const user = await this.userRepo.findById(owner)
+    if (!user || !user.isActive) throw expired()
+
+    /* The device gate runs BEFORE a use is spent. It used to run after, so a
+       student opening the link on a browser still waiting for an admin's
+       device approval (every browser after the first, by default) spent a
+       sign-in on the refusal — enough taps and the link was used up before
+       the approval came, leaving a password many students do not have. Only
+       when a use is left: a spent link issues nothing either way. */
+    if ((doc.useCount ?? 0) < LINK_MAX_SIGNINS) await this.#enforceDeviceForLogin(user.id, user.role, meta)
+
     /* Claimed atomically, one use per sign-in, up to LINK_MAX_SIGNINS. */
     const claimed = await AuthTokenModel.updateOne(
       { _id: doc._id, $or: [{ useCount: { $lt: LINK_MAX_SIGNINS } }, { useCount: { $exists: false } }] },
@@ -1113,10 +1127,8 @@ export class AuthService {
     )
     if (claimed.modifiedCount === 0) return { liveClassId, inApp }
 
-    const user = await this.userRepo.findById(owner)
-    if (!user || !user.isActive) throw expired()
     void this.userRepo.touchLastLogin(user.id)
-    const tokens = await this.#issueLoginTokens(user.id, user.email, user.role, meta, 'client')
+    const tokens = await this.#issueTokens(user.id, user.email, user.role, meta, 'client')
     logger.info({ userId: user.id, liveClassId }, 'Student signed in via class join link')
     return { liveClassId, inApp, user: toSafeUser(user), tokens }
   }

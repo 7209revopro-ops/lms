@@ -153,6 +153,44 @@ try {
   const fs = await import('node:fs')
   const mails = fs.existsSync(process.env.EMAIL_LOG_DIR!) ? fs.readdirSync(process.env.EMAIL_LOG_DIR!).map(f => fs.readFileSync(nodePath.join(process.env.EMAIL_LOG_DIR!, f), 'utf8')) : []
   check('the email Join button is the same join link', !!wa && mails.some(m => m.includes(`https://lms.example.test/j/${wa.buttonParam}`)), `${mails.length} mails`)
+
+  section('G · the answer was lost: tapping again signs the student in again')
+  {
+    const anil = await mkStudent('anil')
+    const cls = await mkClass(-2 * MIN)
+    await M.ClassBookingModel.create({ userId: anil._id, liveClassId: cls._id, status: 'booked' })
+    const c = await mintJoinCode(String(anil._id), String(cls._id))
+    const first: Jar = new Map()
+    const g1 = await call('POST', '/auth/join-link/redeem', { jar: first, body: { token: c } })
+    check('first tap signs in', g1.body?.data?.signedIn === true, why(g1))
+    /* The browser kept only its device cookie — the session cookies never arrived. */
+    const lost: Jar = new Map([['lms_device', first.get('lms_device')!]])
+    const g2 = await call('POST', '/auth/join-link/redeem', { jar: lost, body: { token: c } })
+    check('the same browser retrying is signed in again', g2.status === 200 && g2.body?.data?.signedIn === true && lost.has('lms_at'), why(g2))
+    const gj = await call('POST', `/live-classes/${cls._id}/join`, { jar: lost })
+    check('and the join then opens the meeting', gj.status === 200 && !!gj.body?.data?.url, why(gj))
+  }
+
+  section('H · a laptop waiting for device approval does not burn the link')
+  {
+    const alwin = await mkStudent('alwin')
+    const phone: Jar = new Map()
+    const pl = await call('POST', '/auth/login', { jar: phone, body: { email: 'alwin@jl.local', password: PW } })
+    check('(signed up and signed in on a phone — device 1, approved)', pl.status === 200, why(pl))
+    const cls = await mkClass(-2 * MIN)
+    await M.ClassBookingModel.create({ userId: alwin._id, liveClassId: cls._id, status: 'booked' })
+    const c = await mintJoinCode(String(alwin._id), String(cls._id))
+    const laptop: Jar = new Map()
+    const h1 = await call('POST', '/auth/join-link/redeem', { jar: laptop, body: { token: c } })
+    check('the laptop is refused while its approval is pending', h1.status === 403 && h1.body?.error?.code === 'DEVICE_PENDING', why(h1))
+    const tok = await M.AuthTokenModel.findOne({ tokenHash: hashJoinCode(c) }).lean() as any
+    check('and no sign-in is spent by that refusal', !tok?.useCount && !tok?.usedAt, `useCount=${tok?.useCount}`)
+    await M.DeviceModel.updateOne({ userId: alwin._id, deviceId: laptop.get('lms_device') }, { $set: { status: 'approved', approvedAt: new Date() } })
+    const h2 = await call('POST', '/auth/join-link/redeem', { jar: laptop, body: { token: c } })
+    check('once approved, the SAME link signs the laptop in', h2.status === 200 && h2.body?.data?.signedIn === true, why(h2))
+    const hj = await call('POST', `/live-classes/${cls._id}/join`, { jar: laptop })
+    check('and opens the class', hj.status === 200 && !!hj.body?.data?.url, why(hj))
+  }
 } catch (err) {
   fail++
   lines.push(`  FAIL  suite threw — ${(err as Error).message}\n${(err as Error).stack}`)

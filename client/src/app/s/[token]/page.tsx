@@ -23,13 +23,14 @@ export default function SigninLinkPage({ params }: { params: Promise<{ token: st
     ran.current = true
     void (async () => {
       try {
-        const res = await api.post<{ data: { next: string } }>('/auth/signin-link/redeem', { token })
+        const res = await api.post<{ data: { next: string } }>('/auth/signin-link/redeem', { token }, { timeout: 12_000 })
         const next = res.data.data.next
         /* Full navigation, so the new session cookie is used everywhere. */
         window.location.replace(next.startsWith('/') && !next.startsWith('//') ? next : '/my-bookings')
       } catch (err) {
         const msg = (err as { response?: { data?: { error?: { message?: string } } } })?.response?.data?.error?.message
-        setError(msg ?? 'This link is invalid or has expired.')
+        const answered = !!(err as { response?: unknown })?.response
+        setError(msg ?? (answered ? 'This link is invalid or has expired.' : 'We could not reach the server. Check your internet connection and open the link again.'))
       }
     })()
   }, [token])
@@ -42,6 +43,17 @@ export default function SigninLinkPage({ params }: { params: Promise<{ token: st
           <div className="flex flex-col items-center gap-3 py-4">
             <Spinner size={24} />
             <p className="text-sm" style={{ color: 'var(--color-text-muted)' }}>Signing you in…</p>
+            {/* Revealed by CSS after 10 s — no JavaScript needed, so a student
+                on a connection that never finishes loading the page still has
+                a way forward (same as /j). */}
+            <style>{'@keyframes slReveal{to{opacity:1;visibility:visible}}.sl-late{opacity:0;visibility:hidden;animation:slReveal .3s ease-out 10s forwards}'}</style>
+            <div className="sl-late mt-3 flex flex-col items-center gap-2">
+              <p className="text-xs" style={{ color: 'var(--color-text-muted)' }}>Taking longer than usual? Your connection may be slow.</p>
+              <a href={`/s/${token}`} className="rounded-xl px-5 py-2.5 text-sm font-bold text-white" style={{ background: 'var(--color-primary)' }}>Try again</a>
+              <Link href={`/login?method=email&from=${encodeURIComponent('/my-bookings')}`} className="text-sm font-semibold" style={{ color: 'var(--color-primary)' }}>
+                Sign in with an email code
+              </Link>
+            </div>
           </div>
         ) : (
           <div className="flex flex-col items-center gap-3">
