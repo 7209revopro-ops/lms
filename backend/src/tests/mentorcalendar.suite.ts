@@ -94,6 +94,21 @@ try {
   const c3 = await call('POST', `/admin/mentor-calendar/meetings/${b3.body?.data?.meeting?.id}/cancel`, adminJ)
   check('an admin cancels anyone\'s', b3.status === 200 && c3.status === 200, `${b3.status} ${c3.status}`)
 
+  section('E · each class with its course and module (for the calendars\' filters)')
+  const course = (await M.CourseModel.collection.insertOne({ title: 'Delta Wave Theory', slug: 'dwt-mc', organizationId: dubai._id, status: 'published', createdAt: new Date(), updatedAt: new Date() })).insertedId
+  const modA = (await M.SectionModel.collection.insertOne({ courseId: course, title: 'Fibonacci levels', order: 1, createdAt: new Date(), updatedAt: new Date() })).insertedId
+  const when = new Date(Date.now() + 3 * DAY)
+  const cls = (title: string, org: unknown, extra: Record<string, unknown>) => M.LiveClassModel.collection.insertOne({ title, instructorId: haf._id, organizationId: org, scheduledStart: when, durationMins: 60, status: 'scheduled', bookedCount: 2, sessionCapacity: 10, createdAt: new Date(), updatedAt: new Date(), ...extra })
+  await cls('Fib live', dubai._id, { courseId: course, sectionId: modA })
+  await cls('Course-wide Q&A', dubai._id, { courseId: course })
+  await cls('Their class', blr._id, { courseId: course, sectionId: modA })
+  r = await cal(moizJ)
+  const hafClasses = ((r.body?.data?.mentors ?? []).find((m: any) => m.email === 'haf@mc.local')?.classes ?? []) as any[]
+  const fib = hafClasses.find(c => c.title === 'Fib live'), qa = hafClasses.find(c => c.title === 'Course-wide Q&A'), theirs = hafClasses.find(c => c.mine === false)
+  check('a class carries its course and module', fib?.course === 'Delta Wave Theory' && fib?.module === 'Fibonacci levels' && fib?.courseId === String(course) && fib?.moduleId === String(modA), JSON.stringify(fib))
+  check('...a class of the whole course: its course, no module', qa?.course === 'Delta Wave Theory' && qa?.module === null, JSON.stringify(qa))
+  check('another academy\'s class: busy, nothing about it', !!theirs && theirs.title === null && theirs.course === null && theirs.module === null, JSON.stringify(theirs))
+
   section('D · not for students')
   const sj = await login('stu@mc.local', '/auth/login')
   const s = await cal(sj)

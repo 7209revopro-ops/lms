@@ -436,6 +436,12 @@ export interface PortalMentorClass {
   capacity: number
   /** Whether this class belongs to the academy that asked. */
   mine: boolean
+  /* The course and module it is a class of — for the calendars' Course and Module filters (the user, 2026-10-09).
+     Like the title, only for the asking academy's own classes: another academy's are null. */
+  courseId: string | null
+  course: string | null
+  moduleId: string | null
+  module: string | null
 }
 
 export interface PortalMentor {
@@ -529,7 +535,7 @@ export async function listMentorsForPortal(input: {
       instructorId: { $in: ids },
       scheduledStart: { $gte: from, $lte: to },
     })
-      .select('title instructorId scheduledStart durationMins status bookedCount sessionCapacity organizationId')
+      .select('title instructorId scheduledStart durationMins status bookedCount sessionCapacity organizationId courseId sectionId')
       .lean(),
     MentorMeetingModel.find({
       mentorId: { $in: ids },
@@ -562,6 +568,17 @@ export async function listMentorsForPortal(input: {
     meetingsByMentor.set(key, list)
   }
 
+  // Each own class's course and module, read once for the whole list.
+  const { CourseModel, SectionModel } = await import('@/models/schema.ts')
+  const own = classes.filter((c) => String(c.organizationId ?? '') === String(org._id))
+  const refsOf = (field: 'courseId' | 'sectionId') => [...new Set(own.map((c) => (c as Record<string, unknown>)[field]).filter(Boolean).map(String))]
+  const [courseRows, sectionRows] = await Promise.all([
+    CourseModel.find({ _id: { $in: refsOf('courseId') } }).select('title').lean(),
+    SectionModel.find({ _id: { $in: refsOf('sectionId') } }).select('title').lean(),
+  ])
+  const courseTitles = new Map(courseRows.map((c) => [String(c._id), String((c as { title?: string }).title ?? '')]))
+  const moduleTitles = new Map(sectionRows.map((m) => [String(m._id), String((m as { title?: string }).title ?? '')]))
+
   const classesByMentor = new Map<string, PortalMentorClass[]>()
   for (const c of classes) {
     const key = String(c.instructorId)
@@ -576,6 +593,10 @@ export async function listMentorsForPortal(input: {
       booked: c.bookedCount ?? 0,
       capacity: c.sessionCapacity ?? 0,
       mine,
+      courseId: mine && c.courseId ? String(c.courseId) : null,
+      course: mine && c.courseId ? courseTitles.get(String(c.courseId)) ?? null : null,
+      moduleId: mine && (c as { sectionId?: unknown }).sectionId ? String((c as { sectionId?: unknown }).sectionId) : null,
+      module: mine && (c as { sectionId?: unknown }).sectionId ? moduleTitles.get(String((c as { sectionId?: unknown }).sectionId)) ?? null : null,
     })
     classesByMentor.set(key, list)
   }
