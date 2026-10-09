@@ -511,8 +511,41 @@ export async function notifySessionEdited(notice: SessionEditNotice): Promise<{
   tally.recipients = bookings.length
   if (!bookings.length) return tally
 
+  /* For the link-change WhatsApp: each student's phone and academy, and the
+     class's start — only a class not yet over is worth a message. */
+  const phoneOf = new Map<string, { phone?: string; name?: string; slug?: string }>()
+  let classStart: Date | null = null
+  if (notice.linkChanged) {
+    const { UserModel, LiveClassModel } = await import('@/models/schema.ts')
+    const cls = await LiveClassModel.findById(notice.liveClassId).select('scheduledStart durationMins status').lean() as any
+    const end = cls ? new Date(cls.scheduledStart).getTime() + (cls.durationMins ?? 60) * 60_000 : 0
+    if (cls && !['cancelled', 'ended'].includes(cls.status) && end > Date.now()) {
+      classStart = new Date(cls.scheduledStart)
+      await ensureOrgSlugs().catch(() => {})
+      const users = await UserModel.find({ _id: { $in: bookings.map(b => b.userId) } })
+        .select('name organizationId enrollmentApplication.phone').lean() as any[]
+      for (const u of users) phoneOf.set(String(u._id), { phone: u.enrollmentApplication?.phone, name: u.name, slug: orgSlugFor(u.organizationId) })
+    }
+  }
+
   for (const b of bookings) {
     const userId = String(b.userId)
+
+    /* WhatsApp (class_link_changed_v1) — best-effort, never blocks the rest. */
+    const wa = phoneOf.get(userId)
+    if (notice.linkChanged && classStart && wa?.phone) {
+      try {
+        const { mintSigninCode } = await import('@/services/signinLink.service.ts')
+        const { sendClassLinkChangedWhatsApp } = await import('@/services/whatsapp.service.ts')
+        const clock = academyClock(classStart, wa.slug)
+        const day = classStart.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', timeZone: clock.zone })
+          .replace(/^(\w{3}) /, '$1, ')
+        const code = await mintSigninCode(userId, `/live-classes/${notice.liveClassId}/watch`)
+        await sendClassLinkChangedWhatsApp(wa.phone, wa.name ?? '', notice.title, day, clock.time, code)
+      } catch (err) {
+        logger.warn({ err, userId }, 'session-edit: link-change WhatsApp failed')
+      }
+    }
 
     if (notice.linkChanged) {
       /* Immediate, and pointed at the session so the student can pick the new

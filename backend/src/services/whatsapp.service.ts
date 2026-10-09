@@ -437,6 +437,18 @@ export async function sendClassRescheduledWhatsApp(
     { category: 'utility', buttonParam: signinCode })
 }
 
+/* class_link_changed_v1 — a booked class's joining link changed (an admin's
+   edit, or rehost-meet-rooms). Button: their sign-in link to the class page,
+   which always carries the current link. */
+export async function sendClassLinkChangedWhatsApp(
+  to: string | null | undefined, studentName: string, sessionTitle: string,
+  dateLabel: string, timeLabel: string, signinCode: string,
+): Promise<void> {
+  if (!signinCode) return
+  await sendTemplate(to, 'class_link_changed_v1', [studentName || 'there', sessionTitle, dateLabel, timeLabel],
+    { category: 'utility', buttonParam: signinCode })
+}
+
 export async function sendClassMentorChangedWhatsApp(
   to: string | null | undefined, studentName: string, sessionTitle: string,
   whenLabel: string, newMentorName: string, signinCode: string,
