@@ -1847,6 +1847,14 @@ router.get('/mentor-calendar', requireInstructor, async (req: Request, res: Resp
   } catch (err) { next(err) }
 })
 
+/* One class on the calendar, with its Info — who booked, joined and reviewed (the user, 2026-10-09). The academy's own only. */
+router.get('/mentor-calendar/classes/:id', requireInstructor, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { getClassForPortal } = await import('@/services/portal.service.ts')
+    sendSuccess(res, await getClassForPortal({ remoteOrgId: await mentorCalendarOrg(req), classId: String(req.params['id'] ?? '') }))
+  } catch (err) { next(err) }
+})
+
 router.post('/mentor-calendar/meetings', requireInstructor, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { createMentorMeetingForPortal } = await import('@/services/portal.service.ts')

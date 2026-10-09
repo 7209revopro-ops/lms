@@ -109,6 +109,27 @@ try {
   check('...a class of the whole course: its course, no module', qa?.course === 'Delta Wave Theory' && qa?.module === null, JSON.stringify(qa))
   check('another academy\'s class: busy, nothing about it', !!theirs && theirs.title === null && theirs.course === null && theirs.module === null, JSON.stringify(theirs))
 
+  section('F · a class\'s Info: who booked, joined, cancelled and reviewed')
+  const ali = await mk('Ali', 'ali@mc.local', 'student', dubai._id), bea = await mk('Bea', 'bea@mc.local', 'student', dubai._id)
+  const fibId = (hafClasses.find(c => c.title === 'Fib live') as any)?.id
+  const t0 = Date.now() - 3 * 3600e3
+  await M.LiveClassModel.collection.updateOne({ _id: new mongoose.Types.ObjectId(fibId) }, { $set: { startedAt: new Date(t0 + 60e3), instructorJoinedAt: new Date(t0 + 90e3), endedAt: new Date(t0 + 3600e3) } })
+  await M.ClassBookingModel.collection.insertMany([
+    { userId: ali._id, liveClassId: new mongoose.Types.ObjectId(fibId), status: 'attended', attendedAt: new Date(t0 + 120e3), attendanceSource: 'click', createdAt: new Date(t0 - 86400e3), updatedAt: new Date() },
+    { userId: bea._id, liveClassId: new mongoose.Types.ObjectId(fibId), status: 'cancelled', cancelledAt: new Date(t0 - 3600e3), createdAt: new Date(t0 - 2 * 86400e3), updatedAt: new Date() },
+  ])
+  await M.ClassFeedbackModel.collection.insertOne({ liveClassId: new mongoose.Types.ObjectId(fibId), userId: ali._id, rating: 5, comment: 'Clear and useful', createdAt: new Date(t0 + 3700e3), updatedAt: new Date() })
+  const info = await call('GET', `/admin/mentor-calendar/classes/${fibId}`, moizJ)
+  const d = info.body?.data
+  check('the class with its course', info.status === 200 && d?.title === 'Fib live' && d?.courseTitle === 'Delta Wave Theory', `${info.status} ${JSON.stringify(d).slice(0, 200)}`)
+  check('its students — names only, each with how it went', JSON.stringify(d?.students?.map((x: any) => [x.name, x.status, !!x.joinedAt, x.review?.rating ?? null])) === JSON.stringify([['Bea', 'cancelled', false, null], ['Ali', 'attended', true, 5]])
+    && !JSON.stringify(d?.students).includes('@'), JSON.stringify(d?.students))
+  check('the timeline, in order', (d?.timeline ?? []).map((e: any) => `${e.kind}:${e.who}`).join(' ') === 'booked:Bea booked:Ali cancelled:Bea started: mentor_joined:HAFFIS joined:Ali ended: review:Ali',
+    (d?.timeline ?? []).map((e: any) => `${e.kind}:${e.who}`).join(' '))
+  check('...the review with its words', (d?.timeline ?? []).some((e: any) => e.kind === 'review' && e.rating === 5 && e.comment === 'Clear and useful'))
+  const theirsId = (hafClasses.find((c: any) => c.mine === false) as any)?.id
+  check('another academy\'s class: not found', (await call('GET', `/admin/mentor-calendar/classes/${theirsId}`, moizJ)).status === 404)
+
   section('D · not for students')
   const sj = await login('stu@mc.local', '/auth/login')
   const s = await cal(sj)

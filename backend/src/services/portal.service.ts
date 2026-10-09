@@ -1199,7 +1199,7 @@ export async function getClassForPortal(input: {
       'type', 'provider', 'meetingUrl', 'googleMeetCode', 'recordingUrl',
       'recordingDurationSecs', 'mentorNotes', 'sessionCapacity', 'bookedCount',
       'startedAt', 'endedAt', 'viewerCount', 'isOnline', 'location', 'room',
-      'courseId', 'instructorId', 'organizationId',
+      'courseId', 'instructorId', 'organizationId', 'instructorJoinedAt',
     ].join(' '))
     .lean()
 
@@ -1216,6 +1216,7 @@ export async function getClassForPortal(input: {
       ? CourseModel.findById(live.courseId).select('title slug').lean()
       : Promise.resolve(null),
   ])
+  const { students, timeline } = await classInfoOf(live as unknown as ClassInfoSource, instructor?.name ?? '')
 
   return {
     id: String(live._id),
@@ -1245,7 +1246,69 @@ export async function getClassForPortal(input: {
     instructorEmail: instructor?.email ?? '',
     courseTitle: (course as { title?: string } | null)?.title ?? '',
     timezone: AVAILABILITY_TIMEZONE,
+    instructorJoinedAt: iso(live.instructorJoinedAt),
+    students,
+    timeline,
   }
+}
+
+/* ─── A class's Info: who booked, who came, how it went (the user, 2026-10-09) ───
+   Everything the calendars' class card shows beyond the class itself: each
+   student who booked (and when, and whether they cancelled), when the class
+   started, when the mentor and each student joined, when it ended, and each
+   student's review from the after-class form. Names only — the card is open to
+   everyone in the academy, and the people on it are reached through their own
+   records, not through this. */
+type ClassInfoSource = { _id: unknown; startedAt?: Date; endedAt?: Date; instructorJoinedAt?: Date }
+export type ClassTimelineEvent = {
+  at: string
+  kind: 'booked' | 'cancelled' | 'started' | 'mentor_joined' | 'joined' | 'ended' | 'review'
+  who: string
+  rating?: number
+  comment?: string
+}
+const iso = (d: unknown) => (d ? new Date(d as string).toISOString() : '')
+
+async function classInfoOf(live: ClassInfoSource, mentorName: string) {
+  const { ClassBookingModel, ClassFeedbackModel, UserModel } = await import('@/models/schema.ts')
+  const [bookings, reviews] = await Promise.all([
+    ClassBookingModel.find({ liveClassId: live._id }).select('userId status attendedAt attendanceSource cancelledAt createdAt').sort({ createdAt: 1 }).lean(),
+    ClassFeedbackModel.find({ liveClassId: live._id }).select('userId rating comment createdAt').lean(),
+  ])
+  const ids = [...new Set([...bookings, ...reviews].map((r) => String((r as { userId: unknown }).userId)))]
+  const names = new Map(
+    (await UserModel.find({ _id: { $in: ids } }).select('name').lean()).map((u) => [String(u._id), String((u as { name?: string }).name ?? '')]),
+  )
+  const nameOf = (id: unknown) => names.get(String(id)) || 'A student'
+  const reviewOf = new Map(reviews.map((r) => [String(r.userId), r]))
+
+  const students = bookings.map((b) => {
+    const r = reviewOf.get(String(b.userId))
+    return {
+      name: nameOf(b.userId),
+      status: String(b.status ?? 'booked'),
+      bookedAt: iso((b as { createdAt?: Date }).createdAt),
+      cancelledAt: iso(b.cancelledAt),
+      joinedAt: iso(b.attendedAt),
+      review: r ? { rating: r.rating, comment: r.comment ?? '', at: iso((r as { createdAt?: Date }).createdAt) } : null,
+    }
+  })
+
+  const timeline: ClassTimelineEvent[] = []
+  for (const b of bookings) {
+    const who = nameOf(b.userId)
+    if ((b as { createdAt?: Date }).createdAt) timeline.push({ at: iso((b as { createdAt?: Date }).createdAt), kind: 'booked', who })
+    if (b.cancelledAt) timeline.push({ at: iso(b.cancelledAt), kind: 'cancelled', who })
+    if (b.attendedAt) timeline.push({ at: iso(b.attendedAt), kind: 'joined', who })
+  }
+  if (live.startedAt) timeline.push({ at: iso(live.startedAt), kind: 'started', who: '' })
+  if (live.instructorJoinedAt) timeline.push({ at: iso(live.instructorJoinedAt), kind: 'mentor_joined', who: mentorName })
+  if (live.endedAt) timeline.push({ at: iso(live.endedAt), kind: 'ended', who: '' })
+  for (const r of reviews) {
+    timeline.push({ at: iso((r as { createdAt?: Date }).createdAt), kind: 'review', who: nameOf(r.userId), rating: r.rating, ...(r.comment ? { comment: r.comment } : {}) })
+  }
+  timeline.sort((a, b) => a.at.localeCompare(b.at))
+  return { students, timeline }
 }
 
 /* ─── Classes for the Tetra Commission portal ──────────────────────────────── */
