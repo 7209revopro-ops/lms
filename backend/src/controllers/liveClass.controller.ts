@@ -1414,6 +1414,28 @@ export class LiveClassController {
       notifyInstructor: false, notifyStudents: false, ...meta,
     })
 
+  /* One class of a Program (services/program.service.ts): the same path as the form — Meet link, instructor checks —
+     with nobody notified here; the program books its students' seats and their reminders follow the bookings. */
+  createForProgram = (
+    dto: {
+      courseId:         string
+      title:            string
+      description?:     string
+      scheduledStart:   Date
+      durationMins:     number
+      instructorId:     string
+      sessionCapacity?: number
+      isOnline?:        boolean
+      location?:        string
+      organizationId?:  string
+    },
+    actor: { id: string; role: string; organizationId?: string },
+    seriesId: string,
+  ): Promise<{ live: Awaited<ReturnType<LiveClassService['create']>>; meetingUrl?: string }> =>
+    this.#createOne({ ...dto, type: 'external' }, { user: actor } as unknown as Request, seriesId, {
+      notifyInstructor: false, notifyStudents: false,
+    })
+
   adminCreate = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     try {
       const body = { ...(req.body as Record<string, unknown>) } as any

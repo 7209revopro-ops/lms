@@ -1784,14 +1784,15 @@ router.get   ('/live-classes',                            live.adminListAll)
    the organization, and an instructor changes or cancels only what they booked (an admin anything). */
 async function mentorCalendarOrg(req: Request): Promise<string> {
   const caller = await callerOrgForRead(req)
-  if (caller.gone) throw Object.assign(new Error('Your account is gone'), { statusCode: 401 })
+  const { ProgramError } = await import('@/services/program.service.ts')
+  if (caller.gone) throw new ProgramError('Your account is gone', 401)
   if (caller.org) return String(caller.org)
   const asked = typeof req.query['org'] === 'string' ? req.query['org'] : ''
   if (asked) return asked
   const { OrganizationModel } = await import('@/models/schema.ts')
   const orgs = await OrganizationModel.find().select('_id').limit(2).lean() as any[]
   if (orgs.length === 1) return String(orgs[0]._id)
-  throw Object.assign(new Error('Say which academy (?org=)'), { statusCode: 400 })
+  throw new ProgramError('Say which academy (?org=)', 400)
 }
 const actorOf = (req: Request) => ({ actorEmail: String(req.user?.email ?? ''), actorIsRootAdmin: req.user?.role !== 'instructor' })
 
@@ -1830,6 +1831,70 @@ router.post('/mentor-calendar/meetings/:id/cancel', requireInstructor, async (re
   try {
     const { cancelMentorMeetingForPortal } = await import('@/services/portal.service.ts')
     sendSuccess(res, await cancelMentorMeetingForPortal({ remoteOrgId: await mentorCalendarOrg(req), meetingId: String(req.params['id'] ?? ''), ...actorOf(req) }), 'Meeting cancelled')
+  } catch (err) { next(err) }
+})
+
+/* ── Programs (Tetra Commission's user, 2026-10-09) ──────────────────────────────────────────────────────
+   A live class that repeats weekly or monthly until an end date, for the students picked for it only
+   (services/program.service.ts). Instructors make and manage their own; admins any in their academy. */
+const programActor = async (req: Request) => ({
+  id: req.user?.id, email: String(req.user?.email ?? ''), name: String((req.user as any)?.name ?? ''), role: String(req.user?.role ?? ''),
+  organizationId: await mentorCalendarOrg(req),
+})
+
+router.get('/programs', requireInstructor, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { listPrograms } = await import('@/services/program.service.ts')
+    sendSuccess(res, await listPrograms(await programActor(req)))
+  } catch (err) { next(err) }
+})
+
+/* Students to pick from — by name or email, this academy's only. */
+router.get('/programs/students', requireInstructor, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { UserModel } = await import('@/models/schema.ts')
+    const q = String(req.query['q'] ?? '').trim()
+    if (q.length < 2) { sendSuccess(res, []); return }
+    const rx = new RegExp(q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i')
+    const org = await mentorCalendarOrg(req)
+    const rows = await UserModel.find({ role: 'student', $or: [{ name: rx }, { email: rx }], ...(org ? { organizationId: org } : {}) })
+      .select('name email').limit(20).lean() as any[]
+    sendSuccess(res, rows.map(u => ({ id: String(u._id), name: u.name, email: u.email })))
+  } catch (err) { next(err) }
+})
+
+router.post('/programs', requireInstructor, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { createProgram } = await import('@/services/program.service.ts')
+    sendSuccess(res, await createProgram((req.body ?? {}) as Record<string, any>, await programActor(req)), 'Program created')
+  } catch (err) { next(err) }
+})
+
+router.get('/programs/:id', requireInstructor, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { getProgram } = await import('@/services/program.service.ts')
+    sendSuccess(res, await getProgram(String(req.params['id'] ?? ''), await programActor(req)))
+  } catch (err) { next(err) }
+})
+
+router.post('/programs/:id/students', requireInstructor, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { changeStudents } = await import('@/services/program.service.ts')
+    sendSuccess(res, await changeStudents(String(req.params['id'] ?? ''), (req.body ?? {}) as any, await programActor(req)), 'Students changed')
+  } catch (err) { next(err) }
+})
+
+router.patch('/programs/:id', requireInstructor, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { rescheduleProgram } = await import('@/services/program.service.ts')
+    sendSuccess(res, await rescheduleProgram(String(req.params['id'] ?? ''), (req.body ?? {}) as any, await programActor(req)), 'Program changed')
+  } catch (err) { next(err) }
+})
+
+router.post('/programs/:id/stop', requireInstructor, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { stopProgram } = await import('@/services/program.service.ts')
+    sendSuccess(res, await stopProgram(String(req.params['id'] ?? ''), await programActor(req)), 'Program stopped')
   } catch (err) { next(err) }
 })
 

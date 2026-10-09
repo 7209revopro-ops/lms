@@ -173,6 +173,8 @@ export class LiveClassService {
 
     return sessions
       .slice()
+      /* A Program's classes (services/program.service.ts) only for its students — they hold its hidden course. */
+      .filter(s => !(s as { programId?: unknown }).programId || index.has(String((s as { courseId?: unknown }).courseId)))
       .sort((a, b) => new Date(a.scheduledStart).getTime() - new Date(b.scheduledStart).getTime())
       .slice(0, limit)
       .map(s => {

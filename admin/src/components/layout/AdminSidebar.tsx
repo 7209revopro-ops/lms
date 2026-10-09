@@ -7,7 +7,7 @@ import { usePathname } from 'next/navigation'
 import {
   LayoutDashboard, BookOpen, Users, GraduationCap,
   Tag, Star, Settings, ChevronLeft, ChevronRight, LogOut, X,
-  ShoppingBag, Ticket, Map, ClipboardList, Video, CalendarDays, BarChart3, ShieldCheck, UserCog, LifeBuoy,
+  ShoppingBag, Ticket, Map, ClipboardList, Video, CalendarDays, Repeat, BarChart3, ShieldCheck, UserCog, LifeBuoy,
   ClipboardCheck, Film, MonitorSmartphone, FileCheck2, Megaphone, Mail, UserX, Award, MessageCircle, MessagesSquare, ListChecks,
 } from 'lucide-react'
 import { useStaffUnread } from '@/lib/api/chat'
@@ -28,6 +28,7 @@ const adminNavItems = [
   { label: 'Learning Paths', href: '/learning-paths',   icon: Map },
   { label: 'Live Classes',   href: '/live-classes',     icon: Video },
   { label: 'Mentor Calendar', href: '/mentor-calendar', icon: CalendarDays },
+  { label: 'Programs', href: '/programs', icon: Repeat },
   { label: 'Class Verification', href: '/class-verification', icon: ListChecks },
   { label: 'Instructor Attendance', href: '/instructor-attendance', icon: UserX },
   { label: 'Instructor Reviews', href: '/instructor-reviews', icon: Award },
@@ -80,6 +81,7 @@ const instructorNavItems = [
   { label: 'Bookings',      href: '/bookings',           icon: CalendarDays },
   { label: 'Availability',  href: '/availability',       icon: CalendarDays },
   { label: 'Mentor Calendar', href: '/mentor-calendar',   icon: CalendarDays },
+  { label: 'Programs',        href: '/programs',          icon: Repeat },
   { label: 'Assignments',   href: '/assignments',        icon: ClipboardCheck },
   { label: 'Exams',         href: '/exams',              icon: FileCheck2 },
   { label: 'Students',      href: '/students',            icon: Users },

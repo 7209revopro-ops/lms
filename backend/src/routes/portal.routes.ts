@@ -223,4 +223,57 @@ router.get('/classes/:id', wrap(async (req, res) => {
   }), 'Class')
 }))
 
+/* ── Programs (Tetra Commission's user, 2026-10-09) ─────────────────────────────────────────────────────
+   Repeating live classes for chosen students, made from the portal for a CS's students
+   (services/program.service.ts). The portal decides who may; here the portal is the actor, and the
+   person behind it is recorded by name and email. */
+async function portalProgramActor(req: Request) {
+  const { OrganizationModel } = await import('@/models/schema.ts')
+  const body = (req.body ?? {}) as Record<string, unknown>
+  const org = orgOf(req) ?? (typeof body['remoteOrgId'] === 'string' ? body['remoteOrgId'] : undefined)
+  if (!org || !(await OrganizationModel.exists({ _id: org }).catch(() => null))) {
+    const { ProgramError } = await import('@/services/program.service.ts')
+    throw new ProgramError('Say which academy (remoteOrgId)', 400)
+  }
+  return { role: 'portal', organizationId: String(org), email: String(body['actorEmail'] ?? req.query['actorEmail'] ?? ''), name: String(body['actorName'] ?? '') }
+}
+
+router.get('/programs', wrap(async (req, res) => {
+  const { listPrograms } = await import('@/services/program.service.ts')
+  // Without filters: every program of the academy. With them: programs with any of these students, or made by this person.
+  const emails = typeof req.query['studentEmails'] === 'string' ? req.query['studentEmails'].split(',').map(e => e.trim()).filter(Boolean) : null
+  const by = typeof req.query['createdByEmail'] === 'string' ? req.query['createdByEmail'].trim().toLowerCase() : ''
+  const actor = await portalProgramActor(req)
+  if (!emails && !by) { sendSuccess(res, await listPrograms(actor), 'Programs'); return }
+  const withStudents = emails?.length ? await listPrograms(actor, { studentEmails: emails }) : []
+  const mine = by ? (await listPrograms(actor)).filter(p => p.createdByEmail.toLowerCase() === by) : []
+  const seen = new Set<string>()
+  sendSuccess(res, [...mine, ...withStudents].filter(p => !seen.has(p.id) && !!seen.add(p.id)), 'Programs')
+}))
+
+router.post('/programs', wrap(async (req, res) => {
+  const { createProgram } = await import('@/services/program.service.ts')
+  sendSuccess(res, await createProgram((req.body ?? {}) as Record<string, any>, await portalProgramActor(req)), 'Program created')
+}))
+
+router.get('/programs/:id', wrap(async (req, res) => {
+  const { getProgram } = await import('@/services/program.service.ts')
+  sendSuccess(res, await getProgram(String(req.params['id'] ?? ''), await portalProgramActor(req)), 'Program')
+}))
+
+router.post('/programs/:id/students', wrap(async (req, res) => {
+  const { changeStudents } = await import('@/services/program.service.ts')
+  sendSuccess(res, await changeStudents(String(req.params['id'] ?? ''), (req.body ?? {}) as any, await portalProgramActor(req)), 'Students changed')
+}))
+
+router.patch('/programs/:id', wrap(async (req, res) => {
+  const { rescheduleProgram } = await import('@/services/program.service.ts')
+  sendSuccess(res, await rescheduleProgram(String(req.params['id'] ?? ''), (req.body ?? {}) as any, await portalProgramActor(req)), 'Program changed')
+}))
+
+router.post('/programs/:id/stop', wrap(async (req, res) => {
+  const { stopProgram } = await import('@/services/program.service.ts')
+  sendSuccess(res, await stopProgram(String(req.params['id'] ?? ''), await portalProgramActor(req)), 'Program stopped')
+}))
+
 export default router

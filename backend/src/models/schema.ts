@@ -632,6 +632,8 @@ export interface ICourse extends Document {
   language:       string
   tags?:          string[]
   program?:        string
+  /* The hidden course behind a Program (ProgramModel) — its students are enrolled here; never in the catalogue. */
+  programId?:      Types.ObjectId
   instructorId:    Types.ObjectId
   categoryId?:     Types.ObjectId
   organizationId?: Types.ObjectId
@@ -660,6 +662,7 @@ const CourseSchema = new Schema<ICourse>(
     language:      { type: String, default: 'English' },
     tags:          [{ type: String }],
     program:       { type: String },
+    programId:     { type: Schema.Types.ObjectId, ref: 'Program' },
     instructorId:   { type: Schema.Types.ObjectId, ref: 'User', required: true },
     categoryId:     { type: Schema.Types.ObjectId, ref: 'Category' },
     organizationId: { type: Schema.Types.ObjectId, ref: 'Organization' },
@@ -1296,6 +1299,9 @@ export interface ILiveClass extends Document {
      from the same "repeat weekly" action. Not a foreign-key relation;
      there is no separate series/template document. */
   seriesId?:      Types.ObjectId
+  /* Set on every class of a Program (ProgramModel): a class that repeats weekly or monthly for the students picked
+     for it — and only for them (GET /live-classes hides it from everyone else). */
+  programId?:     Types.ObjectId
   /* Set only on classes created by a timetable import (classImport.service.ts):
      which import made it, and a stable key — course + spreadsheet session_id +
      date — so re-running or resuming an import can never create the same class
@@ -1399,6 +1405,7 @@ const LiveClassSchema = new Schema<ILiveClass>(
     hostSeatsLeft:               { type: Number, min: 0 },
     overflowSeatsLeft:           { type: Number, min: 0 },
     seriesId:                    { type: Schema.Types.ObjectId },
+    programId:                   { type: Schema.Types.ObjectId, ref: 'Program' },
     importJobId:                 { type: Schema.Types.ObjectId },
     importRef:                   { type: String, maxlength: 200 },
   },
@@ -1465,6 +1472,7 @@ LiveClassSchema.index({ muxLiveStreamId: 1 }, { sparse: true })
 LiveClassSchema.index({ cltRoomName: 1 }, { sparse: true })
 LiveClassSchema.index({ organizationId: 1 })
 LiveClassSchema.index({ seriesId: 1 }, { sparse: true })
+LiveClassSchema.index({ programId: 1, scheduledStart: 1 }, { sparse: true })
 LiveClassSchema.index({ importJobId: 1 }, { sparse: true })
 /* Partial, not sparse: only imported classes carry a ref, and the uniqueness is
    the duplicate-proofing for resume/re-import (see ILiveClass.importRef). */
@@ -2950,6 +2958,69 @@ export const MentorAvailabilityModel = mongoose.model<IMentorAvailability>(
   'MentorAvailability',
   MentorAvailabilitySchema,
 )
+
+/* ── Program (Tetra Commission's user, 2026-10-09) ───────────────────────────
+   A live class that repeats — weekly on chosen days, or monthly on a date — until an end date, for the students picked
+   for it and nobody else. Made in the LMS admin (Programs) or from the commission portal for a CS's students.
+   Behind it: a hidden course (CourseModel.programId) the students are enrolled in, so every class of it admits them
+   through the usual door; each occurrence is an ordinary LiveClass (programId) with a seat booked for each student.
+   services/program.service.ts. */
+export interface IProgram extends Document {
+  id:              string
+  title:           string
+  description?:    string
+  organizationId?: Types.ObjectId
+  instructorId:    Types.ObjectId
+  courseId:        Types.ObjectId
+  repeat:          'weekly' | 'monthly'
+  weekdays:        number[]          // weekly: 0 = Sunday … 6 = Saturday
+  monthDay?:       number            // monthly: 1–31; a shorter month takes its last day
+  startDate:       string            // YYYY-MM-DD, academy time
+  endDate:         string            // YYYY-MM-DD, academy time, inclusive
+  time:            string            // HH:MM, academy time
+  timezone:        string
+  durationMins:    number
+  isOnline:        boolean
+  location?:       string
+  studentIds:      Types.ObjectId[]
+  status:          'active' | 'stopped'
+  createdById?:    Types.ObjectId
+  createdByEmail?: string
+  createdByName?:  string
+  source:          'lms' | 'portal'
+  createdAt:       Date
+  updatedAt:       Date
+}
+
+const ProgramSchema = new Schema<IProgram>(
+  {
+    title:          { type: String, required: true, trim: true, maxlength: 200 },
+    description:    { type: String, maxlength: 2000 },
+    organizationId: { type: Schema.Types.ObjectId, ref: 'Organization', index: true },
+    instructorId:   { type: Schema.Types.ObjectId, ref: 'User', required: true },
+    courseId:       { type: Schema.Types.ObjectId, ref: 'Course', required: true },
+    repeat:         { type: String, enum: ['weekly', 'monthly'], required: true },
+    weekdays:       { type: [Number], default: [] },
+    monthDay:       { type: Number, min: 1, max: 31 },
+    startDate:      { type: String, required: true, match: /^\d{4}-\d{2}-\d{2}$/ },
+    endDate:        { type: String, required: true, match: /^\d{4}-\d{2}-\d{2}$/ },
+    time:           { type: String, required: true, match: /^\d{2}:\d{2}$/ },
+    timezone:       { type: String, default: 'Asia/Dubai' },
+    durationMins:   { type: Number, required: true, min: 15, max: 480 },
+    isOnline:       { type: Boolean, default: true },
+    location:       { type: String },
+    studentIds:     [{ type: Schema.Types.ObjectId, ref: 'User' }],
+    status:         { type: String, enum: ['active', 'stopped'], default: 'active' },
+    createdById:    { type: Schema.Types.ObjectId, ref: 'User' },
+    createdByEmail: { type: String },
+    createdByName:  { type: String },
+    source:         { type: String, enum: ['lms', 'portal'], default: 'lms' },
+  },
+  baseSchemaOptions,
+)
+ProgramSchema.index({ studentIds: 1 })
+
+export const ProgramModel = mongoose.model<IProgram>('Program', ProgramSchema)
 
 /* ─────────────────────────────────────────────────────
    MENTOR MEETING — time booked with a mentor that is not a class

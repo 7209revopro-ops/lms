@@ -128,6 +128,12 @@ router.get('/', authenticate, async (req: Request, res: Response, next: NextFunc
         andFilter(lcOrgFilter, { courseId: { $in: [...dmCourses, ...enrolled] } })
       }
     }
+    /* A Program's classes (services/program.service.ts) are for its students only: anyone else never sees them.
+       Its students hold an enrolment in the program's hidden course — the index above already has it. */
+    andFilter(lcOrgFilter, { $or: [
+      { programId: { $exists: false } }, { programId: null },
+      { courseId: { $in: [...index.keys()].filter(k => Types.ObjectId.isValid(k)).map(k => new Types.ObjectId(k)) } },
+    ] })
     const classes = await LiveClassModel.find(lcOrgFilter)
       .populate('instructorId', 'id name avatarUrl')
       /* `description` and `level` because the catalogue's top screen is a
