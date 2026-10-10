@@ -9,7 +9,7 @@ import {
   X, User, Mail, Lock, Eye, EyeOff, AlertCircle,
   CheckCircle2, Users, ChevronDown, ChevronUp,
   Check, Unlock, ArrowLeft, ArrowRight,
-  TrendingUp, Cpu, BarChart2, Tag, Building2,
+  TrendingUp, Cpu, BarChart2, Tag, Building2, Phone,
 } from 'lucide-react'
 import { useCreateInstructor } from '@/lib/api/instructors'
 import Spinner from '@/components/ui/Spinner'
@@ -42,6 +42,10 @@ const accountSchema = z.object({
   name:     z.string().min(2, 'Name must be at least 2 characters').max(100),
   email:    z.string().email('Enter a valid email address'),
   password: z.string().min(8, 'Password must be at least 8 characters'),
+  /* Optional — the number WhatsApp messages go to, with its country code. */
+  phone:    z.string().trim().max(30)
+    .refine(v => !v || /^\+?[\d\s()-]{7,}$/.test(v), 'Enter the number with its country code, e.g. +971 50 123 4567')
+    .optional(),
 })
 type AccountValues = z.infer<typeof accountSchema>
 
@@ -289,6 +293,7 @@ export function AddStudentModal({ open, onClose }: Props) {
       name:       accountValues.name,
       email:      accountValues.email,
       password:   accountValues.password,
+      ...(accountValues.phone?.trim() ? { phone: accountValues.phone.trim() } : {}),
       role:       'student',
       categories: Array.from(categories) as ('4x-trading' | 'digital-marketing' | 'ai' | 'jura')[],
       courses,
@@ -501,6 +506,14 @@ export function AddStudentModal({ open, onClose }: Props) {
                           <Mail size={13} className="absolute left-3 top-1/2 -translate-y-1/2" style={{ color: 'rgba(255,255,255,0.3)' }} />
                           <input {...register('email')} type="email" placeholder="john@example.com"
                             className={inputCls} style={inputStyle(!!errors.email)} />
+                        </div>
+                      </Field>
+
+                      <Field label="Phone (WhatsApp)" error={errors.phone?.message}>
+                        <div className="relative">
+                          <Phone size={13} className="absolute left-3 top-1/2 -translate-y-1/2" style={{ color: 'rgba(255,255,255,0.3)' }} />
+                          <input {...register('phone')} type="tel" inputMode="tel" placeholder="+971 50 123 4567"
+                            className={inputCls} style={inputStyle(!!errors.phone)} />
                         </div>
                       </Field>
 

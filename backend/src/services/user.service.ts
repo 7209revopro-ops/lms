@@ -136,6 +136,13 @@ export class UserService {
 
     const updated = await this.repo.updateById(id, update)
     if (!updated) throw new UserError('USER_NOT_FOUND', 'User not found.', 404)
+    if (dto.phone !== undefined && updated.role === 'student') await this.#mirrorStudentPhone(id, dto.phone)
+    /* '' means clear. The update above maps it to undefined, which a $set
+       skips — so the number used to stay. Removed explicitly instead. */
+    if (dto.phone !== undefined && !dto.phone.trim()) {
+      const { UserModel } = await import('@/models/schema.ts')
+      await UserModel.updateOne({ _id: id }, { $unset: { phone: '' } })
+    }
 
     /* On deactivation, force the user to log out everywhere. */
     if (dto.isActive === false) {
@@ -227,6 +234,18 @@ export class UserService {
       await this.repo.updateById(user.id, patch)
       Object.assign(user, patch)
     }
+    if (dto.phone && dto.role === 'student') await this.#mirrorStudentPhone(user.id, dto.phone)
     return user
+  }
+
+  /* A student's WhatsApp number is read from enrollmentApplication.phone by
+     every student message (reminders, new class, today's classes …), not from
+     the account's `phone`. An admin setting the number writes both, so the
+     next message goes to it; '' clears both. */
+  async #mirrorStudentPhone(userId: string, phone: string): Promise<void> {
+    const { UserModel } = await import('@/models/schema.ts')
+    const value = phone.trim()
+    await UserModel.updateOne({ _id: userId },
+      value ? { $set: { 'enrollmentApplication.phone': value } } : { $unset: { 'enrollmentApplication.phone': '' } })
   }
 }

@@ -240,6 +240,9 @@ export function EditStudentModal({ user, onClose, onSuccess }: Props) {
   /* Profile fields */
   const [name,  setName]  = useState(user.name)
   const [email, setEmail] = useState(user.email)
+  /* The student's WhatsApp number — the application's, else the account's. */
+  const initialPhone = user.enrollmentApplication?.phone ?? user.phone ?? ''
+  const [phone, setPhone] = useState(initialPhone)
   const [error, setError] = useState<string | null>(null)
 
   /* Categories — multi-select for students */
@@ -394,9 +397,10 @@ export function EditStudentModal({ user, onClose, onSuccess }: Props) {
 
     const promises: Promise<unknown>[] = []
 
-    const dto: { name?: string; email?: string; avatarUrl?: string; categories?: ('4x-trading' | 'digital-marketing' | 'ai' | 'jura')[] } = {}
+    const dto: { name?: string; email?: string; phone?: string; avatarUrl?: string; categories?: ('4x-trading' | 'digital-marketing' | 'ai' | 'jura')[] } = {}
     if (name.trim()  !== user.name)  dto.name  = name.trim()
     if (email.trim() !== user.email) dto.email = email.trim().toLowerCase()
+    if (phone.trim() !== initialPhone.trim()) dto.phone = phone.trim()   // '' clears it
     if (newAvatarUrl)                dto.avatarUrl = newAvatarUrl
     /* Compare categories */
     const origCats: Set<string> = initCats()
@@ -528,6 +532,22 @@ export function EditStudentModal({ user, onClose, onSuccess }: Props) {
                     type="email" required placeholder="email@example.com"
                     className={base} style={iStyle} onFocus={iFocus} onBlur={iBlur} />
                 </div>
+              </div>
+
+              {/* Phone — the number WhatsApp messages go to */}
+              <div>
+                <label className="mb-1 block text-[10px] font-semibold uppercase tracking-widest"
+                  style={{ color: 'rgba(255,255,255,0.35)' }}>Phone (WhatsApp)</label>
+                <div className="relative">
+                  <Phone size={13} className="absolute left-3 top-1/2 -translate-y-1/2"
+                    style={{ color: 'rgba(255,255,255,0.35)' }} />
+                  <input value={phone} onChange={e => setPhone(e.target.value)}
+                    type="tel" inputMode="tel" maxLength={30} placeholder="+971 50 123 4567"
+                    className={base} style={iStyle} onFocus={iFocus} onBlur={iBlur} />
+                </div>
+                <p className="mt-1 text-[10px]" style={{ color: 'rgba(255,255,255,0.3)' }}>
+                  With the country code (+971, +91 …). Class reminders and WhatsApp messages go here.
+                </p>
               </div>
 
               {/* Categories — multi-select */}
