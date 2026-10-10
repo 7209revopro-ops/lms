@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from 'next'
 import { Bricolage_Grotesque, DM_Sans, JetBrains_Mono } from 'next/font/google'
 import { Providers } from './providers'
+import Script from 'next/script'
 import { PwaRegister } from '@/components/PwaRegister'
 import './globals.css'
 
@@ -83,7 +84,18 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <head>
         <script dangerouslySetInnerHTML={{ __html: THEME_BOOT }} />
       </head>
-      <body><Providers>{children}</Providers><PwaRegister /></body>
+      <body>
+        <Providers>{children}</Providers><PwaRegister />
+        {/* Google Analytics (gtag.js, G-7WQCSFLT8D). next/script loads it after
+            the page is interactive, so it never delays the page itself. */}
+        <Script src="https://www.googletagmanager.com/gtag/js?id=G-7WQCSFLT8D" strategy="afterInteractive" />
+        <Script id="gtag-init" strategy="afterInteractive">{`
+          window.dataLayer = window.dataLayer || [];
+          function gtag(){dataLayer.push(arguments);}
+          gtag('js', new Date());
+          gtag('config', 'G-7WQCSFLT8D');
+        `}</Script>
+      </body>
     </html>
   )
 }
