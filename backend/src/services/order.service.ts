@@ -17,7 +17,7 @@ import { NotificationService } from '@/services/notification.service.ts'
 import { sendEnrollmentConfirmation } from '@/services/email.service.ts'
 import { CourseModel, UserModel } from '@/models/schema.ts'
 import { env } from '@/config/env.ts'
-import type { OrderGateway, IOrder, PaymentAccessStatus, EnrollmentFeeSummary, SalesCrm } from '@/models/schema.ts'
+import type { OrderGateway, IOrder, PaymentAccessStatus, EnrollmentFeeSummary, SaleAcademy, SalesCrm } from '@/models/schema.ts'
 import { applyInitialPaymentAccess, raisePaymentAccess, type AccessSummary } from '@/services/paymentAccess.service.ts'
 import { logger } from '@/utils/logger.ts'
 
@@ -1906,6 +1906,8 @@ export class OrderService {
     feeSummary?: Omit<EnrollmentFeeSummary, 'invoiceId' | 'invoiceNumber' | 'recordedAt'>
     /** Which sales CRM sold it, as a tag for staff. Absent from an older finance. */
     salesCrm?: SalesCrm
+    /** Which academy the close was sold for. Absent from an older finance. */
+    academy?: SaleAcademy
   }): Promise<{
     userId: string
     created: boolean
@@ -1961,24 +1963,38 @@ export class OrderService {
        AED 5,200 as AED 52.00 and counted it a hundredth in revenue. */
     const amountMinor = input.amountMinor ?? Math.round((input.amount ?? 0) * 100)
 
-    /* A Banglore CRM sale is a Bangalore-academy student, whichever academy
-       runs the course (2026-10-09) — the other CRMs' students still take the
-       course's academy, as before. Only a new account, or one with no academy,
-       is put there: an existing student who already belongs to another academy
-       (a Dubai student buying again through the Banglore CRM) is left where
-       they are, because moving them would take them out of that academy's
-       lists, reports and staff's reach without anybody deciding it. */
+    /* A sale for the Bangalore academy is a Bangalore-academy student, whichever
+       academy runs the course. The close says which academy (2026-10-10) and
+       that wins; from a finance that does not say, a Banglore CRM sale is
+       Bangalore (2026-10-09). A Dubai sale — or one that says nothing, from any
+       other CRM — still takes the course's academy, as before. Only a new
+       account, or one with no academy, is put there: an existing student who
+       already belongs to another academy (a Dubai student buying again for
+       Bangalore) is left where they are, because moving them would take them
+       out of that academy's lists, reports and staff's reach without anybody
+       deciding it. */
     let userOrganizationId: unknown
-    if (input.salesCrm === 'banglore') {
+    const forBangalore = input.academy ? input.academy === 'bangalore' : input.salesCrm === 'banglore'
+    if (forBangalore) {
       const { OrganizationModel } = await import('@/models/schema.ts')
       const bangalore = await OrganizationModel.findOne({ slug: 'bangalore' }).select('_id').lean()
       if (bangalore?._id) userOrganizationId = bangalore._id
-      else logger.warn({ externalId: input.externalId }, 'Banglore CRM enrolment: no organisation with slug "bangalore" — the course\'s academy is used')
+      else logger.warn({ externalId: input.externalId, salesCrm: input.salesCrm }, 'Bangalore academy enrolment: no organisation with slug "bangalore" — the course\'s academy is used')
       const existing = await UserModel.findOne({ email: input.email.toLowerCase().trim() }).select('organizationId').lean()
       const theirs = (existing as { organizationId?: unknown } | null)?.organizationId
       if (bangalore?._id && theirs && String(theirs) !== String(bangalore._id)) {
-        logger.warn({ externalId: input.externalId, userId: String(existing!._id) },
-          'Banglore CRM enrolment for a student of another academy — left in their academy, not moved to Bangalore')
+        logger.warn({ externalId: input.externalId, userId: String(existing!._id), salesCrm: input.salesCrm },
+          'Bangalore academy enrolment for a student of another academy — left in their academy, not moved to Bangalore')
+      }
+    } else if (input.academy === 'dubai') {
+      /* And the other way: a Dubai sale for a Bangalore student leaves them in Bangalore, said in the log. */
+      const { OrganizationModel } = await import('@/models/schema.ts')
+      const existing = await UserModel.findOne({ email: input.email.toLowerCase().trim() }).select('organizationId').lean()
+      const theirs = (existing as { organizationId?: unknown } | null)?.organizationId
+      const theirOrg = theirs ? await OrganizationModel.findById(String(theirs)).select('slug').lean() : null
+      if ((theirOrg as { slug?: string } | null)?.slug === 'bangalore') {
+        logger.warn({ externalId: input.externalId, userId: String(existing!._id), salesCrm: input.salesCrm },
+          'Dubai academy enrolment for a Bangalore-academy student — left in Bangalore, not moved')
       }
     }
 

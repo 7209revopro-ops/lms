@@ -801,6 +801,14 @@ export type PaymentAccessStatus = typeof PAYMENT_ACCESS_STATUSES[number]
 export const SALES_CRMS = ['delta', 'remote', 'draw', 'banglore'] as const
 export type SalesCrm = typeof SALES_CRMS[number]
 
+/* The academy a sales CRM close was sold for, picked at the close and passed on
+   by Delta Finance (2026-10-10): dubai — what every close was before — or
+   bangalore, whose new students are put in the organisation with slug
+   'bangalore' (see provisionFinanceEnrolment). The Banglore CRM's are always
+   bangalore. */
+export const SALE_ACADEMIES = ['dubai', 'bangalore'] as const
+export type SaleAcademy = typeof SALE_ACADEMIES[number]
+
 /* An enrolment's money as Delta Finance approved it: the course fee, what was
    paid, the balance, whether a bonus was given at the close, and the receipt
    the counsellor took. Minor units (cents / fils) like every amount here.

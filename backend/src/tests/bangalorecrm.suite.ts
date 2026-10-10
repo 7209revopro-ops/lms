@@ -11,7 +11,13 @@
      C. an existing student of another academy (Dubai) buying through the
         Banglore CRM: enrolled and tagged, but left in Dubai — not moved;
      D. an existing student with no academy: put in Bangalore;
-     E. an unknown CRM code is refused (422), nobody created.
+     E. an unknown CRM code is refused (422), nobody created;
+     F. the academy picked at the close (2026-10-10): "bangalore" from the Sales
+        CRM / Draw / Remote → a new student in Bangalore, tagged with their CRM;
+        "dubai" → the course's academy, as before — and it wins over crm
+        "banglore"; an existing Dubai student sold for Bangalore stays in Dubai,
+        an existing Bangalore student sold for Dubai stays in Bangalore; an
+        unknown academy is refused (422).
    Run: bun --no-env-file src/tests/bangalorecrm.suite.ts
    (BANGALORECRM_DATABASE_URL to point it at a throwaway mongod.)
 ───────────────────────────────────────────────────────────── */
@@ -137,6 +143,32 @@ step('E. An unknown CRM code')
 {
   const r = await enrol('stranger@t.local', 'bangalore-typo')
   check('refused with a 422, nobody created', r.status === 422 && !(await userOf('stranger@t.local')), `${r.status}`)
+}
+
+step('F. The academy picked at the close')
+{
+  const r = await enrol('sales.blr@t.local', 'delta', { academy: 'bangalore' })
+  check('a Sales CRM close for Bangalore is taken', r.status === 200 && r.body?.data?.created === true, `${r.status} ${JSON.stringify(r.body).slice(0, 200)}`)
+  check('...created in the Bangalore organisation, though Dubai runs the course', same((await userOf('sales.blr@t.local'))?.organizationId, bangalore._id))
+  check('...the enrolment tagged the Sales CRM, not the Banglore CRM', (await enrolmentOf('sales.blr@t.local'))?.salesCrm === 'delta')
+  await enrol('draw.blr@t.local', 'draw', { academy: 'bangalore' })
+  await enrol('remote.blr@t.local', 'remote', { academy: 'bangalore' })
+  check('a Draw close for Bangalore: in Bangalore, tagged Draw', same((await userOf('draw.blr@t.local'))?.organizationId, bangalore._id) && (await enrolmentOf('draw.blr@t.local'))?.salesCrm === 'draw')
+  check('a Remote CRM close for Bangalore: in Bangalore', same((await userOf('remote.blr@t.local'))?.organizationId, bangalore._id))
+  await enrol('sales.dxb@t.local', 'delta', { academy: 'dubai' })
+  check('a Sales CRM close for Dubai takes the course\'s academy (Dubai), as before', same((await userOf('sales.dxb@t.local'))?.organizationId, dubai._id))
+  await enrol('blr.says.dubai@t.local', 'banglore', { academy: 'dubai' })
+  check('the academy wins over the CRM: crm "banglore" with academy "dubai" takes the course\'s academy', same((await userOf('blr.says.dubai@t.local'))?.organizationId, dubai._id))
+  await enrol('blr.says.blr@t.local', 'banglore', { academy: 'bangalore' })
+  check('the Banglore CRM with academy "bangalore": in Bangalore', same((await userOf('blr.says.blr@t.local'))?.organizationId, bangalore._id))
+  await UserModel.create({ name: 'Dubai Student 2', email: 'dubai.two@t.local', role: 'student', organizationId: dubai._id, enrollmentStatus: 'approved' } as never)
+  const moved = await enrol('dubai.two@t.local', 'remote', { academy: 'bangalore' })
+  check('an existing Dubai student sold for Bangalore: enrolled, left in Dubai', moved.status === 200 && moved.body?.data?.created === false && same((await userOf('dubai.two@t.local'))?.organizationId, dubai._id) && !!(await enrolmentOf('dubai.two@t.local')))
+  await UserModel.create({ name: 'Bangalore Student', email: 'blr.student@t.local', role: 'student', organizationId: bangalore._id, enrollmentStatus: 'approved' } as never)
+  const stays = await enrol('blr.student@t.local', 'delta', { academy: 'dubai' })
+  check('an existing Bangalore student sold for Dubai: enrolled, left in Bangalore', stays.status === 200 && same((await userOf('blr.student@t.local'))?.organizationId, bangalore._id) && !!(await enrolmentOf('blr.student@t.local')))
+  const bad = await enrol('bad.academy@t.local', 'delta', { academy: 'mumbai' })
+  check('an unknown academy is refused with a 422, nobody created', bad.status === 422 && !(await userOf('bad.academy@t.local')), `${bad.status}`)
 }
 
 server.close()

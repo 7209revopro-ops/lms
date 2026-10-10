@@ -14,7 +14,7 @@ import { validate } from '@/middleware/validate.middleware.ts'
 import { OrderService } from '@/services/order.service.ts'
 import { AuthService } from '@/services/auth.service.ts'
 import { logger } from '@/utils/logger.ts'
-import { PAYMENT_ACCESS_STATUSES, SALES_CRMS, type PaymentAccessStatus, type SalesCrm } from '@/models/schema.ts'
+import { PAYMENT_ACCESS_STATUSES, SALE_ACADEMIES, SALES_CRMS, type PaymentAccessStatus, type SaleAcademy, type SalesCrm } from '@/models/schema.ts'
 
 const router = Router()
 const orderSvc = new OrderService()
@@ -222,6 +222,11 @@ const financeEnrolmentSchema = z.object({
      older finance. A Banglore CRM student is made a Bangalore-academy student
      (see provisionFinanceEnrolment). */
   crm: z.enum(SALES_CRMS).optional(),
+  /* Which academy the close was sold for — "dubai" or "bangalore", picked at
+     the close (2026-10-10). A Bangalore one is a Bangalore-academy student,
+     whichever CRM sold it. Absent from an older finance: the Banglore CRM's are
+     Bangalore, the rest as before. */
+  academy: z.enum(SALE_ACADEMIES).optional(),
 })
 
 router.post('/finance/enrolment', validate(financeEnrolmentSchema), async (req: Request, res: Response, next: NextFunction) => {
@@ -237,12 +242,13 @@ router.post('/finance/enrolment', validate(financeEnrolmentSchema), async (req: 
       return
     }
 
-    const { email, name, phone, courseSlug, invoiceId, invoiceNumber, amount, amountMinor, currency, paymentStatus, feeSummary, crm } = req.body as {
+    const { email, name, phone, courseSlug, invoiceId, invoiceNumber, amount, amountMinor, currency, paymentStatus, feeSummary, crm, academy } = req.body as {
       email: string; name?: string; phone?: string; courseSlug: string
       invoiceId: string; invoiceNumber?: string; amount?: number; amountMinor?: number; currency?: string
       paymentStatus?: PaymentAccessStatus
       feeSummary?: Parameters<typeof orderSvc.provisionFinanceEnrolment>[0]['feeSummary']
       crm?: SalesCrm
+      academy?: SaleAcademy
     }
 
     let result
@@ -257,6 +263,7 @@ router.post('/finance/enrolment', validate(financeEnrolmentSchema), async (req: 
         ...(paymentStatus ? { paymentStatus } : {}),
         ...(feeSummary ? { feeSummary } : {}),
         ...(crm ? { salesCrm: crm } : {}),
+        ...(academy ? { academy } : {}),
       })
     } catch (err) {
       /* An unmapped or renamed slug is the caller's mistake and will fail the
