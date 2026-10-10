@@ -117,6 +117,8 @@ export const userKeys = {
 
 export function useUsers(role: AdminUserRole | undefined, params: {
   page?: number; per_page?: number; search?: string; category?: string; status?: 'active' | 'inactive'; exclude_students?: boolean; enrollmentStatus?: 'pending' | 'approved' | 'rejected' | 'cancelled'
+  /** Only students with no phone number, on the account or the application. */
+  no_phone?: 'true'
 } = {}) {
   return useQuery({
     queryKey: userKeys.list(role ?? 'all', params),
@@ -280,6 +282,17 @@ export function useDeleteUser() {
       qc.invalidateQueries({ queryKey: ['admin', 'users'] })
       qc.invalidateQueries({ queryKey: ['admin', 'stats'] })
     },
+  })
+}
+
+/* ─── Recheck the commission portal: who looks after this student, asked now ─── */
+export interface TetraCsRecheck { found: boolean; cs: string; team: string; code: string; open: boolean }
+export function useRecheckCs() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async (id: string) =>
+      (await api.post<{ success: true; data: TetraCsRecheck }>(`/admin/users/${id}/recheck-cs`)).data.data,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['admin', 'users'] }),
   })
 }
 

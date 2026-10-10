@@ -298,7 +298,8 @@ export class AdminController {
       const status           = q['status'] as 'active' | 'inactive' | undefined
       const excludeStudents  = Boolean(q['exclude_students'])
       const enrollmentStatus = q['enrollmentStatus'] as 'pending' | 'approved' | 'rejected' | 'cancelled' | undefined
-      const { docs, totalCount } = await this.userService.listByRole(role, { page, perPage: per_page, search, category: effectiveCategory, status, excludeStudents, enrollmentStatus, organizationId: req.user!.organizationId })
+      const noPhone          = q['no_phone'] === 'true'
+      const { docs, totalCount } = await this.userService.listByRole(role, { page, perPage: per_page, search, category: effectiveCategory, status, excludeStudents, enrollmentStatus, noPhone, organizationId: req.user!.organizationId })
       const meta = buildPaginationMeta(totalCount, page, per_page)
       /* What each student studies, beside what they were approved into
          (`categories`) — see utils/enrolledPrograms.ts. */

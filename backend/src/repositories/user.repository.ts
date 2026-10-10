@@ -163,6 +163,8 @@ export class UserRepository extends BaseRepository<IUser> {
       enrollmentStatus?: string
       status?:           'active' | 'inactive'
       excludeStudents?:  boolean
+      /** Only those with no phone number — on the account or the application. */
+      noPhone?:          boolean
       organizationId?:   string
     },
   ): Promise<{ docs: IUser[]; totalCount: number }> {
@@ -232,6 +234,13 @@ export class UserRepository extends BaseRepository<IUser> {
       filter['$or'] = categoryOr
     } else if (searchAnd.length) {
       filter['$and'] = searchAnd
+    }
+
+    /* No phone: neither on the account nor on the application. Under $and,
+       like the academy below, so the search and programme clauses stay. */
+    if (params.noPhone) {
+      const blank = (field: string) => ({ $or: [{ [field]: { $exists: false } }, { [field]: null }, { [field]: { $regex: '^\\s*$' } }] })
+      andFilter(filter, { $and: [blank('phone'), blank('enrollmentApplication.phone')] })
     }
 
     if (params.organizationId && Types.ObjectId.isValid(params.organizationId)) {

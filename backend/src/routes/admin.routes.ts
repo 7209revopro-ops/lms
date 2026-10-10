@@ -1,4 +1,5 @@
 import { Router } from 'express'
+import { recheckTetraCs, recheckTetraCsLater, TetraCsUnavailableError } from '@/services/tetraCsRecheck.service.ts'
 import { resolveClassEntitlement } from '@/services/classEntitlement.service.ts'
 /* Type-only, and aliased: every handler below binds its own `Types` value
    via `await import('mongoose')`, which would shadow the namespace. */
@@ -172,6 +173,32 @@ const categoryCreateSchema = z.object({
 
 const categoryUpdateSchema = categoryCreateSchema.partial()
 
+/* After a student is created or edited here, ask the commission portal who
+   looks after them — in the background, once the save has answered. The id is
+   the route's (an edit) or the one the save answers with (a create). */
+function recheckCsAfter(idOf?: (r: Request) => string) {
+  return (req: Request, res: Response, next: NextFunction) => {
+    // sendSuccess answers with res.send and a JSON string (utils/response.ts).
+    const send = res.send.bind(res)
+    let done = false
+    res.send = ((body?: unknown) => {
+      if (!done && res.statusCode < 300) {
+        done = true
+        let id = idOf ? idOf(req) : ''
+        if (!id) {
+          try {
+            const parsed = (typeof body === 'string' ? JSON.parse(body) : body) as { success?: boolean; data?: { _id?: unknown; id?: unknown } }
+            if (parsed?.success !== false) id = String(parsed?.data?._id ?? parsed?.data?.id ?? '')
+          } catch { /* not JSON: nothing to ask about */ }
+        }
+        recheckTetraCsLater(id)
+      }
+      return send(body)
+    }) as typeof res.send
+    next()
+  }
+}
+
 const usersQuerySchema = z.object({
   page:              z.coerce.number().int().min(1).default(1),
   per_page:          z.coerce.number().int().min(1).max(500).default(20),
@@ -181,6 +208,8 @@ const usersQuerySchema = z.object({
   status:            z.enum(['active', 'inactive']).optional(),
   exclude_students:  z.coerce.boolean().optional(),
   enrollmentStatus:  z.enum(['pending', 'approved', 'rejected', 'cancelled']).optional(),
+  /* Only students with no phone number, on their account or their application. */
+  no_phone:          z.enum(['true', 'false']).optional(),
 })
 
 /* The rate the CHECKOUT actually uses, handed out so the admin panel shows
@@ -373,7 +402,7 @@ router.get  ('/users', requirePermission('users','list'),
     next()
   },
   ctrl.listUsers)
-router.post ('/users', requirePermission('users','create'),          validate(userCreateSchema), audit('user.create', 'User'),
+router.post ('/users', requirePermission('users','create'),          validate(userCreateSchema), audit('user.create', 'User'), recheckCsAfter(),
   async (req, res, next) => {
     const role       = req.user!.role
     const targetRole = (req.body as { role?: string }).role ?? 'instructor'
@@ -607,8 +636,26 @@ router.patch ('/users/:id', requirePermission('users','update'),
   },
   validate(userUpdateSchema),
   audit('user.roleChange', 'User', r => String(r.params['id'] ?? '')),
+  recheckCsAfter(r => String(r.params['id'] ?? '')),
   ctrl.updateUser,
 )
+
+/* Recheck the commission portal — the Students table's "…" menu: asks Tetra
+   Commission now who looks after this student, and keeps the answer
+   (services/tetraCsRecheck.service.ts). Anyone who may edit the student. */
+router.post('/users/:id/recheck-cs', requirePermission('users','update'), requireSameOrgUser('id'),
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const answer = await recheckTetraCs(String(req.params['id'] ?? ''))
+      sendSuccess(res, answer)
+    } catch (err) {
+      if (err instanceof TetraCsUnavailableError) {
+        res.status(err.message === 'Not a student' ? 400 : 503).json({ success: false, error: { code: 'COMMISSION_UNAVAILABLE', message: err.message } })
+        return
+      }
+      next(err)
+    }
+  })
 router.delete('/users/:id', requirePermission('users','delete'),           requireAdmin, requireSameOrgUser('id'), audit('user.delete', 'User', r => String(r.params['id'] ?? '')), ctrl.deleteUser)
 
 /* POST /admin/users/:id/reset-2fa — clear a user's second factor.

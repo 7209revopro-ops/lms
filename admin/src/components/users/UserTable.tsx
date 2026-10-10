@@ -5,8 +5,9 @@ import { motion, AnimatePresence } from 'framer-motion'
 import {
   Search, Mail, Calendar, CheckCircle2, XCircle,
   ChevronLeft, ChevronRight, MoreHorizontal, ShieldCheck, ShieldOff, ArrowUp, ArrowDown, Pencil, Eye, PenLine,
+  Phone, PhoneOff, RefreshCw,
 } from 'lucide-react'
-import { useUsers, useUpdateUser, useImpersonateClient, type AdminUser } from '@/lib/api/users'
+import { useUsers, useUpdateUser, useImpersonateClient, useRecheckCs, type AdminUser } from '@/lib/api/users'
 import { useCurrentUser } from '@/lib/api/user'
 import { categoryScopeOf, isProgrammeScoped } from '@/lib/programScope'
 import Spinner from '@/components/ui/Spinner'
@@ -52,6 +53,7 @@ export function UserTable({ role, label }: Props) {
   const [search,      setSearch]      = useState('')
   const [page,        setPage]        = useState(1)
   const [category,    setCategory]    = useState<CategoryFilter>('')
+  const [noPhone,     setNoPhone]     = useState(false)
   const [editingUser, setEditingUser] = useState<AdminUser | null>(null)
   const [historyUser, setHistoryUser] = useState<AdminUser | null>(null)
 
@@ -60,6 +62,7 @@ export function UserTable({ role, label }: Props) {
     page,
     per_page: 20,
     category: category || undefined,
+    ...(role === 'student' && noPhone ? { no_phone: 'true' as const } : {}),
   })
 
   const handleCategoryFilter = (cat: CategoryFilter) => {
@@ -110,6 +113,18 @@ export function UserTable({ role, label }: Props) {
         </div>
         )}
 
+        {/* Students with no phone number, within the programme chosen */}
+        {role === 'student' && (
+          <button
+            onClick={() => { setNoPhone(v => !v); setPage(1) }}
+            className="inline-flex items-center gap-1.5 rounded-xl px-3 py-1.5 text-xs font-semibold transition-all"
+            style={noPhone
+              ? { background: 'rgba(248,113,113,0.12)', color: '#F87171', border: '1px solid rgba(248,113,113,0.35)' }
+              : { background: 'rgba(255,255,255,0.04)', color: 'rgba(255,255,255,0.45)', border: '1px solid rgba(255,255,255,0.07)' }}>
+            <PhoneOff size={12} />No phone
+          </button>
+        )}
+
         <p className="ml-auto text-xs" style={{ color: 'rgba(255,255,255,0.4)' }}>
           {data && `${data.meta.total_count.toLocaleString()} ${label.toLowerCase()}`}
         </p>
@@ -117,12 +132,12 @@ export function UserTable({ role, label }: Props) {
 
       <div className="overflow-hidden rounded-2xl" style={{ border: '1px solid rgba(255,255,255,0.07)' }}>
         <div className="overflow-x-auto">
-        <table className={`w-full border-collapse ${role === 'student' ? 'min-w-[880px]' : 'min-w-[720px]'}`}>
+        <table className={`w-full border-collapse ${role === 'student' ? 'min-w-[1020px]' : 'min-w-[720px]'}`}>
           <thead>
             <tr style={{ background: 'rgba(255,255,255,0.03)', borderBottom: '1px solid rgba(255,255,255,0.07)' }}>
               {/* Students: who looks after them in Tetra Commission, beside their email. */}
               {(role === 'student'
-                ? ['Name', 'Email', 'CS · Team', 'Category', 'Status', 'Joined', '']
+                ? ['Name', 'Email', 'Phone', 'CS · Team', 'Category', 'Status', 'Joined', '']
                 : ['Name', 'Email', 'Category', 'Status', 'Joined', '']).map(h => (
                 <th key={h} className="px-4 py-3 text-left"
                   style={{ color: 'rgba(255,255,255,0.35)', fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.08em' }}>
@@ -133,14 +148,14 @@ export function UserTable({ role, label }: Props) {
           </thead>
           <tbody>
             {isLoading && (
-              <tr><td colSpan={role === 'student' ? 7 : 6} className="px-4 py-12 text-center">
+              <tr><td colSpan={role === 'student' ? 8 : 6} className="px-4 py-12 text-center">
                 <div className="inline-flex items-center gap-2 text-sm" style={{ color: 'rgba(255,255,255,0.4)' }}>
                   <Spinner size={14} />Loading…
                 </div>
               </td></tr>
             )}
             {!isLoading && data?.docs.length === 0 && (
-              <tr><td colSpan={role === 'student' ? 7 : 6} className="px-4 py-16 text-center text-sm" style={{ color: 'rgba(255,255,255,0.35)' }}>
+              <tr><td colSpan={role === 'student' ? 8 : 6} className="px-4 py-16 text-center text-sm" style={{ color: 'rgba(255,255,255,0.35)' }}>
                 No {label.toLowerCase()} found
               </td></tr>
             )}
@@ -199,6 +214,9 @@ export function UserTable({ role, label }: Props) {
   )
 }
 
+/** Their phone — on the account, else the one on their application. */
+const phoneOf = (u: AdminUser): string => (u.phone || u.enrollmentApplication?.phone || '').trim()
+
 function UserRow({ user, index, onEdit, onViewHistory }: {
   user:          AdminUser
   index:         number
@@ -206,6 +224,7 @@ function UserRow({ user, index, onEdit, onViewHistory }: {
   onViewHistory?: (u: AdminUser) => void
 }) {
   const update    = useUpdateUser()
+  const recheck   = useRecheckCs()
   const toast     = useToast()
   const viewAs    = useImpersonateClient()
   const { data: me } = useCurrentUser()
@@ -226,6 +245,18 @@ function UserRow({ user, index, onEdit, onViewHistory }: {
      assuming it, so the flag is meaningless on any other role and must not be
      drawn there. */
   const isLent = user.role === 'instructor' && !!user.sharedAcrossOrgs
+
+  /* Asks Tetra Commission now who looks after them, and keeps the answer. */
+  const recheckCs = async () => {
+    setMenuOpen(false)
+    try {
+      const a = await recheck.mutateAsync(user.id)
+      if (!a.found) toast.error('Not in the commission portal yet', `${user.email} is not a student there`)
+      else toast.success(`${a.open || !a.cs ? 'No CS yet' : a.cs}${a.team ? ` · ${a.team}` : ''}${a.code ? ` · ${a.code}` : ''}`)
+    } catch (err: any) {
+      toast.error('Could not ask the commission portal', err?.response?.data?.error?.message)
+    }
+  }
 
   const viewAsStudent = async (mode: 'read' | 'write' = 'read') => {
     setMenuOpen(false)
@@ -371,8 +402,22 @@ function UserRow({ user, index, onEdit, onViewHistory }: {
         </div>
       </td>
       {user.role === 'student' && (
+        <td className="px-4 py-3.5">
+          {phoneOf(user) ? (
+            <div className="flex items-center gap-1.5 whitespace-nowrap text-sm" style={{ color: 'rgba(255,255,255,0.55)' }}>
+              <Phone size={12} />{phoneOf(user)}
+            </div>
+          ) : (
+            <span className="text-xs" style={{ color: 'rgba(255,255,255,0.25)' }}>—</span>
+          )}
+        </td>
+      )}
+      {user.role === 'student' && (
         <td className="px-4 py-3.5 max-w-[220px]">
           <CsTag cs={user.tetraCs} variant="cell" />
+          {user.tetraCs?.code && (
+            <p className="mt-0.5 font-mono text-[10px]" style={{ color: 'rgba(255,255,255,0.35)' }}>{user.tetraCs.code}</p>
+          )}
         </td>
       )}
       <td className="px-4 py-3.5">
@@ -456,6 +501,14 @@ function UserRow({ user, index, onEdit, onViewHistory }: {
                       Act as student · read &amp; write
                     </button>
                   </>
+                )}
+                {user.role === 'student' && (
+                  <button onClick={() => void recheckCs()} disabled={recheck.isPending}
+                    className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-xs font-semibold transition-colors hover:bg-white/[0.05] disabled:opacity-40"
+                    style={{ color: '#2DD4BF' }}>
+                    {recheck.isPending ? <Spinner size={12} /> : <RefreshCw size={12} />}
+                    Recheck commission portal
+                  </button>
                 )}
                 <button onClick={() => setActive(!user.isActive)}
                   className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-xs font-semibold transition-colors hover:bg-white/[0.05]"

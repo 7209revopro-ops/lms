@@ -20,7 +20,7 @@ export class UserService {
   private readonly repo         = new UserRepository()
   private readonly refreshRepo  = new RefreshTokenRepository()
 
-  async listByRole(role: UserRole | undefined, params: { page: number; perPage: number; search?: string; category?: string; status?: 'active' | 'inactive'; excludeStudents?: boolean; enrollmentStatus?: 'pending' | 'approved' | 'rejected' | 'cancelled'; organizationId?: string }) {
+  async listByRole(role: UserRole | undefined, params: { page: number; perPage: number; search?: string; category?: string; status?: 'active' | 'inactive'; excludeStudents?: boolean; enrollmentStatus?: 'pending' | 'approved' | 'rejected' | 'cancelled'; noPhone?: boolean; organizationId?: string }) {
     return this.repo.listByRole(role, params)
   }
 

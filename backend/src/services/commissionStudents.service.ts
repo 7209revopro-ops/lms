@@ -35,6 +35,7 @@
 ───────────────────────────────────────────────────── */
 import { EnrollmentModel, UserModel, OrganizationModel, CourseModel, OrderModel, SystemSettingModel } from '@/models/schema.ts'
 import { logger } from '@/utils/logger.ts'
+import { recheckTetraCsLater } from '@/services/tetraCsRecheck.service.ts'
 
 /* The programme Tetra Commission is for — "FOREX Trading" in the admin. */
 export const FOREX_PROGRAMME = '4x-trading'
@@ -191,6 +192,8 @@ export async function drainCommissionStudentsOnce(now = new Date()): Promise<{ s
         $unset: { 'commissionSync.lastError': 1, 'commissionSync.nextAttemptAt': 1 },
       })
       tally.sent++
+      // Their CS and team, now that they are there — not in up to ten minutes.
+      recheckTetraCsLater(String(student._id))
       logger.info({ userId: String(student._id), course, student: answer.studentCode, team: answer.teamName, existing: answer.existing },
         answer.existing ? 'Forex student already in Tetra Commission — left as they are' : 'Forex student sent to Tetra Commission')
     } catch (err) {
