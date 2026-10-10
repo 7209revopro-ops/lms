@@ -1,7 +1,6 @@
 import type { Metadata, Viewport } from 'next'
 import { Bricolage_Grotesque, DM_Sans, JetBrains_Mono } from 'next/font/google'
 import { Providers } from './providers'
-import Script from 'next/script'
 import { PwaRegister } from '@/components/PwaRegister'
 import './globals.css'
 
@@ -72,6 +71,11 @@ const THEME_BOOT = `
 }catch(e){document.documentElement.setAttribute('data-theme','light')}})();
 `
 
+const GTAG_INIT = `window.dataLayer = window.dataLayer || [];
+function gtag(){dataLayer.push(arguments);}
+gtag('js', new Date());
+gtag('config', 'G-7WQCSFLT8D');`
+
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html
@@ -82,19 +86,14 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       className={`${displayFont.variable} ${bodyFont.variable} ${monoFont.variable}`}
     >
       <head>
+        {/* Google tag (gtag.js) — G-7WQCSFLT8D. Plain tags first in <head>, as
+            Google asks, so they are in the page's HTML and its tag check finds them. */}
+        <script async src="https://www.googletagmanager.com/gtag/js?id=G-7WQCSFLT8D" />
+        <script dangerouslySetInnerHTML={{ __html: GTAG_INIT }} />
         <script dangerouslySetInnerHTML={{ __html: THEME_BOOT }} />
       </head>
       <body>
         <Providers>{children}</Providers><PwaRegister />
-        {/* Google Analytics (gtag.js, G-7WQCSFLT8D). next/script loads it after
-            the page is interactive, so it never delays the page itself. */}
-        <Script src="https://www.googletagmanager.com/gtag/js?id=G-7WQCSFLT8D" strategy="afterInteractive" />
-        <Script id="gtag-init" strategy="afterInteractive">{`
-          window.dataLayer = window.dataLayer || [];
-          function gtag(){dataLayer.push(arguments);}
-          gtag('js', new Date());
-          gtag('config', 'G-7WQCSFLT8D');
-        `}</Script>
       </body>
     </html>
   )
