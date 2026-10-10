@@ -276,4 +276,16 @@ router.post('/programs/:id/stop', wrap(async (req, res) => {
   sendSuccess(res, await stopProgram(String(req.params['id'] ?? ''), await portalProgramActor(req)), 'Program stopped')
 }))
 
+/* Exams (2026-10-10, portalExams.service.ts): an academy's published exams, and one student's — with their state and
+   a sign-in link straight into each. Read only (a student's list mints their usual 24-hour sign-in links). */
+router.get('/exams', wrap(async (req, res) => {
+  const { listExamsForPortal } = await import('@/services/portalExams.service.ts')
+  sendSuccess(res, await listExamsForPortal(req.query.academy), 'Exams')
+}))
+
+router.get('/exams/student', wrap(async (req, res) => {
+  const { studentExamsForPortal } = await import('@/services/portalExams.service.ts')
+  sendSuccess(res, await studentExamsForPortal(req.query.email), 'Student exams')
+}))
+
 export default router
