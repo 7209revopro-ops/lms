@@ -2589,6 +2589,7 @@ export type AuditAction =
   | 'settings.device-limit'
   | 'settings.finance-check'
   | 'class.verify'
+  | 'message.send'
 
 export interface IAuditLog extends Document {
   id:         string

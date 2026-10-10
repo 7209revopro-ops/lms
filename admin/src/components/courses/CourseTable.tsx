@@ -7,7 +7,7 @@ import {
   Search, Plus, Edit2, Trash2, BookOpen, Star, Users,
   ChevronUp, ChevronDown, ChevronLeft, ChevronRight,
   CheckSquare, Square, Globe, Archive, Trash,
-  LayoutGrid, List, TrendingUp, FileEdit, Clock, Eye,
+  LayoutGrid, List, TrendingUp, FileEdit, Clock, Eye, Send,
 } from 'lucide-react'
 import { useCourses, useBulkCourses } from '@/lib/api/courses'
 import { useAdminStats } from '@/lib/api/stats'
@@ -295,6 +295,8 @@ function CourseRow({ course, index, checked, onToggle, onDelete }: {
   const st = STATUS_CONFIG[course.status]
   const lv = course.level ? LEVEL_CONFIG[course.level] : null
   const cur = useOrgCurrency()
+  const { data: me } = useCurrentUser()
+  const canMessage = me?.role === 'super_admin' || me?.role === 'admin'
 
   return (
     <motion.tr
@@ -376,10 +378,17 @@ function CourseRow({ course, index, checked, onToggle, onDelete }: {
         </span>
       </td>
 
-      {/* Students */}
+      {/* Students — with a shortcut to message them (admin / super admin) */}
       <td className="px-4 py-3.5">
         <div className="flex items-center gap-1.5 text-sm" style={{ color: 'rgba(255,255,255,0.5)' }}>
           <Users size={12} />{course.enrolledCount.toLocaleString()}
+          {canMessage && course.enrolledCount > 0 && (
+            <Link href={`/send-message?courseId=${course.id}`} onClick={e => e.stopPropagation()}
+              className="ml-1 flex h-6 w-6 items-center justify-center rounded-md transition-colors hover:bg-white/10"
+              title="Message this course's students">
+              <Send size={11} />
+            </Link>
+          )}
         </div>
       </td>
 

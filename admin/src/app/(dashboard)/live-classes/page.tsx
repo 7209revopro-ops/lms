@@ -10,7 +10,7 @@ import {
   ChevronRight, PlayCircle, CalendarDays, Pencil, Search, X, Plus,
   LayoutList, CalendarRange, ChevronLeft, GraduationCap,
   UserCheck, LayoutGrid, Building2, MapPin, UserPlus,
-  ChevronDown, User, Globe, Share2, Check, FileSpreadsheet, LifeBuoy,
+  ChevronDown, User, Globe, Share2, Check, FileSpreadsheet, LifeBuoy, Send,
 } from 'lucide-react'
 import { useAllLiveClasses, useCreateLiveClass, useMyMeetings, markInstructorJoined, type LiveClass, type LiveClassType, type MentorMeeting } from '@/lib/api/liveClasses'
 import { CLASS_LANGUAGES, withFlagAndNative } from '@/lib/languages'
@@ -771,6 +771,17 @@ function TableRow({ live, index, showInstructor, onBackup }: { live: LiveClass; 
               title="Attendance">
               <UserCheck size={13} />
             </Link>
+
+            {/* Message this session's booked students — admin / super admin */}
+            {(me?.role === 'super_admin' || me?.role === 'admin') && (
+              <Link
+                href={`/send-message?liveClassId=${live.id}`}
+                className="flex h-7 w-7 items-center justify-center rounded-lg transition-colors hover:bg-white/10"
+                style={{ color: 'rgba(255,255,255,0.4)' }}
+                title="Message booked students">
+                <Send size={12} />
+              </Link>
+            )}
 
             {/* Copy / share link — super_admin, admin, sub_admin */}
             {canShareLink && (

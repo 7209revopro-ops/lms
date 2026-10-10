@@ -266,6 +266,14 @@ async function sendTemplate(
   })
 }
 
+/* Any template, as an admin chose it on the Send message page
+   (services/broadcast.service.ts) — the caller has already filled the values. */
+export async function sendTemplateMessage(
+  to: string | null | undefined, templateName: string, params: string[], buttonParam?: string,
+): Promise<void> {
+  await sendTemplate(to, templateName, params, { category: 'utility', ...(buttonParam ? { buttonParam } : {}) })
+}
+
 /* ── Typed helpers, one per trigger event ─────────────── */
 
 export async function sendEnrollmentApprovedWhatsApp(

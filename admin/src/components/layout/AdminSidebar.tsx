@@ -8,7 +8,7 @@ import {
   LayoutDashboard, BookOpen, Users, GraduationCap,
   Tag, Star, Settings, ChevronLeft, ChevronRight, LogOut, X,
   ShoppingBag, Ticket, Map, ClipboardList, Video, CalendarDays, Repeat, BarChart3, ShieldCheck, UserCog, LifeBuoy,
-  ClipboardCheck, Film, MonitorSmartphone, FileCheck2, Megaphone, Mail, UserX, Award, MessageCircle, MessagesSquare, ListChecks,
+  ClipboardCheck, Film, MonitorSmartphone, FileCheck2, Megaphone, Mail, UserX, Award, MessageCircle, MessagesSquare, Send, ListChecks,
 } from 'lucide-react'
 import { useStaffUnread } from '@/lib/api/chat'
 import { useUIStore } from '@/store/ui.store'
@@ -128,14 +128,16 @@ function SidebarContent({ collapsed, onClose }: SidebarContentProps) {
   // platform-wide (span every organization, no org to scope by) — only
   // super_admin sees either, same reasoning as the backend route guard
   // (requireSuperAdmin, not requireAdmin) on GET /email-logs.
+  /* Send message — admin and super admin only, as the route allows. */
+  const sendItem = { label: 'Send Message', href: '/send-message', icon: Send }
   const navItems  = user?.role === 'super_admin'
-    ? [...withClassroom,
+    ? [...withClassroom, sendItem,
         { label: 'Roles',      href: '/roles',       icon: ShieldCheck },
         { label: 'Email Logs', href: '/email-logs',  icon: Mail },
         { label: 'WhatsApp Logs', href: '/whatsapp-logs', icon: MessageCircle },
         { label: 'Chats',      href: '/chats',       icon: MessagesSquare },
       ]
-    : withClassroom
+    : user?.role === 'admin' ? [...withClassroom, sendItem] : withClassroom
   const roleLabel = isInstructor ? 'Instructor' : isManager ? 'Manager' : 'Admin'
   const bottomItems = isInstructor ? [] : [settingsItem]
 

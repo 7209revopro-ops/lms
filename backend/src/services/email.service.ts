@@ -589,6 +589,20 @@ export async function sendVerifyEmail(to: string, name: string, verifyUrl: strin
   })
 }
 
+/* A message an admin wrote on the Send message page (broadcast.service.ts):
+   plain text, shown as paragraphs in the usual layout, with an optional
+   button. Already personalised by the caller. */
+export async function sendAdminMessageEmail(to: string, subject: string, bodyText: string, button?: { label: string; url: string }): Promise<void> {
+  const clean = sanitiseSubject(subject)
+  const paras = bodyText.split(/\n{2,}/).map(p => `<p>${escapeHtml(p).replace(/\n/g, '<br>')}</p>`).join('')
+  const html = wrap(clean, `
+    <h2 style="margin:0 0 16px;font-size:20px;font-weight:700;color:#0D0F1A">${escapeHtml(clean)}</h2>
+    ${paras}
+    ${button ? `<p style="margin:24px 0"><a href="${escapeHtml(sanitiseUrl(button.url))}" style="display:inline-block;background:linear-gradient(135deg,#0057b8,#2F6BFF);color:#fff;font-weight:600;padding:12px 24px;border-radius:12px;text-decoration:none">${escapeHtml(button.label)}</a></p>` : ''}
+  `)
+  await sender.send({ to, subject: clean, html, text: `${bodyText}${button ? `\n\n${button.label}: ${button.url}` : ''}` })
+}
+
 /* ── Changing the address on an account ──────────────────────────────────
    Two messages, and BOTH matter.
 

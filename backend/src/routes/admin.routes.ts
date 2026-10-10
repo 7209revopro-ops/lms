@@ -2747,6 +2747,50 @@ router.get('/coupons/validate', async (req: Request, res: Response, next: NextFu
    the same rank cross-academy class sharing and instructor lending already
    draw the line at. Which academy a row belongs to is resolved below,
    because a schema/service call cannot see the caller's role. */
+/* ── Send message: a WhatsApp template and/or an email to a course's students
+   or a live session's booked students (services/broadcast.service.ts).
+   Admin and super admin only; below super admin, their own academy's
+   students. Preview first, then send — the send is audited. */
+const broadcastSchema = z.object({
+  audience:       z.enum(['course', 'session']),
+  courseId:       z.string().optional(),
+  liveClassId:    z.string().optional(),
+  organizationId: z.string().optional(),
+  sectionId:      z.string().optional(),
+  whatsapp:       z.object({ template: z.string().max(80), values: z.array(z.string().max(1000)).max(10) }).optional(),
+  email:          z.object({ subject: z.string().max(200), body: z.string().max(10000) }).optional(),
+})
+const broadcastCaller = (req: Request) => ({ id: req.user!.id, role: req.user!.role, organizationId: req.user!.organizationId ?? null })
+const broadcastFail = (err: unknown, res: Response, next: NextFunction) => {
+  const e = err as { name?: string; code?: string; statusCode?: number; message?: string }
+  if (e && e.constructor?.name === 'BroadcastError') {
+    res.status(e.statusCode ?? 400).json({ success: false, error: { code: e.code, message: e.message } }); return
+  }
+  next(err)
+}
+router.get('/messages/templates', requireRole('super_admin', 'admin'), async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { BroadcastService } = await import('@/services/broadcast.service.ts')
+    const audience = req.query['audience'] === 'session' ? 'session' : 'course'
+    sendSuccess(res, new BroadcastService().templatesFor(audience))
+  } catch (err) { next(err) }
+})
+router.post('/messages/preview', requireRole('super_admin', 'admin'), validate(broadcastSchema), async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { BroadcastService } = await import('@/services/broadcast.service.ts')
+    sendSuccess(res, await new BroadcastService().preview(req.body, broadcastCaller(req)))
+  } catch (err) { broadcastFail(err, res, next) }
+})
+router.post('/messages/send', requireRole('super_admin', 'admin'), validate(broadcastSchema),
+  audit('message.send', 'Message', r => String((r.body as any)?.liveClassId ?? (r.body as any)?.courseId ?? ''),
+    r => ({ audience: (r.body as any)?.audience, template: (r.body as any)?.whatsapp?.template ?? null, email: !!(r.body as any)?.email, subject: (r.body as any)?.email?.subject ?? null })),
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const { BroadcastService } = await import('@/services/broadcast.service.ts')
+      sendSuccess(res, await new BroadcastService().send(req.body, broadcastCaller(req)), 'Sending')
+    } catch (err) { broadcastFail(err, res, next) }
+  })
+
 const announcementCreateSchema = z.object({
   title:           z.string().min(3).max(150).trim(),
   description:     z.string().min(1).max(3000).trim(),

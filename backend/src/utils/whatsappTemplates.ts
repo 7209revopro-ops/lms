@@ -41,6 +41,12 @@ export const WHATSAPP_TEMPLATES: Record<string, TemplateInfo> = {
   class_has_started_v2: { label: 'Class has started', params: [STUDENT_NAME, 'Class'],
     body: "Hi {{1}}, your class *{{2}}* has started.\n\nTap the button below — you'll be signed in and taken straight to the class.",
     button: { base: 'client', path: '/j/', secret: 'one-tap join, 2 h' } },
+  course_update_v1: { label: 'Course update', params: [STUDENT_NAME, 'Course', 'Message'],
+    body: 'Hi {{1}}, an update about your course {{2}}:\n\n{{3}}',
+    button: { base: 'client', path: '/s/', secret: 'one-tap sign-in, 24 h' } },
+  class_update_v1: { label: 'Class update', params: [STUDENT_NAME, 'Class', 'When', 'Message'],
+    body: 'Hi {{1}}, an update about your class {{2}} on {{3}}:\n\n{{4}}',
+    button: { base: 'client', path: '/s/', secret: 'one-tap sign-in, 24 h' } },
   class_starts_in_5_min: { label: 'Starts in 5 minutes (old)', params: [STUDENT_NAME, 'Class', 'Day', 'Time'],
     button: { base: 'client', path: '/live-classes/' } },
   class_has_started: { label: 'Class has started (old)', params: [STUDENT_NAME, 'Class'],
@@ -70,3 +76,27 @@ export function renderWhatsApp(templateName: string, params: string[], buttonPar
   }
   return { label: t?.label ?? templateName, ...(text ? { text } : {}), values, ...(button ? { button } : {}) }
 }
+
+/* ─────────────────────────────────────────────────────────────
+   Templates an admin may send by hand (Send message page), to a course's
+   students or a live session's booked students. `defaults` pre-fill each
+   value; {name} {course} {class} {day} {time} {when} {mentor} are replaced
+   per student. `button` says what the student's own link opens.
+───────────────────────────────────────────────────────────── */
+export type SendAudience = 'course' | 'session'
+export type SendButton = 'signin-course' | 'signin-class' | 'signin-schedule' | 'signin-bookings' | 'join'
+export interface SendableTemplate { name: string; audiences: SendAudience[]; defaults: string[]; button?: SendButton; note?: string }
+
+export const SENDABLE_TEMPLATES: SendableTemplate[] = [
+  { name: 'course_update_v1',        audiences: ['course'],  defaults: ['{name}', '{course}', ''], button: 'signin-course', note: 'General message about a course — write it in the last value.' },
+  { name: 'class_update_v1',         audiences: ['session'], defaults: ['{name}', '{class}', '{when}', ''], button: 'signin-class', note: 'General message about this class — write it in the last value.' },
+  { name: 'class_starts_in_5_min_v2', audiences: ['session'], defaults: ['{name}', '{class}', '{day}', '{time}'], button: 'join', note: 'The button joins the class in one tap.' },
+  { name: 'class_has_started_v2',    audiences: ['session'], defaults: ['{name}', '{class}'], button: 'join', note: 'The button joins the class in one tap.' },
+  { name: 'class_link_changed_v1',   audiences: ['session'], defaults: ['{name}', '{class}', '{day}', '{time}'], button: 'signin-class' },
+  { name: 'class_cancelled_v1',      audiences: ['session'], defaults: ['{name}', '{class}', '{day}', '{time}'], button: 'signin-schedule' },
+  { name: 'class_rescheduled_v1',    audiences: ['session'], defaults: ['{name}', '{class}', '', '{when}'], button: 'signin-bookings', note: 'Fill in "Was" with the old day and time.' },
+  { name: 'class_mentor_changed_v1', audiences: ['session'], defaults: ['{name}', '{class}', '{when}', '{mentor}'], button: 'signin-bookings' },
+  { name: 'new_class_scheduled_v1',  audiences: ['session'], defaults: ['{name}', '{course}', '{class}', '{day}', '{time}'], button: 'signin-schedule' },
+  { name: 'class_reminder_tomorrow', audiences: ['session'], defaults: ['{class}', '{when}'] },
+  { name: 'class_starting_soon_v5',  audiences: ['session'], defaults: ['{class}', '5'] },
+]
