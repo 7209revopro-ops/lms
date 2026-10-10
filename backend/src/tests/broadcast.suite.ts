@@ -90,7 +90,7 @@ try {
   const p1 = await call('POST', '/admin/messages/preview', SA, courseBody())
   check('super admin: 4 active students (dropped left out)', p1.status === 200 && p1.body?.data?.total === 4, why(p1) + JSON.stringify(p1.body?.data?.names))
   check('WhatsApp 3 / no phone 1; email 4', p1.body?.data?.whatsapp?.willSend === 3 && p1.body.data.whatsapp.noPhone === 1 && p1.body.data.email.willSend === 4)
-  check('sample personalised', p1.body?.data?.sample?.whatsapp?.text?.includes('Hi Anna, an update about your course MBT Course') && p1.body.data.sample.email.subject === 'Update for MBT Course', JSON.stringify(p1.body?.data?.sample))
+  check('sample personalised', p1.body?.data?.sample?.whatsapp?.text?.includes("Hi Anna, there's an update about your course MBT Course") && p1.body.data.sample.email.subject === 'Update for MBT Course', JSON.stringify(p1.body?.data?.sample))
   const p2 = await call('POST', '/admin/messages/preview', DA, courseBody())
   check('Dubai admin: only Dubai students (3)', p2.body?.data?.total === 3, String(p2.body?.data?.total))
   const p3 = await call('POST', '/admin/messages/preview', SA, courseBody({ sectionId: String(sec2._id) }))
