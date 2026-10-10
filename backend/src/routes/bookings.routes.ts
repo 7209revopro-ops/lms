@@ -223,7 +223,11 @@ router.post('/', authenticate, requireEnrollmentApproval, validate(createBooking
     if (booker.gone) {
       res.status(403).json({ success: false, error: { code: 'NOT_ENROLLED', message: 'You must be enrolled in this course to book the session' } }); return
     }
-    const entitlement = await resolveClassEntitlement(session, userId, booker.org, 'active')
+    /* 'notDropped', the same rule as joining and the class list: an enrolment
+       turns 'completed' when the student finishes the recorded lessons, and
+       the course's live classes go on after that — 'active' here locked
+       exactly the students who had done the most work out of booking. */
+    const entitlement = await resolveClassEntitlement(session, userId, booker.org, 'notDropped')
     /* EVERY refusal, not a list of the ones we remembered. Checking two of the
        three codes left WRONG_ACADEMY falling straight through into a
        SUCCESSFUL booking — the exact hole that passing the academy was added
