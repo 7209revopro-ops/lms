@@ -24,6 +24,9 @@ router.get(
       const { docs, totalCount } = await repo.list(page, per_page, {
         status: q['status'],
         to:     q['to'],
+        q:      q['q'],
+        from:   q['from'],
+        until:  q['until'],
       })
       sendSuccess(res, docs, undefined, 200, buildPaginationMeta(totalCount, page, per_page))
     } catch (err) {
@@ -31,6 +34,15 @@ router.get(
     }
   },
 )
+
+/* GET /email-logs/summary — sent / failed / pending, today and the last 7 days. */
+router.get('/summary', authenticateAdmin, requireSuperAdmin, async (_req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { EmailOutboxModel } = await import('@/models/schema.ts')
+    const { outboxSummary } = await import('@/utils/outboxLog.ts')
+    sendSuccess(res, await outboxSummary(EmailOutboxModel))
+  } catch (err) { next(err) }
+})
 
 /* GET /email-logs/:id/html — the rendered body, fetched only on demand.
    A separate route rather than always including it in the list response:

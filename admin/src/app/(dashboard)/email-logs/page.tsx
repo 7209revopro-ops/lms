@@ -6,7 +6,8 @@ import {
   Mail, ChevronLeft, ChevronRight, ChevronDown, Search, X,
   AlertCircle, CheckCircle2, Clock, XCircle, Check, Inbox,
 } from 'lucide-react'
-import { useEmailLogs, fetchEmailLogHtml, type EmailLog, type EmailLogStatus } from '@/lib/api/emailLogs'
+import { useEmailLogs, useEmailLogSummary, fetchEmailLogHtml, type EmailLog, type EmailLogStatus } from '@/lib/api/emailLogs'
+import { LogSummary, DateRange } from '@/components/logs/LogSummary'
 import Spinner from '@/components/ui/Spinner'
 
 /* ─── Helpers ──────────────────────────────────────────── */
@@ -216,12 +217,16 @@ export default function EmailLogsPage() {
   const [status,    setStatus]    = useState<EmailLogStatus | ''>('')
   const [toInput,   setToInput]   = useState('')
   const [to,        setTo]        = useState('')
+  const [from,      setFrom]      = useState('')
+  const [until,     setUntil]     = useState('')
 
-  const { data, isLoading, isError } = useEmailLogs({ page, status: status || undefined, to: to || undefined })
+  /* The search box matches the recipient OR the subject. */
+  const { data, isLoading, isError } = useEmailLogs({ page, status: status || undefined, q: to || undefined, from: from || undefined, until: until || undefined })
+  const { data: summary } = useEmailLogSummary()
 
   const applyTo   = () => { setTo(toInput.trim()); setPage(1) }
-  const clearAll  = () => { setStatus(''); setToInput(''); setTo(''); setPage(1) }
-  const hasFilter = !!status || !!to
+  const clearAll  = () => { setStatus(''); setToInput(''); setTo(''); setFrom(''); setUntil(''); setPage(1) }
+  const hasFilter = !!status || !!to || !!from || !!until
 
   return (
     <div className="space-y-6">
@@ -250,9 +255,12 @@ export default function EmailLogsPage() {
         )}
       </div>
 
+      <LogSummary data={summary} onPick={s => { setStatus(s); setPage(1) }} />
+
       {/* Filters */}
       <div className="flex flex-wrap items-center gap-3">
         <StatusDropdown value={status} onChange={v => { setStatus(v); setPage(1) }} />
+        <DateRange from={from} until={until} onChange={(f, u) => { setFrom(f); setUntil(u); setPage(1) }} />
 
         <div className="flex items-center gap-1.5 rounded-xl px-3 py-2"
           style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)' }}>
@@ -261,7 +269,7 @@ export default function EmailLogsPage() {
             value={toInput}
             onChange={e => setToInput(e.target.value)}
             onKeyDown={e => e.key === 'Enter' && applyTo()}
-            placeholder="Filter by recipient email…"
+            placeholder="Search recipient or subject…"
             className="bg-transparent text-xs text-white outline-none placeholder:text-white/25 w-56"
           />
           {toInput && (

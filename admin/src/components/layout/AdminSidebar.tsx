@@ -132,6 +132,7 @@ function SidebarContent({ collapsed, onClose }: SidebarContentProps) {
     ? [...withClassroom,
         { label: 'Roles',      href: '/roles',       icon: ShieldCheck },
         { label: 'Email Logs', href: '/email-logs',  icon: Mail },
+        { label: 'WhatsApp Logs', href: '/whatsapp-logs', icon: MessageCircle },
         { label: 'Chats',      href: '/chats',       icon: MessagesSquare },
       ]
     : withClassroom

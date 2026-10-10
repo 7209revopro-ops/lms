@@ -1,4 +1,5 @@
 import { EmailOutboxModel, type IEmailOutbox, type EmailOutboxStatus } from '@/models/schema.ts'
+import { createdBetween, escapeRegex } from '@/utils/outboxLog.ts'
 
 export class EmailOutboxRepository {
   /* EmailOutboxModel already IS the send log (see its own comment in
@@ -7,6 +8,10 @@ export class EmailOutboxRepository {
   async list(page: number, perPage: number, filter: {
     status?: string
     to?:     string
+    /* Recipient OR subject, partial. */
+    q?:      string
+    from?:   string
+    until?:  string
   } = {}): Promise<{ docs: IEmailOutbox[]; totalCount: number }> {
     const q: Record<string, unknown> = {}
 
@@ -27,6 +32,14 @@ export class EmailOutboxRepository {
       const escaped = to.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
       q['to'] = { $regex: escaped, $options: 'i' }
     }
+
+    const search = filter.q ? String(filter.q).trim().slice(0, 120) : ''
+    if (search) {
+      const rx = { $regex: escapeRegex(search), $options: 'i' }
+      q['$or'] = [{ to: rx }, { subject: rx }]
+    }
+    const range = createdBetween(filter.from, filter.until)
+    if (range) Object.assign(q, range)
 
     const [docs, totalCount] = await Promise.all([
       EmailOutboxModel.find(q, { html: 0 }) // the full HTML body is never needed for a list row
