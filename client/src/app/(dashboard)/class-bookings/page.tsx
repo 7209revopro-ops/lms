@@ -1518,6 +1518,18 @@ export default function ClassBookingsPage() {
      two views agreeing about any given class. */
   const catalog = useMemo(()=>buildCatalog(allClasses,bookingMap),[allClasses,bookingMap])
 
+  /* One course with classes: open its modules straight away instead of a
+     list of one. Once per visit — tapping back to "Courses" then shows the
+     list rather than bouncing them back in. */
+  const autoEntered=useRef(false)
+  useEffect(()=>{
+    if(autoEntered.current||loadCls||view!=='courses'||hCourse) return
+    if(catalog.length===1&&catalog[0]?.id){
+      autoEntered.current=true
+      setHCourse(catalog[0].id); setHModule(null); syncUrl('courses',catalog[0].id,null,'replace')
+    }
+  },[catalog,loadCls,view,hCourse])  // eslint-disable-line react-hooks/exhaustive-deps
+
   /* A group the modal is open on can come from either view, and the two index
      it differently: the flat list nests groups under a date, the hierarchy
      under a module. Resolved against the flat list first, then the catalogue,
