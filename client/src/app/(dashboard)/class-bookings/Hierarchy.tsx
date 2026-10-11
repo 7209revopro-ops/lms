@@ -41,8 +41,8 @@ import JoinMeetButton from '@/components/live-classes/JoinMeetButton'
 import { useJoinClock } from '@/hooks/useJoinClock'
 import { getJoinPhase, type JoinWindowSession } from '@/lib/joinWindow'
 import { useCurrentUser } from '@/lib/api/user'
-import {
 import { showModuleLocked } from '@/lib/api/journey'
+import {
   getSlotStatus, SC, seatsLeft, nextSlot,
   moduleFacets, showFacet, filterGroups,
   buildCatalog, GENERAL_MODULE_ID as GENERAL,
@@ -1418,12 +1418,12 @@ function SessionCard({
       <span aria-hidden className="absolute inset-y-0 left-0 w-1"
         style={{ background: c.color, opacity: shown === 'bookable' || shown === 'live' || shown === 'booked' ? 1 : 0.45 }} />
 
-      <div className="flex flex-1 flex-col gap-2 p-3.5 pl-4">
+      <div className="flex flex-1 flex-col gap-2 p-3 pl-3.5 sm:p-3.5 sm:pl-4">
 
         {/* ── the clock, and what state it is in ── */}
         <div className="flex items-start justify-between gap-2">
           <div className="min-w-0">
-            <p className="syne truncate text-[20px] font-extrabold leading-none tracking-tight"
+            <p className="syne truncate text-[17px] font-bold leading-none sm:text-[20px]"
               style={{ color: 'var(--color-text-primary)' }}>
               {time}
             </p>
@@ -1754,7 +1754,8 @@ export function ModuleSheet({
      one day wide and a card three days narrow would make the column of days
      read as three different screens. Each card carries its own controls now,
      so three across is the widest that keeps a button a comfortable target. */
-  const cols = 'grid-cols-1 sm:grid-cols-2 xl:grid-cols-3'
+  /* Two per row on a phone too — the card is built to fit half its width. */
+  const cols = 'grid-cols-2 xl:grid-cols-3'
 
   /* The stagger runs across the WHOLE sheet, not per day, so the cascade
      reads top to bottom instead of restarting at every heading. */
@@ -1830,7 +1831,7 @@ export function ModuleSheet({
             return (
               <section key={bucket.key} aria-labelledby={headingId}>
                 <DayHead bucket={bucket} headingId={headingId} reduce={reduce} />
-                <div className={`grid gap-3.5 ${cols}`}>
+                <div className={`grid gap-2.5 sm:gap-3.5 ${cols}`}>
                   {bucket.items.map(lc => {
                     const s = rows.get(lc.id)
                     if (!s) return null
@@ -1979,7 +1980,7 @@ export function Hierarchy({
           /* A real course runs to ten modules, so this is a grid rather
              than a column — ten stacked banners would be three screens of
              scrolling to see a list the reference fits in two rows. */
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+          <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-3 xl:grid-cols-4">
             {modules.map((m, i) => (
               <ModuleCard key={m.id || 'general'} node={m} index={i}
                 position={m.id === GENERAL ? null : (m.number ?? ordered.indexOf(m) + 1)}
@@ -2001,7 +2002,7 @@ export function Hierarchy({
           title={q ? 'No courses match' : 'No upcoming sessions'}
           body={q ? 'Try a different search term.' : 'When classes are scheduled for your courses they will appear here.'} />
       ) : (
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5">
+        <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5">
           {visibleCourses.map((c, i) => (
             <CourseCard key={c.id || 'unassigned'} node={c} index={i}
               onOpen={() => onNavigate(c.id, null)} />
