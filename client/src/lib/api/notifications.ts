@@ -65,3 +65,24 @@ export function useMarkAllRead() {
     },
   })
 }
+
+/* New classes scheduled in the student's courses that they have not seen —
+   the badge on Schedule (bottom bar + menu). Cleared by opening the Schedule. */
+export const NEW_CLASS_KIND = 'live-class-scheduled'
+export function useNewClassesCount() {
+  return useQuery({
+    queryKey: ['notifications', 'unread-count', NEW_CLASS_KIND],
+    queryFn:  () => apiGet<{ unreadCount: number }>('/notifications/unread-count', { kind: NEW_CLASS_KIND }).then(d => d.unreadCount),
+    refetchInterval: 60_000,
+    staleTime: 30_000,
+  })
+}
+
+/** Mark the new-class notices read (opening the Schedule). */
+export function useClearNewClasses() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: () => api.post('/notifications/read-all', undefined, { params: { kind: NEW_CLASS_KIND } }).then(() => {}),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['notifications'] }) },
+  })
+}

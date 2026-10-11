@@ -14,6 +14,7 @@ import { useToast } from '@/store/ui.store'
 import { useAllLiveClasses, type LiveClass } from '@/lib/api/liveClasses'
 import { JourneyBar } from '@/components/class-schedule/JourneyBar'
 import { showModuleLocked } from '@/lib/api/journey'
+import { useClearNewClasses, useNewClassesCount } from '@/lib/api/notifications'
 import { useMyBookings, useCreateBooking, useCancelBooking, type MyBooking } from '@/lib/api/bookings'
 import { useCurrentUser } from '@/lib/api/user'
 import { APP_TIMEZONE } from '@/lib/timezone'
@@ -1246,6 +1247,10 @@ export default function ClassBookingsPage() {
   /* Only the classes of courses this student holds — the courses they do not
      are levels of the journey bar above, each with its own way to unlock. */
   const {data:allClasses=[],isLoading:loadCls,isError:errCls,refetch:refetchCls} = useAllLiveClasses('all',{mine:true})
+  /* Opening the Schedule is seeing the new classes: clear their badge. */
+  const {data:newClasses=0}=useNewClassesCount()
+  const clearNew=useClearNewClasses()
+  useEffect(()=>{ if(newClasses>0&&!clearNew.isPending) clearNew.mutate() },[newClasses])  // eslint-disable-line react-hooks/exhaustive-deps
   const {data:bkData,         isLoading:loadBk, isError:errBk, refetch:refetchBk}  = useMyBookings({per_page:100})
   const myBookings: MyBooking[] = bkData?.docs ?? []
 
@@ -1667,7 +1672,8 @@ export default function ClassBookingsPage() {
         </motion.div>
 
         {/* ─── YOUR JOURNEY ─────────────────────────────────────── */}
-        <JourneyBar onPickCourse={id=>{ if(view!=='courses') setView('courses'); navigate(id,null) }}/>
+        {/* Courses view only — the Sessions list is a plain timetable. */}
+        {view==='courses'&&<JourneyBar onPickCourse={id=>navigate(id,null)}/>}
 
         {/* ─── STATS ────────────────────────────────────────────── */}
         {!isTree&&!isLoading&&filterDelivery!=='offline'&&(

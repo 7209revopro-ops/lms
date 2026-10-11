@@ -32,8 +32,8 @@ export class NotificationService {
     return this.repo.listForUser(userId, params)
   }
 
-  async unreadCount(userId: string) {
-    return this.repo.unreadCount(userId)
+  async unreadCount(userId: string, kind?: string) {
+    return this.repo.unreadCount(userId, kind)
   }
 
   async markRead(userId: string, id: string) {
@@ -45,7 +45,7 @@ export class NotificationService {
     return n
   }
 
-  async markAllRead(userId: string): Promise<{ updated: number }> {
-    return { updated: await this.repo.markAllRead(userId) }
+  async markAllRead(userId: string, kind?: string): Promise<{ updated: number }> {
+    return { updated: await this.repo.markAllRead(userId, kind) }
   }
 }

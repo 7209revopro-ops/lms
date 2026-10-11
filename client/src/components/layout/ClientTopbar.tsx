@@ -248,7 +248,9 @@ export function ClientTopbar() {
         initial={{ y: -100, opacity: 0 }}
         animate={{ left, y: 0, opacity: 1 }}
         transition={{ y: { type: 'spring', stiffness: 280, damping: 28, mass: 0.8 }, left: { type: 'spring', stiffness: 300, damping: 30 } }}
-        className="fixed top-0 right-0 z-30 bg-[var(--color-bg-surface)]"
+        /* Laptops and up only — below `lg` the bottom tab bar and the More
+           drawer are the navigation, and the page gets the whole screen. */
+        className="fixed top-0 right-0 z-30 hidden bg-[var(--color-bg-surface)] lg:block"
         style={{ borderBottom: '1px solid var(--color-border)' }}>
 
         {/* ── Row 1: Logo (topbar mode) + search + actions ── */}

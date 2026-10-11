@@ -39,8 +39,10 @@ export class NotificationRepository extends BaseRepository<INotification> {
     return { docs, totalCount, unreadCount }
   }
 
-  async unreadCount(userId: string | Types.ObjectId): Promise<number> {
-    return NotificationModel.countDocuments({ userId, readAt: { $exists: false } }).exec()
+  /* `kind` narrows it to one kind — e.g. 'live-class-scheduled', the new-class
+     badge on the student's Schedule tab. */
+  async unreadCount(userId: string | Types.ObjectId, kind?: string): Promise<number> {
+    return NotificationModel.countDocuments({ userId, readAt: { $exists: false }, ...(kind ? { kind } : {}) }).exec()
   }
 
   async markRead(userId: string | Types.ObjectId, id: string): Promise<INotification | null> {
@@ -51,9 +53,9 @@ export class NotificationRepository extends BaseRepository<INotification> {
     ).exec()
   }
 
-  async markAllRead(userId: string | Types.ObjectId): Promise<number> {
+  async markAllRead(userId: string | Types.ObjectId, kind?: string): Promise<number> {
     const res = await NotificationModel.updateMany(
-      { userId, readAt: { $exists: false } },
+      { userId, readAt: { $exists: false }, ...(kind ? { kind } : {}) },
       { $set: { readAt: new Date() } },
     ).exec()
     return res.modifiedCount

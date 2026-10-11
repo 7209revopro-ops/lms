@@ -31,10 +31,12 @@ const monoFont = JetBrains_Mono({
 export const metadata: Metadata = {
   title: { template: '%s | Delta Institutions', default: 'Delta Institutions | Leading Trading Academy' },
   description: 'UAE leading trading academy. Begin your learning journey at Delta Institutions.',
+  /* Square, padded icons made from the logo. The 1,400px /icons/icone.png
+     was the Apple icon too — iOS shrinks it into a cramped tile. */
   icons: {
-    icon:     [{ url: '/icons/icone.png', type: 'image/png' }],
-    shortcut: '/icons/icone.png',
-    apple:    '/icons/icone.png',
+    icon:     [{ url: '/favicon-48.png', sizes: '48x48', type: 'image/png' }, { url: '/icon-192.png', sizes: '192x192', type: 'image/png' }],
+    shortcut: '/favicon-48.png',
+    apple:    [{ url: '/apple-touch-icon.png', sizes: '180x180', type: 'image/png' }],
   },
   manifest:    '/manifest.webmanifest',
   applicationName: 'Delta Institutions',

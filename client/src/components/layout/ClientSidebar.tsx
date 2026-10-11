@@ -1,21 +1,26 @@
 'use client'
 
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import {
   BookOpen, GraduationCap, Trophy,
   Settings, LogOut, Flame, Map, X, Video, CalendarDays, LifeBuoy, ClipboardList,
-  Ticket, Receipt, Sparkles, Sun, Moon, Monitor, Star, MessageCircle,
+  Ticket, Receipt, Sparkles, Sun, Moon, Monitor, Star, MessageCircle, Search, ShoppingCart, Download,
 } from 'lucide-react'
 import { useChatUnread } from '@/lib/api/chat'
+import { useNewClassesCount } from '@/lib/api/notifications'
+import { useInstallOffer, promptInstall } from '@/lib/pwaInstall'
 import { useUIStore } from '@/store/ui.store'
 import { useThemeStore } from '@/store/theme.store'
 import { logout as apiLogout, useCurrentUser } from '@/lib/api/user'
 import { AvatarImg } from '@/components/ui/AvatarImg'
 
 const navItems = [
+  /* Search and the cart lived only in the top header, which phones no longer show. */
+  { label: 'Search',         href: '/search',         icon: Search },
+  { label: 'Cart',           href: '/cart',           icon: ShoppingCart },
   { label: 'My Learning',    href: '/my-learning',    icon: GraduationCap },
   { label: 'Class Schedule', href: '/class-bookings', icon: CalendarDays },
   { label: 'My Bookings',    href: '/my-bookings',    icon: Ticket },
@@ -57,6 +62,9 @@ function SidebarContent({ onClose }: { onClose: () => void }) {
      correctly all along. */
   const { data: user } = useCurrentUser()
   const { data: chatUnread } = useChatUnread(user?.role === 'student')
+  const { data: newClasses } = useNewClassesCount()
+  const installOffer = useInstallOffer()
+  const [iosHint, setIosHint] = useState(false)
   const displayName    = user?.name ?? 'Account'
   const displayEmail   = user?.email ?? ''
   const avatarInitial  = (user?.name?.trim()?.[0] ?? '?').toUpperCase()
@@ -107,6 +115,10 @@ function SidebarContent({ onClose }: { onClose: () => void }) {
                   )}
                   <Icon size={17} className="relative z-10 flex-shrink-0" strokeWidth={active ? 2.2 : 1.8} />
                   <span className="relative z-10 whitespace-nowrap text-sm font-medium">{item.label}</span>
+                  {item.href === '/class-bookings' && !!newClasses && (
+                    <span className="relative z-10 ml-auto flex h-5 min-w-5 items-center justify-center rounded-full px-1.5 text-[10px] font-bold text-white"
+                      style={{ background: '#D97706' }} title="New classes">{newClasses > 99 ? '99+' : newClasses}</span>
+                  )}
                   {item.href === '/messages' && !!chatUnread && (
                     <span className="relative z-10 ml-auto flex h-5 min-w-5 items-center justify-center rounded-full px-1.5 text-[10px] font-bold text-white"
                       style={{ background: '#0057b8' }}>{chatUnread > 99 ? '99+' : chatUnread}</span>
@@ -146,6 +158,22 @@ function SidebarContent({ onClose }: { onClose: () => void }) {
           <ThemeIcon size={17} strokeWidth={1.8} className="flex-shrink-0" />
           <span className="whitespace-nowrap text-sm font-medium">{themeLabel}</span>
         </button>
+
+        {/* Install app — replaces the automatic install popup. */}
+        {installOffer && (
+          <button type="button"
+            onClick={() => { if (installOffer === 'prompt') void promptInstall(); else setIosHint(v => !v) }}
+            className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left transition-colors hover:bg-[var(--color-hover)]"
+            style={{ color: 'var(--color-primary)' }}>
+            <Download size={17} strokeWidth={1.8} className="flex-shrink-0" />
+            <span className="whitespace-nowrap text-sm font-medium">Install app</span>
+          </button>
+        )}
+        {iosHint && (
+          <p className="mx-3 mb-1 rounded-xl px-3 py-2 text-[11px] leading-relaxed" style={{ background: 'var(--color-bg-inset)', color: 'var(--color-text-secondary)' }}>
+            On iPhone: tap <b>Share</b> in Safari, then <b>Add to Home Screen</b>.
+          </p>
+        )}
 
         {bottomItems.map((item) => {
           const Icon = item.icon

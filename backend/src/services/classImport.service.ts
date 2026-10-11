@@ -932,6 +932,17 @@ export class ClassImportService {
             const first = open[0]!
             const what = open.length === 1 ? first.title : `${first.title} + ${open.length - 1} more class${open.length > 2 ? 'es' : ''}`
             const userId = String(u._id)
+            /* In the app too — one notice per course, which is what the
+               student app's "new classes" badge on Schedule counts. */
+            try {
+              const { NotificationService } = await import('@/services/notification.service.ts')
+              await new NotificationService().create(userId, {
+                kind:  'live-class-scheduled',
+                title: `${open.length} new class${open.length > 1 ? 'es' : ''} in ${courseTitle}`,
+                body:  `Starting with "${first.title}" — ${day(first.scheduledStart)}, ${time(first.scheduledStart)}`,
+                link:  '/class-bookings',
+              })
+            } catch (err) { logger.warn({ err, userId }, '[ClassImport] in-app notice failed') }
             try {
               await queueDigestItem({
                 userId, kind: 'new-session',

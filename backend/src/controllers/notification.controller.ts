@@ -2,6 +2,12 @@ import type { Request, Response, NextFunction } from 'express'
 import { NotificationService } from '@/services/notification.service.ts'
 import { sendSuccess, buildPaginationMeta, parsePagination } from '@/utils/response.ts'
 
+/* ?kind= — one notification kind only (a plain slug; anything else is ignored). */
+const kindOf = (req: Request): string | undefined => {
+  const k = req.query['kind']
+  return typeof k === 'string' && /^[a-z-]{1,40}$/.test(k) ? k : undefined
+}
+
 export class NotificationController {
   private readonly service = new NotificationService()
 
@@ -19,7 +25,7 @@ export class NotificationController {
 
   unreadCount = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     try {
-      sendSuccess(res, { unreadCount: await this.service.unreadCount(req.user!.id) })
+      sendSuccess(res, { unreadCount: await this.service.unreadCount(req.user!.id, kindOf(req)) })
     } catch (err) { next(err) }
   }
 
@@ -32,7 +38,7 @@ export class NotificationController {
 
   markAllRead = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     try {
-      sendSuccess(res, await this.service.markAllRead(req.user!.id), 'All notifications marked read')
+      sendSuccess(res, await this.service.markAllRead(req.user!.id, kindOf(req)), 'All notifications marked read')
     } catch (err) { next(err) }
   }
 }

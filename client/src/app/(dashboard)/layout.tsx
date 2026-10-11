@@ -6,10 +6,12 @@ import { useUIStore } from '@/store/ui.store'
 import { ClientSidebar } from '@/components/layout/ClientSidebar'
 import { ClientTopbar } from '@/components/layout/ClientTopbar'
 import { MobileTabBar } from '@/components/layout/MobileTabBar'
+import { NotificationsSheet } from '@/components/notifications/NotificationsSheet'
+import { MissedPopup } from '@/components/notifications/MissedPopup'
 import { RightSidebar, RightSidebarToggle } from '@/components/layout/RightSidebar'
 import { VerifyEmailBanner } from '@/components/auth/VerifyEmailBanner'
 import { EnrollmentStatusBanner } from '@/components/auth/EnrollmentStatusBanner'
-import { InstallPrompt } from '@/components/pwa/InstallPrompt'
+import { InstallCapture } from '@/components/pwa/InstallCapture'
 import { AnnouncementPopup } from '@/components/announcements/AnnouncementPopup'
 import { Toaster } from '@/components/ui/Toaster'
 import { RootPortalHistoryBridge } from '@/components/RootPortalHistoryBridge'
@@ -49,9 +51,11 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       </motion.main>
 
       <MobileTabBar />
+      <NotificationsSheet />
+      <MissedPopup />
       <RightSidebar />
       <RightSidebarToggle />
-      <InstallPrompt />
+      <InstallCapture />
       <AnnouncementPopup />
       <Toaster />
     </div>

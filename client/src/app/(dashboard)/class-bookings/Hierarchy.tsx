@@ -26,11 +26,11 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
-import { motion, useReducedMotion } from 'framer-motion'
+import { AnimatePresence, motion, useReducedMotion } from 'framer-motion'
 import {
   BookOpen, ChevronRight, Globe, Layers, Lock, Users, Clock,
   Share2, Calendar, ArrowLeft, Radio, MapPin, Video, User,
-  CheckCircle2, AlertCircle, X,
+  CheckCircle2, AlertCircle, X, SlidersHorizontal,
 } from 'lucide-react'
 import type { LiveClass } from '@/lib/api/liveClasses'
 import type { MyBooking } from '@/lib/api/bookings'
@@ -42,6 +42,7 @@ import { useJoinClock } from '@/hooks/useJoinClock'
 import { getJoinPhase, type JoinWindowSession } from '@/lib/joinWindow'
 import { useCurrentUser } from '@/lib/api/user'
 import { showModuleLocked } from '@/lib/api/journey'
+import { BottomSheet } from '@/components/ui/BottomSheet'
 import {
   getSlotStatus, SC, seatsLeft, nextSlot,
   moduleFacets, showFacet, filterGroups,
@@ -1649,7 +1650,10 @@ export function ModuleSheet({
   /* Reset when the module changes. Without this, walking from a module taught
      in Hindi to one that is English-only would carry `language: 'Hindi'`
      across and show an empty screen for a module that has sessions. */
-  useEffect(() => { setLanguage(null); setTutorId(null); setMode(null) }, [node.id])
+  /* The date strip: 'all', or one day's key (YYYY-MM-DD). */
+  const [day, setDay] = useState<string>('all')
+  const [showFilters, setShowFilters] = useState(false)
+  useEffect(() => { setLanguage(null); setTutorId(null); setMode(null); setDay('all') }, [node.id])
 
   /* THE LIST IS DERIVED ON A MINUTE, NOT ON A SECOND. `now` ticks once a
      second while any booked session is within two minutes of a join
@@ -1749,6 +1753,11 @@ export function ModuleSheet({
     [node.groups, nowMin],
   )
   const narrowed = shownCount !== totalCount
+  /* A picked day that no longer has sessions (filters changed, or it ended) falls back to all. */
+  useEffect(() => { if (day !== 'all' && !buckets.some(b => b.key === day)) setDay('all') }, [buckets, day])
+  const shownBuckets = day === 'all' ? buckets : buckets.filter(b => b.key === day)
+  const activeFilters = [showLang && language, showTutor && tutorId, showMode && mode].filter(Boolean).length
+  const hasFilters = showLang || showTutor || showMode
 
   /* SMALL BOXES, in a grid that does not change shape between days — a card
      one day wide and a card three days narrow would make the column of days
@@ -1786,37 +1795,77 @@ export function ModuleSheet({
         note={narrowed ? `${shownCount} of ${totalCount}` : plural(totalCount, 'session')}
       />
 
-      {/* ── FILTERS ──
-
-          Each row appears only when it would actually narrow something. A
-          module taught by one instructor does not get an instructor filter:
-          a control whose every option returns the same list is furniture,
-          and on a screen this small it is furniture in the way. The same
-          rule drops the language row on a single-language module. */}
-      {(showLang || showTutor || showMode) && (
-        <div className="mb-4 flex flex-col gap-2 rounded-2xl px-3 py-2.5"
-          style={{ background: 'var(--color-bg-inset)', border: '1px solid var(--color-border)' }}>
-          {showLang && (
-            <FilterRow
-              icon={<Globe size={11} strokeWidth={2.5} style={{ color: 'var(--color-success)' }} />}
-              label="Language" value={language} onChange={setLanguage}
-              options={facets.languages.map(l => ({ id: l, label: l }))} />
-          )}
-          {showTutor && (
-            <FilterRow
-              icon={<User size={11} strokeWidth={2.5} style={{ color: 'var(--color-primary-on-surface, var(--color-primary))' }} />}
-              label="Instructor" value={tutorId} onChange={setTutorId}
-              options={facets.instructors.map(i => ({ id: i.id, label: i.name, avatarUrl: i.avatarUrl }))} />
-          )}
-          {/* Online or in the room — shown only when the module has both. */}
-          {showMode && (
-            <FilterRow
-              icon={<MapPin size={11} strokeWidth={2.5} style={{ color: 'var(--color-text-muted)' }} />}
-              label="Mode" value={mode} onChange={v => setMode(v as SessionMode | null)}
-              options={facets.modes.map(m => ({ id: m, label: m === 'online' ? 'Online' : 'In person' }))} />
-          )}
+      {/* ── DATE STRIP + FILTER ──
+          Pinned under the header while the sessions scroll: pick a day instead
+          of scrolling a long list, and the filters live behind one button
+          (a bottom drawer on a phone) instead of three rows of chips. */}
+      {buckets.length > 0 && (
+        <div className="sticky z-20 mb-4 rounded-2xl px-1.5 py-1.5"
+          style={{ top: 'calc(var(--app-header-h) + 6px)', background: 'color-mix(in srgb, var(--color-bg-page) 88%, transparent)', backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)' }}>
+          <div className="flex items-center gap-2">
+            <div className="flex min-w-0 flex-1 gap-1.5 overflow-x-auto pb-0.5" style={{ scrollbarWidth: 'none' }} role="tablist" aria-label="Day">
+              {[{ key: 'all', label: 'All', n: shownCount }, ...buckets.map(b => ({ key: b.key, label: b.label, n: b.items.length }))].map(c => {
+                const on = day === c.key
+                return (
+                  <button key={c.key} type="button" role="tab" aria-selected={on} onClick={() => setDay(c.key)}
+                    className="cs-focus flex flex-shrink-0 items-center gap-1.5 rounded-full px-3 py-1.5 text-[12px] font-semibold outline-none transition-colors"
+                    style={on
+                      ? { background: 'var(--color-primary)', color: '#fff' }
+                      : { background: 'var(--color-bg-surface)', color: 'var(--color-text-secondary)', border: '1px solid var(--color-border)' }}>
+                    {c.label}
+                    <span className="rounded-full px-1.5 text-[10px] font-bold"
+                      style={{ background: on ? 'rgba(255,255,255,0.22)' : 'var(--color-bg-inset)' }}>{c.n}</span>
+                  </button>
+                )
+              })}
+            </div>
+            {hasFilters && (
+              <button type="button" onClick={() => setShowFilters(true)}
+                className="cs-focus relative flex flex-shrink-0 items-center gap-1.5 rounded-full px-3 py-1.5 text-[12px] font-bold outline-none"
+                style={{ background: activeFilters ? 'var(--color-primary-light)' : 'var(--color-bg-surface)', color: 'var(--color-primary-on-surface, var(--color-primary))', border: '1px solid var(--color-border)' }}>
+                <SlidersHorizontal size={13} strokeWidth={2.4} />Filter
+                {activeFilters > 0 && <span className="flex h-4 min-w-4 items-center justify-center rounded-full px-1 text-[10px] text-white" style={{ background: 'var(--color-primary)' }}>{activeFilters}</span>}
+              </button>
+            )}
+          </div>
         </div>
       )}
+
+      <AnimatePresence>
+        {showFilters && (
+          <BottomSheet label="Filter sessions" onClose={() => setShowFilters(false)}>
+            <div className="dm space-y-3 px-5 pb-2 pt-4 sm:pt-6">
+              <h3 className="text-[17px] font-bold" style={{ color: 'var(--color-text-primary)' }}>Filter sessions</h3>
+              {showLang && (
+                <FilterRow
+                  icon={<Globe size={11} strokeWidth={2.5} style={{ color: 'var(--color-success)' }} />}
+                  label="Language" value={language} onChange={setLanguage}
+                  options={facets.languages.map(l => ({ id: l, label: l }))} />
+              )}
+              {showTutor && (
+                <FilterRow
+                  icon={<User size={11} strokeWidth={2.5} style={{ color: 'var(--color-primary-on-surface, var(--color-primary))' }} />}
+                  label="Instructor" value={tutorId} onChange={setTutorId}
+                  options={facets.instructors.map(i => ({ id: i.id, label: i.name, avatarUrl: i.avatarUrl }))} />
+              )}
+              {showMode && (
+                <FilterRow
+                  icon={<MapPin size={11} strokeWidth={2.5} style={{ color: 'var(--color-text-muted)' }} />}
+                  label="Mode" value={mode} onChange={v => setMode(v as SessionMode | null)}
+                  options={facets.modes.map(m => ({ id: m, label: m === 'online' ? 'Online' : 'In person' }))} />
+              )}
+            </div>
+            <div className="dm grid grid-cols-2 gap-2 px-4 pb-4 pt-3">
+              <button type="button" onClick={() => { setLanguage(null); setTutorId(null); setMode(null) }}
+                className="rounded-2xl py-3 text-sm font-bold" style={{ background: 'var(--color-bg-inset)', color: 'var(--color-text-primary)' }}>Clear</button>
+              <button type="button" onClick={() => setShowFilters(false)}
+                className="rounded-2xl py-3 text-sm font-bold text-white" style={{ background: 'var(--color-primary)' }}>
+                Show {plural(shownCount, 'session')}
+              </button>
+            </div>
+          </BottomSheet>
+        )}
+      </AnimatePresence>
 
       {buckets.length === 0 ? (
         <Empty icon={<Calendar size={26} style={{ color: 'var(--color-primary)' }} />}
@@ -1826,7 +1875,7 @@ export function ModuleSheet({
             : 'This module has no upcoming sessions. Check back soon.'} />
       ) : (
         <div className="flex flex-col gap-7">
-          {buckets.map(bucket => {
+          {shownBuckets.map(bucket => {
             const headingId = `day-${node.id || 'general'}-${bucket.key}`
             return (
               <section key={bucket.key} aria-labelledby={headingId}>

@@ -2,8 +2,9 @@ import type { MetadataRoute } from 'next'
 
 export default function manifest(): MetadataRoute.Manifest {
   return {
-    name:             'LearnOS | Learn Without Limits',
-    short_name:       'Delta Institutions',
+    name:             'Delta Institutions',
+    short_name:       'Delta',
+    id:               '/',
     description:      'Expert-led courses, hands-on projects, and a community that grows with you.',
     start_url:        '/',
     scope:            '/',
@@ -12,11 +13,14 @@ export default function manifest(): MetadataRoute.Manifest {
     background_color: '#FFFFFF',
     theme_color:      '#0057b8',
     categories:       ['education', 'productivity'],
+    /* The Delta "d". The old /icons/icon.svg (a LearnOS triangle) was listed
+       here with sizes 'any' — browsers that prefer SVG installed THAT. The
+       maskable one keeps the logo inside the 80% safe circle, so Android's
+       round / squircle masks do not clip it. */
     icons: [
-      { src: '/icon-192.png', sizes: '192x192', type: 'image/png', purpose: 'any' },
-      { src: '/icon-512.png', sizes: '512x512', type: 'image/png', purpose: 'any' },
-      { src: '/icon-512.png', sizes: '512x512', type: 'image/png', purpose: 'maskable' },
-      { src: '/icons/icon.svg', sizes: 'any', type: 'image/svg+xml', purpose: 'any' },
+      { src: '/icon-192.png',          sizes: '192x192', type: 'image/png', purpose: 'any' },
+      { src: '/icon-512.png',          sizes: '512x512', type: 'image/png', purpose: 'any' },
+      { src: '/icon-maskable-512.png', sizes: '512x512', type: 'image/png', purpose: 'maskable' },
     ],
     shortcuts: [
       {

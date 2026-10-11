@@ -63,8 +63,11 @@
      From `sm` up row 1 returns to 68: 68 + 1 = 69.
      From `md` up the tab row returns as well: 68 + 1 + 44 = 113.
      The border is easy to forget and costs exactly the 1px of clipping this
-     token exists to prevent. */
-  --app-header-h: 61px;
+     token exists to prevent.
+     BELOW `lg` THERE IS NO TOP HEADER AT ALL (Oct 2026): phones and tablets
+     navigate with the bottom tab bar (MobileTabBar) and the More drawer, so
+     the page only keeps clear of the notch / status bar. */
+  --app-header-h: env(safe-area-inset-top, 0px);
 
   /* Shadows read as "depth" on light and as "separation" on dark, where a
      drop shadow is nearly invisible — dark leans on borders instead. */
@@ -76,13 +79,8 @@
   --font-mono:            'JetBrains Mono', monospace;
 }
 
-/* Row 1 grows back to 68px from `sm` up — see ClientTopbar. */
-@media (min-width: 640px) {
-  :root { --app-header-h: 69px; }
-}
-
-/* The tab row only exists from `md` up — see ClientTopbar. */
-@media (min-width: 768px) {
+/* The header (row 1 + the tab row) — laptops and up only. */
+@media (min-width: 1024px) {
   :root { --app-header-h: 113px; }
 }
 

@@ -13,6 +13,7 @@
    write: their advisor / the support team picks it up.
 ───────────────────────────────────────────────────────────── */
 import { useEffect, useMemo, useState } from 'react'
+import { createPortal } from 'react-dom'
 import Link from 'next/link'
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion'
 import { Lock, Trophy, Sparkles, Play, X, CheckCircle2, Layers, UserRound, Send, ChevronRight } from 'lucide-react'
@@ -81,11 +82,14 @@ function Level({ lv, onOpen, index }: { lv: JourneyLevel; onOpen: () => void; in
 }
 
 function Sheet({ children, onClose, wide }: { children: React.ReactNode; onClose: () => void; wide?: boolean }) {
+  const [host, setHost] = useState<HTMLElement | null>(null)
+  useEffect(() => setHost(document.body), [])
   useEffect(() => {
     const h = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
     window.addEventListener('keydown', h); return () => window.removeEventListener('keydown', h)
   }, [onClose])
-  return (
+  if (!host) return null
+  return createPortal(
     <div className="fixed inset-0 z-[70] flex items-end justify-center p-0 sm:items-center sm:p-4">
       <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="absolute inset-0 bg-slate-900/50 backdrop-blur-sm" onClick={onClose} />
       <motion.div initial={{ opacity: 0, y: 40 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 40 }} transition={{ type: 'spring', stiffness: 320, damping: 30 }}
@@ -97,7 +101,8 @@ function Sheet({ children, onClose, wide }: { children: React.ReactNode; onClose
         </button>
         {children}
       </motion.div>
-    </div>
+    </div>,
+    host,
   )
 }
 
@@ -149,6 +154,20 @@ export function JourneyBar({ onPickCourse }: { onPickCourse?: (courseId: string)
   }, [])
 
   const levels = useMemo(() => data?.programmes ?? [], [data])
+
+  /* Opens by itself after a minute on the page — once a day, per browser. */
+  useEffect(() => {
+    if (!levels.length) return
+    const today = new Date().toISOString().slice(0, 10)
+    let seen: string | null = null
+    try { seen = localStorage.getItem('lms_journey_auto_day') } catch { /* private mode */ }
+    if (seen === today) return
+    const t = setTimeout(() => {
+      setShowJourney(true)
+      try { localStorage.setItem('lms_journey_auto_day', today) } catch { /* ignore */ }
+    }, 60_000)
+    return () => clearTimeout(t)
+  }, [levels.length])
   const modLevel = mod ? levels.flatMap(p => p.levels).find(l => l.courseId === mod.courseId || l.title === mod.courseTitle) : undefined
   if (!levels.length && !mod) return null
 
