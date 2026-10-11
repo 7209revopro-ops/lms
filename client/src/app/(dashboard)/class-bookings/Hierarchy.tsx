@@ -352,7 +352,7 @@ function CourseCard({ node, index, onOpen }: {
       animate={{ opacity: 1, y: 0, transition: { ...spring, delay: Math.min(index, 11) * 0.04 } }}
       style={CARD}
       aria-label={label}
-      className="dm group flex h-full w-full min-w-0 flex-col overflow-hidden rounded-[20px] bg-[var(--color-bg-surface)] text-left outline-none focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[color:var(--color-primary-on-surface,var(--color-primary))]">
+      className="dm group flex h-full w-full min-w-0 flex-col overflow-hidden rounded-2xl sm:rounded-[20px] bg-[var(--color-bg-surface)] text-left outline-none focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[color:var(--color-primary-on-surface,var(--color-primary))]">
       {/* ── the photo, clean: only two small badges on it ── */}
       <div className="relative aspect-video w-full flex-shrink-0 overflow-hidden" style={{ background: skin.wash }}>
         <div className="absolute inset-0 transition-transform duration-500 group-hover:scale-105">
@@ -363,54 +363,56 @@ function CourseCard({ node, index, onOpen }: {
             <ModuleGeometry skin={skin} />
           )}
         </div>
-        <div className="absolute left-2.5 right-2.5 top-2.5 flex items-start justify-between gap-2">
-          <span className="rounded-full px-2.5 py-1 text-[11px] font-bold shadow-sm" style={{ background: 'rgba(255,255,255,0.95)', color: '#0C447C' }}>
-            {empty ? 'No sessions yet' : week ? `${week} this week` : plural(node.sessionCount, 'session')}
+        <div className="absolute left-1.5 right-1.5 top-1.5 flex items-start justify-between gap-1 sm:left-2.5 sm:right-2.5 sm:top-2.5">
+          <span className="rounded-full px-2 py-0.5 text-[10px] font-bold shadow-sm sm:px-2.5 sm:py-1 sm:text-[11px]" style={{ background: 'rgba(255,255,255,0.95)', color: '#0C447C' }}>
+            {empty ? 'No sessions' : week ? `${week} this week` : plural(node.sessionCount, 'session')}
           </span>
           {jl ? (
-            <span className="rounded-full px-2.5 py-1 text-[11px] font-bold shadow-sm" style={{ background: '#0ECC8E', color: '#04342C' }}>Level {jl.level}</span>
+            <span className="rounded-full px-2 py-0.5 text-[10px] font-bold shadow-sm sm:px-2.5 sm:py-1 sm:text-[11px]" style={{ background: '#0ECC8E', color: '#04342C' }}><span className="sm:hidden">L{jl.level}</span><span className="hidden sm:inline">Level {jl.level}</span></span>
           ) : node.shared ? (
-            <span className="inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-bold shadow-sm" style={{ background: 'rgba(255,255,255,0.95)', color: '#3C3489' }}>
-              <Share2 size={10} strokeWidth={2.5} />Shared
+            <span className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-bold shadow-sm sm:px-2.5 sm:py-1 sm:text-[11px]" style={{ background: 'rgba(255,255,255,0.95)', color: '#3C3489' }}>
+              <Share2 size={10} strokeWidth={2.5} /><span className="hidden sm:inline">Shared</span>
             </span>
           ) : null}
         </div>
       </div>
 
-      {/* ── the course, in dark type ── */}
-      <div className="flex flex-1 flex-col gap-2.5 p-4">
+      {/* ── the course, in dark type (compact: two cards per row on phones) ── */}
+      <div className="flex flex-1 flex-col gap-2 p-3 sm:gap-2.5 sm:p-4">
         <div>
-          <h3 className="line-clamp-2 text-[15px] font-bold leading-snug" style={{ color: 'var(--color-text-primary)' }}>
+          <h3 className="line-clamp-2 text-[13.5px] font-bold leading-tight sm:text-[15px] sm:leading-snug" style={{ color: 'var(--color-text-primary)' }}>
             {titleCase(node.title)}
           </h3>
-          <p className="mt-1 text-[12.5px] font-medium" style={{ color: 'var(--color-text-secondary)' }}>
+          <p className="mt-0.5 truncate text-[11px] font-medium sm:mt-1 sm:text-[12.5px]" style={{ color: 'var(--color-text-secondary)' }}>
             {plural(total, 'module')}{node.program ? ` · ${titleCase(node.program.replace('4x-trading', 'Forex').replace(/-/g, ' '))}` : ''}
           </p>
         </div>
 
         <div>
-          <div className="flex items-center justify-between text-[12px] font-semibold" style={{ color: 'var(--color-text-secondary)' }}>
-            <span>Modules open</span>
-            <span style={{ color: 'var(--color-text-primary)' }}>{open} of {total}</span>
+          <div className="flex items-center justify-between text-[10.5px] font-semibold sm:text-[12px]" style={{ color: 'var(--color-text-secondary)' }}>
+            <span><span className="sm:hidden">Open</span><span className="hidden sm:inline">Modules open</span></span>
+            <span style={{ color: 'var(--color-text-primary)' }}>{open}/{total}</span>
           </div>
-          <div className="mt-1.5 h-2 w-full overflow-hidden rounded-full" style={{ background: 'var(--color-bg-inset)' }}>
+          <div className="mt-1 h-1.5 w-full overflow-hidden rounded-full sm:mt-1.5 sm:h-2" style={{ background: 'var(--color-bg-inset)' }}>
             <div className="h-full rounded-full" style={{ width: `${total ? Math.round((open / total) * 100) : 0}%`, background: 'var(--color-primary)' }} />
           </div>
         </div>
 
         {nextLabel && (
-          <div className="flex items-center gap-2 rounded-xl px-3 py-2" style={{ background: 'var(--color-primary-light)' }}>
-            <Clock size={14} strokeWidth={2.25} style={{ color: 'var(--color-primary-on-surface, var(--color-primary))' }} />
-            <span className="text-[12.5px] font-semibold" style={{ color: 'var(--color-text-primary)' }}>Next class: {nextLabel}</span>
+          <div className="flex items-start gap-1.5 rounded-xl px-2 py-1.5 sm:items-center sm:gap-2 sm:px-3 sm:py-2" style={{ background: 'var(--color-primary-light)' }}>
+            <Clock size={13} strokeWidth={2.25} className="mt-px flex-shrink-0 sm:mt-0" style={{ color: 'var(--color-primary-on-surface, var(--color-primary))' }} />
+            <span className="text-[11px] font-semibold leading-tight sm:text-[12.5px]" style={{ color: 'var(--color-text-primary)' }}>
+              <span className="hidden sm:inline">Next class: </span>{nextLabel}
+            </span>
           </div>
         )}
 
         <span aria-hidden
-          className="mt-auto flex w-full items-center justify-center gap-1.5 rounded-xl py-2.5 text-[13px] font-bold transition-opacity group-hover:opacity-90"
+          className="mt-auto flex w-full items-center justify-center gap-1 rounded-xl py-2 text-[12px] font-bold transition-opacity group-hover:opacity-90 sm:gap-1.5 sm:py-2.5 sm:text-[13px]"
           style={empty
             ? { background: 'var(--color-bg-inset)', color: 'var(--color-text-muted)', border: '1px solid var(--color-border)' }
             : { background: 'var(--color-primary)', color: '#fff', boxShadow: '0 2px 8px rgba(0,87,184,0.25)' }}>
-          {empty ? 'Nothing scheduled' : 'View modules'}
+          {empty ? <><span className="sm:hidden">No classes</span><span className="hidden sm:inline">Nothing scheduled</span></> : <><span className="sm:hidden">View</span><span className="hidden sm:inline">View modules</span></>}
           {!empty && <ChevronRight size={14} strokeWidth={2.5} className="transition-transform duration-300 group-hover:translate-x-0.5" />}
         </span>
       </div>
@@ -1942,7 +1944,7 @@ export function Hierarchy({
           title={q ? 'No courses match' : 'No upcoming sessions'}
           body={q ? 'Try a different search term.' : 'When classes are scheduled for your courses they will appear here.'} />
       ) : (
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+        <div className="grid grid-cols-2 gap-2.5 sm:gap-4 lg:grid-cols-3 xl:grid-cols-4">
           {visibleCourses.map((c, i) => (
             <CourseCard key={c.id || 'unassigned'} node={c} index={i}
               onOpen={() => onNavigate(c.id, null)} />
