@@ -353,8 +353,8 @@ function CourseCard({ node, index, onOpen }: {
       style={CARD}
       aria-label={label}
       className="dm group flex h-full w-full min-w-0 flex-col overflow-hidden rounded-[20px] bg-[var(--color-bg-surface)] text-left outline-none focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[color:var(--color-primary-on-surface,var(--color-primary))]">
-      {/* ── photo header, the title on it ── */}
-      <div className="relative h-[150px] w-full flex-shrink-0 overflow-hidden sm:h-auto sm:aspect-[16/9]" style={{ background: skin.wash }}>
+      {/* ── the photo, clean: only two small badges on it ── */}
+      <div className="relative aspect-video w-full flex-shrink-0 overflow-hidden" style={{ background: skin.wash }}>
         <div className="absolute inset-0 transition-transform duration-500 group-hover:scale-105">
           {cover ? (
             <img src={cover} alt="" loading="lazy" decoding="async" draggable={false}
@@ -363,44 +363,56 @@ function CourseCard({ node, index, onOpen }: {
             <ModuleGeometry skin={skin} />
           )}
         </div>
-        {/* A shade so white type reads on any photo. */}
-        <div className="absolute inset-0" style={{ background: 'linear-gradient(180deg, rgba(8,12,22,0.05) 30%, rgba(8,12,22,0.78) 100%)' }} />
-        <div className="absolute left-3 right-3 top-3 flex items-start justify-between gap-2">
-          <span className="rounded-full px-2.5 py-1 text-[11px] font-bold" style={{ background: 'rgba(255,255,255,0.92)', color: '#0C447C' }}>
-            {empty ? 'No sessions yet' : week ? `${week} session${week > 1 ? 's' : ''} this week` : plural(node.sessionCount, 'session')}
+        <div className="absolute left-2.5 right-2.5 top-2.5 flex items-start justify-between gap-2">
+          <span className="rounded-full px-2.5 py-1 text-[11px] font-bold shadow-sm" style={{ background: 'rgba(255,255,255,0.95)', color: '#0C447C' }}>
+            {empty ? 'No sessions yet' : week ? `${week} this week` : plural(node.sessionCount, 'session')}
           </span>
           {jl ? (
-            <span className="rounded-full px-2.5 py-1 text-[11px] font-bold" style={{ background: 'rgba(14,204,142,0.92)', color: '#04342C' }}>Level {jl.level}</span>
+            <span className="rounded-full px-2.5 py-1 text-[11px] font-bold shadow-sm" style={{ background: '#0ECC8E', color: '#04342C' }}>Level {jl.level}</span>
           ) : node.shared ? (
-            <span className="inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-bold" style={{ background: 'rgba(255,255,255,0.92)', color: '#3C3489' }}>
+            <span className="inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-bold shadow-sm" style={{ background: 'rgba(255,255,255,0.95)', color: '#3C3489' }}>
               <Share2 size={10} strokeWidth={2.5} />Shared
             </span>
           ) : null}
         </div>
-        <div className="absolute inset-x-3 bottom-3">
-          <h3 className="line-clamp-2 text-[16px] font-bold leading-snug text-white sm:text-[15px]" style={{ textShadow: '0 1px 2px rgba(0,0,0,0.35)' }}>
+      </div>
+
+      {/* ── the course, in dark type ── */}
+      <div className="flex flex-1 flex-col gap-2.5 p-4">
+        <div>
+          <h3 className="line-clamp-2 text-[15px] font-bold leading-snug" style={{ color: 'var(--color-text-primary)' }}>
             {titleCase(node.title)}
           </h3>
-          <p className="mt-0.5 truncate text-[12px] font-medium" style={{ color: 'rgba(255,255,255,0.82)' }}>
+          <p className="mt-1 text-[12.5px] font-medium" style={{ color: 'var(--color-text-secondary)' }}>
             {plural(total, 'module')}{node.program ? ` · ${titleCase(node.program.replace('4x-trading', 'Forex').replace(/-/g, ' '))}` : ''}
           </p>
         </div>
-      </div>
 
-      {/* ── progress + what is next ── */}
-      <div className="flex flex-1 flex-col gap-2 px-3.5 pb-3.5 pt-3">
-        <div className="h-1.5 w-full overflow-hidden rounded-full" style={{ background: 'var(--color-bg-inset)' }}>
-          <div className="h-full rounded-full" style={{ width: `${total ? Math.round((open / total) * 100) : 0}%`, background: 'var(--color-primary)' }} />
+        <div>
+          <div className="flex items-center justify-between text-[12px] font-semibold" style={{ color: 'var(--color-text-secondary)' }}>
+            <span>Modules open</span>
+            <span style={{ color: 'var(--color-text-primary)' }}>{open} of {total}</span>
+          </div>
+          <div className="mt-1.5 h-2 w-full overflow-hidden rounded-full" style={{ background: 'var(--color-bg-inset)' }}>
+            <div className="h-full rounded-full" style={{ width: `${total ? Math.round((open / total) * 100) : 0}%`, background: 'var(--color-primary)' }} />
+          </div>
         </div>
-        <div className="flex items-center justify-between gap-2 text-[12px]">
-          <span className="truncate font-medium" style={{ color: 'var(--color-text-secondary)' }}>
-            {open} of {total} modules open
-          </span>
-          <span className="flex flex-shrink-0 items-center gap-0.5 font-bold" style={{ color: empty ? 'var(--color-text-muted)' : 'var(--color-primary-on-surface, var(--color-primary))' }}>
-            {nextLabel ? <>Next: {nextLabel}</> : empty ? 'Nothing scheduled' : 'View modules'}
-            <ChevronRight size={14} strokeWidth={2.5} className="transition-transform duration-300 group-hover:translate-x-0.5" />
-          </span>
-        </div>
+
+        {nextLabel && (
+          <div className="flex items-center gap-2 rounded-xl px-3 py-2" style={{ background: 'var(--color-primary-light)' }}>
+            <Clock size={14} strokeWidth={2.25} style={{ color: 'var(--color-primary-on-surface, var(--color-primary))' }} />
+            <span className="text-[12.5px] font-semibold" style={{ color: 'var(--color-text-primary)' }}>Next class: {nextLabel}</span>
+          </div>
+        )}
+
+        <span aria-hidden
+          className="mt-auto flex w-full items-center justify-center gap-1.5 rounded-xl py-2.5 text-[13px] font-bold transition-opacity group-hover:opacity-90"
+          style={empty
+            ? { background: 'var(--color-bg-inset)', color: 'var(--color-text-muted)', border: '1px solid var(--color-border)' }
+            : { background: 'var(--color-primary)', color: '#fff', boxShadow: '0 2px 8px rgba(0,87,184,0.25)' }}>
+          {empty ? 'Nothing scheduled' : 'View modules'}
+          {!empty && <ChevronRight size={14} strokeWidth={2.5} className="transition-transform duration-300 group-hover:translate-x-0.5" />}
+        </span>
       </div>
     </motion.button>
   )
@@ -415,91 +427,41 @@ function ModuleCard({ node, position, index, courseTitle, onOpen }: {
     () => moduleSkin(node.id, node.title, position, courseTitle),
     [node.id, node.title, position, courseTitle],
   )
-
   const locked = node.blocked
   const empty  = node.sessionCount === 0
-  /* Locked and empty are different sentences, and a locked module with no
-     sessions must not offer to show them. */
-  const cta = empty ? 'Nothing scheduled' : locked ? 'View sessions' : 'Choose a slot'
-
   return (
-    /* ONE focusable element, as CourseCard is. The CTA below is a span that
-       looks like a button — nesting a real button inside this one would make
-       the card unreachable by keyboard and invalid HTML. */
     <motion.button type="button" onClick={onOpen}
       {...cardHover}
       initial={{ opacity: 0, y: 12 }}
-      /* The delay lives INSIDE the animate target. As a top-level
-         `transition` prop it was framer's default for whileHover and whileTap
-         as well, and being written after the spread it also replaced
-         cardHover's own 350/28 spring — so the tenth card in the grid sat
-         still for a third of a second after the cursor arrived. */
       animate={{ opacity: 1, y: 0, transition: { ...spring, delay: Math.min(index, 11) * 0.035 } }}
       style={CARD}
       aria-label={`${node.title} — ${plural(node.sessionCount, 'session')}${locked ? ', locked' : ''}`}
-      className="dm group flex h-full w-full flex-col overflow-hidden rounded-2xl bg-[var(--color-bg-surface)] text-left">
+      className="dm group flex w-full items-center gap-3.5 rounded-2xl bg-[var(--color-bg-surface)] p-3.5 text-left">
+      {/* The module number on its own colour tile. */}
+      <span className="relative flex h-14 w-14 flex-shrink-0 flex-col items-center justify-center overflow-hidden rounded-2xl"
+        style={{ background: skin.wash, filter: locked ? 'grayscale(0.9)' : undefined, opacity: locked ? 0.6 : 1 }}>
+        <span className="absolute inset-0 opacity-60"><ModuleGeometry skin={skin} /></span>
+        <span className="relative text-[9px] font-bold uppercase tracking-[0.14em]" style={{ color: 'rgba(255,255,255,0.85)' }}>{position !== null ? 'Module' : 'More'}</span>
+        <span className="relative text-[20px] font-extrabold leading-none text-white">{position !== null ? pad2(position) : '·'}</span>
+      </span>
 
-      {/* ── the banner ── */}
-      <div className="relative aspect-video flex-shrink-0 overflow-hidden"
-        style={{ background: skin.wash, opacity: locked ? 0.55 : 1, filter: locked ? 'grayscale(0.9)' : undefined }}>
-        <ModuleGeometry skin={skin} />
-
-        <div className="absolute inset-0 flex flex-col justify-end p-3.5">
-          <span className="dm text-[11px] sm:text-[9px] font-bold uppercase tracking-[0.18em]"
-            style={{ color: 'rgba(255,255,255,0.72)' }}>
-            {position !== null ? 'Module' : 'Sessions'}
-          </span>
-          {position !== null && (
-            /* Not pure #FFF: the dark palette stops at #E8EAF0 to avoid
-               haloing, and a 30px numeral is exactly that case. */
-            <span className="syne text-[30px] font-extrabold leading-none tracking-tight"
-              style={{ color: 'rgba(255,255,255,0.95)' }}>
-              {pad2(position)}
-            </span>
+      <span className="min-w-0 flex-1">
+        <span className="line-clamp-2 text-[15px] font-bold leading-snug" style={{ color: 'var(--color-text-primary)' }}>{titleCase(node.title)}</span>
+        <span className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[12px] font-medium" style={{ color: 'var(--color-text-secondary)' }}>
+          {locked ? (
+            <span className="inline-flex items-center gap-1 font-bold" style={{ color: '#B45309' }}><Lock size={11} strokeWidth={2.5} />Locked</span>
+          ) : null}
+          <span className="inline-flex items-center gap-1"><Calendar size={12} strokeWidth={2} />{empty ? 'Nothing scheduled' : plural(node.sessionCount, 'session')}</span>
+          {node.languages.length > 0 && (
+            <span className="inline-flex min-w-0 items-center gap-1"><Globe size={12} strokeWidth={2} /><span className="truncate">{node.languages.join(', ')}</span></span>
           )}
-        </div>
-
-        {locked && (
-          <span className="absolute right-2 top-2 inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] sm:text-[9px] font-bold"
-            style={{ background: 'rgba(15,23,42,0.55)', color: '#fff', backdropFilter: 'blur(6px)' }}>
-            <Lock size={8} strokeWidth={2.5} />Locked
-          </span>
-        )}
-      </div>
-
-      {/* ── the body ── */}
-      <div className="flex flex-1 flex-col gap-1.5 p-3.5">
-        <h3 className="line-clamp-2 text-sm font-bold leading-snug"
-          style={{ color: 'var(--color-text-primary)' }}>{titleCase(node.title)}</h3>
-
-        {node.description && (
-          <p className="line-clamp-3 text-xs leading-relaxed"
-            style={{ color: 'var(--color-text-secondary)' }}>{node.description}</p>
-        )}
-
-        {/* The hairline every sibling card separates its footer with. */}
-        <div className="mt-auto flex items-center gap-3 pt-3 text-[11px] font-medium"
-          style={{ borderTop: '1px solid var(--color-border)', color: 'var(--color-text-muted)' }}>
-          <span className="flex items-center gap-1">
-            <Globe size={10} strokeWidth={2} />{plural(node.languages.length, 'Language')}
-          </span>
-          <span className="flex items-center gap-1">
-            <Calendar size={10} strokeWidth={2} />{plural(node.sessionCount, 'Session')}
-          </span>
-        </div>
-
-        {/* Delta blue and white, the primary CTA every other screen uses —
-            stable in both themes, unlike an ink button whose inverse text
-            flips with the palette. */}
-        <span aria-hidden
-          className="mt-2.5 flex w-full items-center justify-center gap-1.5 rounded-xl py-2.5 text-[12px] font-bold transition-opacity group-hover:opacity-90"
-          style={locked || empty
-            ? { background: 'var(--color-bg-inset)', color: 'var(--color-text-muted)', border: '1px solid var(--color-border)' }
-            : { background: 'var(--color-primary)', color: '#fff', boxShadow: '0 2px 8px rgba(0,87,184,0.25)' }}>
-          {locked ? <Lock size={12} strokeWidth={2.5} /> : <BookOpen size={12} strokeWidth={2.5} />}
-          {cta}
         </span>
-      </div>
+      </span>
+
+      <span className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full transition-transform group-hover:translate-x-0.5"
+        style={{ background: locked || empty ? 'var(--color-bg-inset)' : 'var(--color-primary)', color: locked || empty ? 'var(--color-text-muted)' : '#fff' }}>
+        {locked ? <Lock size={15} strokeWidth={2.4} /> : <ChevronRight size={17} strokeWidth={2.6} />}
+      </span>
     </motion.button>
   )
 }
@@ -1958,7 +1920,7 @@ export function Hierarchy({
           /* A real course runs to ten modules, so this is a grid rather
              than a column — ten stacked banners would be three screens of
              scrolling to see a list the reference fits in two rows. */
-          <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-2 sm:gap-4 lg:grid-cols-3 xl:grid-cols-4">
+          <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2 sm:gap-3 xl:grid-cols-3">
             {modules.map((m, i) => (
               <ModuleCard key={m.id || 'general'} node={m} index={i}
                 position={m.id === GENERAL ? null : (m.number ?? ordered.indexOf(m) + 1)}
@@ -1980,7 +1942,7 @@ export function Hierarchy({
           title={q ? 'No courses match' : 'No upcoming sessions'}
           body={q ? 'Try a different search term.' : 'When classes are scheduled for your courses they will appear here.'} />
       ) : (
-        <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
           {visibleCourses.map((c, i) => (
             <CourseCard key={c.id || 'unassigned'} node={c} index={i}
               onOpen={() => onNavigate(c.id, null)} />
