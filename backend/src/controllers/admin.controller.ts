@@ -134,6 +134,7 @@ export class AdminController {
         program?:      '4x-trading' | 'digital-marketing' | 'ai' | 'jura'
         organizationId?: string
         sharedAcademies?: boolean
+        programOrder?: number | null
       }
 
       const tags = typeof dto.tags === 'string'
@@ -221,6 +222,7 @@ export class AdminController {
         organizationId,
         /* Serving both academies is a super admin's decision. */
         ...(isSuper && typeof dto.sharedAcademies === 'boolean' ? { sharedAcademies: dto.sharedAcademies } : {}),
+        ...(typeof dto.programOrder === 'number' ? { programOrder: dto.programOrder } : {}),
       })
       sendSuccess(res, toCourseDTO(course, 0), 'Course created', 201)
     } catch (err) { next(err) }

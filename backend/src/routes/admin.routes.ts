@@ -157,6 +157,8 @@ const courseCreateSchema = z.object({
   organizationId: z.string().optional(),
   /* Serve both academies. Super admins only — dropped for anyone else. */
   sharedAcademies: z.boolean().optional(),
+  /* Level in its programme's journey; null clears it. */
+  programOrder:   z.coerce.number().int().min(0).max(999).nullable().optional(),
 })
 
 const courseUpdateSchema = courseCreateSchema.partial().extend({

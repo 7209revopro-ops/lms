@@ -9,6 +9,8 @@ export interface Course {
   organizationId?: string
   /** Serves both academies: the other academy sees it in its catalogue and pickers. */
   sharedAcademies?: boolean
+  /** Level in its programme's journey (student Class Schedule). */
+  programOrder?: number
   id:            string
   title:         string
   slug:          string
@@ -58,6 +60,8 @@ export interface CourseFormValues {
   organizationId?: string
   /** Serve both academies — super admins only. */
   sharedAcademies?: boolean
+  /** Level in its programme's journey; '' clears it. */
+  programOrder?: number | ''
 }
 
 export interface Category { id: string; name: string; slug: string }

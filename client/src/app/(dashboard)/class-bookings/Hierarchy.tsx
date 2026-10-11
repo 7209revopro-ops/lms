@@ -42,6 +42,7 @@ import { useJoinClock } from '@/hooks/useJoinClock'
 import { getJoinPhase, type JoinWindowSession } from '@/lib/joinWindow'
 import { useCurrentUser } from '@/lib/api/user'
 import {
+import { showModuleLocked } from '@/lib/api/journey'
   getSlotStatus, SC, seatsLeft, nextSlot,
   moduleFacets, showFacet, filterGroups,
   buildCatalog, GENERAL_MODULE_ID as GENERAL,
@@ -1102,9 +1103,17 @@ function SessionAction({
   if (barred && (shown === 'locked' || shown === 'closed')) {
     const extra = shown === 'closed' ? <> Seats for this date closed {fmtPassed(bookingClosedAt(lc), now)}.</> : null
     return (
-      <ActionNote icon={<Lock size={12} strokeWidth={2} />}
-        title="Module access is off"
-        body={<>These sessions are listed so you can see what the module covers. Ask your admin to open it.{extra}</>} />
+      <div className="space-y-1.5">
+        <ActionNote icon={<Lock size={12} strokeWidth={2} />}
+          title="Module locked"
+          body={<>You can see what this module covers; booking opens once it is unlocked.{extra}</>} />
+        <button type="button"
+          onClick={() => showModuleLocked({ courseId: (lc as any).course?.id ?? (lc as any).courseId, courseTitle: (lc as any).course?.title, moduleTitle: (lc as any).sectionId?.title })}
+          className="cs-focus flex min-h-[40px] w-full items-center justify-center gap-1.5 rounded-xl py-2 text-[12px] font-bold outline-none"
+          style={{ background: 'rgba(245,158,11,0.12)', color: '#92400E', border: '1px solid rgba(245,158,11,0.35)' }}>
+          <Lock size={12} strokeWidth={2.5} />How to unlock
+        </button>
+      </div>
     )
   }
 

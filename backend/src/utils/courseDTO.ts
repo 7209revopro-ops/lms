@@ -40,6 +40,8 @@ export interface CourseDTO {
   organizationId?: string
   /** Serves both academies — see ICourse.sharedAcademies. */
   sharedAcademies: boolean
+  /** Level in its programme's journey. */
+  programOrder?: number
   categoryId?:    string
   program?:       '4x-trading' | 'digital-marketing' | 'ai' | 'jura'
   enrolledCount:  number
@@ -83,6 +85,7 @@ export function toCourseDTO(course: ICourse, lessonCount?: number): CourseDTO {
     instructorId:  '',
     organizationId: json['organizationId'] ? String(json['organizationId']) : undefined,
     sharedAcademies: json['sharedAcademies'] === true,
+    programOrder:    typeof json['programOrder'] === 'number' ? json['programOrder'] as number : undefined,
   }
 
   const inst = json.instructorId

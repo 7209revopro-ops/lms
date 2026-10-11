@@ -142,6 +142,7 @@ export class CourseService {
     program?:        '4x-trading' | 'digital-marketing' | 'ai' | 'jura'
     organizationId?: string
     sharedAcademies?: boolean
+    programOrder?:   number | null
   }): Promise<ICourse> {
     if (await this.repo.slugExists(input.slug)) {
       throw new CourseError('SLUG_TAKEN', 'Another course already uses this slug.', 409)
@@ -174,6 +175,7 @@ export class CourseService {
       ;(payload as any).organizationId = new Types.ObjectId(input.organizationId)
     }
     if (input.sharedAcademies !== undefined) payload.sharedAcademies = input.sharedAcademies
+    if (typeof input.programOrder === 'number') payload.programOrder = input.programOrder
     return this.repo.createOne(payload)
   }
 
@@ -197,6 +199,7 @@ export class CourseService {
       instructorId: string
       program:      '4x-trading' | 'digital-marketing' | 'ai' | 'jura' | ''
       sharedAcademies: boolean
+      programOrder:    number | null
     }>,
   ): Promise<ICourse> {
     if (!Types.ObjectId.isValid(id)) {
@@ -236,6 +239,7 @@ export class CourseService {
     }
     if (input.status       !== undefined) update.status       = input.status
     if (input.sharedAcademies !== undefined) update.sharedAcademies = input.sharedAcademies
+    if (input.programOrder !== undefined) (update as any).programOrder = input.programOrder ?? undefined
     if (input.level !== undefined) {
       update.level = input.level === '' ? undefined : input.level
     }

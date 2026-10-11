@@ -12,6 +12,8 @@ import {
 import Link from 'next/link'
 import { useToast } from '@/store/ui.store'
 import { useAllLiveClasses, type LiveClass } from '@/lib/api/liveClasses'
+import { JourneyBar } from '@/components/class-schedule/JourneyBar'
+import { showModuleLocked } from '@/lib/api/journey'
 import { useMyBookings, useCreateBooking, useCancelBooking, type MyBooking } from '@/lib/api/bookings'
 import { useCurrentUser } from '@/lib/api/user'
 import { APP_TIMEZONE } from '@/lib/timezone'
@@ -1237,7 +1239,9 @@ export default function ClassBookingsPage() {
   const panelRef = useRef<HTMLDivElement>(null)
   const toast    = useToast()
 
-  const {data:allClasses=[],isLoading:loadCls,isError:errCls,refetch:refetchCls} = useAllLiveClasses()
+  /* Only the classes of courses this student holds — the courses they do not
+     are levels of the journey bar above, each with its own way to unlock. */
+  const {data:allClasses=[],isLoading:loadCls,isError:errCls,refetch:refetchCls} = useAllLiveClasses('all',{mine:true})
   const {data:bkData,         isLoading:loadBk, isError:errBk, refetch:refetchBk}  = useMyBookings({per_page:100})
   const myBookings: MyBooking[] = bkData?.docs ?? []
 
@@ -1536,7 +1540,10 @@ export default function ClassBookingsPage() {
       else if(code==='SESSION_FULL')    toast.error('Slot is full.')
       else if(code==='ALREADY_BOOKED')  toast.info('Already booked.')
       else if(code==='NOT_ENROLLED')    toast.error('Enroll in this course to book.')
-      else if(code==='MODULE_BLOCKED')   toast.error('This class belongs to a module you don\'t have access to. Contact your admin.')
+      else if(code==='MODULE_BLOCKED'){
+        const lc:any=allClasses.find(c=>c.id===id)
+        showModuleLocked({courseId:lc?.course?.id??lc?.courseId, courseTitle:lc?.course?.title, moduleTitle:lc?.sectionId?.title})
+      }
       else if(code==='PENDING_APPROVAL') toast.error('Complete your registration first to book classes.')
       else if(code==='ACCESS_REJECTED')  toast.error('Your access request was not approved. Contact support to appeal.')
       else toast.error(e?.response?.data?.error?.message??'Could not book.')
@@ -1654,6 +1661,9 @@ export default function ClassBookingsPage() {
             )}
           </div>
         </motion.div>
+
+        {/* ─── YOUR JOURNEY ─────────────────────────────────────── */}
+        <JourneyBar onPickCourse={id=>{ if(view!=='courses') setView('courses'); navigate(id,null) }}/>
 
         {/* ─── STATS ────────────────────────────────────────────── */}
         {!isTree&&!isLoading&&filterDelivery!=='offline'&&(

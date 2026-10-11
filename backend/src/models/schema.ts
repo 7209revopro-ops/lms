@@ -644,6 +644,9 @@ export interface ICourse extends Document {
      (organizationId) still owns and edits it; the other academy sees it in
      the catalogue, the admin lists and the enrol pickers. */
   sharedAcademies?: boolean
+  /* Its level in its programme's journey (student Class Schedule): 1, 2, 3 …
+     Courses without one come after, by title. */
+  programOrder?: number
   organizationId?: Types.ObjectId
   /* Denormalized stats */
   enrolledCount:  number
@@ -674,6 +677,7 @@ const CourseSchema = new Schema<ICourse>(
     instructorId:   { type: Schema.Types.ObjectId, ref: 'User', required: true },
     categoryId:     { type: Schema.Types.ObjectId, ref: 'Category' },
     sharedAcademies: { type: Boolean, default: false, index: true },
+    programOrder:    { type: Number, min: 0, max: 999 },
     organizationId: { type: Schema.Types.ObjectId, ref: 'Organization' },
     enrolledCount:  { type: Number, default: 0 },
     ratingAvg:     { type: Number, default: 0 },

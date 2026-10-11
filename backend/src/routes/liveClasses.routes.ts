@@ -128,6 +128,14 @@ router.get('/', authenticate, async (req: Request, res: Response, next: NextFunc
         andFilter(lcOrgFilter, { courseId: { $in: [...dmCourses, ...enrolled] } })
       }
     }
+    /* ?mine=1 — the Class Schedule page: only classes of courses the student
+       holds (bought / enrolled, not dropped), through their own course or a
+       guest door that names it. Courses they do not hold appear on that page
+       as locked levels of their journey instead (GET /live-classes/journey). */
+    if (req.query['mine'] === '1') {
+      const held = [...index.keys()].filter(k => Types.ObjectId.isValid(k)).map(k => new Types.ObjectId(k))
+      andFilter(lcOrgFilter, { $or: [{ courseId: { $in: held } }, { 'guestCohorts.courseId': { $in: held } }] })
+    }
     /* A Program's classes (services/program.service.ts) are for its students only: anyone else never sees them.
        Its students hold an enrolment in the program's hidden course — the index above already has it. */
     andFilter(lcOrgFilter, { $or: [
@@ -265,6 +273,17 @@ router.get('/', authenticate, async (req: Request, res: Response, next: NextFunc
 
 /* Upcoming sessions for authenticated user's enrolled courses */
 router.get('/upcoming', authenticate, ctrl.upcomingForMe)
+
+/* GET /live-classes/journey — the student's programme journey for the Class
+   Schedule page: each course of their programme(s) as a level (completed /
+   current / up next / locked), its modules (open or locked, and why), and
+   their advisor. services/journey.service.ts */
+router.get('/journey', authenticate, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { studentJourney } = await import('@/services/journey.service.ts')
+    sendSuccess(res, await studentJourney(req.user!.id))
+  } catch (err) { next(err) }
+})
 
 /* Student watch access — checks enrollment, returns playback URL or meeting URL */
 router.get('/:id/watch', authenticate, ctrl.watchAccess)

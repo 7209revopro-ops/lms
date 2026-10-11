@@ -47,6 +47,8 @@ const schema = z.object({
   program:      z.enum(['4x-trading', 'digital-marketing', 'ai', 'jura', '']),
   organizationId: z.string().optional(),
   sharedAcademies: z.boolean().optional(),
+  /* Level in its programme's journey (student Class Schedule). '' = none. */
+  programOrder: z.union([z.coerce.number().int().min(1).max(999), z.literal('')]).optional(),
 })
 
 type Values = z.infer<typeof schema>
@@ -201,6 +203,7 @@ export function CourseForm({ course }: CourseFormProps) {
       program:      course?.program       ?? '',
       organizationId: (course as { organizationId?: string } | undefined)?.organizationId ?? '',
       sharedAcademies: course?.sharedAcademies ?? false,
+      programOrder: course?.programOrder ?? '',
     },
   })
 
@@ -546,6 +549,12 @@ export function CourseForm({ course }: CourseFormProps) {
                   )} />
                 </div>
               )}
+
+              <Field label="Level in programme">
+                <input type="number" min={1} max={999} {...register('programOrder')} placeholder="1, 2, 3 … (order of the student's journey)"
+                  className="w-full rounded-xl px-3 py-2.5 text-sm text-white outline-none placeholder:text-white/30"
+                  style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.09)' }} />
+              </Field>
 
               <Field label="Program *">
                 <Controller name="program" control={control} render={({ field }) => (
