@@ -13,10 +13,10 @@
    write: their advisor / the support team picks it up.
 ───────────────────────────────────────────────────────────── */
 import { useEffect, useMemo, useState } from 'react'
-import { createPortal } from 'react-dom'
+import { BottomSheet } from '@/components/ui/BottomSheet'
 import Link from 'next/link'
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion'
-import { Lock, Trophy, Sparkles, Play, X, CheckCircle2, Layers, UserRound, Send, ChevronRight } from 'lucide-react'
+import { Lock, Trophy, Sparkles, Play, CheckCircle2, Layers, UserRound, Send, ChevronRight } from 'lucide-react'
 import { useJourney, type JourneyLevel } from '@/lib/api/journey'
 import { useCreateTicket } from '@/lib/api/support'
 
@@ -81,28 +81,13 @@ function Level({ lv, onOpen, index }: { lv: JourneyLevel; onOpen: () => void; in
   )
 }
 
+/* The shared drawer / popup (swipe down to close on phones), padded and
+   scrolling as one block. */
 function Sheet({ children, onClose, wide }: { children: React.ReactNode; onClose: () => void; wide?: boolean }) {
-  const [host, setHost] = useState<HTMLElement | null>(null)
-  useEffect(() => setHost(document.body), [])
-  useEffect(() => {
-    const h = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
-    window.addEventListener('keydown', h); return () => window.removeEventListener('keydown', h)
-  }, [onClose])
-  if (!host) return null
-  return createPortal(
-    <div className="fixed inset-0 z-[70] flex items-end justify-center p-0 sm:items-center sm:p-4">
-      <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="absolute inset-0 bg-slate-900/50 backdrop-blur-sm" onClick={onClose} />
-      <motion.div initial={{ opacity: 0, y: 40 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 40 }} transition={{ type: 'spring', stiffness: 320, damping: 30 }}
-        className={`dm relative max-h-[88vh] w-full ${wide ? 'max-w-3xl' : 'max-w-md'} overflow-y-auto rounded-t-3xl bg-[var(--color-bg-surface)] p-6 sm:rounded-3xl`}
-        style={{ boxShadow: '0 24px 64px rgba(15,23,42,0.22)' }} role="dialog">
-        <span aria-hidden className="mx-auto -mt-2 mb-3 block h-1.5 w-10 rounded-full sm:hidden" style={{ background: 'var(--color-border)' }} />
-        <button type="button" onClick={onClose} className="absolute right-4 top-4 rounded-full p-1.5 hover:bg-[var(--color-bg-muted)]" aria-label="Close">
-          <X size={16} style={{ color: 'var(--color-text-muted)' }} />
-        </button>
-        {children}
-      </motion.div>
-    </div>,
-    host,
+  return (
+    <BottomSheet label="Your journey" onClose={onClose} wide={wide}>
+      <div className="dm min-h-0 flex-1 overflow-y-auto overscroll-contain px-6 pb-6 pt-3 sm:pt-6">{children}</div>
+    </BottomSheet>
   )
 }
 
