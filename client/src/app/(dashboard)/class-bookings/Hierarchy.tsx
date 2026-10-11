@@ -43,6 +43,7 @@ import { getJoinPhase, type JoinWindowSession } from '@/lib/joinWindow'
 import { useCurrentUser } from '@/lib/api/user'
 import { showModuleLocked } from '@/lib/api/journey'
 import { BottomSheet } from '@/components/ui/BottomSheet'
+import { useJourney } from '@/lib/api/journey'
 import {
   getSlotStatus, SC, seatsLeft, nextSlot,
   moduleFacets, showFacet, filterGroups,
@@ -294,162 +295,112 @@ function ModuleGeometry({ skin }: { skin: Skin }) {
     The three we know are rendered from this map rather than through
     `titleCase`, which preserves deliberate capitals and would leave 'BEGINNER'
     shouting; anything else still shows as typed. */
-const LEVEL_LABEL: Record<string, string> = {
-  beginner: 'Beginner', intermediate: 'Intermediate', advanced: 'Advanced',
-}
 
 function CourseCard({ node, index, onOpen }: {
   node: CourseNode; index: number; onOpen: () => void
 }) {
   const moduleCount = node.modules.length
   const empty       = node.sessionCount === 0
-
-  const raw   = node.level?.trim() ?? ''
-  const level = raw ? (LEVEL_LABEL[raw.toLowerCase()] ?? titleCase(raw)) : null
-
-  /* Remembered BY URL rather than as a boolean, so the cover comes back by
-     itself if the course is later given a working one. */
+  /* A thumbnail that fails to load falls back to the branded header. */
   const [failedSrc, setFailedSrc] = useState<string | null>(null)
   const cover = node.thumbnailUrl && node.thumbnailUrl !== failedSrc ? node.thumbnailUrl : null
-
-  /* Hashed off the course id, not the render index: `index` is the position
-     in the FILTERED grid, so seeding from it would repaint every banner in
-     the row as the student types in the search box. */
   const skin = useMemo(
     () => moduleSkin(node.id, node.title, moduleHash(node.id || node.title) % 6, node.program ?? 'delta'),
     [node.id, node.title, node.program],
   )
 
-  const tutors = node.instructors
-  const tutor  = tutors.length === 1 ? tutors[0]!.name
-               : tutors.length > 1   ? `${tutors.length} instructors`
-               : null
+  /* The journey (already loaded for the page) knows the course's level and
+     how many of ALL its modules are open; the catalogue only knows modules
+     that have classes. */
+  const { data: journey } = useJourney()
+  const jl = journey?.programmes.flatMap(p => p.levels).find(l => l.courseId === node.id)
+  const open  = jl && jl.modulesTotal ? jl.modulesOpen : node.modules.filter(m => !m.blocked).length
+  const total = jl && jl.modulesTotal ? jl.modulesTotal : moduleCount
+
+  /* The next class and this week's count, from the sessions still ahead. */
+  const { next, week } = useMemo(() => {
+    const now = Date.now(), weekEnd = now + 7 * 86_400_000
+    let next: number | null = null, week = 0
+    for (const m of node.modules) for (const g of m.groups) for (const lc of g.slots) {
+      const t = new Date(lc.scheduledStart).getTime()
+      if (!Number.isFinite(t) || t < now - 2 * 3_600_000) continue
+      if (t <= weekEnd) week++
+      if (!m.blocked && (next === null || t < next)) next = t
+    }
+    return { next, week }
+  }, [node.modules])
+  const nextLabel = next === null ? null : (() => {
+    const d = new Date(next), today = new Date()
+    const tomorrow = new Date(); tomorrow.setDate(today.getDate() + 1)
+    const time = d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })
+    const day = d.toDateString() === today.toDateString() ? 'Today'
+      : d.toDateString() === tomorrow.toDateString() ? 'Tomorrow'
+      : d.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' })
+    return `${day}, ${time}`
+  })()
 
   const label = [
-    titleCase(node.title), ' — ', plural(moduleCount, 'module'), ', ',
+    titleCase(node.title), ' — ', `${open} of ${total} modules open`, ', ',
     empty ? 'nothing scheduled' : plural(node.sessionCount, 'upcoming session'),
-    level ? `, ${level}` : '',
-    node.shared ? ', shared with your academy' : '',
+    nextLabel ? `, next ${nextLabel}` : '',
   ].join('')
 
   return (
-    /* ONE focusable element. The CTA below is a span that looks like a button
-       — a real one nested here would be invalid HTML and would cost a second
-       tab stop on every card.
-
-       The stagger lives INSIDE the animate target. As a sibling `transition`
-       prop it would be framer's default for whileHover and whileTap too, and
-       being written after the spread it would replace cardHover's own spring,
-       so the last card in the grid would sit still for a third of a second
-       after the cursor reached it. */
     <motion.button type="button" onClick={onOpen}
       {...cardHover}
       initial={{ opacity: 0, y: 16 }}
       animate={{ opacity: 1, y: 0, transition: { ...spring, delay: Math.min(index, 11) * 0.04 } }}
       style={CARD}
       aria-label={label}
-      className="dm group flex h-full w-full min-w-0 flex-col overflow-hidden rounded-2xl bg-[var(--color-bg-surface)] text-left outline-none focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[color:var(--color-primary-on-surface,var(--color-primary))]">
-
-      {/* ── cover ── */}
-      <div className="relative aspect-video w-full flex-shrink-0 overflow-hidden"
-        style={{ background: skin.wash }}>
+      className="dm group flex h-full w-full min-w-0 flex-col overflow-hidden rounded-[20px] bg-[var(--color-bg-surface)] text-left outline-none focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[color:var(--color-primary-on-surface,var(--color-primary))]">
+      {/* ── photo header, the title on it ── */}
+      <div className="relative h-[150px] w-full flex-shrink-0 overflow-hidden sm:h-auto sm:aspect-[16/9]" style={{ background: skin.wash }}>
         <div className="absolute inset-0 transition-transform duration-500 group-hover:scale-105">
           {cover ? (
             <img src={cover} alt="" loading="lazy" decoding="async" draggable={false}
-              onError={() => setFailedSrc(cover)}
-              className="h-full w-full object-cover" />
+              onError={() => setFailedSrc(cover)} className="h-full w-full object-cover" />
           ) : (
             <ModuleGeometry skin={skin} />
           )}
         </div>
-
-        {/* The Catalog's hover scrim and play affordance, so the two screens
-            answer a pointer the same way. */}
-        <div className="absolute inset-0 flex items-center justify-center opacity-0 transition-opacity duration-300 group-hover:opacity-100"
-          style={{ background: 'rgba(13,15,26,0.30)' }}>
-          <span className="flex h-10 w-10 items-center justify-center rounded-full"
-            style={{ background: 'rgba(0,87,184,0.90)', boxShadow: '0 6px 18px rgba(0,87,184,0.40)' }}>
-            <ChevronRight size={15} strokeWidth={3} color="white" />
+        {/* A shade so white type reads on any photo. */}
+        <div className="absolute inset-0" style={{ background: 'linear-gradient(180deg, rgba(8,12,22,0.05) 30%, rgba(8,12,22,0.78) 100%)' }} />
+        <div className="absolute left-3 right-3 top-3 flex items-start justify-between gap-2">
+          <span className="rounded-full px-2.5 py-1 text-[11px] font-bold" style={{ background: 'rgba(255,255,255,0.92)', color: '#0C447C' }}>
+            {empty ? 'No sessions yet' : week ? `${week} session${week > 1 ? 's' : ''} this week` : plural(node.sessionCount, 'session')}
           </span>
+          {jl ? (
+            <span className="rounded-full px-2.5 py-1 text-[11px] font-bold" style={{ background: 'rgba(14,204,142,0.92)', color: '#04342C' }}>Level {jl.level}</span>
+          ) : node.shared ? (
+            <span className="inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-bold" style={{ background: 'rgba(255,255,255,0.92)', color: '#3C3489' }}>
+              <Share2 size={10} strokeWidth={2.5} />Shared
+            </span>
+          ) : null}
         </div>
-
-        {/* Top-left: how much of this course is actually on. The Catalog puts
-            the runtime here; the schedule's equivalent is what you can book. */}
-        <span className="absolute left-2.5 top-2.5 rounded-lg px-2 py-0.5 text-[11px] sm:text-[10px] font-bold"
-          style={{ background: 'rgba(13,15,26,0.68)', color: 'white', backdropFilter: 'blur(6px)' }}>
-          {empty ? 'No sessions' : plural(node.sessionCount, 'session')}
-        </span>
-
-        {node.shared && (
-          /* The admin dashboard's cross-academy violet, as tint on glass —
-             white on #A78BFA measures about 2:1 and was the weakest type on
-             the card. */
-          <span className="absolute right-2.5 top-2.5 inline-flex max-w-[60%] items-center gap-1 rounded-full px-2 py-0.5 text-[11px] sm:text-[9px] font-bold"
-            style={{
-              background: 'rgba(8,12,22,0.55)', border: `1px solid rgba(${SHARED_RGB},0.45)`,
-              color: '#CFC0FF', backdropFilter: 'blur(6px)',
-            }}>
-            <Share2 size={8} strokeWidth={2.5} className="flex-shrink-0" />
-            <span className="truncate">Shared</span>
-          </span>
-        )}
+        <div className="absolute inset-x-3 bottom-3">
+          <h3 className="line-clamp-2 text-[16px] font-bold leading-snug text-white sm:text-[15px]" style={{ textShadow: '0 1px 2px rgba(0,0,0,0.35)' }}>
+            {titleCase(node.title)}
+          </h3>
+          <p className="mt-0.5 truncate text-[12px] font-medium" style={{ color: 'rgba(255,255,255,0.82)' }}>
+            {plural(total, 'module')}{node.program ? ` · ${titleCase(node.program.replace('4x-trading', 'Forex').replace(/-/g, ' '))}` : ''}
+          </p>
+        </div>
       </div>
 
-      {/* ── content, in the Catalog's order ── */}
-      <div className="flex flex-1 flex-col gap-2 p-3.5">
-        <span className="inline-flex w-fit items-center gap-1 rounded-lg px-2 py-0.5 text-[11px] sm:text-[10px] font-semibold"
-          style={{ background: 'rgba(0,87,184,0.08)', color: 'var(--color-primary-on-surface, var(--color-primary))' }}>
-          <span className="h-1.5 w-1.5 rounded-full" style={{ background: 'var(--color-primary)' }} />
-          Course
-        </span>
-
-        <h3 className="line-clamp-2 break-words text-sm font-bold leading-snug"
-          style={{ color: 'var(--color-text-primary)' }}>{titleCase(node.title)}</h3>
-
-        {tutor && (
-          <p className="truncate text-xs" style={{ color: 'var(--color-text-muted)' }}>{tutor}</p>
-        )}
-
-        <div className="flex flex-wrap items-center gap-2 text-[11px] font-medium"
-          style={{ color: 'var(--color-text-muted)' }}>
-          <span className="flex items-center gap-1">
-            <Layers size={10} strokeWidth={2} />{plural(moduleCount, 'module')}
-          </span>
-          {node.program && (
-            <span className="rounded-md px-1.5 py-0.5 text-[11px] sm:text-[10px] font-medium"
-              style={{ background: 'var(--color-bg-subtle)', color: 'var(--color-text-muted)' }}>
-              {titleCase(node.program)}
-            </span>
-          )}
+      {/* ── progress + what is next ── */}
+      <div className="flex flex-1 flex-col gap-2 px-3.5 pb-3.5 pt-3">
+        <div className="h-1.5 w-full overflow-hidden rounded-full" style={{ background: 'var(--color-bg-inset)' }}>
+          <div className="h-full rounded-full" style={{ width: `${total ? Math.round((open / total) * 100) : 0}%`, background: 'var(--color-primary)' }} />
         </div>
-
-        {/* The hairline the Catalog separates its footer with. Level sits where
-            the Catalog puts it; the button below is the schedule's, full width,
-            because this card has exactly one thing to do. */}
-        <div className="mt-auto flex items-center justify-between gap-2 pt-3"
-          style={{ borderTop: '1px solid var(--color-border)' }}>
-          <span className="truncate text-[11px] sm:text-[10px] capitalize" style={{ color: 'var(--color-text-muted)' }}>
-            {level ?? 'All levels'}
+        <div className="flex items-center justify-between gap-2 text-[12px]">
+          <span className="truncate font-medium" style={{ color: 'var(--color-text-secondary)' }}>
+            {open} of {total} modules open
           </span>
-          {!empty && (
-            <span className="flex-shrink-0 text-[11px] sm:text-[10px] font-semibold" style={{ color: 'var(--color-text-muted)' }}>
-              {plural(node.sessionCount, 'session')} ahead
-            </span>
-          )}
+          <span className="flex flex-shrink-0 items-center gap-0.5 font-bold" style={{ color: empty ? 'var(--color-text-muted)' : 'var(--color-primary-on-surface, var(--color-primary))' }}>
+            {nextLabel ? <>Next: {nextLabel}</> : empty ? 'Nothing scheduled' : 'View modules'}
+            <ChevronRight size={14} strokeWidth={2.5} className="transition-transform duration-300 group-hover:translate-x-0.5" />
+          </span>
         </div>
-
-        <span aria-hidden
-          className="mt-2.5 flex w-full items-center justify-center gap-1.5 rounded-xl py-2.5 text-[12px] font-bold transition-opacity group-hover:opacity-90"
-          style={empty
-            ? { background: 'var(--color-bg-inset)', color: 'var(--color-text-muted)', border: '1px solid var(--color-border)' }
-            : { background: 'var(--color-primary)', color: '#fff', boxShadow: '0 2px 8px rgba(0,87,184,0.25)' }}>
-          {empty ? <Calendar size={12} strokeWidth={2.5} /> : <BookOpen size={12} strokeWidth={2.5} />}
-          {empty ? 'Nothing scheduled' : 'View modules'}
-          {!empty && (
-            <ChevronRight size={12} strokeWidth={2.5}
-              className="transition-transform duration-300 group-hover:translate-x-0.5" />
-          )}
-        </span>
       </div>
     </motion.button>
   )
@@ -1331,6 +1282,9 @@ function SessionAction({
 
 /* ── The session card ───────────────────────────────────────────────────── */
 
+/* 120 → "2 h", 90 → "1 h 30", 45 → "45 min". */
+const fmtLength = (mins: number) => mins < 60 ? `${mins} min` : `${Math.floor(mins / 60)} h${mins % 60 ? ` ${mins % 60}` : ''}`
+
 function SessionCard({
   s, dayLabel, blocked, pendingReg, index, now,
   onBook, onCancel, bookPending, cancelPending,
@@ -1412,41 +1366,25 @@ function SessionCard({
         transition: reduce ? { duration: 0 } : { ...spring, delay: Math.min(index, 10) * 0.035 },
       }}
       style={CARD}
-      className="dm relative flex h-full min-w-0 flex-col overflow-hidden rounded-2xl bg-[var(--color-bg-surface)]">
-
-      {/* Four pixels of the one colour that answers "can I have this?", so a
-          day's grid can be read down its left edge before a word is. */}
-      <span aria-hidden className="absolute inset-y-0 left-0 w-1"
-        style={{ background: c.color, opacity: shown === 'bookable' || shown === 'live' || shown === 'booked' ? 1 : 0.45 }} />
-
-      <div className="flex flex-1 flex-col gap-2 p-3 pl-3.5 sm:p-3.5 sm:pl-4">
+      className="dm relative flex h-full min-w-0 flex-col overflow-hidden rounded-[18px] bg-[var(--color-bg-surface)]">
+      <div className="flex flex-1 flex-col gap-2 p-3 sm:p-4">
 
         {/* ── the clock, and what state it is in ── */}
         <div className="flex items-start justify-between gap-2">
+          {/* The day, then the time — the two things a student decides on —
+              then how long and where, in one quiet line. */}
           <div className="min-w-0">
-            <p className="syne truncate text-[17px] font-bold leading-none sm:text-[20px]"
-              style={{ color: 'var(--color-text-primary)' }}>
-              {time}
+            <p className="truncate text-[11px] font-semibold" style={{ color: 'var(--color-text-muted)' }}>{dayLabel}</p>
+            <p className="syne mt-0.5 truncate font-bold leading-none" style={{ color: 'var(--color-text-primary)' }}>
+              <span className="text-[22px] sm:text-[24px]">{time.split(' ')[0]}</span>
+              {time.split(' ')[1] && <span className="ml-1 text-[12px] sm:text-[13px]">{time.split(' ')[1]}</span>}
             </p>
-            {/* THE DATE, BUT ONLY ON A PHONE.
-
-                The reasoning for leaving it off was sound at two and three
-                columns: the band heading above the grid carries the day, so
-                "Sep 20" under a band reading "Today - Sat 20 Sep" is the same
-                fact twice on every card. At 375px the grid is ONE column and
-                each card is 280-330px tall, so by the second card the heading
-                that carried the day has scrolled away and every card on
-                screen says only "8:30 PM" - a time with no day attached, on
-                the screen where you commit to attending. */}
-            <p className="mt-1.5 flex items-center gap-1 text-[11px] font-semibold"
-              style={{ color: 'var(--color-text-muted)' }}>
+            <p className="mt-1 flex min-w-0 items-center gap-1 text-[11px] font-medium" style={{ color: 'var(--color-text-muted)' }}>
               <Clock size={10} strokeWidth={2.25} className="flex-shrink-0" />
-              <span className="sm:hidden">{dayLabel} &middot; </span>
-              {lc.durationMins || 60} min
+              <span className="truncate">{fmtLength(lc.durationMins || 60)} · {offline ? (where || 'In person') : 'Online'}</span>
             </p>
           </div>
-
-          <span className="flex flex-shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-[11px] sm:text-[10px] font-bold"
+          <span className="flex flex-shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-bold"
             style={{ background: c.bg, color: ink(c.color), border: `1px solid ${c.border}` }}>
             {shown === 'live' && (
               <motion.span aria-hidden className="h-1.5 w-1.5 rounded-full" style={{ background: c.color }}
@@ -1458,8 +1396,8 @@ function SessionCard({
         </div>
 
         {/* ── which class this is ── */}
-        <p className="line-clamp-2 text-[12.5px] font-bold leading-snug"
-          style={{ color: 'var(--color-text-secondary)' }}>
+        <p className="line-clamp-2 text-[13px] font-semibold leading-snug"
+          style={{ color: 'var(--color-text-primary)' }}>
           {titleCase(lc.title)}
         </p>
 
@@ -1467,22 +1405,13 @@ function SessionCard({
             Pill is the file's own chip; the delivery one is hand-rolled only
             because a room code has to be able to truncate, which needs the
             min-w-0 flex child Pill does not take. */}
-        <div className="flex flex-wrap items-center gap-1.5">
-          {language && (
+        {language && (
+          <div className="flex flex-wrap items-center gap-1.5">
             <Pill rgb="14,204,142" solid="var(--color-success)" icon={<Globe size={9} strokeWidth={2.5} />}>
               {language}
             </Pill>
-          )}
-          <span className="inline-flex min-w-0 max-w-full items-center gap-1 rounded-full px-2 py-0.5 text-[11px] sm:text-[10px] font-semibold"
-            style={offline
-              ? { background: 'rgba(0,87,184,0.08)', color: 'var(--color-primary-on-surface, var(--color-primary))', border: '1px solid rgba(0,87,184,0.20)' }
-              : { background: 'rgba(99,102,241,0.08)', color: '#6366F1', border: '1px solid rgba(99,102,241,0.20)' }}>
-            {offline
-              ? <MapPin size={9} strokeWidth={2.5} className="flex-shrink-0" />
-              : <Video size={9} strokeWidth={2.5} className="flex-shrink-0" />}
-            <span className="truncate">{offline ? (where || 'In person') : 'Online'}</span>
-          </span>
-        </div>
+          </div>
+        )}
 
         {/* ── who is teaching ── */}
         <div className="flex items-center gap-2">
@@ -1513,10 +1442,10 @@ function SessionCard({
                   ? 'No seats left'
                   : yours
                     ? `${left} ${left === 1 ? 'seat' : 'seats'} left for your academy`
-                    : `${left} of ${cap} seats left`}
+                    : <>{left} <span className="hidden sm:inline">of {cap} </span>{left === 1 ? 'seat' : 'seats'} left</>}
               </span>
               {!yours && (
-                <span className="flex flex-shrink-0 items-center gap-1 text-[11px] sm:text-[9px] font-bold uppercase tracking-[0.1em]"
+                <span className="hidden flex-shrink-0 items-center gap-1 text-[9px] font-bold uppercase tracking-[0.1em] sm:flex"
                   style={{ color: 'var(--color-text-muted)' }}>
                   <Users size={9} strokeWidth={2.5} />{cap - left} booked
                 </span>
@@ -1528,7 +1457,7 @@ function SessionCard({
                 <motion.span className="block h-full rounded-full"
                   initial={reduce ? false : { width: 0 }} animate={{ width: `${taken}%` }}
                   transition={reduce ? { duration: 0 } : { ...spring, delay: 0.1 + Math.min(index, 10) * 0.035 }}
-                  style={{ background: left === 0 ? 'var(--color-text-muted)' : scarce ? 'var(--color-warning)' : 'var(--color-primary)' }} />
+                  style={{ background: left === 0 ? 'var(--color-text-muted)' : scarce ? 'var(--color-warning)' : 'var(--color-success)' }} />
               </div>
             )}
           </div>
@@ -2029,7 +1958,7 @@ export function Hierarchy({
           /* A real course runs to ten modules, so this is a grid rather
              than a column — ten stacked banners would be three screens of
              scrolling to see a list the reference fits in two rows. */
-          <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-3 xl:grid-cols-4">
+          <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-2 sm:gap-4 lg:grid-cols-3 xl:grid-cols-4">
             {modules.map((m, i) => (
               <ModuleCard key={m.id || 'general'} node={m} index={i}
                 position={m.id === GENERAL ? null : (m.number ?? ordered.indexOf(m) + 1)}
