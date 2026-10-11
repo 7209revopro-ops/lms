@@ -38,7 +38,11 @@ import { Hierarchy, allGroupsIn } from './Hierarchy'
 import { CLASS_LANGUAGES } from '@/lib/languages'
 
 /* ── Google Fonts ──────────────────────────────────────────── */
-const FONT_CSS = `@import url('https://fonts.googleapis.com/css2?family=Syne:wght@600;700;800&family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;1,9..40,400&display=swap');.syne{font-family:'Syne',sans-serif}.dm{font-family:'DM Sans',sans-serif}`
+/* One family for the whole schedule: DM Sans. The display style (.syne —
+   times, titles, numbers, journey levels) used to be Syne, a very wide
+   extra-bold face that crowded a phone screen; it is now DM Sans bold,
+   slightly tightened, so headings and body read as one type. */
+const FONT_CSS = `@import url('https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;0,9..40,800;1,9..40,400&display=swap');.syne{font-family:'DM Sans',sans-serif;letter-spacing:-0.015em}.dm{font-family:'DM Sans',sans-serif}`
 // eslint-disable-next-line react/no-danger
 const FontLoader = () => <style dangerouslySetInnerHTML={{ __html: FONT_CSS }} />
 

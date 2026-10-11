@@ -5,6 +5,7 @@ import { motion } from 'framer-motion'
 import { useUIStore } from '@/store/ui.store'
 import { ClientSidebar } from '@/components/layout/ClientSidebar'
 import { ClientTopbar } from '@/components/layout/ClientTopbar'
+import { MobileTabBar } from '@/components/layout/MobileTabBar'
 import { RightSidebar, RightSidebarToggle } from '@/components/layout/RightSidebar'
 import { VerifyEmailBanner } from '@/components/auth/VerifyEmailBanner'
 import { EnrollmentStatusBanner } from '@/components/auth/EnrollmentStatusBanner'
@@ -33,7 +34,10 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
             right panel's width as padding, the INNER one caps the reading
             width. Done as `mx-auto` + `lg:mr-[…]` on one element, the auto
             margin wins the cascade and the content slides under the panel. */}
-        <div className={`px-4 py-6 sm:px-8 sm:py-8 transition-[padding] duration-300 ease-out ${
+        {/* Below lg the bottom tab bar floats over the page: reserve its height
+            (64px + its 10px gap + the iPhone home indicator) so nothing ends
+            up underneath it. */}
+        <div className={`px-4 py-6 pb-[calc(96px+env(safe-area-inset-bottom))] sm:px-8 sm:py-8 sm:pb-[calc(104px+env(safe-area-inset-bottom))] lg:pb-8 transition-[padding] duration-300 ease-out ${
           rightPanelOpen ? 'lg:pr-[344px]' : 'lg:pr-8'
         }`}>
           <div className="mx-auto w-full max-w-[1240px]">
@@ -44,6 +48,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         </div>
       </motion.main>
 
+      <MobileTabBar />
       <RightSidebar />
       <RightSidebarToggle />
       <InstallPrompt />

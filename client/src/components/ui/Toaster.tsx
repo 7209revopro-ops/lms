@@ -23,7 +23,7 @@ export function Toaster() {
      pinned instead and the width follows; from `sm` up the original
      right-anchored card is restored. */
   return (
-    <div className="pointer-events-none fixed bottom-6 left-4 right-4 z-[100] flex flex-col gap-2 sm:left-auto sm:right-6 sm:w-full sm:max-w-sm">
+    <div className="pointer-events-none fixed bottom-[calc(86px+env(safe-area-inset-bottom))] lg:bottom-6 left-4 right-4 z-[100] flex flex-col gap-2 sm:left-auto sm:right-6 sm:w-full sm:max-w-sm">
       <AnimatePresence initial={false}>
         {toasts.map(t => (
           <ToastCard key={t.id} {...t} onDismiss={() => popToast(t.id)} />

@@ -69,7 +69,7 @@ export function InstallPrompt() {
           /* left-6 with no right offset let shrink-to-fit take the whole 351px
              remaining, so this sat flush against the right edge and covered the
              activity-panel button entirely. Pin both edges on a phone. */
-          className="fixed bottom-6 left-4 right-4 z-50 overflow-hidden rounded-2xl bg-[var(--color-bg-surface)] sm:left-6 sm:right-auto sm:max-w-sm"
+          className="fixed bottom-[calc(86px+env(safe-area-inset-bottom))] lg:bottom-6 left-4 right-4 z-50 overflow-hidden rounded-2xl bg-[var(--color-bg-surface)] sm:left-6 sm:right-auto sm:max-w-sm"
           style={{ border: '1px solid var(--color-border)', boxShadow: '0 16px 40px rgba(13,15,26,0.15)' }}>
           <div className="flex items-start gap-3 p-4">
             <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-xl"

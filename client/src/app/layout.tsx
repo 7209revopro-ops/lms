@@ -49,6 +49,9 @@ export const viewport: Viewport = {
   themeColor: '#0057b8',
   width: 'device-width',
   initialScale: 1,
+  /* Lets env(safe-area-inset-bottom) report the iPhone home indicator, so
+     the bottom tab bar can sit above it. */
+  viewportFit: 'cover',
 }
 
 /* Runs before the first paint, ahead of React and ahead of the stylesheet
