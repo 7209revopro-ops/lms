@@ -288,4 +288,16 @@ router.get('/exams/student', wrap(async (req, res) => {
   sendSuccess(res, await studentExamsForPortal(req.query.email), 'Student exams')
 }))
 
+/* Pending (2026-10-11, portalPending.service.ts): what the admin sidebar's badges count — Requests, Support,
+   mentors' Messages — and whom each waits on, for the Root portal's Pending page. Read only. The Root portal's
+   alone: it names every staff account and its backlog, which the sales CRM has no use for. */
+router.get('/pending', wrap(async (req, res) => {
+  if (req.caller !== 'portal') {
+    sendError(res, 'FORBIDDEN', 'Only the Root portal reads what is pending', 403)
+    return
+  }
+  const { pendingForPortal } = await import('@/services/portalPending.service.ts')
+  sendSuccess(res, await pendingForPortal(), 'Pending')
+}))
+
 export default router
