@@ -26,12 +26,15 @@ const STATE = {
   locked:    { label: 'Locked',   color: 'var(--color-text-muted)', bg: 'var(--color-bg-inset)', ring: 'var(--color-border)' },
 } as const
 
-const short = (t: string) => {
-  const m = t.match(/^([A-Z]{2,6})\b/)                       // "MBT", "DSLP", "HADC"
-  if (m && t.length > 14) return m[1]!
-  const words = t.replace(/[()]/g, '').split(/\s+/).filter(w => w.length > 2)
-  return t.length <= 14 ? t : words.map(w => w[0]).join('').slice(0, 5).toUpperCase()
-}
+/* "MARKET BREAK-OUT TRADING PROGRAM" → "Market Break-Out Trading Program";
+   a leading code ("DSLP - Delta Structure …", "MMC (MARKET MAKING CYCLE)")
+   stays in capitals. */
+const KEEP_CAPS = new Set(['AI', 'UAE', 'HR', 'MBT', 'DWT', 'MMC', 'HADC', 'DSLP', 'SEO', 'JURA'])
+const courseName = (t: string) => t.trim().split(/\s+/).map(w => {
+  const bare = w.replace(/[^A-Za-z]/g, '')
+  if (KEEP_CAPS.has(bare.toUpperCase()) && bare === bare.toUpperCase()) return w
+  return w.toLowerCase().replace(/(^|[(\-])([a-z])/g, (_, a: string, b: string) => a + b.toUpperCase())
+}).join(' ')
 
 /* A progress ring around the level's badge. */
 function Ring({ pct, color, size = 58, children }: { pct: number; color: string; size?: number; children: React.ReactNode }) {
@@ -58,7 +61,7 @@ function Level({ lv, onOpen, index }: { lv: JourneyLevel; onOpen: () => void; in
     <motion.button type="button" onClick={onOpen}
       initial={reduce ? false : { opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: index * 0.06, type: 'spring', stiffness: 300, damping: 24 }}
       whileHover={reduce ? undefined : { y: -3 }} whileTap={reduce ? undefined : { scale: 0.97 }}
-      className="relative flex w-[112px] flex-shrink-0 flex-col items-center gap-1.5 rounded-2xl px-2 pb-3 pt-3 text-center outline-none"
+      className="relative flex w-full flex-col items-center gap-1.5 rounded-2xl px-2 pb-3 pt-3 text-center outline-none"
       style={{ background: st.bg, border: `1.5px solid ${st.ring}` }}
       aria-label={`Level ${lv.level}: ${lv.title} — ${st.label}`}>
       {lv.state === 'next' && !reduce && (
@@ -69,7 +72,7 @@ function Level({ lv, onOpen, index }: { lv: JourneyLevel; onOpen: () => void; in
       <Ring pct={lv.state === 'completed' ? 100 : lv.progressPercent} color={st.color as string}>
         <span className="flex h-10 w-10 items-center justify-center rounded-full" style={{ background: 'var(--color-bg-surface)', color: st.color }}>{icon}</span>
       </Ring>
-      <span className="syne line-clamp-1 text-[12px] font-700" style={{ color: lv.state === 'locked' ? 'var(--color-text-muted)' : 'var(--color-text-primary)' }}>{short(lv.title)}</span>
+      <span className="syne line-clamp-2 min-h-[30px] text-[11.5px] font-700 leading-tight" title={lv.title} style={{ color: lv.state === 'locked' ? 'var(--color-text-muted)' : 'var(--color-text-primary)' }}>{courseName(lv.title)}</span>
       <span className="text-[10px] font-semibold" style={{ color: st.color }}>
         {lv.state === 'current' ? `${lv.progressPercent}% · ${lv.modulesOpen}/${lv.modulesTotal} modules` : st.label}
       </span>
@@ -77,7 +80,7 @@ function Level({ lv, onOpen, index }: { lv: JourneyLevel; onOpen: () => void; in
   )
 }
 
-function Sheet({ children, onClose }: { children: React.ReactNode; onClose: () => void }) {
+function Sheet({ children, onClose, wide }: { children: React.ReactNode; onClose: () => void; wide?: boolean }) {
   useEffect(() => {
     const h = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
     window.addEventListener('keydown', h); return () => window.removeEventListener('keydown', h)
@@ -86,8 +89,9 @@ function Sheet({ children, onClose }: { children: React.ReactNode; onClose: () =
     <div className="fixed inset-0 z-[70] flex items-end justify-center p-0 sm:items-center sm:p-4">
       <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="absolute inset-0 bg-slate-900/50 backdrop-blur-sm" onClick={onClose} />
       <motion.div initial={{ opacity: 0, y: 40 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 40 }} transition={{ type: 'spring', stiffness: 320, damping: 30 }}
-        className="dm relative max-h-[88vh] w-full max-w-md overflow-y-auto rounded-t-3xl bg-[var(--color-bg-surface)] p-6 sm:rounded-3xl"
+        className={`dm relative max-h-[88vh] w-full ${wide ? 'max-w-3xl' : 'max-w-md'} overflow-y-auto rounded-t-3xl bg-[var(--color-bg-surface)] p-6 sm:rounded-3xl`}
         style={{ boxShadow: '0 24px 64px rgba(15,23,42,0.22)' }} role="dialog">
+        <span aria-hidden className="mx-auto -mt-2 mb-3 block h-1.5 w-10 rounded-full sm:hidden" style={{ background: 'var(--color-border)' }} />
         <button type="button" onClick={onClose} className="absolute right-4 top-4 rounded-full p-1.5 hover:bg-[var(--color-bg-muted)]" aria-label="Close">
           <X size={16} style={{ color: 'var(--color-text-muted)' }} />
         </button>
@@ -129,9 +133,13 @@ function AdvisorLine({ advisor }: { advisor: { name?: string; team?: string } | 
   )
 }
 
+/* The level they are on: the furthest course they hold (1 if none). */
+const levelAt = (ls: JourneyLevel[]) => Math.max(1, ...ls.filter(l => l.state === 'current' || l.state === 'completed').map(l => l.level))
+
 export function JourneyBar({ onPickCourse }: { onPickCourse?: (courseId: string) => void }) {
   const { data } = useJourney()
   const [open, setOpen] = useState<JourneyLevel | null>(null)
+  const [showJourney, setShowJourney] = useState(false)
   const [mod, setMod] = useState<{ courseId?: string; courseTitle?: string; moduleTitle?: string } | null>(null)
 
   useEffect(() => {
@@ -146,39 +154,67 @@ export function JourneyBar({ onPickCourse }: { onPickCourse?: (courseId: string)
 
   return (
     <>
-      {levels.map(p => {
-        const done = p.levels.filter(l => l.state === 'completed').length
-        const at = Math.max(1, ...p.levels.filter(l => l.state !== 'locked' && l.state !== 'next').map(l => l.level))
-        return (
-          <section key={p.program} className="mb-5 rounded-3xl p-4 sm:p-5"
-            style={{ background: 'linear-gradient(135deg, var(--color-bg-surface), var(--color-primary-light))', border: '1px solid var(--color-border)', boxShadow: '0 2px 10px rgba(15,23,42,0.05)' }}>
-            <div className="mb-3 flex items-center justify-between gap-3">
-              <div>
-                <p className="text-[10px] font-bold uppercase tracking-widest" style={{ color: 'var(--color-primary)' }}>Your {p.label} journey</p>
-                <p className="syne text-[15px] font-700" style={{ color: 'var(--color-text-primary)' }}>
-                  Level {at} of {p.levels.length}{done ? ` · ${done} completed 🏆` : ''}
-                </p>
-              </div>
-              <span className="rounded-full px-2.5 py-1 text-[10px] font-bold" style={{ background: 'var(--color-bg-surface)', color: 'var(--color-text-secondary)', border: '1px solid var(--color-border)' }}>
-                {Math.round((done / p.levels.length) * 100)}% of the path
-              </span>
-            </div>
-            <div className="-mx-1 flex items-center gap-0 overflow-x-auto px-1 pb-1">
-              {p.levels.map((lv, i) => (
-                <div key={lv.courseId} className="flex items-center">
-                  <Level lv={lv} index={i} onOpen={() => (lv.state === 'current' || lv.state === 'completed') && onPickCourse ? onPickCourse(lv.courseId) : setOpen(lv)} />
-                  {i < p.levels.length - 1 && (
-                    <span className="mx-1 h-[3px] w-5 flex-shrink-0 rounded-full sm:w-8"
-                      style={{ background: lv.state === 'completed' ? '#0ECC8E' : 'repeating-linear-gradient(90deg, var(--color-border) 0 6px, transparent 6px 10px)' }} />
-                  )}
-                </div>
+      {/* On the page: one compact bar. The journey itself opens over it —
+          a centred popup on a laptop, a bottom drawer on a phone (Sheet). */}
+      {levels.length > 0 && (
+        <motion.button type="button" onClick={() => setShowJourney(true)}
+          initial={{ opacity: 0, y: -6 }} animate={{ opacity: 1, y: 0 }} whileHover={{ y: -1 }} whileTap={{ scale: 0.99 }}
+          className="mb-5 flex w-full items-center gap-3 rounded-2xl px-4 py-3 text-left outline-none"
+          style={{ background: 'linear-gradient(135deg, var(--color-bg-surface), var(--color-primary-light))', border: '1px solid var(--color-border)', boxShadow: '0 2px 10px rgba(15,23,42,0.05)' }}
+          aria-label="Open your journey">
+          <span className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-xl" style={{ background: 'var(--color-primary)', color: '#fff' }}><Trophy size={18} /></span>
+          <span className="min-w-0 flex-1">
+            <span className="block text-[10px] font-bold uppercase tracking-widest" style={{ color: 'var(--color-primary)' }}>Your journey</span>
+            <span className="syne block truncate text-[14px] font-700" style={{ color: 'var(--color-text-primary)' }}>
+              {levels.map(p => `${p.label} · Level ${levelAt(p.levels)} of ${p.levels.length}`).join('   |   ')}
+            </span>
+            <span className="mt-1 flex gap-1" aria-hidden>
+              {levels[0]!.levels.map(l => (
+                <span key={l.courseId} className="h-1.5 flex-1 max-w-8 rounded-full"
+                  style={{ background: l.state === 'completed' ? '#0ECC8E' : l.state === 'current' ? '#0057b8' : l.state === 'next' ? '#F59E0B' : 'var(--color-border)' }} />
               ))}
-            </div>
-          </section>
-        )
-      })}
+            </span>
+          </span>
+          {levels.some(p => p.levels.some(l => l.state === 'next')) && (
+            <span className="hidden flex-shrink-0 rounded-full px-2.5 py-1 text-[10px] font-bold sm:inline" style={{ background: 'rgba(245,158,11,0.14)', color: '#B45309' }}>✨ Up next</span>
+          )}
+          <ChevronRight size={18} className="flex-shrink-0" style={{ color: 'var(--color-text-muted)' }} />
+        </motion.button>
+      )}
 
       <AnimatePresence>
+        {showJourney && (
+          <Sheet wide onClose={() => setShowJourney(false)}>
+            <p className="text-[10px] font-bold uppercase tracking-widest" style={{ color: 'var(--color-primary)' }}>Your journey</p>
+            <h3 className="syne mt-1 pr-8 text-lg font-800" style={{ color: 'var(--color-text-primary)' }}>Level up, course by course</h3>
+            <div className="mt-4 space-y-5">
+              {levels.map(p => {
+                const done = p.levels.filter(l => l.state === 'completed').length
+                return (
+                  <section key={p.program}>
+                    <div className="mb-2.5 flex items-center justify-between gap-3">
+                      <p className="syne text-[14px] font-700" style={{ color: 'var(--color-text-primary)' }}>
+                        {p.label} · Level {levelAt(p.levels)} of {p.levels.length}{done ? ` · ${done} completed 🏆` : ''}
+                      </p>
+                      <span className="flex-shrink-0 rounded-full px-2.5 py-1 text-[10px] font-bold" style={{ background: 'var(--color-bg-inset)', color: 'var(--color-text-secondary)' }}>
+                        {Math.round((done / p.levels.length) * 100)}% done
+                      </span>
+                    </div>
+                    <div className="grid grid-cols-3 gap-2 sm:grid-cols-5">
+                      {p.levels.map((lv, i) => (
+                        <Level key={lv.courseId} lv={lv} index={i} onOpen={() => {
+                          if ((lv.state === 'current' || lv.state === 'completed') && onPickCourse) { setShowJourney(false); onPickCourse(lv.courseId) }
+                          else { setShowJourney(false); setOpen(lv) }
+                        }} />
+                      ))}
+                    </div>
+                  </section>
+                )
+              })}
+            </div>
+            <p className="mt-4 text-[11px]" style={{ color: 'var(--color-text-muted)' }}>Tap a course you have to see its classes; tap a locked one to unlock it.</p>
+          </Sheet>
+        )}
         {open && (
           <Sheet onClose={() => setOpen(null)}>
             <p className="text-[10px] font-bold uppercase tracking-widest" style={{ color: STATE[open.state].color }}>Level {open.level} · {STATE[open.state].label}</p>
