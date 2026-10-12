@@ -7,7 +7,7 @@
    decides their own students' requests, the portal naming them by address,
    and a Super Admin every Forex applicant's.
 
-     POST /service/enrolment-requests                   { status, emails?, page?, perPage? }
+     POST /service/enrolment-requests                   { status, emails?, page?, perPage?, from?, to?, academy?, program?, q? }
      POST /service/enrolment-requests/:userId           { email }  one, with the whole application
      POST /service/enrolment-requests/:userId/document  { email, field, byName, byEmail }  a 5-minute link to an ID scan
      POST /service/enrolment-requests/:userId/approve   { email, byName, byEmail, courses? }
@@ -153,31 +153,72 @@ function requestOf(u: UserRow, academies: Map<string, string>, withApplication =
   }
 }
 
+const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+/** A day or an instant the portal sent ("2026-10-12" or ISO) — null when it isn't one. */
+function dateOf(raw: unknown, name: string): Date | null {
+  if (raw === undefined || raw === null || raw === '') return null
+  const d = new Date(String(raw))
+  if (Number.isNaN(d.getTime())) throw bad(`${name} must be a date`)
+  return d
+}
+
+/**
+ * The portal's filters (the user, 2026-10-12): applied between `from` and `to`
+ * (when they sent the application, else signed up — as `appliedAt` says; `to`
+ * not included), the academy whose name has `academy` in it, a programme they
+ * applied to (`program`, as they picked it), and `q` in the name, address or
+ * phone. Each left out filters nothing.
+ */
+async function filtersOf(input: { from?: unknown; to?: unknown; academy?: unknown; program?: unknown; q?: unknown }): Promise<Record<string, unknown>[]> {
+  const out: Record<string, unknown>[] = []
+  const from = dateOf(input.from, 'from'), to = dateOf(input.to, 'to')
+  if (from || to) {
+    const range = { ...(from ? { $gte: from } : {}), ...(to ? { $lt: to } : {}) }
+    out.push({ $or: [{ fullRegistrationSubmittedAt: range }, { fullRegistrationSubmittedAt: null, createdAt: range }] })
+  }
+  const academy = typeof input.academy === 'string' ? input.academy.trim().slice(0, 80) : ''
+  if (academy) {
+    const orgs = await OrganizationModel.find({ name: { $regex: escapeRe(academy), $options: 'i' } }).select('_id').lean() as unknown as { _id: unknown }[]
+    out.push({ organizationId: { $in: orgs.map(o => o._id) } })
+  }
+  const program = typeof input.program === 'string' ? input.program.trim().slice(0, 120) : ''
+  if (program) out.push({ 'enrollmentApplication.programs': { $regex: `^\\s*${escapeRe(program)}\\s*$`, $options: 'i' } })
+  const q = typeof input.q === 'string' ? input.q.trim().slice(0, 120) : ''
+  if (q) {
+    const re = { $regex: escapeRe(q), $options: 'i' }
+    out.push({ $or: [{ name: re }, { email: re }, { 'enrollmentApplication.phone': re }] })
+  }
+  return out
+}
+
 /**
  * Requests, newest first: a CS's students' (`emails`, at most 500 at a time —
- * the portal asks in batches) or, with no `emails`, every Forex applicant's.
+ * the portal asks in batches) or, with no `emails`, every Forex applicant's —
+ * narrowed by the portal's filters (filtersOf). `programs`: every programme
+ * applied to among them before those filters, for the portal's picker.
  */
-export async function enrolmentRequestsForPortal(input: { status?: unknown; emails?: unknown; page?: unknown; perPage?: unknown }) {
+export async function enrolmentRequestsForPortal(input: { status?: unknown; emails?: unknown; page?: unknown; perPage?: unknown; from?: unknown; to?: unknown; academy?: unknown; program?: unknown; q?: unknown }) {
   const status = (STATUSES as readonly unknown[]).includes(input.status ?? 'pending') ? (input.status ?? 'pending') as Status : null
   if (!status) throw bad(`status must be one of ${STATUSES.join(', ')}`)
   const page = Math.max(1, Math.floor(Number(input.page) || 1))
   const perPage = Math.min(MAX_PER_PAGE, Math.max(1, Math.floor(Number(input.perPage) || 50)))
   const emails = input.emails === undefined ? null : manyEmails(input.emails)
-  if (emails && !emails.length) return { requests: [], total: 0, page, perPage }
+  if (emails && !emails.length) return { requests: [], total: 0, page, perPage, programs: [] }
 
-  const filter = {
-    $and: [
-      IN_PIPELINE,
-      ...(status === 'all' ? [] : [STATUS_CLAUSE[status]]),
-      emails ? { email: { $in: emails } } : FOREX_CLAUSE,
-    ],
-  }
-  const [rows, total] = await Promise.all([
+  const base = [
+    IN_PIPELINE,
+    ...(status === 'all' ? [] : [STATUS_CLAUSE[status]]),
+    emails ? { email: { $in: emails } } : FOREX_CLAUSE,
+  ]
+  const filter = { $and: [...base, ...(await filtersOf(input))] }
+  const [rows, total, programs] = await Promise.all([
     UserModel.find(filter).select(FIELDS).sort({ createdAt: -1 }).skip((page - 1) * perPage).limit(perPage).lean() as unknown as Promise<UserRow[]>,
     UserModel.countDocuments(filter),
+    UserModel.distinct('enrollmentApplication.programs', { $and: base }) as Promise<unknown[]>,
   ])
   const academies = await academiesOf(rows)
-  return { requests: rows.map(r => requestOf(r, academies)), total, page, perPage }
+  const programList = [...new Set(programs.map(p => String(p ?? '').trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b))
+  return { requests: rows.map(r => requestOf(r, academies)), total, page, perPage, programs: programList }
 }
 
 /** The request, if it is this address's — the portal names the student it means. */
