@@ -826,7 +826,8 @@ export interface EnrollmentFeeSummary {
   feeMinor:      number
   paidMinor:     number
   balanceMinor:  number
-  /* currency: the bonus's own — USD from the sales CRMs since 2026-10-09; absent, the fee's. */
+  /* currency: the bonus's own — USD from the sales CRMs since 2026-10-09; absent on a sales CRM's
+     enrolment (salesCrm), USD too (the user, 2026-10-12); absent otherwise, the fee's. */
   bonus?:        { given: boolean; amountMinor: number; currency?: string } | null
   receipt?:      { url: string; name?: string; mimeType?: string } | null
   recordedAt:    Date
