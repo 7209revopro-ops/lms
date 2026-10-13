@@ -119,6 +119,8 @@ export function useUsers(role: AdminUserRole | undefined, params: {
   page?: number; per_page?: number; search?: string; category?: string; status?: 'active' | 'inactive'; exclude_students?: boolean; enrollmentStatus?: 'pending' | 'approved' | 'rejected' | 'cancelled'
   /** Only students with no phone number, on the account or the application. */
   no_phone?: 'true'
+  /** Onboarded in Tetra Commission: yes, no (there, not yet), none (not there). */
+  onboarded?: 'yes' | 'no' | 'none'
 } = {}) {
   return useQuery({
     queryKey: userKeys.list(role ?? 'all', params),

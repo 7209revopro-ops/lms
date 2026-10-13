@@ -28,6 +28,9 @@ import { useDocumentUrl, type ResolvedDocument } from '@/lib/api/documents'
 import Spinner from '@/components/ui/Spinner'
 import { programLabel } from '@/lib/programs'
 import { useBackdropClose } from '@/hooks/useBackdropClose'
+import { useSalesStatus, type FinanceRequestFilter } from '@/lib/api/salesStatus'
+import { SalesStatusTags } from '@/components/ui/SalesStatusTags'
+import { OnboardedTag } from '@/components/ui/OnboardedTag'
 
 /* ── Constants ─────────────────────────────────────── */
 const CATEGORY_META: Record<ProgramCategory, { label: string; color: string; bg: string; Icon: React.ComponentType<{ size?: number }> }> = {
@@ -998,6 +1001,8 @@ export default function EnrollmentRequestsPage() {
   const [blockFilter,    setBlockFilter]    = useState<'all' | 'blocked' | 'unblocked'>('all')
   const [accountType,    setAccountType]    = useState<'full' | 'express'>('full')
   const [expressDelete,  setExpressDelete]  = useState<ExpressMember | null>(null)
+  /* Where the enrolment stands in finance (2026-10-13) — the backend asks finance. */
+  const [financeFilter,  setFinanceFilter]  = useState<FinanceRequestFilter | ''>('')
 
   const approve         = useApproveEnrollment()
   const reject          = useRejectEnrollment()
@@ -1018,7 +1023,7 @@ export default function EnrollmentRequestsPage() {
   const canRevokeStudent = (displayCats: ProgramCategory[]) =>
     isFullAdmin || (!!scopeCategory && displayCats.length === 1 && displayCats[0] === scopeCategory)
 
-  const { data, isLoading } = useEnrollmentRequests(statusFilter)
+  const { data, isLoading, error: listError } = useEnrollmentRequests(statusFilter, undefined, financeFilter || undefined)
 
   // Dashboard stat counts for Full Registration
   const { data: pendingCountData  } = useEnrollmentRequests('pending')
@@ -1076,6 +1081,9 @@ export default function EnrollmentRequestsPage() {
     }
     return true
   })
+  /* Which sales CRM has each of them, and their enrolment in finance — one ask for the rows on screen. */
+  const sales = useSalesStatus(accountType === 'full' ? requests.map(r => r.id) : [])
+  const listMessage = (listError as { response?: { data?: { error?: { message?: string } } } } | null)?.response?.data?.error?.message
 
   const handleApprove = async (cats: ProgramCategory[]) => {
     if (!approveTarget) return
@@ -1323,6 +1331,27 @@ export default function EnrollmentRequestsPage() {
           </div>
         )}
 
+        {/* Where the enrolment stands in finance (2026-10-13) */}
+        {accountType === 'full' && (
+          <div className="flex overflow-hidden rounded-xl" style={{ border: '1px solid rgba(255,255,255,0.08)', background: 'rgba(255,255,255,0.03)' }}>
+            {([['', 'Any finance', 'rgba(255,255,255,0.7)'], ['none', 'Not raised', 'rgba(255,255,255,0.7)'], ['pending', 'Finance pending', '#FBBF24'],
+               ['returned', 'Sent back', '#F87171'], ['approved', 'Finance approved', '#4ADE80']] as const).map(([v, text, color]) => (
+              <button
+                key={v || 'any'}
+                onClick={() => setFinanceFilter(v)}
+                className="px-3 py-2 text-xs font-medium transition-all"
+                style={{
+                  color:      financeFilter === v ? color : 'rgba(255,255,255,0.35)',
+                  background: financeFilter === v ? (v ? `${color}1f` : 'rgba(255,255,255,0.06)') : 'transparent',
+                  borderRight: '1px solid rgba(255,255,255,0.06)',
+                }}
+              >
+                {text}
+              </button>
+            ))}
+          </div>
+        )}
+
         {/* Block filter — shown for pending/rejected (full) or always for express */}
         {(accountType === 'express' || statusFilter === 'pending' || statusFilter === 'rejected') && (
           <div className="flex overflow-hidden rounded-xl" style={{ border: '1px solid rgba(255,255,255,0.08)', background: 'rgba(255,255,255,0.03)' }}>
@@ -1517,10 +1546,10 @@ export default function EnrollmentRequestsPage() {
 
           {/* ── Full Registration table ── */}
           {accountType === 'full' && (
-          <table className="w-full min-w-[700px] border-collapse">
+          <table className="w-full min-w-[920px] border-collapse">
             <thead>
               <tr style={{ background: 'rgba(255,255,255,0.03)', borderBottom: '1px solid rgba(255,255,255,0.07)' }}>
-                {['Student', 'Country of Residence', 'Programs', statusFilter === 'approved' ? 'Approved by' : statusFilter === 'rejected' ? 'Rejected by' : 'Status', 'Signed up', ''].map(h => (
+                {['Student', 'Sales CRM · Finance', 'Country of Residence', 'Programs', statusFilter === 'approved' ? 'Approved by' : statusFilter === 'rejected' ? 'Rejected by' : 'Status', 'Signed up', ''].map(h => (
                   <th key={h} className="px-4 py-3 text-left"
                     style={{ color: 'rgba(255,255,255,0.35)', fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.08em' }}>
                     {h}
@@ -1530,7 +1559,7 @@ export default function EnrollmentRequestsPage() {
             </thead>
             <tbody>
               {isLoading && (
-                <tr><td colSpan={6} className="px-4 py-14 text-center">
+                <tr><td colSpan={7} className="px-4 py-14 text-center">
                   <div className="inline-flex items-center gap-2 text-sm" style={{ color: 'rgba(255,255,255,0.4)' }}>
                     <Spinner size={14} />Loading requests…
                   </div>
@@ -1541,8 +1570,14 @@ export default function EnrollmentRequestsPage() {
                   result means "not in the part we loaded", which is a different
                   sentence entirely - and the dangerous one, because it reads as
                   "this student never applied". */}
-              {!isLoading && requests.length === 0 && (
-                <tr><td colSpan={6} className="px-4 py-16 text-center">
+              {!isLoading && listError && (
+                <tr><td colSpan={7} className="px-4 py-10 text-center text-sm" style={{ color: '#FBBF24' }}>
+                  <AlertTriangle size={16} className="mx-auto mb-2" />
+                  {listMessage || 'Could not load these requests. Try again in a moment.'}
+                </td></tr>
+              )}
+              {!isLoading && !listError && requests.length === 0 && (
+                <tr><td colSpan={7} className="px-4 py-16 text-center">
                   <div style={{ color: 'rgba(255,255,255,0.3)' }}>
                     <CheckCircle2 size={28} className="mx-auto mb-3 opacity-40" />
                     <p className="text-sm font-medium">
@@ -1559,7 +1594,7 @@ export default function EnrollmentRequestsPage() {
                 </td></tr>
               )}
               {!isLoading && truncated && requests.length > 0 && (
-                <tr><td colSpan={6} className="px-4 py-2.5 text-center text-xs"
+                <tr><td colSpan={7} className="px-4 py-2.5 text-center text-xs"
                   style={{ color: '#FBBF24', background: 'rgba(250,204,21,0.06)', borderBottom: '1px solid rgba(250,204,21,0.15)' }}>
                     Showing {loadedCount} of {serverCount}. Search only looks at these {loadedCount} - narrow by programme to reach the rest.
                 </td></tr>
@@ -1601,8 +1636,14 @@ export default function EnrollmentRequestsPage() {
                           <p className="truncate text-sm font-semibold text-white" style={{ maxWidth: 180 }}>{r.name}</p>
                           <p className="truncate text-xs" style={{ color: 'rgba(255,255,255,0.4)', maxWidth: 200 }}>{r.email}</p>
                           <div style={{ maxWidth: 200 }}><CsTag cs={r.tetraCs} /></div>
+                          {r.tetraCs?.code && <div className="mt-1"><OnboardedTag cs={r.tetraCs} /></div>}
                         </div>
                       </div>
+                    </td>
+
+                    {/* Which sales CRM has them, and their enrolment in finance (2026-10-13) */}
+                    <td className="px-4 py-3.5 align-top" style={{ maxWidth: 260 }}>
+                      <SalesStatusTags status={sales.data?.[r.id]} loading={sales.isLoading} />
                     </td>
 
                     {/* Country of Residence */}

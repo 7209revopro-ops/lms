@@ -211,6 +211,9 @@ export interface IUser extends Document {
     open?:  boolean
     /** When the commission portal last said so. */
     at?:    Date
+    /** Onboarded in Tetra Commission (their welcome went), and when; unset until it says. */
+    onboarded?:   boolean
+    onboardedAt?: Date | null
   }
   /* Meta */
   lastLoginAt?:  Date
@@ -353,6 +356,10 @@ const UserSchema = new Schema<IUser>(
       code: { type: String },
       open: { type: Boolean },
       at:   { type: Date },
+      /* Whether Tetra Commission onboarded them, and when (2026-10-13) —
+         unset until a portal that says so has. */
+      onboarded:   { type: Boolean },
+      onboardedAt: { type: Date },
     },
   },
   baseSchemaOptions,

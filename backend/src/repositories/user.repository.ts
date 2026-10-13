@@ -165,6 +165,8 @@ export class UserRepository extends BaseRepository<IUser> {
       excludeStudents?:  boolean
       /** Only those with no phone number — on the account or the application. */
       noPhone?:          boolean
+      /** Onboarded in Tetra Commission: yes, no (in Tetra, not yet), none (not in Tetra at all). */
+      onboarded?:        'yes' | 'no' | 'none'
       organizationId?:   string
     },
   ): Promise<{ docs: IUser[]; totalCount: number }> {
@@ -242,6 +244,14 @@ export class UserRepository extends BaseRepository<IUser> {
       const blank = (field: string) => ({ $or: [{ [field]: { $exists: false } }, { [field]: null }, { [field]: { $regex: '^\\s*$' } }] })
       andFilter(filter, { $and: [blank('phone'), blank('enrollmentApplication.phone')] })
     }
+
+    /* Onboarded in Tetra Commission (2026-10-13), as its push last said. "In
+       Tetra" is having a student code there; "not yet" is in Tetra without
+       onboarded — including from before the portal said, which reads as not
+       yet until it does. */
+    if (params.onboarded === 'yes') andFilter(filter, { 'tetraCs.onboarded': true })
+    else if (params.onboarded === 'no') andFilter(filter, { 'tetraCs.code': { $nin: [null, ''] }, 'tetraCs.onboarded': { $ne: true } })
+    else if (params.onboarded === 'none') andFilter(filter, { $or: [{ 'tetraCs.code': { $exists: false } }, { 'tetraCs.code': { $in: [null, ''] } }] })
 
     if (params.organizationId && Types.ObjectId.isValid(params.organizationId)) {
       /* Instructors may be LENT to the other academy, so an instructor list is

@@ -212,6 +212,8 @@ const usersQuerySchema = z.object({
   enrollmentStatus:  z.enum(['pending', 'approved', 'rejected', 'cancelled']).optional(),
   /* Only students with no phone number, on their account or their application. */
   no_phone:          z.enum(['true', 'false']).optional(),
+  /* Onboarded in Tetra Commission: yes, no (there but not yet), none (not there). */
+  onboarded:         z.enum(['yes', 'no', 'none']).optional(),
 })
 
 /* The rate the CHECKOUT actually uses, handed out so the admin panel shows
@@ -942,7 +944,12 @@ const enrollmentRequestQuerySchema = z.object({
   category: z.enum(['4x-trading', 'digital-marketing', 'ai', 'jura']).optional(),
   page:     z.coerce.number().min(1).default(1),
   per_page: z.coerce.number().min(1).max(100).default(20),
+  /* Where the student's enrolment stands in finance (2026-10-13): none raised,
+     waiting for approval, sent back, approved. */
+  finance:  z.enum(['none', 'pending', 'returned', 'approved']).optional(),
 })
+
+const salesStatusSchema = z.object({ ids: z.array(z.string()).min(1).max(100) })
 
 const approveEnrollmentSchema = z.object({
   categories: z.array(z.enum(['4x-trading', 'digital-marketing', 'ai', 'jura'])).optional(),
@@ -956,6 +963,13 @@ router.get ('/enrollment-requests',
   requireAnyAdmin,
   validate(enrollmentRequestQuerySchema, 'query'),
   ctrl.listEnrollmentRequests,
+)
+/* Which sales CRM has each of these students as a lead, and their enrolment in
+   finance (2026-10-13) — a page of Enrollment Requests at a time. Read-only. */
+router.post('/enrollment-requests/sales-status',
+  requireAnyAdmin,
+  validate(salesStatusSchema),
+  ctrl.enrollmentRequestsSalesStatus,
 )
 /* ─── The finance check's switch ─────────────────────────────────
    Whether approving by hand asks finance first. Off by default. Read by any

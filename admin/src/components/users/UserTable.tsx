@@ -18,6 +18,7 @@ import { EditInstructorModal } from '@/components/instructors/EditInstructorModa
 import { StudentHistoryModal } from '@/components/users/StudentHistoryModal'
 import { CrossAcademyBadge, crossAccent } from '@/components/ui/CrossAcademyBadge'
 import { CsTag } from '@/components/ui/CsTag'
+import { OnboardedTag } from '@/components/ui/OnboardedTag'
 
 interface Props {
   role:  'student' | 'instructor'
@@ -54,6 +55,7 @@ export function UserTable({ role, label }: Props) {
   const [page,        setPage]        = useState(1)
   const [category,    setCategory]    = useState<CategoryFilter>('')
   const [noPhone,     setNoPhone]     = useState(false)
+  const [onboarded,   setOnboarded]   = useState<'' | 'yes' | 'no' | 'none'>('')
   const [editingUser, setEditingUser] = useState<AdminUser | null>(null)
   const [historyUser, setHistoryUser] = useState<AdminUser | null>(null)
 
@@ -63,6 +65,7 @@ export function UserTable({ role, label }: Props) {
     per_page: 20,
     category: category || undefined,
     ...(role === 'student' && noPhone ? { no_phone: 'true' as const } : {}),
+    ...(role === 'student' && onboarded ? { onboarded } : {}),
   })
 
   const handleCategoryFilter = (cat: CategoryFilter) => {
@@ -125,6 +128,24 @@ export function UserTable({ role, label }: Props) {
           </button>
         )}
 
+        {/* Onboarded in Tetra Commission (2026-10-13), within the programme chosen */}
+        {role === 'student' && (
+          <div className="flex items-center gap-1.5">
+            {([['', 'Any'], ['yes', 'Onboarded'], ['no', 'Not onboarded'], ['none', 'Not in Tetra']] as const).map(([v, text]) => (
+              <button key={v || 'any'}
+                onClick={() => { setOnboarded(v); setPage(1) }}
+                className="rounded-xl px-3 py-1.5 text-xs font-semibold transition-all"
+                style={onboarded === v && v
+                  ? { background: v === 'yes' ? 'rgba(74,222,128,0.12)' : v === 'no' ? 'rgba(251,191,36,0.12)' : 'rgba(255,255,255,0.08)', color: v === 'yes' ? '#4ADE80' : v === 'no' ? '#FBBF24' : 'rgba(255,255,255,0.8)', border: `1px solid ${v === 'yes' ? 'rgba(74,222,128,0.35)' : v === 'no' ? 'rgba(251,191,36,0.35)' : 'rgba(255,255,255,0.2)'}` }
+                  : onboarded === v
+                    ? { background: 'rgba(255,255,255,0.08)', color: 'rgba(255,255,255,0.8)', border: '1px solid rgba(255,255,255,0.15)' }
+                    : { background: 'rgba(255,255,255,0.04)', color: 'rgba(255,255,255,0.45)', border: '1px solid rgba(255,255,255,0.07)' }}>
+                {text}
+              </button>
+            ))}
+          </div>
+        )}
+
         <p className="ml-auto text-xs" style={{ color: 'rgba(255,255,255,0.4)' }}>
           {data && `${data.meta.total_count.toLocaleString()} ${label.toLowerCase()}`}
         </p>
@@ -132,12 +153,12 @@ export function UserTable({ role, label }: Props) {
 
       <div className="overflow-hidden rounded-2xl" style={{ border: '1px solid rgba(255,255,255,0.07)' }}>
         <div className="overflow-x-auto">
-        <table className={`w-full border-collapse ${role === 'student' ? 'min-w-[1020px]' : 'min-w-[720px]'}`}>
+        <table className={`w-full border-collapse ${role === 'student' ? 'min-w-[1140px]' : 'min-w-[720px]'}`}>
           <thead>
             <tr style={{ background: 'rgba(255,255,255,0.03)', borderBottom: '1px solid rgba(255,255,255,0.07)' }}>
               {/* Students: who looks after them in Tetra Commission, beside their email. */}
               {(role === 'student'
-                ? ['Name', 'Email', 'Phone', 'CS · Team', 'Category', 'Status', 'Joined', '']
+                ? ['Name', 'Email', 'Phone', 'CS · Team', 'Onboarded', 'Category', 'Status', 'Joined', '']
                 : ['Name', 'Email', 'Category', 'Status', 'Joined', '']).map(h => (
                 <th key={h} className="px-4 py-3 text-left"
                   style={{ color: 'rgba(255,255,255,0.35)', fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.08em' }}>
@@ -148,14 +169,14 @@ export function UserTable({ role, label }: Props) {
           </thead>
           <tbody>
             {isLoading && (
-              <tr><td colSpan={role === 'student' ? 8 : 6} className="px-4 py-12 text-center">
+              <tr><td colSpan={role === 'student' ? 9 : 6} className="px-4 py-12 text-center">
                 <div className="inline-flex items-center gap-2 text-sm" style={{ color: 'rgba(255,255,255,0.4)' }}>
                   <Spinner size={14} />Loading…
                 </div>
               </td></tr>
             )}
             {!isLoading && data?.docs.length === 0 && (
-              <tr><td colSpan={role === 'student' ? 8 : 6} className="px-4 py-16 text-center text-sm" style={{ color: 'rgba(255,255,255,0.35)' }}>
+              <tr><td colSpan={role === 'student' ? 9 : 6} className="px-4 py-16 text-center text-sm" style={{ color: 'rgba(255,255,255,0.35)' }}>
                 No {label.toLowerCase()} found
               </td></tr>
             )}
@@ -418,6 +439,11 @@ function UserRow({ user, index, onEdit, onViewHistory }: {
           {user.tetraCs?.code && (
             <p className="mt-0.5 font-mono text-[10px]" style={{ color: 'rgba(255,255,255,0.35)' }}>{user.tetraCs.code}</p>
           )}
+        </td>
+      )}
+      {user.role === 'student' && (
+        <td className="px-4 py-3.5">
+          <OnboardedTag cs={user.tetraCs} variant="cell" />
         </td>
       )}
       <td className="px-4 py-3.5">

@@ -26,6 +26,9 @@ export interface TetraCsRecheck {
   /** Their student code there, STU-…. */
   code:   string
   open:   boolean
+  /** Onboarded there, and when (2026-10-13); absent from a portal from before. */
+  onboarded?:   boolean
+  onboardedAt?: string | null
 }
 
 export class TetraCsUnavailableError extends Error {}
@@ -64,11 +67,19 @@ export async function recheckTetraCs(userId: string): Promise<TetraCsRecheck> {
     team:  String(body.data.team ?? ''),
     code:  String(body.data.code ?? ''),
     open:  body.data.open === true,
+    ...(typeof body.data.onboarded === 'boolean'
+      ? { onboarded: body.data.onboarded, onboardedAt: body.data.onboarded && typeof body.data.onboardedAt === 'string' ? body.data.onboardedAt : null }
+      : {}),
   }
   // Not there is not news: whatever the push last said stays.
   if (answer.found) {
+    const at = answer.onboardedAt && !Number.isNaN(Date.parse(answer.onboardedAt)) ? new Date(answer.onboardedAt) : null
     await UserModel.updateOne({ _id: user._id }, {
-      $set: { tetraCs: { name: answer.cs, team: answer.team, code: answer.code, open: answer.open, at: new Date() } },
+      $set: {
+        'tetraCs.name': answer.cs, 'tetraCs.team': answer.team, 'tetraCs.code': answer.code, 'tetraCs.open': answer.open, 'tetraCs.at': new Date(),
+        // A portal from before says nothing of onboarding: what the push said stays.
+        ...(answer.onboarded !== undefined ? { 'tetraCs.onboarded': answer.onboarded, 'tetraCs.onboardedAt': at } : {}),
+      },
     })
   }
   return answer

@@ -16,6 +16,10 @@ import { signAccessToken, toSeconds } from '@/utils/jwt.ts'
 import type { UserRole } from '@/types/index.ts'
 import type { Types } from 'mongoose'
 import { enrolledProgramsByUser } from '@/utils/enrolledPrograms.ts'
+import { financeStatuses, financeRequestState, salesStatusFor, type FinanceRequestFilter } from '@/services/salesStatus.service.ts'
+
+/** The finance request filter on Enrollment Requests asks finance about at most this many students of the tab. */
+const FINANCE_FILTER_CAP = 3_000
 
 /* Long enough to open a tab, far too short to pass around. The impersonation
    session itself still runs for IMPERSONATION_EXPIRES_IN. */
@@ -301,7 +305,8 @@ export class AdminController {
       const excludeStudents  = Boolean(q['exclude_students'])
       const enrollmentStatus = q['enrollmentStatus'] as 'pending' | 'approved' | 'rejected' | 'cancelled' | undefined
       const noPhone          = q['no_phone'] === 'true'
-      const { docs, totalCount } = await this.userService.listByRole(role, { page, perPage: per_page, search, category: effectiveCategory, status, excludeStudents, enrollmentStatus, noPhone, organizationId: req.user!.organizationId })
+      const onboarded        = q['onboarded'] as 'yes' | 'no' | 'none' | undefined
+      const { docs, totalCount } = await this.userService.listByRole(role, { page, perPage: per_page, search, category: effectiveCategory, status, excludeStudents, enrollmentStatus, noPhone, onboarded, organizationId: req.user!.organizationId })
       const meta = buildPaginationMeta(totalCount, page, per_page)
       /* What each student studies, beside what they were approved into
          (`categories`) — see utils/enrolledPrograms.ts. */
@@ -627,13 +632,37 @@ export class AdminController {
         filter['enrollmentStatus'] = status
       }
 
-      const projection = 'id name email avatarUrl category categories enrollmentStatus enrollmentApplication enrollmentCancellationReason rejectionReason approvedBy approvedByEmail approvedByName approvedByRole approvedAt rejectedByEmail rejectedAt isActive createdAt tetraCs'
+      const projection = 'id name email phone avatarUrl category categories enrollmentStatus enrollmentApplication enrollmentCancellationReason rejectionReason approvedBy approvedByEmail approvedByName approvedByRole approvedAt rejectedByEmail rejectedAt isActive createdAt tetraCs'
 
-      const [docs, totalCount] = await Promise.all([
-        UserModel.find(filter).select(projection).sort({ createdAt: -1 })
-          .skip((page - 1) * per_page).limit(per_page).lean({ virtuals: true }),
-        UserModel.countDocuments(filter),
-      ])
+      let docs: unknown[]
+      let totalCount: number
+      const financeFilter = q['finance'] as FinanceRequestFilter | undefined
+      if (financeFilter) {
+        /* Where their enrolment stands in finance (2026-10-13): finance is asked
+           for everyone the tab holds — newest first, up to FINANCE_FILTER_CAP —
+           and the page is cut from those whose newest request is in that state
+           ("none": finance has no request for them). */
+        const all = await UserModel.find(filter).select('_id email').sort({ createdAt: -1 }).limit(FINANCE_FILTER_CAP).lean() as unknown as { _id: Types.ObjectId; email?: string }[]
+        let fin: Awaited<ReturnType<typeof financeStatuses>>
+        try {
+          fin = await financeStatuses(all.map(d => String(d.email ?? '')))
+        } catch (err) {
+          res.status(503).json({ success: false, error: { code: 'FINANCE_UNAVAILABLE', message: `Finance could not be asked, so this filter can't be applied — ${(err as Error).message}` } })
+          return
+        }
+        const keep = all.filter(d => financeRequestState(fin.get(String(d.email ?? '').toLowerCase())?.requests ?? []) === financeFilter)
+        totalCount = keep.length
+        const pageIds = keep.slice((page - 1) * per_page, page * per_page).map(d => d._id)
+        const found = await UserModel.find({ _id: { $in: pageIds } }).select(projection).lean({ virtuals: true }) as unknown as { _id: Types.ObjectId }[]
+        const byId = new Map(found.map(d => [String(d._id), d]))
+        docs = pageIds.map(id => byId.get(String(id))).filter(Boolean)
+      } else {
+        ;[docs, totalCount] = await Promise.all([
+          UserModel.find(filter).select(projection).sort({ createdAt: -1 })
+            .skip((page - 1) * per_page).limit(per_page).lean({ virtuals: true }),
+          UserModel.countDocuments(filter),
+        ])
+      }
 
       const mapped = (docs as any[]).map(d => ({
         ...d,
@@ -642,6 +671,38 @@ export class AdminController {
         rejectionReason: d.rejectionReason ?? d.enrollmentCancellationReason,
       }))
       sendSuccess(res, mapped, undefined, 200, buildPaginationMeta(totalCount, page, per_page))
+    } catch (err) { next(err) }
+  }
+
+  /* Where each of these students stands in sales (2026-10-13) — which sales CRM
+     has them as a lead, and their enrolment in finance — for Enrollment
+     Requests to show beside each one. Only students this admin can see on
+     that page: their academy and, for a department's sub_admin, its reach. */
+  enrollmentRequestsSalesStatus = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    try {
+      const { UserModel } = await import('@/models/schema.ts')
+      const { Types: OTypes } = await import('mongoose')
+      const ids = ((req.body as { ids?: unknown })?.ids as unknown[] ?? [])
+        .map(String).filter(id => OTypes.ObjectId.isValid(id))
+      if (!ids.length) { sendSuccess(res, {}); return }
+      const filter: Record<string, unknown> = { _id: { $in: [...new Set(ids)].map(id => new OTypes.ObjectId(id)) }, role: 'student' }
+      const orgId = req.user!.organizationId
+      if (orgId && OTypes.ObjectId.isValid(orgId)) filter['organizationId'] = new OTypes.ObjectId(orgId)
+      const reach = await studentReachClause(req)
+      const members = memberClause(req)
+      andFilter(filter, reach && members
+        ? { $or: [
+            { $and: [{ enrollmentStatus: 'approved' }, members] },
+            { $and: [{ enrollmentStatus: { $ne: 'approved' } }, reach] },
+          ] }
+        : reach)
+      const users = await UserModel.find(filter).select('_id email phone enrollmentApplication.phone').lean() as unknown as
+        { _id: Types.ObjectId; email?: string; phone?: string; enrollmentApplication?: { phone?: string } }[]
+      sendSuccess(res, await salesStatusFor(users.map(u => ({
+        id: String(u._id),
+        email: String(u.email ?? '').trim().toLowerCase(),
+        phone: String(u.phone || u.enrollmentApplication?.phone || ''),
+      }))))
     } catch (err) { next(err) }
   }
 

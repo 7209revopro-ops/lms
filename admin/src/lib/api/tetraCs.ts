@@ -15,4 +15,7 @@ export interface TetraCs {
   open?: boolean
   /** When the portal last said so. */
   at?:   string
+  /** Onboarded there (their welcome went), and when — unset until the portal says (2026-10-13). */
+  onboarded?:   boolean
+  onboardedAt?: string | null
 }
