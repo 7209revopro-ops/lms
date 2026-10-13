@@ -112,12 +112,12 @@ function AskForAccess({ subject, message }: { subject: string; message: string }
   )
 }
 
-function AdvisorLine({ advisor }: { advisor: { name?: string; team?: string } | null }) {
+function AdvisorLine({ advisor }: { advisor: { name?: string } | null }) {
   return (
     <div className="flex items-center gap-2.5 rounded-2xl px-3.5 py-2.5" style={{ background: 'var(--color-bg-inset)' }}>
       <span className="flex h-8 w-8 items-center justify-center rounded-full" style={{ background: 'rgba(0,87,184,0.10)', color: '#0057b8' }}><UserRound size={15} /></span>
       <span className="min-w-0 text-xs" style={{ color: 'var(--color-text-secondary)' }}>
-        {advisor?.name ? <>Your advisor: <b style={{ color: 'var(--color-text-primary)' }}>{advisor.name}</b>{advisor.team ? ` · ${advisor.team}` : ''}</> : 'Our support team will help you.'}
+        {advisor?.name ? <>Your advisor: <b style={{ color: 'var(--color-text-primary)' }}>{advisor.name}</b></> : 'Our support team will help you.'}
       </span>
     </div>
   )

@@ -12,7 +12,7 @@ export interface JourneyLevel {
 }
 export interface Journey {
   programmes: Array<{ program: string; label: string; levels: JourneyLevel[] }>
-  advisor: { name?: string; team?: string } | null
+  advisor: { name?: string } | null
 }
 
 /** GET /live-classes/journey — the student's programme levels. */

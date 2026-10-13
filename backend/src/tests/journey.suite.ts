@@ -75,7 +75,7 @@ try {
   check('states: completed, current, locked, locked', lv.map((x: any) => x.state).join() === 'completed,current,locked,locked', lv.map((x: any) => x.state).join())
   const dwtL = lv[1]
   check('DWT: 40%, 1 of 2 modules open, locked for payment', dwtL?.progressPercent === 40 && dwtL.modulesOpen === 1 && dwtL.modulesTotal === 2 && dwtL.lockReason === 'payment' && dwtL.modules[1].locked === true, JSON.stringify(dwtL))
-  check('advisor', j.body?.data?.advisor?.name === 'Alice Antony' && j.body.data.advisor.team === 'Team Expandables')
+  check('advisor: name only, never the sales team', j.body?.data?.advisor?.name === 'Alice Antony' && !('team' in (j.body.data.advisor ?? {})), JSON.stringify(j.body?.data?.advisor))
 
   /* DWT completed too → MMC becomes "Up next". */
   await M.EnrollmentModel.updateOne({ userId: me._id, courseId: dwt._id }, { $set: { status: 'completed', progressPercent: 100 } })

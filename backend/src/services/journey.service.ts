@@ -32,7 +32,8 @@ export interface JourneyLevel {
 }
 export interface Journey {
   programmes: Array<{ program: string; label: string; levels: JourneyLevel[] }>
-  advisor: { name?: string; team?: string } | null
+  /* The advisor's name only — their sales team is internal, not for students. */
+  advisor: { name?: string } | null
 }
 
 const PROGRAM_LABEL: Record<string, string> = {
@@ -117,5 +118,5 @@ export async function studentJourney(userId: string): Promise<Journey> {
   }
 
   const cs = me.tetraCs
-  return { programmes: out, advisor: cs?.name ? { name: cs.name, team: cs.team } : null }
+  return { programmes: out, advisor: cs?.name ? { name: cs.name } : null }
 }
