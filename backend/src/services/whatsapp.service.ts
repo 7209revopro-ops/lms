@@ -445,6 +445,19 @@ export async function sendClassRescheduledWhatsApp(
     { category: 'utility', buttonParam: signinCode })
 }
 
+/* class_update_v1 — a change to a class in the student's course that they
+   have NOT booked (cancelled, moved, new mentor): "there's an update about
+   your class {{2}} on {{3}}: {{4}}". Button: their sign-in link to the Class
+   Schedule. No send without a code. */
+export async function sendClassUpdateWhatsApp(
+  to: string | null | undefined, studentName: string, sessionTitle: string,
+  whenLabel: string, message: string, signinCode: string,
+): Promise<void> {
+  if (!signinCode) return
+  await sendTemplate(to, 'class_update_v1', [studentName || 'there', sessionTitle, whenLabel, message],
+    { category: 'utility', buttonParam: signinCode })
+}
+
 /* class_link_changed_v1 — a booked class's joining link changed (an admin's
    edit, or rehost-meet-rooms). Button: their sign-in link to the class page,
    which always carries the current link. */

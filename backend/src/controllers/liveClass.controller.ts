@@ -597,8 +597,46 @@ export async function notifySessionEdited(notice: SessionEditNotice): Promise<{
   return tally
 }
 
+/* ─────────────────────────────────────────────────────────────────────────
+   enrolledAudienceFor — the students a class change ALSO goes to: everyone
+   enrolled in the class's course who has not booked it.
+
+   Through the class's DOORS (classEntitlement.service.ts), so it is exactly
+   the students who could attend it: each door's academy, that door's course,
+   an enrolment that is not dropped, and not blocked from the door's module.
+   A Bangalore student never hears about a Dubai-only class. Approved, active
+   students only; booked students are left out (notifyBookedStudents has them).
+───────────────────────────────────────────────────────────────────────── */
+export async function enrolledAudienceFor(liveClassId: string, bookedUserIds: Set<string>): Promise<
+  Array<{ _id: unknown; name?: string; email?: string; organizationId?: unknown }>
+> {
+  const { LiveClassModel, EnrollmentModel, UserModel } = await import('@/models/schema.ts')
+  const live = await LiveClassModel.findById(liveClassId)
+    .select('organizationId courseId sectionId guestCohorts').lean() as ClassDoors | null
+  if (!live) return []
+
+  const out = new Map<string, { _id: unknown; name?: string; email?: string; organizationId?: unknown }>()
+  for (const door of doorsFor(live)) {
+    if (!door.courseId || !Types.ObjectId.isValid(door.courseId)) continue
+    const enrolments = await EnrollmentModel.find({ courseId: new Types.ObjectId(door.courseId), status: { $ne: 'dropped' } })
+      .select('userId blockedLessons').lean() as Array<{ userId: unknown; blockedLessons?: unknown[] }>
+    const open = enrolments
+      .filter(e => !(door.sectionId && (e.blockedLessons ?? []).map(String).includes(String(door.sectionId))))
+      .map(e => String(e.userId))
+      .filter(id => !bookedUserIds.has(id) && !out.has(id))
+    if (open.length === 0) continue
+    const users = await UserModel.find({
+      _id: { $in: open.map(id => new Types.ObjectId(id)) },
+      role: 'student', isActive: { $ne: false }, enrollmentStatus: 'approved',
+      ...(door.organizationId ? { $or: [{ organizationId: new Types.ObjectId(door.organizationId) }, { organizationId: { $exists: false } }, { organizationId: null }] } : {}),
+    }).select('name email organizationId').lean()
+    for (const u of users) out.set(String(u._id), u as { _id: unknown; name?: string; email?: string; organizationId?: unknown })
+  }
+  return [...out.values()]
+}
+
 export async function notifyBookedStudents(notice: BookingChangeNotice): Promise<{
-  recipients: number; notified: number; emailed: number; parked: number
+  recipients: number; notified: number; emailed: number; parked: number; enrolledNotified: number
 }> {
   const { ClassBookingModel, UserModel } = await import('@/models/schema.ts')
   const { NotificationService } = await import('@/services/notification.service.ts')
@@ -610,7 +648,6 @@ export async function notifyBookedStudents(notice: BookingChangeNotice): Promise
     status:      { $in: ['booked', 'attended'] },
   }).select('userId').lean()
 
-  if (bookings.length === 0) return { recipients: 0, notified: 0, emailed: 0, parked: 0 }
 
   /* One query for every recipient rather than one per booking. */
   const userIds = bookings.map(b => b.userId)
@@ -722,6 +759,45 @@ export async function notifyBookedStudents(notice: BookingChangeNotice): Promise
     }
   }
 
+  /* ── Everyone enrolled in the course who has NOT booked it ───────────────
+     Same three changes, their own wording: in-app now, email + WhatsApp from
+     the same buffer as the booked students' (audience 'enrolled'). */
+  let enrolledNotified = 0
+  const enrolled = await enrolledAudienceFor(notice.liveClassId, new Set(userIds.map(String)))
+  for (const user of enrolled) {
+    const u = user as { _id: unknown; name?: string; email?: string; organizationId?: unknown }
+    const readerSlug = orgSlugFor(u.organizationId)
+    const was = academyClock(oldStart, readerSlug).full
+    const kinds: Array<{ kind: CriticalKind; title: string; body: string }> = notice.wasCancelled
+      ? [{ kind: 'cancelled', title: `Class cancelled: ${notice.title}`, body: `This class in your course on ${was} has been cancelled.` }]
+      : [
+          ...(notice.wasRescheduled ? [{ kind: 'rescheduled' as const, title: `Class time changed: ${notice.title}`,
+              body: `This class in your course has moved from ${was} to ${academyClock(newStart, readerSlug).full}.` }] : []),
+          ...(notice.instructorChanged ? [{ kind: 'instructor' as const, title: `Mentor changed: ${notice.title}`,
+              body: `This class in your course will now be taught by ${nameOf(notice.newInstructorId)}.` }] : []),
+        ]
+    for (const m of kinds) {
+      try {
+        await notifications.create(String(u._id), { kind: 'system', title: m.title, body: m.body, link: SCHEDULE_LINK })
+        enrolledNotified++
+      } catch (err) {
+        logger.error({ err, userId: String(u._id) }, 'class change (enrolled): in-app notification failed')
+      }
+      if (!u.email) continue
+      try {
+        await parkCriticalMail({
+          liveClassId: notice.liveClassId, userId: String(u._id), email: u.email, name: u.name ?? '',
+          kind: m.kind, title: notice.title, audience: 'enrolled',
+          scheduledStart: notice.newStart ?? notice.oldStart, oldStart, newStart,
+          ...(notice.instructorChanged ? { oldInstructorName: nameOf(notice.oldInstructorId), newInstructorName: nameOf(notice.newInstructorId) } : {}),
+        })
+        parked++
+      } catch (err) {
+        logger.error({ err, to: u.email }, 'class change (enrolled): could not park email')
+      }
+    }
+  }
+
   /* The buffer must never outlive the class it is about. A cancellation for a
      session starting in eight minutes waits for nothing — it flushes here,
      in the request, exactly as this function used to behave. */
@@ -736,9 +812,9 @@ export async function notifyBookedStudents(notice: BookingChangeNotice): Promise
     }
   }
 
-  logger.info({ liveClassId: notice.liveClassId, recipients: users.length, notified, parked, emailed },
+  logger.info({ liveClassId: notice.liveClassId, recipients: users.length, notified, enrolled: enrolled.length, enrolledNotified, parked, emailed },
     'booking change notifications sent')
-  return { recipients: users.length, notified, emailed, parked }
+  return { recipients: users.length, notified, emailed, parked, enrolledNotified }
 }
 
 export class LiveClassController {

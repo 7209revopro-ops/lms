@@ -1649,6 +1649,41 @@ export async function sendCancelledNotification(
   await sender.send({ to, subject, html, text: `Dear ${name},\n\nWe regret to inform you that your scheduled class on ${dateStr} at ${timeStr} has been cancelled.\n\nWe apologize for the inconvenience. A replacement session will be scheduled, and you will be notified once it is available.\n\nThank you for your understanding.\n\nDelta Academy` })
 }
 
+/* A change to a class in the student's course that they have NOT booked —
+   cancelled, moved, or a new mentor. The booked-student mails above all say
+   "your class" / "your booking"; this one says what changed and points at the
+   Class Schedule. Times in the reader's academy clock, always labelled. */
+export async function sendClassChangeToEnrolled(
+  to: string,
+  name: string,
+  sessionTitle: string,
+  change: { kind: 'cancelled' | 'rescheduled' | 'instructor'; oldStart: Date | string; newStart: Date | string; newInstructorName?: string },
+  academySlug?: string | null,
+): Promise<void> {
+  const was = academyClock(new Date(change.oldStart), academySlug)
+  const now = academyClock(new Date(change.newStart), academySlug)
+  const lines =
+    change.kind === 'cancelled'
+      ? [`The class <strong>${escapeHtml(sessionTitle)}</strong> on <strong>${was.date} at ${was.time}</strong> has been cancelled.`]
+      : change.kind === 'rescheduled'
+        ? [`The class <strong>${escapeHtml(sessionTitle)}</strong> has moved.`,
+           `Was: <strong>${was.date} at ${was.time}</strong><br/>Now: <strong>${now.date} at ${now.time}</strong>`]
+        : [`The class <strong>${escapeHtml(sessionTitle)}</strong> on <strong>${now.date} at ${now.time}</strong> will now be taught by <strong>${escapeHtml(change.newInstructorName ?? 'another mentor')}</strong>.`]
+  const subject = change.kind === 'cancelled' ? `Class cancelled — ${sessionTitle}`
+    : change.kind === 'rescheduled' ? `Class time changed — ${sessionTitle}` : `Mentor changed — ${sessionTitle}`
+  const scheduleUrl = `${process.env['CLIENT_URL'] ?? 'http://localhost:3000'}/class-bookings`
+  const html = wrap(subject, `
+    <h2 style="margin:0 0 16px;font-size:20px;font-weight:700;color:#0D0F1A">${escapeHtml(subject)}</h2>
+    <p style="margin:0 0 16px;color:#374151">Dear <strong>${escapeHtml(name)}</strong>,</p>
+    ${lines.map(l => `<p style="margin:0 0 16px;color:#374151">${l}</p>`).join('')}
+    <p style="margin:0 0 24px;color:#374151">This is a class in your course. Open your Class Schedule to see every session and book the one that suits you.</p>
+    <p style="margin:0 0 24px"><a href="${escapeHtml(scheduleUrl)}" style="display:inline-block;background:#0057B8;color:#fff;text-decoration:none;font-weight:700;padding:12px 22px;border-radius:10px">Open Class Schedule</a></p>
+    <p style="margin:0;color:#374151"><strong>Delta Academy</strong></p>
+  `)
+  const plain = lines.map(l => l.replace(/<br\/>/g, '\n').replace(/<[^>]+>/g, '')).join('\n\n')
+  await sender.send({ to, subject, html, text: `Dear ${name},\n\n${plain}\n\nThis is a class in your course. Open your Class Schedule to see every session and book the one that suits you: ${scheduleUrl}\n\nDelta Academy` })
+}
+
 /* THE ONE CLASS MAIL THAT NEVER SAID WHICH CLOCK IT MEANT. Its caller formatted
    the time itself, in the process timezone, with no zone tag, and handed the
    finished string across — the exact boundary academyClock.ts bans. A guest

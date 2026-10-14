@@ -14,9 +14,13 @@
      • It asserts on the OUTCOME — a Notification row exists, a message really
        reached the mail transport — never merely that the request returned 200.
        The request returns 200 whether or not anybody was told.
-     • It checks WHO receives. A student who cancelled their booking must not
-       be told, nor a student booked on a DIFFERENT session. Notifying everyone
-       would sail through a naive "somebody got a message" assertion.
+     • It checks WHO receives, and in which words. A booked student gets the
+       booked version ("Instructor Update", "Rescheduled"). Everyone else
+       enrolled in the course — a student who cancelled their booking, one
+       booked on a DIFFERENT session — gets the enrolled version ("Mentor
+       changed", "Class time changed") and never the booked one. Students who
+       could not attend the class (module blocked, dropped, pending, another
+       academy, not enrolled) hear nothing: see the last section.
      • It checks the NEGATIVE: an unrelated edit (the title) must notify
        nobody, and re-saving identical values must notify nobody. A helper that
        fired on every save would look perfect in every positive test.
@@ -246,13 +250,19 @@ try {
       !!mail && /teacher\.a/.test(mail.body) && /teacher\.b/.test(mail.body),
       mail?.subject)
 
-    /* Who must NOT hear about it. */
-    check('a student who CANCELLED their booking is not notified',
-      (await notesFor(cancelled._id, /Instructor changed/i)).length === 0)
-    check('...and gets no email', (await mailFor('cancelled@t.local', /Instructor Update/i)).length === 0)
-    check('a student booked on a DIFFERENT session is not notified',
-      (await notesFor(elsewhere._id, /Instructor changed/i)).length === 0)
-    check('...and gets no email', (await mailFor('elsewhere@t.local', /Instructor Update/i)).length === 0)
+    /* Enrolled but not booked on THIS session: told, in their own words. */
+    for (const [who, u] of [['cancelled', cancelled], ['elsewhere', elsewhere]] as const) {
+      check(`the ${who} student (enrolled, not booked here) gets the enrolled in-app notice`,
+        (await notesFor(u._id, /^Mentor changed/i)).length === 1)
+      check(`...and the enrolled email`,
+        await until(async () => (await mailFor(`${who}@t.local`, /^Mentor changed/i)).length === 1))
+      check(`...never the booked version`,
+        (await notesFor(u._id, /Instructor changed/i)).length === 0 &&
+        (await mailFor(`${who}@t.local`, /Instructor Update/i)).length === 0)
+    }
+    check('the booked student gets ONLY the booked version',
+      (await notesFor(booked._id, /^Mentor changed/i)).length === 0 &&
+      (await mailFor('booked@t.local', /^Mentor changed/i)).length === 0)
   }
 
   /* ══════════ 2. TIME CHANGE ══════════ */
@@ -269,9 +279,13 @@ try {
       await until(async () => (await notesFor(booked._id, /rescheduled/i)).length > 0))
     check('the booked student gets an email',
       await until(async () => (await mailFor('booked@t.local', /Rescheduled|Delay/i)).length === 1))
-    check('the cancelled-booking student is told nothing',
+    check('the cancelled-booking student gets the enrolled version, not the booked one',
+      (await notesFor(cancelled._id, /^Class time changed/i)).length === 1 &&
       (await notesFor(cancelled._id, /rescheduled/i)).length === 0 &&
+      await until(async () => (await mailFor('cancelled@t.local', /^Class time changed/i)).length === 1) &&
       (await mailFor('cancelled@t.local', /Rescheduled|Delay/i)).length === 0)
+    check('the student booked elsewhere is emailed too',
+      await until(async () => (await mailFor('elsewhere@t.local', /^Class time changed/i)).length === 1))
   }
 
   /* ══════════ 3. BOTH AT ONCE ══════════ */
@@ -301,6 +315,11 @@ try {
         (await mailFor('booked@t.local', /Rescheduled|Delay/i)).length === 1 &&
         (await mailFor('booked@t.local', /Instructor Update/i)).length === 1),
       `${(await mailbox()).length} total`)
+    check('...and the enrolled students receive both of theirs',
+      await until(async () =>
+        (await mailFor('cancelled@t.local', /^(Class time changed|Mentor changed)/i)).length === 2 &&
+        (await mailFor('elsewhere@t.local', /^(Class time changed|Mentor changed)/i)).length === 2, 15000),
+      JSON.stringify((await mailbox()).filter(m => /cancelled@|elsewhere@/.test(m.to)).map(m => `${m.to}: ${m.subject}`)))
   }
 
   /* ══════════ 4. NEGATIVE — an unrelated edit tells nobody ══════════ */
@@ -404,7 +423,8 @@ try {
 
     check('only the surviving student is a recipient', result.recipients === 1, JSON.stringify(result))
     check('...and they are notified in-app', result.notified === 1, JSON.stringify(result))
-    check('...and emailed', result.emailed === 1, JSON.stringify(result))
+    check('...and emailed — one booked mail, plus one per enrolled student told',
+      result.emailed === 1 + result.enrolledNotified, JSON.stringify(result))
   }
 
   section('ROBUSTNESS — a session nobody booked is a no-op, not a crash')
@@ -416,7 +436,48 @@ try {
       wasCancelled: false, wasRescheduled: false, instructorChanged: true,
       oldInstructorId: String(teacherA._id), newInstructorId: String(teacherB._id),
     })
-    check('no recipients, no error', result.recipients === 0 && result.emailed === 0, JSON.stringify(result))
+    check('nobody booked: no booked recipients, no error', result.recipients === 0, JSON.stringify(result))
+    check('...but every enrolled student is still told', result.enrolledNotified === 3 && result.emailed === 3, JSON.stringify(result))
+  }
+
+  section('ENROLLED STUDENTS — only those who could attend the class hear about it')
+  {
+    const { notifyBookedStudents } = await import('@/controllers/liveClass.controller.ts')
+    const { SectionModel } = await import('@/models/schema.ts')
+    const blr = await OrganizationModel.create({ name: 'Bangalore Academy', slug: 'bangalore', currency: 'INR', paymentGateway: 'abzer' })
+    const mod = await SectionModel.create({ courseId: course._id, title: 'Module 1', order: 1 })
+    const gated = await LiveClassModel.create({
+      courseId: course._id, sectionId: mod._id, title: 'Gated Session', scheduledStart: new Date(Date.now() + 8 * 86_400_000),
+      durationMins: 60, type: 'external', instructorId: teacherA._id, organizationId: org._id,
+      language: 'English', status: 'scheduled', isOnline: false, location: 'Campus', room: 'A1', sessionCapacity: 30,
+    })
+    const s = (email: string, extra: object = {}) => mk(email, 'student', { enrollmentStatus: 'approved', ...extra })
+    const open      = await s('open@t.local')
+    const blocked   = await s('blocked@t.local')
+    const dropped   = await s('dropped@t.local')
+    const pending   = await s('pending@t.local', { enrollmentStatus: 'pending' })
+    const otherOrg  = await s('bangalore@t.local', { organizationId: blr._id })
+    const outsider  = await s('outsider@t.local')
+    await EnrollmentModel.create({ userId: open._id,     courseId: course._id })
+    await EnrollmentModel.create({ userId: blocked._id,  courseId: course._id, blockedLessons: [mod._id] })
+    await EnrollmentModel.create({ userId: dropped._id,  courseId: course._id, status: 'dropped' })
+    await EnrollmentModel.create({ userId: pending._id,  courseId: course._id })
+    await EnrollmentModel.create({ userId: otherOrg._id, courseId: course._id })
+    void outsider
+
+    await NotificationModel.deleteMany({})
+    const result = await notifyBookedStudents({
+      liveClassId: String(gated._id), title: 'Gated Session',
+      wasCancelled: true, wasRescheduled: false, instructorChanged: false,
+    })
+    const told = async (u: { _id: unknown }) => (await notesFor(u._id, /^Class cancelled/i)).length > 0
+    check('an enrolled student with the module open is told', await told(open), JSON.stringify(result))
+    check('...and emailed', await until(async () => (await mailFor('open@t.local', /^Class cancelled/i)).length === 1))
+    check('a student blocked from this module is NOT told', !(await told(blocked)))
+    check('a dropped enrolment is NOT told', !(await told(dropped)))
+    check('a pending (not approved) student is NOT told', !(await told(pending)))
+    check('another academy\'s student is NOT told about a class that is not open to their academy', !(await told(otherOrg)))
+    check('a student not enrolled in the course is NOT told', !(await told(outsider)))
   }
 
 } finally {

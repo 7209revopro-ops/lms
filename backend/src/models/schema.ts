@@ -2860,6 +2860,10 @@ export interface ICriticalMail extends Document {
   newStart?:          Date
   oldInstructorName?: string
   newInstructorName?: string
+  /* Who the notice is for: a student BOOKED on the class, or one ENROLLED in
+     its course who has not booked it. The wording differs ("your booking"
+     makes no sense to the second), and so does the send-time audience check. */
+  audience?:          'booked' | 'enrolled'
   queuedAt:           Date
   dueAt:              Date
   sentAt?:            Date | null
@@ -2889,6 +2893,7 @@ const CriticalMailSchema = new Schema<ICriticalMail>(
     newStart:          { type: Date },
     oldInstructorName: { type: String, maxlength: 200 },
     newInstructorName: { type: String, maxlength: 200 },
+    audience:          { type: String, enum: ['booked', 'enrolled'], default: 'booked' },
     queuedAt:          { type: Date, default: () => new Date() },
     /* Set once, from the FIRST edit, and never pushed back by a merge — a
        rolling window would let a stream of corrections delay a cancellation

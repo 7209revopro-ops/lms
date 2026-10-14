@@ -48,6 +48,7 @@ const senders = {
   rescheduled: async (to: string) => { mails.push(`rescheduled:${to}`) },
   delayed:     async (to: string) => { mails.push(`delayed:${to}`) },
   instructor:  async (to: string) => { mails.push(`instructor:${to}`) },
+  enrolled:    async (to: string, _n: string, _t: string, c: { kind: string }) => { mails.push(`enrolled-${c.kind}:${to}`) },
 } as any
 const outbox = (name: string) => M.WhatsAppOutboxModel.find({ templateName: name }).lean() as Promise<any[]>
 const nextOf = async (code: string) => (await M.AuthTokenModel.findOne({ tokenHash: hashSigninCode(code), purpose: 'signin-link' }).lean() as any)?.nextPath
@@ -112,6 +113,30 @@ try {
   failMail = false
   const r2 = await job.flushCriticalMail({ now: new Date(t0.getTime() + 12 * MIN), senders })
   check('next flush: mail + WhatsApp', r2.sent === 1 && (await outbox('class_cancelled_v1')).length === 1, JSON.stringify(r2))
+
+  section('F · enrolled in the course, NOT booked: class_update_v1, its own words')
+  await M.WhatsAppOutboxModel.deleteMany({}); await M.CriticalMailModel.deleteMany({}); mails.length = 0
+  const fan = await M.UserModel.create({ name: 'fan', email: 'fan@cw.local', passwordHash: 'x', role: 'student', isActive: true,
+    organizationId: org._id, enrollmentApplication: { phone: '+971500000077' } })   // no booking at all
+  await park(fan, 'cancelled', { audience: 'enrolled' })
+  await flush()
+  wa = await outbox('class_update_v1')
+  check('sent although they hold no booking', wa.length === 1 && wa[0].to.endsWith('500000077'), JSON.stringify(wa.map(w => w.to)))
+  check('params: name, class, when, what changed',
+    JSON.stringify(wa[0]?.params) === JSON.stringify(['fan', 'MBT 4 · MALAYALAM BATCH', 'Tue, 13 Oct, 05:00 PM GST', 'This class has been cancelled. Book another session from your Class Schedule.']),
+    JSON.stringify(wa[0]?.params))
+  check('button → /class-bookings', (await nextOf(wa[0]?.buttonParam)) === '/class-bookings')
+  check('the enrolled email, not the booked one', mails.includes('enrolled-cancelled:fan@cw.local') && !mails.includes('cancelled:fan@cw.local'), mails.join(','))
+  check('no booked-student template', (await outbox('class_cancelled_v1')).length === 0)
+
+  await M.WhatsAppOutboxModel.deleteMany({}); await M.CriticalMailModel.deleteMany({})
+  await park(fan, 'rescheduled', { audience: 'enrolled', newStart: moved })
+  await flush()
+  wa = await outbox('class_update_v1')
+  check('a move: "It has moved to …" in their clock',
+    wa.length === 1 && wa[0].params?.[3] === 'It has moved to Wednesday, October 14, 2026 at 07:00 PM GST.' && wa[0].params?.[2] === 'Tue, 13 Oct, 05:00 PM GST',
+    JSON.stringify(wa[0]?.params))
+  check('no class_rescheduled_v1 ("your booking moves with it")', (await outbox('class_rescheduled_v1')).length === 0)
   void HOUR
 } catch (err) {
   fail++
