@@ -15,6 +15,9 @@
    of it the fee has opened, how many of its modules they can open and how many
    are locked, their progress, and whether they finished it (and hold the
    certificate) or dropped it. Both academies, oldest course first.
+
+   And their date of birth, as they gave it on their application (YYYY-MM-DD,
+   "" when they gave none) — the portal shows their birthday (2026-10-14).
 ───────────────────────────────────────────────────── */
 import { UserModel, EnrollmentModel, CourseModel, OrganizationModel, SectionModel } from '@/models/schema.ts'
 import { PortalError } from '@/services/portal.service.ts'
@@ -48,6 +51,20 @@ export interface PortalStudentCourses {
   email:   string
   exists:  boolean
   courses: PortalCourse[]
+  /** From their application, YYYY-MM-DD — "" when none (or not a date). */
+  dateOfBirth: string
+}
+
+/** A date of birth as YYYY-MM-DD, or "" — what the application form keeps, cleaned up. */
+export function birthDateOf(raw: unknown): string {
+  const t = String(raw ?? '').trim()
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(t)
+  if (m) {
+    const d = new Date(Date.UTC(+m[1]!, +m[2]! - 1, +m[3]!))
+    return d.getUTCFullYear() === +m[1]! && d.getUTCMonth() === +m[2]! - 1 && d.getUTCDate() === +m[3]! && +m[1]! > 1900 ? `${m[1]}-${m[2]}-${m[3]}` : ''
+  }
+  const d = t ? new Date(t) : null
+  return d && !Number.isNaN(d.getTime()) && d.getUTCFullYear() > 1900 ? d.toISOString().slice(0, 10) : ''
 }
 
 const bad = (message: string) => new PortalError('VALIDATION_ERROR', message, 400)
@@ -62,7 +79,7 @@ export async function enrolmentsForPortal(input: { emails: unknown; detail?: unk
   if (detail && wanted.length > MAX_DETAIL) throw bad(`Each module by name is for at most ${MAX_DETAIL} addresses at a time, and ${wanted.length} were asked for`)
   if (!wanted.length) return { students: [] }
 
-  const users = await UserModel.find({ email: { $in: wanted } }).select('_id email').lean() as unknown as { _id: unknown; email: string }[]
+  const users = await UserModel.find({ email: { $in: wanted } }).select('_id email enrollmentApplication.dateOfBirth').lean() as unknown as { _id: unknown; email: string; enrollmentApplication?: { dateOfBirth?: string } }[]
   const enrolments = users.length
     ? await EnrollmentModel.find({ userId: { $in: users.map(u => u._id) } })
       .select('userId courseId status source progressPercent enrolledAt completedAt certificateId paymentAccess blockedLessons createdAt')
@@ -131,10 +148,11 @@ export async function enrolmentsForPortal(input: { emails: unknown; detail?: unk
   }
 
   const userByEmail = new Map(users.map(u => [String(u.email).toLowerCase(), idOf(u._id)]))
+  const dobByEmail = new Map(users.map(u => [String(u.email).toLowerCase(), birthDateOf(u.enrollmentApplication?.dateOfBirth)]))
   return {
     students: wanted.map(email => {
       const id = userByEmail.get(email)
-      return { email, exists: !!id, courses: id ? byUser.get(id) ?? [] : [] }
+      return { email, exists: !!id, courses: id ? byUser.get(id) ?? [] : [], dateOfBirth: dobByEmail.get(email) ?? '' }
     }),
   }
 }

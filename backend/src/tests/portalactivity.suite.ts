@@ -206,6 +206,9 @@ await enrol(course, 10 * DAY, { source: 'purchase', progressPercent: 35, payment
 // One module locked by an admin by hand.
 await enrol(mbo, 30 * DAY, { status: 'completed', progressPercent: 100, completedAt: at(2 * DAY), certificateId: 'cert-1', blockedLessons: [mboModules[1]] })
 await enrol(oldCourse, 20 * DAY, { status: 'dropped', progressPercent: 12 })
+// Their dates of birth, as the application form keeps them (2026-10-14): one a date, one not.
+await UserModel.collection.updateOne({ email: 'learner@lms.test' }, { $set: { 'enrollmentApplication.dateOfBirth': '1990-02-25' } })
+await UserModel.collection.updateOne({ email: 'other@lms.test' }, { $set: { 'enrollmentApplication.dateOfBirth': 'not sure' } })
 const asked = await enrolmentsForPortal({ emails: [' LEARNER@lms.test', 'other@lms.test', 'nobody@lms.test'] })
 check('every address asked, in order, whatever its case', asked.students.map(s => `${s.email}:${s.exists}`).join(' ') === 'learner@lms.test:true other@lms.test:true nobody@lms.test:false',
   asked.students.map(s => `${s.email}:${s.exists}`).join(' '))
@@ -224,6 +227,14 @@ check('...a module an admin locked by hand counted the same', JSON.stringify(don
 check('...and a course with no modules: none, and none locked',
   JSON.stringify(theirs.find(c => c.slug === 'old-pa')?.modules) === JSON.stringify({ total: 0, unlocked: 0, locked: 0 }), JSON.stringify(theirs.find(c => c.slug === 'old-pa')?.modules))
 check('an account with no course: there, with none', asked.students[1]!.courses.length === 0)
+check('the date of birth from their application, as YYYY-MM-DD', asked.students[0]!.dateOfBirth === '1990-02-25', asked.students[0]!.dateOfBirth)
+check('...none when it is not a date, or there is no account', asked.students[1]!.dateOfBirth === '' && asked.students[2]!.dateOfBirth === '', JSON.stringify(asked.students.map(s => s.dateOfBirth)))
+{
+  const { birthDateOf } = await import('@/services/portalEnrolments.service.ts')
+  check('a date of birth cleaned up: a real day kept, an impossible one or a year before 1900 dropped',
+    birthDateOf('2000-01-18T00:00:00.000Z') === '2000-01-18' && birthDateOf('1999-02-30') === '' && birthDateOf('1800-01-01') === '' && birthDateOf('') === '',
+    [birthDateOf('2000-01-18T00:00:00.000Z'), birthDateOf('1999-02-30'), birthDateOf('1800-01-01')].join(','))
+}
 let badList: unknown = null, tooMany: unknown = null
 try { await enrolmentsForPortal({ emails: 'learner@lms.test' }) } catch (err) { badList = err }
 try { await enrolmentsForPortal({ emails: Array.from({ length: 501 }, (_, i) => `x${i}@lms.test`) }) } catch (err) { tooMany = err }
