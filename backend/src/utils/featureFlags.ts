@@ -51,6 +51,10 @@ export const CROSS_ORG_CLASSES_ENABLED =
    they set it, so the suites keep asserting on their messages. */
 const DEFAULT_WHATSAPP_TEMPLATES_ON = [
   'class_has_started_v2', 'class_cancelled_v1', 'class_rescheduled_v1', 'class_link_changed_v1', 'instructor_review_request_v1',
+  /* "name@use" lets a template out for one use only: course_update_v1 as a program's "you've been added" message
+     (services/program.service.ts) — program WhatsApps go only from here, never from a CS's own WhatsApp (the
+     commission portal, PROGRAM_CS_WHATSAPP). The Send message page's course_update_v1 stays off. */
+  'course_update_v1@program',
 ]
 const WHATSAPP_ON: ReadonlySet<string> | 'all' = (() => {
   const raw = (process.env['WHATSAPP_TEMPLATES_ON'] ?? '').trim()
@@ -60,6 +64,6 @@ const WHATSAPP_ON: ReadonlySet<string> | 'all' = (() => {
   return new Set(raw.split(',').map(s => s.trim()).filter(Boolean))
 })()
 
-export function whatsappTemplateOn(name: string): boolean {
-  return WHATSAPP_ON === 'all' || WHATSAPP_ON.has(name)
+export function whatsappTemplateOn(name: string, use?: string): boolean {
+  return WHATSAPP_ON === 'all' || WHATSAPP_ON.has(name) || (!!use && WHATSAPP_ON.has(`${name}@${use}`))
 }

@@ -561,7 +561,7 @@ export async function notifyProgramCreated(p: any): Promise<{ notified: number; 
     if (phone) {
       try {
         const code = await mintSigninCode(String(u._id), '/class-bookings')
-        await sendTemplateMessage(phone, 'course_update_v1', [u.name || 'there', p.title, `You have been added to this program. ${schedule}`], code)
+        await sendTemplateMessage(phone, 'course_update_v1', [u.name || 'there', p.title, `You have been added to this program. ${schedule}`], code, 'program')
         tally.whatsapp++
       } catch (err) { logger.warn({ err, userId: String(u._id) }, 'program: WhatsApp failed') }
     }

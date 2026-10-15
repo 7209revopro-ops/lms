@@ -21,6 +21,7 @@ import { logger } from '@/utils/logger.ts'
 import { env } from '@/config/env.ts'
 import { normalizeWhatsAppNumber } from '@/utils/normalizeWhatsAppNumber.ts'
 import { whatsappTemplateOn } from '@/utils/featureFlags.ts'
+const BOOTED_AT = Date.now()
 import { writeFile, mkdir } from 'fs/promises'
 import { join } from 'path'
 
@@ -192,10 +193,12 @@ export function whatsappBackoffFor(attempts: number): number {
 /** Attempt one already-persisted row. Exported so the drain job reuses it. */
 export async function deliverWhatsAppOutboxRow(row: {
   id: string; to: string; templateName: string; languageCode: string; params: string[]; buttonParam?: string; attempts: number
+  createdAt?: Date
 }): Promise<'sent' | 'retry' | 'failed'> {
   const { WhatsAppOutboxModel } = await import('@/models/schema.ts')
-  /* Queued before its template was switched off: closed, never sent. */
-  if (!whatsappTemplateOn(row.templateName)) {
+  /* Queued before this process started (so before the switch it runs under) and its template is off: closed, never
+     sent. A row made since already passed the check in sendTemplate, with its use. */
+  if (row.createdAt && row.createdAt.getTime() < BOOTED_AT && !whatsappTemplateOn(row.templateName)) {
     await WhatsAppOutboxModel.updateOne({ _id: row.id }, { $set: { status: 'failed', lastError: 'Template switched off (WHATSAPP_TEMPLATES_ON)' } })
     return 'failed'
   }
@@ -241,6 +244,8 @@ function sanitiseParam(value: string): string {
 interface SendOptions {
   category?:    WhatsAppTemplateCategory
   buttonParam?: string
+  /* What it is for, when a template is let out for one use only (featureFlags "name@use"). */
+  use?:         string
 }
 
 async function sendTemplate(
@@ -251,7 +256,7 @@ async function sendTemplate(
   languageCode = 'en_US',
 ): Promise<void> {
   /* Switched off (utils/featureFlags.ts whatsappTemplateOn): not stored, not sent — the email and in-app go as usual. */
-  if (!whatsappTemplateOn(templateName)) {
+  if (!whatsappTemplateOn(templateName, opts.use)) {
     logger.debug({ templateName }, 'WhatsApp send skipped — template switched off')
     return
   }
@@ -280,9 +285,9 @@ async function sendTemplate(
 /* Any template, as an admin chose it on the Send message page
    (services/broadcast.service.ts) — the caller has already filled the values. */
 export async function sendTemplateMessage(
-  to: string | null | undefined, templateName: string, params: string[], buttonParam?: string,
+  to: string | null | undefined, templateName: string, params: string[], buttonParam?: string, use?: string,
 ): Promise<void> {
-  await sendTemplate(to, templateName, params, { category: 'utility', ...(buttonParam ? { buttonParam } : {}) })
+  await sendTemplate(to, templateName, params, { category: 'utility', ...(buttonParam ? { buttonParam } : {}), ...(use ? { use } : {}) })
 }
 
 /* ── Typed helpers, one per trigger event ─────────────── */

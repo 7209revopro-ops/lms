@@ -52,11 +52,12 @@ export async function drainWhatsAppOutboxOnce(): Promise<{ sent: number; retry: 
     .lean()
 
   for (const row of due as unknown as {
-    _id: unknown; to: string; templateName: string; languageCode: string; params: string[]; buttonParam?: string; attempts: number
+    _id: unknown; to: string; templateName: string; languageCode: string; params: string[]; buttonParam?: string; attempts: number; createdAt?: Date
   }[]) {
     const outcome = await deliverWhatsAppOutboxRow({
       id: String(row._id), to: row.to, templateName: row.templateName,
       languageCode: row.languageCode, params: row.params ?? [], buttonParam: row.buttonParam, attempts: row.attempts ?? 0,
+      ...(row.createdAt ? { createdAt: new Date(row.createdAt) } : {}),
     })
     tally[outcome === 'sent' ? 'sent' : outcome === 'failed' ? 'failed' : 'retry']++
   }
