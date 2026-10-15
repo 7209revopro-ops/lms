@@ -34,3 +34,32 @@
    leave them holding seats they are refused at the door. */
 export const CROSS_ORG_CLASSES_ENABLED =
   String(process.env['CROSS_ORG_CLASSES'] ?? '').toLowerCase() === 'true'
+
+/* ── WHICH WHATSAPP TEMPLATES MAY GO OUT AT ALL (2026-10-15) ──────────────
+   WhatsApp is billed per message, so only these are sent (the user's list):
+     class_has_started_v2       a booked class has started — Join
+     class_cancelled_v1         a booked class was cancelled
+     class_rescheduled_v1       a booked class moved
+     class_link_changed_v1      a booked class's joining link changed
+     instructor_review_request_v1  review the mentor after class
+   Every other notice still goes by email and in-app; only its WhatsApp is not
+   sent. Checked where every WhatsApp is made (whatsapp.service.ts sendTemplate)
+   AND where a queued one is delivered, so nothing queued earlier slips out.
+
+   WHATSAPP_TEMPLATES_ON overrides the list: comma-separated names, "all" for
+   every template, "none" for no WhatsApp at all. Tests send everything unless
+   they set it, so the suites keep asserting on their messages. */
+const DEFAULT_WHATSAPP_TEMPLATES_ON = [
+  'class_has_started_v2', 'class_cancelled_v1', 'class_rescheduled_v1', 'class_link_changed_v1', 'instructor_review_request_v1',
+]
+const WHATSAPP_ON: ReadonlySet<string> | 'all' = (() => {
+  const raw = (process.env['WHATSAPP_TEMPLATES_ON'] ?? '').trim()
+  if (!raw) return process.env['NODE_ENV'] === 'test' ? 'all' : new Set(DEFAULT_WHATSAPP_TEMPLATES_ON)
+  if (/^all$/i.test(raw)) return 'all'
+  if (/^(none|off)$/i.test(raw)) return new Set<string>()
+  return new Set(raw.split(',').map(s => s.trim()).filter(Boolean))
+})()
+
+export function whatsappTemplateOn(name: string): boolean {
+  return WHATSAPP_ON === 'all' || WHATSAPP_ON.has(name)
+}

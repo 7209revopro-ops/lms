@@ -19,6 +19,7 @@ import { logger } from '@/utils/logger.ts'
 import { academyClock } from '@/utils/academyClock.ts'
 import { ensureOrgSlugs, orgSlugFor } from '@/utils/orgSlugs.ts'
 import { renderWhatsApp, SENDABLE_TEMPLATES, WHATSAPP_TEMPLATES, type SendAudience } from '@/utils/whatsappTemplates.ts'
+import { whatsappTemplateOn } from '@/utils/featureFlags.ts'
 
 export class BroadcastError extends Error {
   constructor(public readonly code: string, message: string, public readonly statusCode = 400) { super(message) }
@@ -52,7 +53,8 @@ const firstName = (n: string) => (n || '').trim().split(/\s+/)[0] || 'there'
 export class BroadcastService {
   /** The templates the page may offer for this audience, with their fields. */
   templatesFor(audience: SendAudience) {
-    return SENDABLE_TEMPLATES.filter(t => t.audiences.includes(audience)).map(t => {
+    /* Only templates that are switched on (utils/featureFlags.ts) — the others would never leave. */
+    return SENDABLE_TEMPLATES.filter(t => t.audiences.includes(audience) && whatsappTemplateOn(t.name)).map(t => {
       const info = WHATSAPP_TEMPLATES[t.name]!
       return { name: t.name, label: info.label, body: info.body ?? null, params: info.params, defaults: t.defaults, button: t.button ?? null, note: t.note ?? null }
     })
@@ -130,6 +132,7 @@ export class BroadcastService {
     if (input.whatsapp) {
       const t = SENDABLE_TEMPLATES.find(x => x.name === input.whatsapp!.template && x.audiences.includes(input.audience))
       if (!t) throw new BroadcastError('INVALID_TEMPLATE', 'That WhatsApp template cannot be sent from here.')
+      if (!whatsappTemplateOn(t.name)) throw new BroadcastError('TEMPLATE_OFF', 'That WhatsApp template is switched off — send it by email instead.')
       const n = WHATSAPP_TEMPLATES[t.name]!.params.length
       if (input.whatsapp.values.length !== n || input.whatsapp.values.some(v => !String(v ?? '').trim())) {
         throw new BroadcastError('MISSING_VALUES', `Fill in all ${n} values of the WhatsApp message.`)

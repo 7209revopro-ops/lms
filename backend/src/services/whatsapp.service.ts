@@ -20,6 +20,7 @@
 import { logger } from '@/utils/logger.ts'
 import { env } from '@/config/env.ts'
 import { normalizeWhatsAppNumber } from '@/utils/normalizeWhatsAppNumber.ts'
+import { whatsappTemplateOn } from '@/utils/featureFlags.ts'
 import { writeFile, mkdir } from 'fs/promises'
 import { join } from 'path'
 
@@ -193,6 +194,11 @@ export async function deliverWhatsAppOutboxRow(row: {
   id: string; to: string; templateName: string; languageCode: string; params: string[]; buttonParam?: string; attempts: number
 }): Promise<'sent' | 'retry' | 'failed'> {
   const { WhatsAppOutboxModel } = await import('@/models/schema.ts')
+  /* Queued before its template was switched off: closed, never sent. */
+  if (!whatsappTemplateOn(row.templateName)) {
+    await WhatsAppOutboxModel.updateOne({ _id: row.id }, { $set: { status: 'failed', lastError: 'Template switched off (WHATSAPP_TEMPLATES_ON)' } })
+    return 'failed'
+  }
   try {
     const { waMessageId } = await rawSender.send({
       to: row.to, templateName: row.templateName, languageCode: row.languageCode,
@@ -244,6 +250,11 @@ async function sendTemplate(
   opts: SendOptions = {},
   languageCode = 'en_US',
 ): Promise<void> {
+  /* Switched off (utils/featureFlags.ts whatsappTemplateOn): not stored, not sent — the email and in-app go as usual. */
+  if (!whatsappTemplateOn(templateName)) {
+    logger.debug({ templateName }, 'WhatsApp send skipped — template switched off')
+    return
+  }
   const normalized = normalizeWhatsAppNumber(to)
   if (!normalized) {
     logger.debug({ to, templateName }, 'WhatsApp send skipped — no usable phone number')
