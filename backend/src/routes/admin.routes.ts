@@ -1966,8 +1966,8 @@ router.get('/programs', requireInstructor, async (req: Request, res: Response, n
 /* The commission teams and CS of this academy, with their student counts — the program form's pickers. */
 router.get('/programs/audiences', requireInstructor, async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { programAudiences, MAX_PROGRAM_STUDENTS } = await import('@/services/program.service.ts')
-    sendSuccess(res, { ...(await programAudiences(await mentorCalendarOrg(req))), max: MAX_PROGRAM_STUDENTS })
+    const { programAudiences } = await import('@/services/program.service.ts')
+    sendSuccess(res, await programAudiences(await mentorCalendarOrg(req)))
   } catch (err) { next(err) }
 })
 

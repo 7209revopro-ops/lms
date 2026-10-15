@@ -1412,7 +1412,8 @@ const LiveClassSchema = new Schema<ILiveClass>(
     endSource:         { type: String, enum: ['meet'] },
     // Module link
     sectionId:         { type: Schema.Types.ObjectId, ref: 'Section' },
-    sessionCapacity:   { type: Number, default: 30, min: 1, max: 500 },
+    /* 100000, not 500: a Program seats all its students (thousands); the class forms keep their own 500 (admin.routes.ts). */
+    sessionCapacity:   { type: Number, default: 30, min: 1, max: 100000 },
     bookedCount:       { type: Number, default: 0, min: 0 },
     language:          { type: String, default: 'English' },
     isOnline:          { type: Boolean, default: true },

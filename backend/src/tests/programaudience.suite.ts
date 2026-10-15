@@ -7,7 +7,8 @@
      C. made with a team: every student is told in-app, by email, and on
         WhatsApp course_update_v1 with the days and time; a sign-in button to the
         Class Schedule; nobody else is told
-     D. at most 490 students — making one with more, or adding past it, is refused
+     D. no limit on students: 2,000 on a program are all booked on every class,
+        quickly; each class's room grows to fit; adding more later books them too
    Run: bun --no-env-file src/tests/programaudience.suite.ts
 ───────────────────────────────────────────────────────────── */
 process.env.DATABASE_URL = 'mongodb://localhost:27017/lms_programaudience'
@@ -87,7 +88,6 @@ try {
   check('teams: Expandables 2, Gladiators 3', JSON.stringify(d?.teams) === JSON.stringify([{ team: 'Team Expandables', count: 2 }, { team: 'Team Gladiators', count: 3 }]), JSON.stringify(d?.teams))
   check('CS: Alice 2, Asha 2, Ravi 1 — each with their team', JSON.stringify(d?.cs) === JSON.stringify([
     { name: 'Alice', team: 'Team Expandables', count: 2 }, { name: 'Asha', team: 'Team Gladiators', count: 2 }, { name: 'Ravi', team: 'Team Gladiators', count: 1 }]), JSON.stringify(d?.cs))
-  check('the cap is told to the form (490)', d?.max === 490)
 
   section('B · a team, a CS, everyone')
   const ids = (r: any) => (r.body?.data ?? []).map((x: any) => x.email).sort().join(',')
@@ -125,16 +125,27 @@ try {
   await new Promise(r => setTimeout(r, 1200))
   check('no notice for the added student', (await M.NotificationModel.countDocuments({ userId: e1._id, title: /^New program/ })) === 0)
 
-  section('D · at most 490 students')
-  const many = await M.UserModel.insertMany(Array.from({ length: 491 }, (_, i) => ({
+  section('D · no limit on students')
+  const many = await M.UserModel.insertMany(Array.from({ length: 2000 }, (_, i) => ({
     name: `Bulk ${i}`, email: `bulk${i}@pa.local`, passwordHash: hash, role: 'student', isActive: true, isVerified: true, enrollmentStatus: 'approved', organizationId: dubai._id })))
+  const t0 = Date.now()
   const big = await call('POST', '/admin/programs', admin, {
-    title: 'Everyone', repeat: 'weekly', weekdays: [1], startDate: dubaiDay(1), endDate: dubaiDay(9), time: '19:00', durationMins: 60,
+    title: 'Everyone', repeat: 'weekly', weekdays: [0, 1, 2, 3, 4, 5, 6], startDate: dubaiDay(1), endDate: dubaiDay(2), time: '19:00', durationMins: 60,
     isOnline: false, location: 'Hall', instructorId: String(mentor._id), students: many.map(u => String(u._id)) })
-  check('491 → refused, saying the limit', big.status === 400 && /at most 490 students/.test(String(big.body?.error?.message)), why(big))
-  check('...and nothing was made', (await M.ProgramModel.countDocuments({ title: 'Everyone' })) === 0)
-  const fill = await call('POST', `/admin/programs/${pid}/students`, admin, { add: many.slice(0, 487).map(u => String(u._id)) })
-  check('adding past 490 is refused too', fill.status === 400 && /at most 490/.test(String(fill.body?.error?.message)), why(fill))
+  const took = Date.now() - t0
+  check('2,000 students → created', big.status === 200 && big.body?.data?.students?.length === 2000, why(big))
+  check(`...in seconds, not minutes (${(took / 1000).toFixed(1)} s)`, took < 30_000)
+  const bigClasses = await M.LiveClassModel.find({ programId: big.body?.data?.id }).lean() as any[]
+  check('every class: 2,000 booked, and room for them', bigClasses.length === 2 && bigClasses.every(c => c.bookedCount === 2000 && c.sessionCapacity >= 2000),
+    JSON.stringify(bigClasses.map(c => [c.bookedCount, c.sessionCapacity])))
+  check('...as 2,000 real bookings per class', (await M.ClassBookingModel.countDocuments({ liveClassId: bigClasses[0]?._id, status: 'booked' })) === 2000)
+  check('...and 2,000 enrolments', (await M.EnrollmentModel.countDocuments({ courseId: (await M.ProgramModel.findById(big.body?.data?.id).lean() as any)?.courseId, status: 'active' })) === 2000)
+  const more = await M.UserModel.insertMany(Array.from({ length: 300 }, (_, i) => ({
+    name: `More ${i}`, email: `more${i}@pa.local`, passwordHash: hash, role: 'student', isActive: true, isVerified: true, enrollmentStatus: 'approved', organizationId: dubai._id })))
+  const grow = await call('POST', `/admin/programs/${big.body?.data?.id}/students`, admin, { add: more.map(u => String(u._id)) })
+  check('300 more added later', grow.status === 200 && grow.body?.data?.students?.length === 2300, why(grow))
+  const after = await M.LiveClassModel.find({ programId: big.body?.data?.id }).lean() as any[]
+  check('...each class now 2,300 booked, room grown', after.every(c => c.bookedCount === 2300 && c.sessionCapacity >= 2300), JSON.stringify(after.map(c => [c.bookedCount, c.sessionCapacity])))
 } catch (err) {
   fail++; lines.push(`  FAIL  suite threw — ${(err as Error).message}\n${(err as Error).stack}`)
 } finally {

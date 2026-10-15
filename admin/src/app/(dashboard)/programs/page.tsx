@@ -17,8 +17,6 @@ import {
    so reminders, the join button and attendance work as for any class. Instructors see and change their own; admins all. */
 
 const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
-/* One class holds 500 seats; a program's classes keep ten spare (program.service.ts MAX_PROGRAM_STUDENTS). */
-const MAX_STUDENTS = 490
 const LANGUAGES = ['English', 'Hindi', 'Hindi/English', 'Malayalam', 'Tamil', 'Arabic', 'Urdu']
 const TZ = 'Asia/Dubai'
 const field = 'w-full rounded-lg border border-white/10 bg-transparent px-3 py-2 text-sm outline-none'
@@ -238,7 +236,7 @@ function ProgramDialog({ program, onClose }: { program?: Program; onClose: () =>
         {err && <p className="text-sm text-rose-400">{err}</p>}
         <div className="flex justify-end gap-2">
           <button type="button" onClick={onClose} className="rounded-lg border border-white/10 px-4 py-2 text-sm">Cancel</button>
-          <button type="button" disabled={busy || f.title.trim().length < 3 || !f.endDate || (f.repeat === 'weekly' && !f.weekdays.length) || (!program && (!students.length || students.length > MAX_STUDENTS)) || (!f.isOnline && f.location.trim().length < 2) || (!program && f.isOnline && f.meetingMode === 'link' && !/^https:\/\/meet\.google\.com\/[a-z]{3}-[a-z]{4}-[a-z]{3}/i.test(f.meetingUrl.trim())) || (!program && !isInstructor && !f.instructorId)} onClick={submit} className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white disabled:opacity-50">{busy ? 'Saving…' : program ? 'Save' : 'Create program'}</button>
+          <button type="button" disabled={busy || f.title.trim().length < 3 || !f.endDate || (f.repeat === 'weekly' && !f.weekdays.length) || (!program && !students.length) || (!f.isOnline && f.location.trim().length < 2) || (!program && f.isOnline && f.meetingMode === 'link' && !/^https:\/\/meet\.google\.com\/[a-z]{3}-[a-z]{4}-[a-z]{3}/i.test(f.meetingUrl.trim())) || (!program && !isInstructor && !f.instructorId)} onClick={submit} className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white disabled:opacity-50">{busy ? 'Saving…' : program ? 'Save' : 'Create program'}</button>
         </div>
       </div>
     </div>
@@ -284,7 +282,6 @@ function PickStudents({ students, setStudents }: { students: ProgramPerson[]; se
     return [...m.entries()]
   }, [aud])
   const shown = showAll ? students : students.slice(0, 24)
-  const over = students.length > MAX_STUDENTS
   return (
     <div className="space-y-2">
       <div className="flex items-center justify-between">
@@ -308,14 +305,11 @@ function PickStudents({ students, setStudents }: { students: ProgramPerson[]; se
       <button type="button" disabled={!!loading || !aud?.total} onClick={() => void pick('all', { all: true })}
         className="w-full rounded-lg border border-white/10 px-3 py-2 text-left text-sm hover:bg-white/5 disabled:opacity-50">
         {loading === 'all' ? 'Adding…' : `Add all students${aud ? ` — ${aud.total}` : ''}`}
-        {aud && aud.total > MAX_STUDENTS && <span className="ml-1 text-xs text-amber-300/90">(more than a program can hold — {MAX_STUDENTS})</span>}
       </button>
       <AddStudentsLocal onPick={s => addMany([s])} />
       {students.length > 0 && (
         <div>
-          <p className={`mb-1 text-xs ${over ? 'text-rose-400' : 'opacity-70'}`}>
-            {students.length} student{students.length === 1 ? '' : 's'}{over ? ` — a program can have at most ${MAX_STUDENTS}; take some off or pick a team or CS` : ''}
-          </p>
+          <p className="mb-1 text-xs opacity-70">{students.length} student{students.length === 1 ? '' : 's'}</p>
           <div className="flex max-h-40 flex-wrap gap-1.5 overflow-auto">
             {shown.map(s => <span key={s.id} className="flex items-center gap-1 rounded-full bg-white/5 px-2.5 py-1 text-xs" title={s.email}>{s.name}<button type="button" onClick={() => setStudents(xs => xs.filter(x => x.id !== s.id))} aria-label={`Remove ${s.name}`}><X className="h-3 w-3" /></button></span>)}
             {students.length > shown.length && <button type="button" onClick={() => setShowAll(true)} className="rounded-full px-2.5 py-1 text-xs text-blue-300">+{students.length - shown.length} more</button>}

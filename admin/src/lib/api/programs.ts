@@ -30,7 +30,7 @@ export const useProgramStudentSearch = (q: string) => useQuery({
 })
 
 /* The commission portal's teams and CS (each student's User.tetraCs), with counts — and a whole group's students. */
-export interface ProgramAudiences { total: number; max: number; teams: { team: string; count: number }[]; cs: { name: string; team: string; count: number }[] }
+export interface ProgramAudiences { total: number; teams: { team: string; count: number }[]; cs: { name: string; team: string; count: number }[] }
 export const useProgramAudiences = (enabled = true) => useQuery({
   queryKey: [...KEY, 'audiences'], enabled, staleTime: 60_000,
   queryFn: () => apiGet<ProgramAudiences>('/admin/programs/audiences'),

@@ -32,13 +32,8 @@ export class ProgramError extends Error {
 }
 
 const MAX_CLASSES = 60
-/* A class holds at most 500 seats (LiveClass.sessionCapacity) and a program's
-   classes are made with ten spare — so 490 students is as many as one program
-   can seat. Picking a whole team or "all students" can go past it. */
-export const MAX_PROGRAM_STUDENTS = 490
 /* The languages classes are taught in (LiveClass.language). */
 export const PROGRAM_LANGUAGES = ['English', 'Hindi', 'Hindi/English', 'Malayalam', 'Tamil', 'Arabic', 'Urdu']
-const tooMany = (n: number) => new ProgramError(`A program can have at most ${MAX_PROGRAM_STUDENTS} students — this would be ${n}. Pick a team or a CS instead of everyone.`)
 const DEFAULT_TZ  = 'Asia/Dubai'
 const DAY = 864e5
 
@@ -133,31 +128,59 @@ export async function resolveStudents(refs: unknown, orgId: string | null): Prom
 
 async function enrol(courseId: Types.ObjectId, studentIds: Types.ObjectId[], orgId: unknown) {
   const { EnrollmentModel } = await import('@/models/schema.ts')
-  for (const userId of studentIds) {
-    await EnrollmentModel.updateOne(
-      { userId, courseId },
-      { $set: { status: 'active' }, $setOnInsert: { source: 'admin', enrolledAt: new Date(), progressPercent: 0, blockedLessons: [], ...(orgId ? { organizationId: orgId } : {}) } },
-      { upsert: true },
-    )
+  /* One bulk write, not one per student — a program can be thousands of students. */
+  for (let i = 0; i < studentIds.length; i += 1000) {
+    await EnrollmentModel.bulkWrite(studentIds.slice(i, i + 1000).map(userId => ({
+      updateOne: {
+        filter: { userId, courseId },
+        update: { $set: { status: 'active' }, $setOnInsert: { source: 'admin', enrolledAt: new Date(), progressPercent: 0, blockedLessons: [], ...(orgId ? { organizationId: orgId } : {}) } },
+        upsert: true,
+      },
+    })) as any, { ordered: false })
   }
 }
 
-/** A seat on each class for each student who has none yet. */
+/** A seat on each class for each student who has none yet. No limit on how many: the class's room grows to fit. */
 async function bookSeats(classIds: Types.ObjectId[], studentIds: Types.ObjectId[], door: { organizationId: string | null; courseId: string }) {
   const { ClassBookingModel } = await import('@/models/schema.ts')
-  const { reserveSeat, seatStampFrom } = await import('@/services/seatPool.service.ts')
+  const { reserveSeat, reserveFlatSeats, seatStampFrom } = await import('@/services/seatPool.service.ts')
+  const flatStamp = seatStampFrom({ pool: { kind: 'flat' } } as any, door)
   for (const liveClassId of classIds) {
-    for (const userId of studentIds) {
-      const had: any = await ClassBookingModel.findOne({ userId, liveClassId }).lean()
-      if (had && had.status !== 'cancelled') continue
-      const reserved = await reserveSeat(String(liveClassId), null)
+    const id = String(liveClassId)
+    const existing = await ClassBookingModel.find({ liveClassId, userId: { $in: studentIds } }).select('userId status').lean() as any[]
+    const had = new Map(existing.map(b => [String(b.userId), b]))
+    const fresh = studentIds.filter(u => !had.has(String(u)))
+    const revive = existing.filter(b => b.status === 'cancelled')
+    const want = fresh.length + revive.length
+    if (!want) continue
+
+    /* Every Program class: all its seats in one go. */
+    if (await reserveFlatSeats(id, want)) {
+      let inserted = fresh.length
+      for (let i = 0; i < fresh.length; i += 1000) {
+        try {
+          await ClassBookingModel.insertMany(fresh.slice(i, i + 1000).map(userId => ({ userId, liveClassId, status: 'booked', bookedAt: new Date(), ...flatStamp })), { ordered: false })
+        } catch (err: any) {
+          /* A booking made in between (unique userId+class): that seat was not used — give it back. */
+          const ok = err?.insertedDocs?.length ?? err?.result?.insertedCount ?? 0
+          inserted -= Math.min(1000, fresh.length - i) - ok
+        }
+      }
+      if (revive.length) {
+        await ClassBookingModel.updateMany({ _id: { $in: revive.map(b => b._id) } }, { $set: { status: 'booked', bookedAt: new Date(), ...flatStamp }, $unset: { cancelledAt: '' } })
+      }
+      if (inserted < fresh.length) await reserveFlatSeats(id, inserted - fresh.length)
+      continue
+    }
+
+    /* A class with academy floors: one seat at a time through its pools. */
+    for (const userId of [...fresh, ...revive.map(b => b.userId)]) {
+      const reserved = await reserveSeat(id, null)
       if (!reserved) continue
       const stamp = seatStampFrom(reserved, door)
-      if (had) {
-        await ClassBookingModel.updateOne({ _id: had._id }, { $set: { status: 'booked', bookedAt: new Date(), ...stamp }, $unset: { cancelledAt: '' } })
-      } else {
-        await ClassBookingModel.create({ userId, liveClassId, status: 'booked', bookedAt: new Date(), ...stamp })
-      }
+      const prev = had.get(String(userId))
+      if (prev) await ClassBookingModel.updateOne({ _id: prev._id }, { $set: { status: 'booked', bookedAt: new Date(), ...stamp }, $unset: { cancelledAt: '' } })
+      else await ClassBookingModel.create({ userId, liveClassId, status: 'booked', bookedAt: new Date(), ...stamp })
     }
   }
 }
@@ -315,7 +338,6 @@ export async function createProgram(input: Record<string, any>, actor: Actor) {
 
   const { ids, missing } = await resolveStudents(input.students ?? input.studentIds, orgId)
   if (!ids.length) throw new ProgramError(missing.length ? `Not students on the LMS: ${missing.join(', ')}` : 'Add at least one student')
-  if (ids.length > MAX_PROGRAM_STUDENTS) throw tooMany(ids.length)
 
   const image = imageOf(input.thumbnailUrl)
   const programId = new Types.ObjectId()
@@ -379,8 +401,6 @@ export async function changeStudents(id: string, input: { add?: unknown; remove?
   const have = new Set((p.studentIds ?? []).map(String))
   const added = add.ids.filter(i => !have.has(String(i)))
   const removed = remove.ids.filter(i => have.has(String(i)))
-  const after = have.size + added.length - removed.length
-  if (after > MAX_PROGRAM_STUDENTS) throw tooMany(after)
   const upcoming = await upcomingClassIds(p._id)
   if (added.length) {
     await enrol(p.courseId, added, p.organizationId)
@@ -473,14 +493,14 @@ export async function programAudiences(orgId: string | null): Promise<{
   }
 }
 
-/** The students of one team, one CS (optionally within a team), or everyone — at most MAX + 1, so a caller can tell it went over. */
+/** The students of one team, one CS (optionally within a team), or everyone. */
 export async function programAudienceStudents(orgId: string | null, pick: { team?: string; cs?: string; all?: boolean }): Promise<Array<{ id: string; name: string; email: string }>> {
   const { UserModel } = await import('@/models/schema.ts')
   const q: Record<string, unknown> = pickable(orgId)
   if (pick.team) q['tetraCs.team'] = pick.team
   if (pick.cs) q['tetraCs.name'] = pick.cs
   if (!pick.team && !pick.cs && !pick.all) return []
-  const rows = await UserModel.find(q).select('name email').sort({ name: 1 }).limit(MAX_PROGRAM_STUDENTS + 1).lean() as any[]
+  const rows = await UserModel.find(q).select('name email').sort({ name: 1 }).lean() as any[]
   return rows.map(u => ({ id: String(u._id), name: u.name, email: u.email }))
 }
 
