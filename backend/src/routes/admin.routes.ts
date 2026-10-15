@@ -1963,10 +1963,25 @@ router.get('/programs', requireInstructor, async (req: Request, res: Response, n
   } catch (err) { next(err) }
 })
 
-/* Students to pick from — by name or email, this academy's only. */
+/* The commission teams and CS of this academy, with their student counts — the program form's pickers. */
+router.get('/programs/audiences', requireInstructor, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { programAudiences, MAX_PROGRAM_STUDENTS } = await import('@/services/program.service.ts')
+    sendSuccess(res, { ...(await programAudiences(await mentorCalendarOrg(req))), max: MAX_PROGRAM_STUDENTS })
+  } catch (err) { next(err) }
+})
+
+/* Students to pick from — by name or email; or a whole commission team (?team=), one CS (?cs=, ?team= too
+   when two teams share a CS name), or everyone (?all=1). This academy's only. */
 router.get('/programs/students', requireInstructor, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { UserModel } = await import('@/models/schema.ts')
+    const team = String(req.query['team'] ?? '').trim(), cs = String(req.query['cs'] ?? '').trim()
+    if (team || cs || req.query['all'] === '1') {
+      const { programAudienceStudents } = await import('@/services/program.service.ts')
+      sendSuccess(res, await programAudienceStudents(await mentorCalendarOrg(req), { team: team || undefined, cs: cs || undefined, all: req.query['all'] === '1' }))
+      return
+    }
     const q = String(req.query['q'] ?? '').trim()
     if (q.length < 2) { sendSuccess(res, []); return }
     const rx = new RegExp(q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i')

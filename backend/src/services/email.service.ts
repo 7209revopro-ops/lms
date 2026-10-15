@@ -1649,6 +1649,26 @@ export async function sendCancelledNotification(
   await sender.send({ to, subject, html, text: `Dear ${name},\n\nWe regret to inform you that your scheduled class on ${dateStr} at ${timeStr} has been cancelled.\n\nWe apologize for the inconvenience. A replacement session will be scheduled, and you will be notified once it is available.\n\nThank you for your understanding.\n\nDelta Academy` })
 }
 
+/* A program (services/program.service.ts) was made with this student on it:
+   what it is, when it meets (already in the reader's academy clock), and that
+   they are booked on every class. */
+export async function sendProgramAdded(
+  to: string, name: string, programTitle: string, schedule: string, mentorName: string, description: string,
+): Promise<void> {
+  const subject = `You've been added to ${programTitle}`
+  const scheduleUrl = `${process.env['CLIENT_URL'] ?? 'http://localhost:3000'}/class-bookings`
+  const html = wrap(subject, `
+    <h2 style="margin:0 0 16px;font-size:20px;font-weight:700;color:#0D0F1A">${escapeHtml(subject)}</h2>
+    <p style="margin:0 0 16px;color:#374151">Dear <strong>${escapeHtml(name)}</strong>,</p>
+    <p style="margin:0 0 16px;color:#374151">A program has been set up for you: <strong>${escapeHtml(programTitle)}</strong>${mentorName ? `, with <strong>${escapeHtml(mentorName)}</strong>` : ''}.</p>
+    ${description ? `<p style="margin:0 0 16px;color:#374151">${escapeHtml(description)}</p>` : ''}
+    <p style="margin:0 0 24px;color:#374151">${escapeHtml(schedule)}</p>
+    <p style="margin:0 0 24px"><a href="${escapeHtml(scheduleUrl)}" style="display:inline-block;background:#0057B8;color:#fff;text-decoration:none;font-weight:700;padding:12px 22px;border-radius:10px">Open Class Schedule</a></p>
+    <p style="margin:0;color:#374151"><strong>Delta Academy</strong></p>
+  `)
+  await sender.send({ to, subject, html, text: `Dear ${name},\n\nA program has been set up for you: ${programTitle}${mentorName ? `, with ${mentorName}` : ''}.\n\n${description ? description + '\n\n' : ''}${schedule}\n\nOpen your Class Schedule: ${scheduleUrl}\n\nDelta Academy` })
+}
+
 /* A change to a class in the student's course that they have NOT booked —
    cancelled, moved, or a new mentor. The booked-student mails above all say
    "your class" / "your booking"; this one says what changed and points at the

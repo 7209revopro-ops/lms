@@ -8,6 +8,7 @@ import { useCurrentUser } from '@/lib/api/user'
 import { useMentorCalendar } from '@/lib/api/mentorCalendar'
 import {
   usePrograms, useCreateProgram, useChangeProgramStudents, useRescheduleProgram, useStopProgram, useProgramStudentSearch,
+  useProgramAudiences, fetchProgramGroup,
   type Program, type ProgramPerson,
 } from '@/lib/api/programs'
 
@@ -16,6 +17,8 @@ import {
    so reminders, the join button and attendance work as for any class. Instructors see and change their own; admins all. */
 
 const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
+/* One class holds 500 seats; a program's classes keep ten spare (program.service.ts MAX_PROGRAM_STUDENTS). */
+const MAX_STUDENTS = 490
 const TZ = 'Asia/Dubai'
 const field = 'w-full rounded-lg border border-white/10 bg-transparent px-3 py-2 text-sm outline-none'
 const errText = (e: unknown) => (e as any)?.response?.data?.error?.message || (e as Error)?.message || 'Something went wrong'
@@ -190,19 +193,11 @@ function ProgramDialog({ program, onClose }: { program?: Program; onClose: () =>
         </div>
         <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={!f.isOnline} onChange={e => set('isOnline', !e.target.checked)} />In person (no Meet link)</label>
         {!f.isOnline && <input className={field} placeholder="Where — room or office" value={f.location} onChange={e => set('location', e.target.value)} />}
-        {!program && (
-          <div>
-            <p className="mb-1 text-xs opacity-80">Students — only they see it</p>
-            <div className="mb-1 flex flex-wrap gap-1.5">
-              {students.map(s => <span key={s.id} className="flex items-center gap-1 rounded-full bg-white/5 px-2.5 py-1 text-xs">{s.name}<button type="button" onClick={() => setStudents(students.filter(x => x.id !== s.id))} aria-label={`Remove ${s.name}`}><X className="h-3 w-3" /></button></span>)}
-            </div>
-            <AddStudentsLocal onPick={s => setStudents(xs => xs.some(x => x.id === s.id) ? xs : [...xs, s])} />
-          </div>
-        )}
+        {!program && <PickStudents students={students} setStudents={setStudents} />}
         {err && <p className="text-sm text-rose-400">{err}</p>}
         <div className="flex justify-end gap-2">
           <button type="button" onClick={onClose} className="rounded-lg border border-white/10 px-4 py-2 text-sm">Cancel</button>
-          <button type="button" disabled={busy || f.title.trim().length < 3 || !f.endDate || (f.repeat === 'weekly' && !f.weekdays.length) || (!program && !students.length) || (!f.isOnline && f.location.trim().length < 2) || (!program && !isInstructor && !f.instructorId)} onClick={submit} className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white disabled:opacity-50">{busy ? 'Saving…' : program ? 'Save' : 'Create program'}</button>
+          <button type="button" disabled={busy || f.title.trim().length < 3 || !f.endDate || (f.repeat === 'weekly' && !f.weekdays.length) || (!program && (!students.length || students.length > MAX_STUDENTS)) || (!f.isOnline && f.location.trim().length < 2) || (!program && !isInstructor && !f.instructorId)} onClick={submit} className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white disabled:opacity-50">{busy ? 'Saving…' : program ? 'Save' : 'Create program'}</button>
         </div>
       </div>
     </div>
@@ -222,6 +217,72 @@ function AddStudentsLocal({ onPick }: { onPick: (s: ProgramPerson) => void }) {
           {(data ?? []).map(s => <button key={s.id} type="button" onClick={() => { onPick(s); setQ('') }} className="flex w-full items-center justify-between px-3 py-2 text-left text-sm hover:bg-white/5"><span>{s.name} <span className="text-xs opacity-60">{s.email}</span></span><UserPlus className="h-3.5 w-3.5 opacity-70" /></button>)}
         </div>
       )}
+    </div>
+  )
+}
+
+/* Who the program is for — the commission portal's way of grouping students (each student's team and CS, kept on
+   the LMS from Tetra Commission), everyone, or one by one. A group adds its students to the list; anyone can still
+   be taken off before the program is made. */
+function PickStudents({ students, setStudents }: { students: ProgramPerson[]; setStudents: (f: (xs: ProgramPerson[]) => ProgramPerson[]) => void }) {
+  const { data: aud } = useProgramAudiences()
+  const [loading, setLoading] = useState('')
+  const [err, setErr] = useState('')
+  const [showAll, setShowAll] = useState(false)
+  const addMany = (list: ProgramPerson[]) => setStudents(xs => {
+    const have = new Set(xs.map(x => x.id))
+    return [...xs, ...list.filter(s => !have.has(s.id))]
+  })
+  const pick = async (label: string, g: { team?: string; cs?: string; all?: boolean }) => {
+    setErr(''); setLoading(label)
+    try { addMany(await fetchProgramGroup(g)) } catch (e) { setErr(errText(e)) } finally { setLoading('') }
+  }
+  const csByTeam = useMemo(() => {
+    const m = new Map<string, { name: string; team: string; count: number }[]>()
+    for (const c of aud?.cs ?? []) m.set(c.team || 'No team', [...(m.get(c.team || 'No team') ?? []), c])
+    return [...m.entries()]
+  }, [aud])
+  const shown = showAll ? students : students.slice(0, 24)
+  const over = students.length > MAX_STUDENTS
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center justify-between">
+        <p className="text-xs opacity-80">Students — only they see it</p>
+        {students.length > 0 && <button type="button" onClick={() => setStudents(() => [])} className="text-xs opacity-60 hover:opacity-100">Clear all</button>}
+      </div>
+      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+        <select className={field} value="" disabled={!!loading} onChange={e => { const t = e.target.value; if (t) void pick(t, { team: t }) }}>
+          <option value="">{loading && !loading.startsWith('cs:') && loading !== 'all' ? 'Adding…' : 'Add a whole team…'}</option>
+          {(aud?.teams ?? []).map(t => <option key={t.team} value={t.team}>{t.team} — {t.count}</option>)}
+        </select>
+        <select className={field} value="" disabled={!!loading} onChange={e => { const v = e.target.value; if (!v) return; const [team, name] = JSON.parse(v); void pick(`cs:${name}`, { cs: name, ...(team ? { team } : {}) }) }}>
+          <option value="">{loading.startsWith('cs:') ? 'Adding…' : "Add a CS's students…"}</option>
+          {csByTeam.map(([team, list]) => (
+            <optgroup key={team} label={team}>
+              {list.map(c => <option key={`${team}|${c.name}`} value={JSON.stringify([c.team, c.name])}>{c.name} — {c.count}</option>)}
+            </optgroup>
+          ))}
+        </select>
+      </div>
+      <button type="button" disabled={!!loading || !aud?.total} onClick={() => void pick('all', { all: true })}
+        className="w-full rounded-lg border border-white/10 px-3 py-2 text-left text-sm hover:bg-white/5 disabled:opacity-50">
+        {loading === 'all' ? 'Adding…' : `Add all students${aud ? ` — ${aud.total}` : ''}`}
+        {aud && aud.total > MAX_STUDENTS && <span className="ml-1 text-xs text-amber-300/90">(more than a program can hold — {MAX_STUDENTS})</span>}
+      </button>
+      <AddStudentsLocal onPick={s => addMany([s])} />
+      {students.length > 0 && (
+        <div>
+          <p className={`mb-1 text-xs ${over ? 'text-rose-400' : 'opacity-70'}`}>
+            {students.length} student{students.length === 1 ? '' : 's'}{over ? ` — a program can have at most ${MAX_STUDENTS}; take some off or pick a team or CS` : ''}
+          </p>
+          <div className="flex max-h-40 flex-wrap gap-1.5 overflow-auto">
+            {shown.map(s => <span key={s.id} className="flex items-center gap-1 rounded-full bg-white/5 px-2.5 py-1 text-xs" title={s.email}>{s.name}<button type="button" onClick={() => setStudents(xs => xs.filter(x => x.id !== s.id))} aria-label={`Remove ${s.name}`}><X className="h-3 w-3" /></button></span>)}
+            {students.length > shown.length && <button type="button" onClick={() => setShowAll(true)} className="rounded-full px-2.5 py-1 text-xs text-blue-300">+{students.length - shown.length} more</button>}
+          </div>
+          <p className="mt-1 text-[11px] opacity-60">When you create it, each student is told in the app, by email and on WhatsApp, with the days and time.</p>
+        </div>
+      )}
+      {err && <p className="text-xs text-rose-400">{err}</p>}
     </div>
   )
 }

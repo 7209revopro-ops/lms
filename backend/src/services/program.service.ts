@@ -1,5 +1,7 @@
 import crypto from 'node:crypto'
 import { Types } from 'mongoose'
+import { logger } from '@/utils/logger.ts'
+import { academyClock } from '@/utils/academyClock.ts'
 
 /* ─────────────────────────────────────────────────────────────────────────────
    Programs (Tetra Commission's user, 2026-10-09) — a live class that repeats
@@ -30,6 +32,11 @@ export class ProgramError extends Error {
 }
 
 const MAX_CLASSES = 60
+/* A class holds at most 500 seats (LiveClass.sessionCapacity) and a program's
+   classes are made with ten spare — so 490 students is as many as one program
+   can seat. Picking a whole team or "all students" can go past it. */
+export const MAX_PROGRAM_STUDENTS = 490
+const tooMany = (n: number) => new ProgramError(`A program can have at most ${MAX_PROGRAM_STUDENTS} students — this would be ${n}. Pick a team or a CS instead of everyone.`)
 const DEFAULT_TZ  = 'Asia/Dubai'
 const DAY = 864e5
 
@@ -252,6 +259,7 @@ export async function createProgram(input: Record<string, any>, actor: Actor) {
 
   const { ids, missing } = await resolveStudents(input.students ?? input.studentIds, orgId)
   if (!ids.length) throw new ProgramError(missing.length ? `Not students on the LMS: ${missing.join(', ')}` : 'Add at least one student')
+  if (ids.length > MAX_PROGRAM_STUDENTS) throw tooMany(ids.length)
 
   const programId = new Types.ObjectId()
   const course = await CourseModel.create({
@@ -276,6 +284,10 @@ export async function createProgram(input: Record<string, any>, actor: Actor) {
     await Promise.all([ProgramModel.deleteOne({ _id: p._id }), EnrollmentModel.deleteMany({ courseId: course._id }), CourseModel.deleteOne({ _id: course._id })])
     throw err
   }
+  /* Its students are told it exists — in-app, email and WhatsApp. Only here, at
+     creation; students added later are not messaged. Not awaited: a team is
+     hundreds of messages, and the program is already made. */
+  void notifyProgramCreated(p).catch(err => logger.error({ err, programId: String(p._id) }, 'program: telling its students failed'))
   return { ...(await present(p)), missing }
 }
 
@@ -306,6 +318,8 @@ export async function changeStudents(id: string, input: { add?: unknown; remove?
   const have = new Set((p.studentIds ?? []).map(String))
   const added = add.ids.filter(i => !have.has(String(i)))
   const removed = remove.ids.filter(i => have.has(String(i)))
+  const after = have.size + added.length - removed.length
+  if (after > MAX_PROGRAM_STUDENTS) throw tooMany(after)
   const upcoming = await upcomingClassIds(p._id)
   if (added.length) {
     await enrol(p.courseId, added, p.organizationId)
@@ -352,4 +366,104 @@ export async function stopProgram(id: string, actor: Actor) {
   p.status = 'stopped'
   await p.save()
   return present(p)
+}
+
+/* ── Picking students by commission team, by CS, or all ────────────────────
+   Tetra Commission (the commission portal) gives every Forex student a team and
+   a CS, and the LMS keeps both on the student (User.tetraCs). The program form
+   picks from those the way the portal groups its students. Approved, active
+   students of the academy only. */
+const pickable = (orgId: string | null) => ({
+  role: 'student', isActive: { $ne: false }, enrollmentStatus: 'approved',
+  ...(orgId ? { organizationId: new Types.ObjectId(orgId) } : {}),
+})
+
+/** The academy's commission teams and CS, each with how many students it has, and the total. */
+export async function programAudiences(orgId: string | null): Promise<{
+  total: number; teams: Array<{ team: string; count: number }>; cs: Array<{ name: string; team: string; count: number }>
+}> {
+  const { UserModel } = await import('@/models/schema.ts')
+  const base = pickable(orgId)
+  const [total, teams, cs] = await Promise.all([
+    UserModel.countDocuments(base),
+    UserModel.aggregate([{ $match: { ...base, 'tetraCs.team': { $nin: [null, ''] } } },
+      { $group: { _id: '$tetraCs.team', count: { $sum: 1 } } }, { $sort: { _id: 1 } }]),
+    UserModel.aggregate([{ $match: { ...base, 'tetraCs.name': { $nin: [null, ''] } } },
+      { $group: { _id: { name: '$tetraCs.name', team: '$tetraCs.team' }, count: { $sum: 1 } } }, { $sort: { '_id.team': 1, '_id.name': 1 } }]),
+  ])
+  return {
+    total,
+    teams: (teams as any[]).map(t => ({ team: String(t._id), count: t.count })),
+    cs: (cs as any[]).map(c => ({ name: String(c._id.name), team: String(c._id.team ?? ''), count: c.count })),
+  }
+}
+
+/** The students of one team, one CS (optionally within a team), or everyone — at most MAX + 1, so a caller can tell it went over. */
+export async function programAudienceStudents(orgId: string | null, pick: { team?: string; cs?: string; all?: boolean }): Promise<Array<{ id: string; name: string; email: string }>> {
+  const { UserModel } = await import('@/models/schema.ts')
+  const q: Record<string, unknown> = pickable(orgId)
+  if (pick.team) q['tetraCs.team'] = pick.team
+  if (pick.cs) q['tetraCs.name'] = pick.cs
+  if (!pick.team && !pick.cs && !pick.all) return []
+  const rows = await UserModel.find(q).select('name email').sort({ name: 1 }).limit(MAX_PROGRAM_STUDENTS + 1).lean() as any[]
+  return rows.map(u => ({ id: String(u._id), name: u.name, email: u.email }))
+}
+
+/* ── Telling the students a program was made for them ─────────────────────
+   In-app, an email, and WhatsApp course_update_v1 ("there's an update about
+   your course {program}: {when it meets}") with a sign-in button to their Class
+   Schedule. The days and time in each READER's academy clock, read off the
+   classes actually made. */
+function scheduleFor(p: any, starts: Date[], slug: string | null | undefined): string {
+  if (!starts.length) return 'No classes are left to come.'
+  const zone = academyClock(starts[0]!, slug).zone
+  const day = (d: Date, o: Intl.DateTimeFormatOptions) => d.toLocaleDateString('en-GB', { ...o, timeZone: zone })
+  const time = academyClock(starts[0]!, slug).time
+  const first = day(starts[0]!, { weekday: 'short', day: 'numeric', month: 'short' })
+  const last = day(starts[starts.length - 1]!, { weekday: 'short', day: 'numeric', month: 'short' })
+  const order = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
+  const when = p.repeat === 'monthly'
+    ? `every month on the ${day(starts[0]!, { day: 'numeric' })}`
+    : `every ${[...new Set(starts.map(d => day(d, { weekday: 'short' })))].sort((a, b) => order.indexOf(a) - order.indexOf(b)).join(', ')}`
+  const n = starts.length
+  const where = p.isOnline ? 'online' : `at ${p.location}`
+  return `${n} class${n === 1 ? '' : 'es'}, ${when} at ${time}, ${where} — from ${first} to ${last}. You are booked on every one.`
+}
+
+export async function notifyProgramCreated(p: any): Promise<{ notified: number; emailed: number; whatsapp: number }> {
+  const { UserModel, LiveClassModel } = await import('@/models/schema.ts')
+  const { NotificationService } = await import('@/services/notification.service.ts')
+  const { sendProgramAdded } = await import('@/services/email.service.ts')
+  const { sendTemplateMessage } = await import('@/services/whatsapp.service.ts')
+  const { mintSigninCode } = await import('@/services/signinLink.service.ts')
+  const { ensureOrgSlugs, orgSlugFor } = await import('@/utils/orgSlugs.ts')
+  const { SCHEDULE_LINK } = await import('@/utils/clientLinks.ts')
+  const notifications = new NotificationService()
+  await ensureOrgSlugs().catch(() => {})
+  const starts = (await LiveClassModel.find({ programId: p._id, status: 'scheduled', scheduledStart: { $gt: new Date() } })
+    .sort({ scheduledStart: 1 }).select('scheduledStart').lean() as any[]).map(c => new Date(c.scheduledStart))
+  const mentor = await UserModel.findById(p.instructorId).select('name').lean() as any
+  const students = await UserModel.find({ _id: { $in: p.studentIds ?? [] } }).select('name email organizationId enrollmentApplication.phone').lean() as any[]
+  const tally = { notified: 0, emailed: 0, whatsapp: 0 }
+  for (const u of students) {
+    const schedule = scheduleFor(p, starts, orgSlugFor(u.organizationId))
+    try {
+      await notifications.create(String(u._id), { kind: 'system', title: `New program: ${p.title}`, body: schedule, link: SCHEDULE_LINK })
+      tally.notified++
+    } catch (err) { logger.warn({ err, userId: String(u._id) }, 'program: in-app notice failed') }
+    if (u.email) {
+      try { await sendProgramAdded(u.email, u.name ?? '', p.title, schedule, mentor?.name ?? '', p.description ?? ''); tally.emailed++ }
+      catch (err) { logger.warn({ err, to: u.email }, 'program: email failed') }
+    }
+    const phone = u.enrollmentApplication?.phone
+    if (phone) {
+      try {
+        const code = await mintSigninCode(String(u._id), '/class-bookings')
+        await sendTemplateMessage(phone, 'course_update_v1', [u.name || 'there', p.title, `You have been added to this program. ${schedule}`], code)
+        tally.whatsapp++
+      } catch (err) { logger.warn({ err, userId: String(u._id) }, 'program: WhatsApp failed') }
+    }
+  }
+  logger.info({ programId: String(p._id), students: students.length, ...tally }, 'program: students told')
+  return tally
 }

@@ -25,6 +25,20 @@ export const useProgramStudentSearch = (q: string) => useQuery({
   queryFn: () => apiGet<ProgramPerson[]>(`/admin/programs/students?q=${encodeURIComponent(q.trim())}`),
 })
 
+/* The commission portal's teams and CS (each student's User.tetraCs), with counts — and a whole group's students. */
+export interface ProgramAudiences { total: number; max: number; teams: { team: string; count: number }[]; cs: { name: string; team: string; count: number }[] }
+export const useProgramAudiences = (enabled = true) => useQuery({
+  queryKey: [...KEY, 'audiences'], enabled, staleTime: 60_000,
+  queryFn: () => apiGet<ProgramAudiences>('/admin/programs/audiences'),
+})
+export const fetchProgramGroup = (pick: { team?: string; cs?: string; all?: boolean }) => {
+  const q = new URLSearchParams()
+  if (pick.team) q.set('team', pick.team)
+  if (pick.cs) q.set('cs', pick.cs)
+  if (pick.all) q.set('all', '1')
+  return apiGet<ProgramPerson[]>(`/admin/programs/students?${q.toString()}`)
+}
+
 function useProgramMutation<I>(fn: (input: I) => Promise<Program>) {
   const qc = useQueryClient()
   return useMutation({ mutationFn: fn, onSuccess: () => qc.invalidateQueries({ queryKey: KEY }) })
