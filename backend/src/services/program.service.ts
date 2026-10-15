@@ -36,6 +36,8 @@ const MAX_CLASSES = 60
    classes are made with ten spare — so 490 students is as many as one program
    can seat. Picking a whole team or "all students" can go past it. */
 export const MAX_PROGRAM_STUDENTS = 490
+/* The languages classes are taught in (LiveClass.language). */
+export const PROGRAM_LANGUAGES = ['English', 'Hindi', 'Hindi/English', 'Malayalam', 'Tamil', 'Arabic', 'Urdu']
 const tooMany = (n: number) => new ProgramError(`A program can have at most ${MAX_PROGRAM_STUDENTS} students — this would be ${n}. Pick a team or a CS instead of everyone.`)
 const DEFAULT_TZ  = 'Asia/Dubai'
 const DAY = 864e5
@@ -222,7 +224,7 @@ async function makeClasses(p: any, actor: Actor): Promise<number> {
     const { live } = await ctrl.createForProgram({
       courseId: String(p.courseId), title: p.title, description: p.description, scheduledStart: start, durationMins: p.durationMins,
       instructorId: String(p.instructorId), sessionCapacity: Math.max(30, (p.studentIds?.length ?? 0) + 10),
-      isOnline: p.isOnline, location: p.location, ...(p.organizationId ? { organizationId: String(p.organizationId) } : {}),
+      isOnline: p.isOnline, location: p.location, language: p.language || 'English', ...(p.organizationId ? { organizationId: String(p.organizationId) } : {}),
     }, { id: actor.id && Types.ObjectId.isValid(actor.id) ? actor.id : String(p.instructorId), role: actor.role === 'portal' ? 'admin' : actor.role, ...(p.organizationId ? { organizationId: String(p.organizationId) } : {}) }, String(p._id), how)
     await LiveClassModel.updateOne({ _id: (live as any)._id }, { $set: { programId: p._id, ...(coIds.length ? { coInstructorIds: coIds } : {}) } })
     made.push((live as any)._id)
@@ -255,7 +257,7 @@ async function present(p: any) {
     time: p.time, timezone: p.timezone, durationMins: p.durationMins, isOnline: p.isOnline, location: p.location ?? '',
     mentor: mentor ? { id: String(mentor._id), name: mentor.name, email: mentor.email } : null,
     coMentors: coMentors.map(m => ({ id: String(m._id), name: m.name, email: m.email })),
-    meetingMode: p.meetingMode ?? 'auto', meetingUrl: p.meetingUrl ?? '',
+    meetingMode: p.meetingMode ?? 'auto', meetingUrl: p.meetingUrl ?? '', language: p.language || 'English',
     students: students.map(s => ({ id: String(s._id), name: s.name, email: s.email })),
     createdByName: p.createdByName ?? '', createdByEmail: p.createdByEmail ?? '',
     classes: classes.map(c => ({ id: String(c._id), startsAt: c.scheduledStart, status: c.status })),
@@ -294,6 +296,8 @@ export async function createProgram(input: Record<string, any>, actor: Actor) {
   if (!mentor || mentor.role === 'student') throw new ProgramError('Pick the mentor who takes it')
   const coMentorIds = await resolveCoMentors(input.coInstructorIds ?? input.coMentorEmails, mentor._id)
   const meeting = meetingChoice(input, isOnline)
+  const language = input.language == null || input.language === '' ? 'English' : String(input.language)
+  if (!PROGRAM_LANGUAGES.includes(language)) throw new ProgramError(`Pick a language: ${PROGRAM_LANGUAGES.join(', ')}`)
 
   const { ids, missing } = await resolveStudents(input.students ?? input.studentIds, orgId)
   if (!ids.length) throw new ProgramError(missing.length ? `Not students on the LMS: ${missing.join(', ')}` : 'Add at least one student')
@@ -308,7 +312,7 @@ export async function createProgram(input: Record<string, any>, actor: Actor) {
   const p: any = await ProgramModel.create({
     _id: programId, title, description: String(input.description ?? '').trim(), ...(orgId ? { organizationId: new Types.ObjectId(orgId) } : {}),
     instructorId: mentor._id, ...(coMentorIds.length ? { coInstructorIds: coMentorIds } : {}),
-    meetingMode: meeting.mode, ...(meeting.url ? { meetingUrl: meeting.url } : {}),
+    meetingMode: meeting.mode, ...(meeting.url ? { meetingUrl: meeting.url } : {}), language,
     courseId: course._id, ...s, timezone: DEFAULT_TZ, isOnline, location: String(input.location ?? '').trim(),
     studentIds: ids, status: 'active', source: actor.role === 'portal' ? 'portal' : 'lms',
     ...(actor.id && Types.ObjectId.isValid(actor.id) ? { createdById: new Types.ObjectId(actor.id) } : {}),
@@ -466,8 +470,15 @@ function scheduleFor(p: any, starts: Date[], slug: string | null | undefined): s
     ? `every month on the ${day(starts[0]!, { day: 'numeric' })}`
     : `every ${[...new Set(starts.map(d => day(d, { weekday: 'short' })))].sort((a, b) => order.indexOf(a) - order.indexOf(b)).join(', ')}`
   const n = starts.length
+  const lang = p.language && p.language !== 'English' ? ` in ${p.language}` : ''
   const where = p.isOnline ? 'online' : `at ${p.location}`
-  return `${n} class${n === 1 ? '' : 'es'}, ${when} at ${time}, ${where} — from ${first} to ${last}. You are booked on every one.`
+  /* How to get in — a pasted link is the same every class, so it is given now; a room made per class
+     comes with its own link 5 minutes before each class. */
+  const join = !p.isOnline ? ''
+    : p.meetingMode === 'link' && p.meetingUrl ? ` Join on Google Meet: ${p.meetingUrl}`
+    : p.meetingMode === 'app' ? ' Join from your Class Schedule in the app.'
+    : " Each class's Google Meet link comes on WhatsApp 5 minutes before it starts."
+  return `${n} class${n === 1 ? '' : 'es'}${lang}, ${when} at ${time}, ${where} — from ${first} to ${last}. You are booked on every one.${join}`
 }
 
 export async function notifyProgramCreated(p: any): Promise<{ notified: number; emailed: number; whatsapp: number }> {

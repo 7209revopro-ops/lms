@@ -1528,6 +1528,7 @@ export class LiveClassController {
       sessionCapacity?: number
       isOnline?:        boolean
       location?:        string
+      language?:        string
       organizationId?:  string
     },
     actor: { id: string; role: string; organizationId?: string },

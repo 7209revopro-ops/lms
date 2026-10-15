@@ -3024,6 +3024,7 @@ export interface IProgram extends Document {
   coInstructorIds?: Types.ObjectId[]
   meetingMode?:    'auto' | 'link' | 'app'
   meetingUrl?:     string
+  language?:       string
   courseId:        Types.ObjectId
   repeat:          'weekly' | 'monthly'
   weekdays:        number[]          // weekly: 0 = Sunday … 6 = Saturday
@@ -3055,6 +3056,7 @@ const ProgramSchema = new Schema<IProgram>(
     /* How its classes meet: a Meet room made per class, the admin's own Meet link, or the in-app stream. */
     meetingMode:    { type: String, enum: ['auto', 'link', 'app'], default: 'auto' },
     meetingUrl:     { type: String, maxlength: 2048 },
+    language:       { type: String, default: 'English', maxlength: 40 },
     courseId:       { type: Schema.Types.ObjectId, ref: 'Course', required: true },
     repeat:         { type: String, enum: ['weekly', 'monthly'], required: true },
     weekdays:       { type: [Number], default: [] },

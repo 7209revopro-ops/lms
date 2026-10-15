@@ -19,6 +19,7 @@ import {
 const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
 /* One class holds 500 seats; a program's classes keep ten spare (program.service.ts MAX_PROGRAM_STUDENTS). */
 const MAX_STUDENTS = 490
+const LANGUAGES = ['English', 'Hindi', 'Hindi/English', 'Malayalam', 'Tamil', 'Arabic', 'Urdu']
 const TZ = 'Asia/Dubai'
 const field = 'w-full rounded-lg border border-white/10 bg-transparent px-3 py-2 text-sm outline-none'
 const errText = (e: unknown) => (e as any)?.response?.data?.error?.message || (e as Error)?.message || 'Something went wrong'
@@ -66,7 +67,7 @@ function ProgramCard({ p, open, onToggle }: { p: Program; open: boolean; onToggl
       <button type="button" onClick={onToggle} className="flex w-full flex-wrap items-start justify-between gap-2 text-left">
         <div>
           <p className="font-semibold">{p.title}{p.status === 'stopped' && <span className="ml-2 rounded bg-white/10 px-1.5 text-xs">stopped</span>}{p.source === 'portal' && <span className="ml-2 text-xs opacity-60">from the portal{p.createdByName ? ` · ${p.createdByName}` : ''}</span>}</p>
-          <p className="mt-0.5 flex items-center gap-1.5 text-xs opacity-70"><Repeat className="h-3.5 w-3.5" />{repeatText(p)} · {p.durationMins} min · until {p.endDate} · {p.isOnline ? (p.meetingMode === 'app' ? 'in-app stream' : p.meetingMode === 'link' ? 'own Meet link' : 'Google Meet') : p.location}</p>
+          <p className="mt-0.5 flex items-center gap-1.5 text-xs opacity-70"><Repeat className="h-3.5 w-3.5" />{repeatText(p)} · {p.durationMins} min · until {p.endDate} · {p.isOnline ? (p.meetingMode === 'app' ? 'in-app stream' : p.meetingMode === 'link' ? 'own Meet link' : 'Google Meet') : p.location}{p.language && p.language !== 'English' ? ` · ${p.language}` : ''}</p>
         </div>
         <div className="text-right text-xs opacity-80">
           <p>{p.mentor?.name ?? '—'}{p.coMentors?.length ? <span className="opacity-70"> + {p.coMentors.map(m => m.name).join(', ')}</span> : null}</p>
@@ -144,7 +145,7 @@ function ProgramDialog({ program, onClose }: { program?: Program; onClose: () =>
     weekdays: program?.weekdays ?? [] as number[], monthDay: program?.monthDay ?? '' as number | '',
     startDate: program?.startDate ?? today, endDate: program?.endDate ?? '', time: program?.time ?? '19:00', durationMins: program?.durationMins ?? 60,
     isOnline: program?.isOnline ?? true, location: program?.location ?? '', instructorId: program?.mentor?.id ?? '',
-    coMentorIds: [] as string[], meetingMode: 'auto' as 'auto' | 'link' | 'app', meetingUrl: '',
+    coMentorIds: [] as string[], meetingMode: 'auto' as 'auto' | 'link' | 'app', meetingUrl: '', language: program?.language ?? 'English',
   })
   const [students, setStudents] = useState<ProgramPerson[]>([])
   const [err, setErr] = useState('')
@@ -160,7 +161,7 @@ function ProgramDialog({ program, onClose }: { program?: Program; onClose: () =>
       } else {
         const made = await create.mutateAsync({
           title: f.title.trim(), description: f.description.trim(), ...sched, isOnline: f.isOnline, location: f.location.trim(),
-          ...(f.instructorId ? { instructorId: f.instructorId } : {}), students: students.map(s => s.id),
+          ...(f.instructorId ? { instructorId: f.instructorId } : {}), students: students.map(s => s.id), language: f.language,
           ...(f.coMentorIds.length ? { coInstructorIds: f.coMentorIds.filter(id => id !== f.instructorId) } : {}),
           ...(f.isOnline ? { meetingMode: f.meetingMode, ...(f.meetingMode === 'link' ? { meetingUrl: f.meetingUrl.trim() } : {}) } : {}),
         })
@@ -214,6 +215,7 @@ function ProgramDialog({ program, onClose }: { program?: Program; onClose: () =>
           <label className="text-xs opacity-80">Until<input type="date" className={`${field} mt-1`} value={f.endDate} onChange={e => set('endDate', e.target.value)} /></label>
           <label className="text-xs opacity-80">Time (Dubai)<input type="time" className={`${field} mt-1`} value={f.time} onChange={e => set('time', e.target.value)} /></label>
           <label className="text-xs opacity-80">Length<select className={`${field} mt-1`} value={f.durationMins} onChange={e => set('durationMins', Number(e.target.value))}>{[30, 45, 60, 90, 120].map(n => <option key={n} value={n}>{n} min</option>)}</select></label>
+          {!program && <label className="col-span-2 text-xs opacity-80">Language<select className={`${field} mt-1`} value={f.language} onChange={e => set('language', e.target.value)}>{LANGUAGES.map(l => <option key={l} value={l}>{l}</option>)}</select></label>}
         </div>
         <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={!f.isOnline} onChange={e => set('isOnline', !e.target.checked)} />In person (no Meet link)</label>
         {!f.isOnline && <input className={field} placeholder="Where — room or office" value={f.location} onChange={e => set('location', e.target.value)} />}

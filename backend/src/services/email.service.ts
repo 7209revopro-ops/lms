@@ -1662,7 +1662,7 @@ export async function sendProgramAdded(
     <p style="margin:0 0 16px;color:#374151">Dear <strong>${escapeHtml(name)}</strong>,</p>
     <p style="margin:0 0 16px;color:#374151">A program has been set up for you: <strong>${escapeHtml(programTitle)}</strong>${mentorName ? `, with <strong>${escapeHtml(mentorName)}</strong>` : ''}.</p>
     ${description ? `<p style="margin:0 0 16px;color:#374151">${escapeHtml(description)}</p>` : ''}
-    <p style="margin:0 0 24px;color:#374151">${escapeHtml(schedule)}</p>
+    <p style="margin:0 0 24px;color:#374151">${escapeHtml(schedule).replace(/https:\/\/meet\.google\.com\/[a-z]{3}-[a-z]{4}-[a-z]{3}/gi, u => `<a href="${u}" style="color:#0057B8;font-weight:700">${u}</a>`)}</p>
     <p style="margin:0 0 24px"><a href="${escapeHtml(scheduleUrl)}" style="display:inline-block;background:#0057B8;color:#fff;text-decoration:none;font-weight:700;padding:12px 22px;border-radius:10px">Open Class Schedule</a></p>
     <p style="margin:0;color:#374151"><strong>Delta Academy</strong></p>
   `)

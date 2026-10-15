@@ -8,6 +8,9 @@
         not change it; another mentor sees nothing
      E. the Mentor Calendar shows it under the co-mentor too
      F. the 10-minute WhatsApp goes to the main mentor and each co-mentor
+     G. language: the classes carry it; one not on the list is refused
+     H. the Meet link on WhatsApp: in the "added" message (own link), and in each
+        class's 5-minute message, with the LMS button still there
    Run: bun --no-env-file src/tests/programcomentors.suite.ts
 ───────────────────────────────────────────────────────────── */
 process.env.DATABASE_URL = 'mongodb://localhost:27017/lms_programcomentors'
@@ -62,14 +65,15 @@ try {
   const co1   = await mk('HAFFIS', 'haf@pc.local', 'instructor', { phone: '+971500000102' })
   const co2   = await mk('ARYA', 'arya@pc.local', 'instructor', { phone: '+971500000103' })
   await mk('OTHER', 'other@pc.local', 'instructor')
-  const stu   = await mk('Stu', 'stu@pc.local', 'student')
+  const stu   = await mk('Stu', 'stu@pc.local', 'student', { enrollmentApplication: { phone: '+971500000201' } })
+  const { hashSigninCode } = await import('@/services/signinLink.service.ts')
   const login = async (email: string) => { const j: Jar = new Map(); const r = await call('POST', '/admin/auth/login', j, { email, password: PW }); if (r.status !== 200) throw new Error(`${email} login ${why(r)}`); return j }
   const admin = await login('admin@pc.local'), coJar = await login('haf@pc.local'), otherJar = await login('other@pc.local')
   const base = { repeat: 'weekly', weekdays: [0, 1, 2, 3, 4, 5, 6], startDate: dubaiDay(1), endDate: dubaiDay(2), time: '19:00', durationMins: 60,
     isOnline: true, instructorId: String(main._id), students: [String(stu._id)] }
 
   section('A · own Meet link, two co-mentors')
-  const a = await call('POST', '/admin/programs', admin, { ...base, title: 'NY session', meetingMode: 'link', meetingUrl: LINK, coInstructorIds: [String(co1._id), String(co2._id)] })
+  const a = await call('POST', '/admin/programs', admin, { ...base, title: 'NY session', meetingMode: 'link', meetingUrl: LINK, language: 'Malayalam', coInstructorIds: [String(co1._id), String(co2._id)] })
   check('created', a.status === 200, why(a))
   const prog = a.body?.data
   check('shows its co-mentors', JSON.stringify((prog?.coMentors ?? []).map((m: any) => m.name).sort()) === JSON.stringify(['ARYA', 'HAFFIS']), JSON.stringify(prog?.coMentors))
@@ -117,6 +121,25 @@ try {
   await runMentor10MinWhatsApp()
   const sent = (await M.WhatsAppOutboxModel.find({ templateName: 'mentor_class_in_10_min' }).lean() as any[]).map(r => r.to).sort()
   check('to the main mentor and both co-mentors', JSON.stringify(sent) === JSON.stringify(['971500000101', '971500000102', '971500000103'].sort()), JSON.stringify(sent))
+
+  section('G · language')
+  check('the program and its classes are in Malayalam', prog?.language === 'Malayalam' && classes.every(x => x.language === 'Malayalam'), JSON.stringify(classes.map(x => x.language)))
+  const badLang = await call('POST', '/admin/programs', admin, { ...base, title: 'Klingon', language: 'Klingon', meetingMode: 'link', meetingUrl: LINK })
+  check('a language not on the list is refused', badLang.status === 400 && /Pick a language/.test(String(badLang.body?.error?.message)), why(badLang))
+
+  section('H · the Meet link on WhatsApp')
+  const added = await M.NotificationModel.findOne({ userId: stu._id, title: 'New program: NY session' }).lean() as any
+  check('the "added" notice gives the link, and the language', String(added?.body).includes(`Join on Google Meet: ${LINK}`) && / in Malayalam,/.test(String(added?.body)), String(added?.body))
+  const addedWa = (await M.WhatsAppOutboxModel.find({ templateName: 'course_update_v1', to: '971500000201' }).lean() as any[]).find(r => r.params?.[1] === 'NY session')
+  check('...so does its WhatsApp', String(addedWa?.params?.[2]).includes(LINK), JSON.stringify(addedWa?.params))
+  await M.LiveClassModel.updateOne({ _id: classes[1]._id }, { $set: { scheduledStart: new Date(Date.now() + 6 * 60_000) } })
+  const { runFiveMinReminders } = await import('@/jobs/reminders.job.ts')
+  await runFiveMinReminders()
+  const five = await M.WhatsAppOutboxModel.findOne({ templateName: 'class_update_v1', to: '971500000201' }).lean() as any
+  check('5 minutes before: class_update_v1 with its Meet link', five?.params?.[1] === 'NY session' && five?.params?.[3] === `It starts in 5 minutes. Join directly on Google Meet: ${LINK}`, JSON.stringify(five?.params))
+  const tok = five?.buttonParam ? await M.AuthTokenModel.findOne({ tokenHash: hashSigninCode(five.buttonParam), purpose: 'signin-link' }).lean() as any : null
+  check('...and its button still signs them in to the class page', tok?.nextPath === `/live-classes/${String(classes[1]._id)}/watch`, String(tok?.nextPath))
+  check('...instead of the usual 5-minute template', (await M.WhatsAppOutboxModel.countDocuments({ templateName: /class_starts_in_5_min/, to: '971500000201' })) === 0)
 } catch (err) {
   fail++; lines.push(`  FAIL  suite threw — ${(err as Error).message}\n${(err as Error).stack}`)
 } finally {

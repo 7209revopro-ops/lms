@@ -524,10 +524,12 @@ export async function runFiveMinReminders(): Promise<void> {
          academy clock. On a shared class the student's academy and the class's
          differ, and an unlabelled ninety-minute gap is a missed class. */
       .populate<{ userId: BookingWithRefs['userId'] }>('userId', 'name email organizationId enrollmentApplication.phone')
-      .populate<{ liveClassId: BookingWithRefs['liveClassId'] }>('liveClassId', 'id title scheduledStart meetingUrl muxPlaybackId status isOnline')
+      .populate<{ liveClassId: BookingWithRefs['liveClassId'] }>('liveClassId', 'id title scheduledStart meetingUrl muxPlaybackId status isOnline programId')
       .lean({ virtuals: true }) as unknown as BookingWithRefs[]
 
     const due = dueBetween(bookings, from, to)
+    const { mintSigninCode } = await import('@/services/signinLink.service.ts')
+    const { sendClassUpdateWhatsApp } = await import('@/services/whatsapp.service.ts')
 
     for (const b of due) {
       const userId  = b.userId.id ?? b.userId._id?.toString()
@@ -550,6 +552,15 @@ export async function runFiveMinReminders(): Promise<void> {
            to join: the plain reminder (class_starting_soon_v5). */
         b.liveClassId.isOnline === false
           ? () => sendClassStartingSoonWhatsApp(phone, b.liveClassId.title, '5')
+          /* A Program's Google Meet class: its own Meet link in the message, to join on Google directly
+             (class_update_v1 — the 5-minute template has no room for a link); the button still signs
+             them in to the class page, where joining is recorded. */
+          : (b.liveClassId as { programId?: unknown }).programId && /^https:\/\/meet\.google\.com\//i.test(String(b.liveClassId.meetingUrl ?? ''))
+          ? async () => sendClassUpdateWhatsApp(
+              phone, b.userId.name, b.liveClassId.title, `${fmtShortDay(classAt, slug)}, ${fmtTime(classAt, slug)}`,
+              `It starts in 5 minutes. Join directly on Google Meet: ${b.liveClassId.meetingUrl}`,
+              await mintSigninCode(userId, `/live-classes/${classIdOf(b.liveClassId)}/watch`),
+            )
           : code
           ? () => sendClassStartsIn5MinV2WhatsApp(
               phone, b.userId.name, b.liveClassId.title,
