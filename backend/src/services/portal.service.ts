@@ -450,6 +450,8 @@ export interface PortalMentor {
   email: string
   /** Lent to this academy rather than belonging to it. */
   shared: boolean
+  /** The academy the mentor belongs to — the portal's calendar shows both academies' (2026-10-15). */
+  academy: { id: string; name: string } | null
   slots: { dayOfWeek: number; startTime: string; endTime: string }[]
   classes: PortalMentorClass[]
   /* Time booked with this mentor that is not a class. Carried beside the
@@ -499,8 +501,13 @@ export async function listMentorsForPortal(input: {
   remoteOrgId?: string
   from?: string
   to?: string
+  /* Every academy's mentors, not only this one's and the lent ones (the portal's Mentor Calendar, 2026-10-15: one
+     company runs both academies, so its staff book Dubai's and Bangalore's mentors alike) — each with its academy,
+     and every class with its title, course and module. */
+  allAcademies?: boolean
 }): Promise<{ timezone: string; from: string; to: string; mentors: PortalMentor[] }> {
   const org = await resolveOrg(input.remoteOrgId)
+  const all = input.allAcademies === true
 
   const from = input.from ? new Date(input.from) : new Date()
   if (Number.isNaN(from.getTime())) throw httpError('from is not a date', 400)
@@ -517,10 +524,14 @@ export async function listMentorsForPortal(input: {
 
   const mentors = await UserModel.find({
     role: 'instructor',
-    $or: [{ organizationId: org._id }, { sharedAcrossOrgs: true }],
+    ...(all ? {} : { $or: [{ organizationId: org._id }, { sharedAcrossOrgs: true }] }),
   })
     .select('name email organizationId sharedAcrossOrgs')
     .lean()
+  const academyNames = new Map(
+    (await OrganizationModel.find({ _id: { $in: [...new Set(mentors.map((m) => String(m.organizationId ?? '')).filter(Boolean))] } }).select('name').lean())
+      .map((o) => [String(o._id), String((o as { name?: string }).name ?? '')]),
+  )
 
   if (mentors.length === 0) {
     return { timezone: AVAILABILITY_TIMEZONE, from: from.toISOString(), to: to.toISOString(), mentors: [] }
@@ -570,7 +581,7 @@ export async function listMentorsForPortal(input: {
 
   // Each own class's course and module, read once for the whole list.
   const { CourseModel, SectionModel } = await import('@/models/schema.ts')
-  const own = classes.filter((c) => String(c.organizationId ?? '') === String(org._id))
+  const own = all ? classes : classes.filter((c) => String(c.organizationId ?? '') === String(org._id))
   const refsOf = (field: 'courseId' | 'sectionId') => [...new Set(own.map((c) => (c as Record<string, unknown>)[field]).filter(Boolean).map(String))]
   const [courseRows, sectionRows] = await Promise.all([
     CourseModel.find({ _id: { $in: refsOf('courseId') } }).select('title').lean(),
@@ -582,7 +593,8 @@ export async function listMentorsForPortal(input: {
   const classesByMentor = new Map<string, PortalMentorClass[]>()
   for (const c of classes) {
     const key = String(c.instructorId)
-    const mine = String(c.organizationId ?? '') === String(org._id)
+    // Every academy's, asked for all of them — the title, course and module of each.
+    const mine = all || String(c.organizationId ?? '') === String(org._id)
     const list = classesByMentor.get(key) ?? []
     list.push({
       id: String(c._id),
@@ -611,6 +623,7 @@ export async function listMentorsForPortal(input: {
         name: m.name ?? '',
         email: m.email ?? '',
         shared: String(m.organizationId ?? '') !== String(org._id),
+        academy: m.organizationId ? { id: String(m.organizationId), name: academyNames.get(String(m.organizationId)) ?? '' } : null,
         slots: (slotsByMentor.get(String(m._id)) ?? []).map((s) => ({
           dayOfWeek: s.dayOfWeek,
           startTime: s.startTime,
@@ -731,6 +744,8 @@ export async function createMentorMeetingForPortal(input: {
   attendees?: unknown
   notes?: string
   bookedByEmail?: string
+  /** Any academy's mentor — the portal's calendar lists both academies' (listMentorsForPortal allAcademies). */
+  allAcademies?: boolean
 }): Promise<{ meeting: PortalMentorMeeting; mentorEmail: string; linkNote: string | null }> {
   const org = await resolveOrg(input.remoteOrgId)
 
@@ -783,7 +798,7 @@ export async function createMentorMeetingForPortal(input: {
   const mentor = await UserModel.findOne({
     email: wanted,
     role: 'instructor',
-    $or: [{ organizationId: org._id }, { sharedAcrossOrgs: true }],
+    ...(input.allAcademies === true ? {} : { $or: [{ organizationId: org._id }, { sharedAcrossOrgs: true }] }),
   }).select('name email meetEmail').lean()
   if (!mentor) throw httpError('No mentor here with that address', 404)
 

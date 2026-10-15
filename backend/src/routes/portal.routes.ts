@@ -157,7 +157,9 @@ router.post('/class-attendance', wrap(async (req, res) => {
 router.get('/mentors', wrap(async (req, res) => {
   const from = typeof req.query.from === 'string' ? req.query.from : undefined
   const to = typeof req.query.to === 'string' ? req.query.to : undefined
-  sendSuccess(res, await listMentorsForPortal({ remoteOrgId: orgOf(req), from, to }), 'Mentors')
+  // ?allAcademies=1 — both academies' mentors (the portal's Mentor Calendar, 2026-10-15).
+  const allAcademies = req.query.allAcademies === '1' || req.query.allAcademies === 'true'
+  sendSuccess(res, await listMentorsForPortal({ remoteOrgId: orgOf(req), from, to, allAcademies }), 'Mentors')
 }))
 
 /**
