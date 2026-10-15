@@ -190,6 +190,16 @@ async function resolveCoMentors(refs: unknown, mainId: unknown): Promise<Types.O
   return users.map(u => u._id).filter(id => String(id) !== String(mainId))
 }
 
+/* Its picture (the portal, 2026-10-15): an https address, or '' to take it off. The student app shows it on the class
+   cards through the program's hidden course. */
+function imageOf(v: unknown): string | undefined {
+  if (v === undefined || v === null) return undefined
+  const url = String(v).trim()
+  if (!url) return ''
+  if (!/^https:\/\/\S+$/i.test(url) || url.length > 2048) throw new ProgramError('The picture must be an https address')
+  return url
+}
+
 /* How its classes meet. 'link' needs a Google Meet link; 'app' is online only. */
 function meetingChoice(input: Record<string, any>, isOnline: boolean): { mode: 'auto' | 'link' | 'app'; url?: string } {
   const mode = input.meetingMode === 'link' || input.meetingMode === 'app' ? input.meetingMode : 'auto'
@@ -247,7 +257,7 @@ async function present(p: any) {
   const [students, mentor, classes, coMentors] = await Promise.all([
     UserModel.find({ _id: { $in: p.studentIds ?? [] } }).select('name email').lean() as Promise<any[]>,
     UserModel.findById(p.instructorId).select('name email').lean() as Promise<any>,
-    LiveClassModel.find({ programId: p._id }).sort({ scheduledStart: 1 }).select('scheduledStart status durationMins').lean() as Promise<any[]>,
+    LiveClassModel.find({ programId: p._id }).sort({ scheduledStart: 1 }).select('scheduledStart status durationMins googleMeetCode').lean() as Promise<any[]>,
     UserModel.find({ _id: { $in: p.coInstructorIds ?? [] } }).select('name email').lean() as Promise<any[]>,
   ])
   const now = Date.now()
@@ -258,9 +268,13 @@ async function present(p: any) {
     mentor: mentor ? { id: String(mentor._id), name: mentor.name, email: mentor.email } : null,
     coMentors: coMentors.map(m => ({ id: String(m._id), name: m.name, email: m.email })),
     meetingMode: p.meetingMode ?? 'auto', meetingUrl: p.meetingUrl ?? '', language: p.language || 'English',
+    thumbnailUrl: p.thumbnailUrl ?? '',
     students: students.map(s => ({ id: String(s._id), name: s.name, email: s.email })),
     createdByName: p.createdByName ?? '', createdByEmail: p.createdByEmail ?? '',
-    classes: classes.map(c => ({ id: String(c._id), startsAt: c.scheduledStart, status: c.status })),
+    /* Each class's Google Meet link — the program's own link, else the room made for that class (2026-10-15: the portal
+       shows the program's link). In person, none. */
+    classes: classes.map(c => ({ id: String(c._id), startsAt: c.scheduledStart, status: c.status,
+      meetUrl: !p.isOnline ? '' : p.meetingMode === 'link' && p.meetingUrl ? p.meetingUrl : c.googleMeetCode ? `https://meet.google.com/${c.googleMeetCode}` : '' })),
     nextClassAt: classes.find(c => c.status === 'scheduled' && new Date(c.scheduledStart).getTime() > now)?.scheduledStart ?? null,
   }
 }
@@ -303,9 +317,11 @@ export async function createProgram(input: Record<string, any>, actor: Actor) {
   if (!ids.length) throw new ProgramError(missing.length ? `Not students on the LMS: ${missing.join(', ')}` : 'Add at least one student')
   if (ids.length > MAX_PROGRAM_STUDENTS) throw tooMany(ids.length)
 
+  const image = imageOf(input.thumbnailUrl)
   const programId = new Types.ObjectId()
   const course = await CourseModel.create({
     title: `Program: ${title}`, slug: `program-${crypto.randomBytes(6).toString('hex')}`, description: String(input.description ?? '').trim() || title,
+    ...(image ? { thumbnailUrl: image } : {}),
     instructorId: mentor._id, price: 0, isFree: true, status: 'draft', language: 'English', programId,
     ...(orgId ? { organizationId: new Types.ObjectId(orgId) } : {}),
   } as any)
@@ -313,6 +329,7 @@ export async function createProgram(input: Record<string, any>, actor: Actor) {
     _id: programId, title, description: String(input.description ?? '').trim(), ...(orgId ? { organizationId: new Types.ObjectId(orgId) } : {}),
     instructorId: mentor._id, ...(coMentorIds.length ? { coInstructorIds: coMentorIds } : {}),
     meetingMode: meeting.mode, ...(meeting.url ? { meetingUrl: meeting.url } : {}), language,
+    ...(image ? { thumbnailUrl: image } : {}),
     courseId: course._id, ...s, timezone: DEFAULT_TZ, isOnline, location: String(input.location ?? '').trim(),
     studentIds: ids, status: 'active', source: actor.role === 'portal' ? 'portal' : 'lms',
     ...(actor.id && Types.ObjectId.isValid(actor.id) ? { createdById: new Types.ObjectId(actor.id) } : {}),
@@ -384,6 +401,20 @@ export async function changeStudents(id: string, input: { add?: unknown; remove?
 export async function rescheduleProgram(id: string, input: Record<string, any>, actor: Actor) {
   const p = await load(id, actor)
   if (p.status !== 'active') throw new ProgramError('This program is stopped')
+  // Its picture alone (2026-10-15): saved on it and its hidden course — the classes stay as they are.
+  const image = imageOf(input.thumbnailUrl)
+  if (image !== undefined) {
+    const { CourseModel } = await import('@/models/schema.ts')
+    p.thumbnailUrl = image || undefined
+    await CourseModel.updateOne({ _id: p.courseId }, image ? { $set: { thumbnailUrl: image } } : { $unset: { thumbnailUrl: '' } })
+  }
+  const SCHEDULE_KEYS = ['repeat', 'weekdays', 'monthDay', 'startDate', 'endDate', 'time', 'durationMins', 'isOnline', 'location']
+  if (!SCHEDULE_KEYS.some(k => input[k] !== undefined)) {
+    if (typeof input.title === 'string' && input.title.trim().length >= 3) p.title = input.title.trim()
+    if (typeof input.description === 'string') p.description = input.description.trim()
+    await p.save()
+    return present(p)
+  }
   const s = {
     repeat: input.repeat ?? p.repeat, weekdays: (input.weekdays ?? p.weekdays ?? []).map(Number),
     monthDay: input.monthDay === undefined ? p.monthDay : (input.monthDay === null || input.monthDay === '' ? undefined : Number(input.monthDay)),

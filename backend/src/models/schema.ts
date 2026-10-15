@@ -3025,6 +3025,8 @@ export interface IProgram extends Document {
   meetingMode?:    'auto' | 'link' | 'app'
   meetingUrl?:     string
   language?:       string
+  /** Its picture — also its hidden course's, which the student app shows on the class cards (2026-10-15). */
+  thumbnailUrl?:   string
   courseId:        Types.ObjectId
   repeat:          'weekly' | 'monthly'
   weekdays:        number[]          // weekly: 0 = Sunday … 6 = Saturday
@@ -3057,6 +3059,7 @@ const ProgramSchema = new Schema<IProgram>(
     meetingMode:    { type: String, enum: ['auto', 'link', 'app'], default: 'auto' },
     meetingUrl:     { type: String, maxlength: 2048 },
     language:       { type: String, default: 'English', maxlength: 40 },
+    thumbnailUrl:   { type: String, maxlength: 2048 },
     courseId:       { type: Schema.Types.ObjectId, ref: 'Course', required: true },
     repeat:         { type: String, enum: ['weekly', 'monthly'], required: true },
     weekdays:       { type: [Number], default: [] },
