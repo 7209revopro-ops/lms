@@ -133,7 +133,10 @@ function ProgramDialog({ program, onClose }: { program?: Program; onClose: () =>
   const { data: me } = useCurrentUser()
   const isInstructor = (me as any)?.role === 'instructor'
   const today = new Date().toLocaleDateString('en-CA', { timeZone: TZ })
-  const { data: cal } = useMentorCalendar(new Date().toISOString(), new Date(Date.now() + 864e5).toISOString())
+  /* Fixed once: a range built from "now" on every render is a new query key every render, so the list
+     was refetched forever and never shown. Only the mentors are read from it. */
+  const [range] = useState(() => [new Date().toISOString(), new Date(Date.now() + 864e5).toISOString()] as const)
+  const { data: cal, isLoading: mentorsLoading } = useMentorCalendar(range[0], range[1])
   const create = useCreateProgram()
   const reschedule = useRescheduleProgram()
   const [f, setF] = useState({
@@ -169,7 +172,7 @@ function ProgramDialog({ program, onClose }: { program?: Program; onClose: () =>
         <textarea className={field} rows={2} placeholder="What it is (optional)" value={f.description} onChange={e => set('description', e.target.value)} />
         {!program && (
           <select className={field} value={f.instructorId} onChange={e => set('instructorId', e.target.value)}>
-            <option value="">{isInstructor ? 'Mentor: me' : 'Pick the mentor…'}</option>
+            <option value="">{mentorsLoading ? 'Loading mentors…' : isInstructor ? 'Mentor: me' : 'Pick the mentor…'}</option>
             {mentors.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
           </select>
         )}
