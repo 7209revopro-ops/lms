@@ -9,13 +9,17 @@ export interface Program {
   id: string; title: string; description: string; status: 'active' | 'stopped'; source: 'lms' | 'portal'
   repeat: 'weekly' | 'monthly'; weekdays: number[]; monthDay: number | null; startDate: string; endDate: string
   time: string; timezone: string; durationMins: number; isOnline: boolean; location: string
-  mentor: ProgramPerson | null; students: ProgramPerson[]; createdByName: string; createdByEmail: string
+  mentor: ProgramPerson | null; coMentors?: ProgramPerson[]; meetingMode?: 'auto' | 'link' | 'app'; meetingUrl?: string
+  students: ProgramPerson[]; createdByName: string; createdByEmail: string
   classes: { id: string; startsAt: string; status: string }[]; nextClassAt: string | null; missing?: string[]
 }
 export interface ProgramInput {
   title: string; description?: string; repeat: 'weekly' | 'monthly'; weekdays?: number[]; monthDay?: number | null
   startDate: string; endDate: string; time: string; durationMins: number; isOnline: boolean; location?: string
   instructorId?: string; students: string[]
+  /* Co-mentors (Meet co-hosts, see it, get the 10-minute WhatsApp); how it meets — a Meet room made per class,
+     the admin's own Meet link, or the in-app stream. */
+  coInstructorIds?: string[]; meetingMode?: 'auto' | 'link' | 'app'; meetingUrl?: string
 }
 
 const KEY = ['admin', 'programs']

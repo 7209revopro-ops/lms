@@ -733,12 +733,20 @@ export async function runMentor10MinWhatsApp(): Promise<void> {
       const mentor = cls.instructorId as { id?: string; name?: string; phone?: string } | null
       const liveClassId = String((cls as { id?: string }).id ?? cls._id)
       try {
+        const when = fmtTime(new Date(cls.scheduledStart), orgSlugFor((cls as { organizationId?: unknown }).organizationId))
         if (mentor?.phone?.trim()) {
-          await sendMentorClassIn10MinWhatsApp(
-            mentor.phone, mentor.name ?? 'Mentor', cls.title,
-            fmtTime(new Date(cls.scheduledStart), orgSlugFor((cls as { organizationId?: unknown }).organizationId)),
-            cls.bookedCount ?? 0, liveClassId,
-          )
+          await sendMentorClassIn10MinWhatsApp(mentor.phone, mentor.name ?? 'Mentor', cls.title, when, cls.bookedCount ?? 0, liveClassId)
+        }
+        /* A Program's co-mentors get the same message — each with their own name. */
+        const coIds = (cls as { coInstructorIds?: unknown[] }).coInstructorIds ?? []
+        if (coIds.length) {
+          const { UserModel } = await import('@/models/schema.ts')
+          const co = await UserModel.find({ _id: { $in: coIds } }).select('name phone').lean() as Array<{ name?: string; phone?: string }>
+          for (const m of co) {
+            if (!m.phone?.trim()) continue
+            await sendMentorClassIn10MinWhatsApp(m.phone, m.name ?? 'Mentor', cls.title, when, cls.bookedCount ?? 0, liveClassId)
+              .catch(err => logger.warn({ err, classId: cls._id }, '[Reminders] co-mentor 10-min WhatsApp failed'))
+          }
         }
         await LiveClassModel.updateOne({ _id: cls._id }, { $set: { mentorWhatsApp10MinSent: true } })
       } catch (err) {

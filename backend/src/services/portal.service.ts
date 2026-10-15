@@ -543,10 +543,11 @@ export async function listMentorsForPortal(input: {
   const [availability, classes, meetings] = await Promise.all([
     MentorAvailabilityModel.find({ mentorId: { $in: ids } }).lean(),
     LiveClassModel.find({
-      instructorId: { $in: ids },
+      /* Theirs to teach, or co-mentored (a Program's) — a co-mentor is busy then too. */
+      $or: [{ instructorId: { $in: ids } }, { coInstructorIds: { $in: ids } }],
       scheduledStart: { $gte: from, $lte: to },
     })
-      .select('title instructorId scheduledStart durationMins status bookedCount sessionCapacity organizationId courseId sectionId')
+      .select('title instructorId coInstructorIds scheduledStart durationMins status bookedCount sessionCapacity organizationId courseId sectionId')
       .lean(),
     MentorMeetingModel.find({
       mentorId: { $in: ids },
@@ -592,9 +593,10 @@ export async function listMentorsForPortal(input: {
 
   const classesByMentor = new Map<string, PortalMentorClass[]>()
   for (const c of classes) {
-    const key = String(c.instructorId)
     // Every academy's, asked for all of them — the title, course and module of each.
     const mine = all || String(c.organizationId ?? '') === String(org._id)
+    /* Under the main mentor and under each co-mentor. */
+    for (const key of [...new Set([String(c.instructorId), ...((c as { coInstructorIds?: unknown[] }).coInstructorIds ?? []).map(String)])]) {
     const list = classesByMentor.get(key) ?? []
     list.push({
       id: String(c._id),
@@ -611,6 +613,7 @@ export async function listMentorsForPortal(input: {
       module: mine && (c as { sectionId?: unknown }).sectionId ? moduleTitles.get(String((c as { sectionId?: unknown }).sectionId)) ?? null : null,
     })
     classesByMentor.set(key, list)
+    }
   }
 
   return {

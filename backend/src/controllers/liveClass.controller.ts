@@ -1019,7 +1019,7 @@ export class LiveClassController {
     /* guestCohorts is in the projection because classServesOrg reads it; without
        it the helper sees an empty array and every shared class looks unshared. */
     const live = await LiveClassModel.findById(id)
-      .select('instructorId courseId organizationId guestCohorts').lean()
+      .select('instructorId coInstructorIds courseId organizationId guestCohorts').lean()
     if (!live) {
       res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Live class not found' } }); return false
     }
@@ -1032,7 +1032,10 @@ export class LiveClassController {
        design, so asking tenancy first answered 404 for every class the
        lending feature exists to create. See instructorOwnsSession in
        utils/tenancy.ts. */
-    const owns = await instructorOwnsSession(req, live)
+    /* A Program's co-mentor may READ the class (see it, open its page, join its room) — never change it. */
+    const coMentor = mode === 'read' && role === 'instructor'
+      && ((live as { coInstructorIds?: unknown[] }).coInstructorIds ?? []).some(c => String(c) === String(req.user?.id))
+    const owns = coMentor || await instructorOwnsSession(req, live)
 
     /* 1. Tenancy. A caller with no academy on record, or a session that
        predates the field, stays unscoped — same convention as every other
@@ -1176,7 +1179,8 @@ export class LiveClassController {
          rather than in the query because the set is one course's worth of
          rows and it keeps the repository signature untouched. */
       const visible = req.user?.role === 'instructor'
-        ? docs.filter(d => String((d as { instructorId?: unknown }).instructorId ?? '') === String(req.user!.id))
+        ? docs.filter(d => String((d as { instructorId?: unknown }).instructorId ?? '') === String(req.user!.id)
+            || ((d as { coInstructorIds?: unknown[] }).coInstructorIds ?? []).some(c => String(c) === String(req.user!.id)))
         : docs
 
       /* THIS ROUTE HAS NEVER HAD AN ACADEMY TERM, and it hands back the DTO —
@@ -1265,7 +1269,13 @@ export class LiveClassController {
     seriesId?: string,
     /* Every existing caller omits this, so their behaviour is unchanged. Only
        the timetable import sets it — see createForImport below. */
-    opts: { notifyInstructor?: boolean; notifyStudents?: boolean; importJobId?: string; importRef?: string } = {},
+    opts: {
+      notifyInstructor?: boolean; notifyStudents?: boolean; importJobId?: string; importRef?: string
+      /* Programs only (createForProgram): a Google Meet link the admin pasted, used as it is instead
+         of making a room; and more co-hosts for the room that is made (its co-mentors). Never read
+         from a request body. */
+      presetMeetingUrl?: string; extraCohosts?: string[]
+    } = {},
   ): Promise<{ live: Awaited<ReturnType<LiveClassService['create']>>; meetingUrl?: string }> => {
     /* Category scope check — a programme-scoped sub_admin can only create for their program */
     const scope = req.user?.categoryScope as string | undefined
@@ -1311,7 +1321,11 @@ export class LiveClassController {
     let meetingUrl: string | undefined
     let googleMeetCode: string | undefined
     let meetSpace: MeetSpaceRecord | undefined
-    if (sessionType === 'external' && isOnline) {
+    if (sessionType === 'external' && isOnline && opts.presetMeetingUrl) {
+      /* The admin's own link: no room is made, so nobody is made co-host — the link's owner runs it. */
+      meetingUrl     = opts.presetMeetingUrl
+      googleMeetCode = /meet\.google\.com\/([a-z]{3}-[a-z]{4}-[a-z]{3})/i.exec(opts.presetMeetingUrl)?.[1]?.toLowerCase()
+    } else if (sessionType === 'external' && isOnline) {
       /* Look up instructor email so workspace users become the Meet host */
       const { UserModel } = await import('@/models/schema.ts')
       const instructor = await UserModel.findById(instructorId).select('email meetEmail').lean()
@@ -1342,8 +1356,9 @@ export class LiveClassController {
           durationMins:     dto.durationMins,
           instructorEmail,
           instructorMeetEmail,
-          /* The staff account co-hosts every class, ahead of the instructor. */
-          staffCohosts:     staffMeetCohosts(),
+          /* The staff account co-hosts every class, ahead of the instructor — and a
+             program's co-mentors after it. */
+          staffCohosts:     [...new Set([...staffMeetCohosts(), ...(opts.extraCohosts ?? []).map(e => e.trim().toLowerCase()).filter(Boolean)])],
         })
         meetingUrl     = meet.meetingUrl
         googleMeetCode = meet.meetingCode || undefined
@@ -1499,7 +1514,9 @@ export class LiveClassController {
     })
 
   /* One class of a Program (services/program.service.ts): the same path as the form — Meet link, instructor checks —
-     with nobody notified here; the program books its students' seats and their reminders follow the bookings. */
+     with nobody notified here; the program books its students' seats and their reminders follow the bookings.
+     How it meets: a Meet room made for it ('auto', the default), the admin's own Meet link ('link'), or the
+     in-app stream ('app' — LiveKit, the interactive one). Co-mentors' Meet addresses co-host a made room. */
   createForProgram = (
     dto: {
       courseId:         string
@@ -1515,10 +1532,15 @@ export class LiveClassController {
     },
     actor: { id: string; role: string; organizationId?: string },
     seriesId: string,
+    how: { meetingMode?: 'auto' | 'link' | 'app'; meetingUrl?: string; cohostEmails?: string[] } = {},
   ): Promise<{ live: Awaited<ReturnType<LiveClassService['create']>>; meetingUrl?: string }> =>
-    this.#createOne({ ...dto, type: 'external' }, { user: actor } as unknown as Request, seriesId, {
-      notifyInstructor: false, notifyStudents: false,
-    })
+    this.#createOne(
+      how.meetingMode === 'app' && dto.isOnline !== false ? { ...dto, type: 'internal', provider: 'livekit' } : { ...dto, type: 'external' },
+      { user: actor } as unknown as Request, seriesId, {
+        notifyInstructor: false, notifyStudents: false,
+        ...(how.meetingMode === 'link' && how.meetingUrl ? { presetMeetingUrl: how.meetingUrl } : {}),
+        ...(how.cohostEmails?.length ? { extraCohosts: how.cohostEmails } : {}),
+      })
 
   adminCreate = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     try {

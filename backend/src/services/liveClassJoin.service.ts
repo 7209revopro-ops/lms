@@ -223,7 +223,9 @@ export async function mintHostTicket(
   assertJoinable(live)
 
   const isAdmin = ADMIN_OBSERVER_ROLES.has(ctx.role)
+  /* The main mentor, or one of a Program's co-mentors — both host the room. */
   const isAssigned = String(live.instructorId) === ctx.userId
+    || ((live as { coInstructorIds?: unknown[] }).coInstructorIds ?? []).some(c => String(c) === ctx.userId)
   if (!isAdmin && !isAssigned) {
     /* Being an instructor is not enough — it must be THIS class. Otherwise any
        instructor could take room control of a colleague's session, and an

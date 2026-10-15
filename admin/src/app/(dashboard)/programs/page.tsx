@@ -66,10 +66,10 @@ function ProgramCard({ p, open, onToggle }: { p: Program; open: boolean; onToggl
       <button type="button" onClick={onToggle} className="flex w-full flex-wrap items-start justify-between gap-2 text-left">
         <div>
           <p className="font-semibold">{p.title}{p.status === 'stopped' && <span className="ml-2 rounded bg-white/10 px-1.5 text-xs">stopped</span>}{p.source === 'portal' && <span className="ml-2 text-xs opacity-60">from the portal{p.createdByName ? ` · ${p.createdByName}` : ''}</span>}</p>
-          <p className="mt-0.5 flex items-center gap-1.5 text-xs opacity-70"><Repeat className="h-3.5 w-3.5" />{repeatText(p)} · {p.durationMins} min · until {p.endDate} · {p.isOnline ? 'online' : p.location}</p>
+          <p className="mt-0.5 flex items-center gap-1.5 text-xs opacity-70"><Repeat className="h-3.5 w-3.5" />{repeatText(p)} · {p.durationMins} min · until {p.endDate} · {p.isOnline ? (p.meetingMode === 'app' ? 'in-app stream' : p.meetingMode === 'link' ? 'own Meet link' : 'Google Meet') : p.location}</p>
         </div>
         <div className="text-right text-xs opacity-80">
-          <p>{p.mentor?.name ?? '—'}</p>
+          <p>{p.mentor?.name ?? '—'}{p.coMentors?.length ? <span className="opacity-70"> + {p.coMentors.map(m => m.name).join(', ')}</span> : null}</p>
           <p>{p.students.length} student{p.students.length === 1 ? '' : 's'} · {upcoming.length} to come</p>
           {p.nextClassAt && <p className="flex items-center justify-end gap-1"><CalendarClock className="h-3.5 w-3.5" />{when(p.nextClassAt)}</p>}
         </div>
@@ -144,6 +144,7 @@ function ProgramDialog({ program, onClose }: { program?: Program; onClose: () =>
     weekdays: program?.weekdays ?? [] as number[], monthDay: program?.monthDay ?? '' as number | '',
     startDate: program?.startDate ?? today, endDate: program?.endDate ?? '', time: program?.time ?? '19:00', durationMins: program?.durationMins ?? 60,
     isOnline: program?.isOnline ?? true, location: program?.location ?? '', instructorId: program?.mentor?.id ?? '',
+    coMentorIds: [] as string[], meetingMode: 'auto' as 'auto' | 'link' | 'app', meetingUrl: '',
   })
   const [students, setStudents] = useState<ProgramPerson[]>([])
   const [err, setErr] = useState('')
@@ -157,7 +158,12 @@ function ProgramDialog({ program, onClose }: { program?: Program; onClose: () =>
       if (program) {
         await reschedule.mutateAsync({ id: program.id, title: f.title.trim(), description: f.description.trim(), isOnline: f.isOnline, location: f.location.trim(), ...sched })
       } else {
-        const made = await create.mutateAsync({ title: f.title.trim(), description: f.description.trim(), ...sched, isOnline: f.isOnline, location: f.location.trim(), ...(f.instructorId ? { instructorId: f.instructorId } : {}), students: students.map(s => s.id) })
+        const made = await create.mutateAsync({
+          title: f.title.trim(), description: f.description.trim(), ...sched, isOnline: f.isOnline, location: f.location.trim(),
+          ...(f.instructorId ? { instructorId: f.instructorId } : {}), students: students.map(s => s.id),
+          ...(f.coMentorIds.length ? { coInstructorIds: f.coMentorIds.filter(id => id !== f.instructorId) } : {}),
+          ...(f.isOnline ? { meetingMode: f.meetingMode, ...(f.meetingMode === 'link' ? { meetingUrl: f.meetingUrl.trim() } : {}) } : {}),
+        })
         if (made.missing?.length) alert(`Not added — not students on the LMS: ${made.missing.join(', ')}`)
       }
       onClose()
@@ -175,6 +181,21 @@ function ProgramDialog({ program, onClose }: { program?: Program; onClose: () =>
             <option value="">{mentorsLoading ? 'Loading mentors…' : isInstructor ? 'Mentor: me' : 'Pick the mentor…'}</option>
             {mentors.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
           </select>
+        )}
+        {!program && (
+          <div>
+            <p className="mb-1 text-xs opacity-80">Co-mentors (optional) — Meet co-hosts on every class, see it in their schedule, get the 10-minute WhatsApp</p>
+            <div className="mb-1 flex flex-wrap gap-1.5">
+              {f.coMentorIds.map(id => {
+                const m = mentors.find(x => x.id === id)
+                return <span key={id} className="flex items-center gap-1 rounded-full bg-white/5 px-2.5 py-1 text-xs">{m?.name ?? id}<button type="button" onClick={() => set('coMentorIds', f.coMentorIds.filter(x => x !== id))} aria-label={`Remove ${m?.name ?? 'co-mentor'}`}><X className="h-3 w-3" /></button></span>
+              })}
+            </div>
+            <select className={field} value="" onChange={e => { const v = e.target.value; if (v && !f.coMentorIds.includes(v)) set('coMentorIds', [...f.coMentorIds, v]) }}>
+              <option value="">{mentorsLoading ? 'Loading mentors…' : 'Add a co-mentor…'}</option>
+              {mentors.filter(m => m.id !== f.instructorId && !f.coMentorIds.includes(m.id)).map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
+            </select>
+          </div>
         )}
         <div className="flex gap-2">
           {(['weekly', 'monthly'] as const).map(r => <button key={r} type="button" onClick={() => set('repeat', r)} className={`flex-1 rounded-lg px-3 py-2 text-sm ${f.repeat === r ? 'bg-blue-600 text-white' : 'border border-white/10'}`}>{r === 'weekly' ? 'Weekly' : 'Monthly'}</button>)}
@@ -196,11 +217,26 @@ function ProgramDialog({ program, onClose }: { program?: Program; onClose: () =>
         </div>
         <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={!f.isOnline} onChange={e => set('isOnline', !e.target.checked)} />In person (no Meet link)</label>
         {!f.isOnline && <input className={field} placeholder="Where — room or office" value={f.location} onChange={e => set('location', e.target.value)} />}
+        {!program && f.isOnline && (
+          <div className="space-y-2">
+            <p className="text-xs opacity-80">How it meets</p>
+            <div className="grid grid-cols-3 gap-2">
+              {([['auto', 'Google Meet', 'A room made for each class'], ['link', 'Paste a Meet link', 'Your own link, every class'], ['app', 'In-app stream', 'Live in the LMS']] as const).map(([v, label, hint]) => (
+                <button key={v} type="button" onClick={() => set('meetingMode', v)}
+                  className={`rounded-lg px-2 py-2 text-left text-xs ${f.meetingMode === v ? 'bg-blue-600 text-white' : 'border border-white/10'}`}>
+                  <span className="block text-sm font-medium">{label}</span><span className="opacity-75">{hint}</span>
+                </button>
+              ))}
+            </div>
+            {f.meetingMode === 'link' && <input className={field} placeholder="https://meet.google.com/abc-defg-hij" value={f.meetingUrl} onChange={e => set('meetingUrl', e.target.value)} />}
+            {f.meetingMode === 'link' && f.coMentorIds.length > 0 && <p className="text-[11px] text-amber-300/90">With your own link, co-mentors are not made co-hosts automatically — add them in Meet yourself.</p>}
+          </div>
+        )}
         {!program && <PickStudents students={students} setStudents={setStudents} />}
         {err && <p className="text-sm text-rose-400">{err}</p>}
         <div className="flex justify-end gap-2">
           <button type="button" onClick={onClose} className="rounded-lg border border-white/10 px-4 py-2 text-sm">Cancel</button>
-          <button type="button" disabled={busy || f.title.trim().length < 3 || !f.endDate || (f.repeat === 'weekly' && !f.weekdays.length) || (!program && (!students.length || students.length > MAX_STUDENTS)) || (!f.isOnline && f.location.trim().length < 2) || (!program && !isInstructor && !f.instructorId)} onClick={submit} className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white disabled:opacity-50">{busy ? 'Saving…' : program ? 'Save' : 'Create program'}</button>
+          <button type="button" disabled={busy || f.title.trim().length < 3 || !f.endDate || (f.repeat === 'weekly' && !f.weekdays.length) || (!program && (!students.length || students.length > MAX_STUDENTS)) || (!f.isOnline && f.location.trim().length < 2) || (!program && f.isOnline && f.meetingMode === 'link' && !/^https:\/\/meet\.google\.com\/[a-z]{3}-[a-z]{4}-[a-z]{3}/i.test(f.meetingUrl.trim())) || (!program && !isInstructor && !f.instructorId)} onClick={submit} className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white disabled:opacity-50">{busy ? 'Saving…' : program ? 'Save' : 'Create program'}</button>
         </div>
       </div>
     </div>

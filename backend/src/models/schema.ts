@@ -1156,6 +1156,8 @@ export interface ILiveClass extends Document {
   id:             string
   courseId:       Types.ObjectId
   instructorId:   Types.ObjectId
+  /** Co-mentors (a Program's): Meet co-hosts, see the class and get the mentor's 10-minute WhatsApp. The main mentor stays instructorId. */
+  coInstructorIds?: Types.ObjectId[]
   title:          string
   description?:   string
   scheduledStart: Date
@@ -1356,6 +1358,9 @@ const LiveClassSchema = new Schema<ILiveClass>(
   {
     courseId:       { type: Schema.Types.ObjectId, ref: 'Course', required: true },
     instructorId:   { type: Schema.Types.ObjectId, ref: 'User',   required: true },
+    /* Co-mentors — set on a Program's classes. Read-only on the class: the main
+       mentor (instructorId) runs it, takes attendance and is reviewed. */
+    coInstructorIds: { type: [{ type: Schema.Types.ObjectId, ref: 'User' }], default: undefined, index: true },
     title:          { type: String, required: true, trim: true, maxlength: 255 },
     description:    { type: String, maxlength: 2000 },
     scheduledStart: { type: Date,   required: true },
@@ -3016,6 +3021,9 @@ export interface IProgram extends Document {
   description?:    string
   organizationId?: Types.ObjectId
   instructorId:    Types.ObjectId
+  coInstructorIds?: Types.ObjectId[]
+  meetingMode?:    'auto' | 'link' | 'app'
+  meetingUrl?:     string
   courseId:        Types.ObjectId
   repeat:          'weekly' | 'monthly'
   weekdays:        number[]          // weekly: 0 = Sunday … 6 = Saturday
@@ -3043,6 +3051,10 @@ const ProgramSchema = new Schema<IProgram>(
     description:    { type: String, maxlength: 2000 },
     organizationId: { type: Schema.Types.ObjectId, ref: 'Organization', index: true },
     instructorId:   { type: Schema.Types.ObjectId, ref: 'User', required: true },
+    coInstructorIds: [{ type: Schema.Types.ObjectId, ref: 'User' }],
+    /* How its classes meet: a Meet room made per class, the admin's own Meet link, or the in-app stream. */
+    meetingMode:    { type: String, enum: ['auto', 'link', 'app'], default: 'auto' },
+    meetingUrl:     { type: String, maxlength: 2048 },
     courseId:       { type: Schema.Types.ObjectId, ref: 'Course', required: true },
     repeat:         { type: String, enum: ['weekly', 'monthly'], required: true },
     weekdays:       { type: [Number], default: [] },

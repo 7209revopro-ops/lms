@@ -176,6 +176,32 @@ async function upcomingClassIds(programId: Types.ObjectId): Promise<Types.Object
   return (await LiveClassModel.find({ programId, status: 'scheduled', scheduledStart: { $gt: new Date() } }).select('_id').lean() as any[]).map(c => c._id)
 }
 
+/* Co-mentors: other instructors (or admins) by id or email — never a student, never the main mentor. */
+async function resolveCoMentors(refs: unknown, mainId: unknown): Promise<Types.ObjectId[]> {
+  const { UserModel } = await import('@/models/schema.ts')
+  const list = (Array.isArray(refs) ? refs : []).map(r => String(r ?? '').trim()).filter(Boolean)
+  if (!list.length) return []
+  const ids = list.filter(r => Types.ObjectId.isValid(r) && !r.includes('@')).map(r => new Types.ObjectId(r))
+  const emails = list.filter(r => r.includes('@')).map(e => e.toLowerCase())
+  const users = await UserModel.find({ $or: [{ _id: { $in: ids } }, { email: { $in: emails } }], role: { $ne: 'student' } }).select('_id').lean() as any[]
+  if (users.length < list.length) throw new ProgramError('A co-mentor was not found, or is not staff')
+  return users.map(u => u._id).filter(id => String(id) !== String(mainId))
+}
+
+/* How its classes meet. 'link' needs a Google Meet link; 'app' is online only. */
+function meetingChoice(input: Record<string, any>, isOnline: boolean): { mode: 'auto' | 'link' | 'app'; url?: string } {
+  const mode = input.meetingMode === 'link' || input.meetingMode === 'app' ? input.meetingMode : 'auto'
+  if (!isOnline) return { mode: 'auto' }
+  if (mode === 'link') {
+    const url = String(input.meetingUrl ?? '').trim()
+    if (!/^https:\/\/meet\.google\.com\/[a-z]{3}-[a-z]{4}-[a-z]{3}(\?.*)?$/i.test(url)) {
+      throw new ProgramError('Paste a Google Meet link — https://meet.google.com/abc-defg-hij')
+    }
+    return { mode, url }
+  }
+  return { mode }
+}
+
 /** Every date of the program still ahead, as a class with the students booked. Returns how many were made. */
 async function makeClasses(p: any, actor: Actor): Promise<number> {
   const { LiveClassModel } = await import('@/models/schema.ts')
@@ -183,6 +209,13 @@ async function makeClasses(p: any, actor: Actor): Promise<number> {
   const ctrl = new LiveClassController()
   const now = Date.now()
   const made: Types.ObjectId[] = []
+  const { UserModel } = await import('@/models/schema.ts')
+  const { effectiveMeetEmail } = await import('@/services/googleMeet.service.ts')
+  const coIds: Types.ObjectId[] = p.coInstructorIds ?? []
+  const cohostEmails = coIds.length
+    ? (await UserModel.find({ _id: { $in: coIds } }).select('email meetEmail').lean() as any[]).map(u => effectiveMeetEmail(u)).filter(Boolean) as string[]
+    : []
+  const how = { meetingMode: (p.meetingMode ?? 'auto') as 'auto' | 'link' | 'app', ...(p.meetingUrl ? { meetingUrl: p.meetingUrl } : {}), cohostEmails }
   for (const date of programDates(p)) {
     const start = wallToUtc(date, p.time, p.timezone || DEFAULT_TZ)
     if (start.getTime() <= now) continue
@@ -190,8 +223,8 @@ async function makeClasses(p: any, actor: Actor): Promise<number> {
       courseId: String(p.courseId), title: p.title, description: p.description, scheduledStart: start, durationMins: p.durationMins,
       instructorId: String(p.instructorId), sessionCapacity: Math.max(30, (p.studentIds?.length ?? 0) + 10),
       isOnline: p.isOnline, location: p.location, ...(p.organizationId ? { organizationId: String(p.organizationId) } : {}),
-    }, { id: actor.id && Types.ObjectId.isValid(actor.id) ? actor.id : String(p.instructorId), role: actor.role === 'portal' ? 'admin' : actor.role, ...(p.organizationId ? { organizationId: String(p.organizationId) } : {}) }, String(p._id))
-    await LiveClassModel.updateOne({ _id: (live as any)._id }, { $set: { programId: p._id } })
+    }, { id: actor.id && Types.ObjectId.isValid(actor.id) ? actor.id : String(p.instructorId), role: actor.role === 'portal' ? 'admin' : actor.role, ...(p.organizationId ? { organizationId: String(p.organizationId) } : {}) }, String(p._id), how)
+    await LiveClassModel.updateOne({ _id: (live as any)._id }, { $set: { programId: p._id, ...(coIds.length ? { coInstructorIds: coIds } : {}) } })
     made.push((live as any)._id)
   }
   await bookSeats(made, p.studentIds ?? [], { organizationId: p.organizationId ? String(p.organizationId) : null, courseId: String(p.courseId) })
@@ -209,10 +242,11 @@ async function cancelUpcoming(programId: Types.ObjectId, reason: string): Promis
 /* ── The answer ────────────────────────────────────────────────────────── */
 async function present(p: any) {
   const { LiveClassModel, UserModel } = await import('@/models/schema.ts')
-  const [students, mentor, classes] = await Promise.all([
+  const [students, mentor, classes, coMentors] = await Promise.all([
     UserModel.find({ _id: { $in: p.studentIds ?? [] } }).select('name email').lean() as Promise<any[]>,
     UserModel.findById(p.instructorId).select('name email').lean() as Promise<any>,
     LiveClassModel.find({ programId: p._id }).sort({ scheduledStart: 1 }).select('scheduledStart status durationMins').lean() as Promise<any[]>,
+    UserModel.find({ _id: { $in: p.coInstructorIds ?? [] } }).select('name email').lean() as Promise<any[]>,
   ])
   const now = Date.now()
   return {
@@ -220,6 +254,8 @@ async function present(p: any) {
     repeat: p.repeat, weekdays: p.weekdays ?? [], monthDay: p.monthDay ?? null, startDate: p.startDate, endDate: p.endDate,
     time: p.time, timezone: p.timezone, durationMins: p.durationMins, isOnline: p.isOnline, location: p.location ?? '',
     mentor: mentor ? { id: String(mentor._id), name: mentor.name, email: mentor.email } : null,
+    coMentors: coMentors.map(m => ({ id: String(m._id), name: m.name, email: m.email })),
+    meetingMode: p.meetingMode ?? 'auto', meetingUrl: p.meetingUrl ?? '',
     students: students.map(s => ({ id: String(s._id), name: s.name, email: s.email })),
     createdByName: p.createdByName ?? '', createdByEmail: p.createdByEmail ?? '',
     classes: classes.map(c => ({ id: String(c._id), startsAt: c.scheduledStart, status: c.status })),
@@ -256,6 +292,8 @@ export async function createProgram(input: Record<string, any>, actor: Actor) {
     ? await UserModel.findOne(mentorRef.includes('@') ? { email: mentorRef.toLowerCase() } : { _id: Types.ObjectId.isValid(mentorRef) ? mentorRef : null }).select('_id role organizationId sharedAcrossOrgs').lean()
     : actor.role === 'instructor' && actor.id ? await UserModel.findById(actor.id).select('_id role organizationId').lean() : null
   if (!mentor || mentor.role === 'student') throw new ProgramError('Pick the mentor who takes it')
+  const coMentorIds = await resolveCoMentors(input.coInstructorIds ?? input.coMentorEmails, mentor._id)
+  const meeting = meetingChoice(input, isOnline)
 
   const { ids, missing } = await resolveStudents(input.students ?? input.studentIds, orgId)
   if (!ids.length) throw new ProgramError(missing.length ? `Not students on the LMS: ${missing.join(', ')}` : 'Add at least one student')
@@ -269,7 +307,9 @@ export async function createProgram(input: Record<string, any>, actor: Actor) {
   } as any)
   const p: any = await ProgramModel.create({
     _id: programId, title, description: String(input.description ?? '').trim(), ...(orgId ? { organizationId: new Types.ObjectId(orgId) } : {}),
-    instructorId: mentor._id, courseId: course._id, ...s, timezone: DEFAULT_TZ, isOnline, location: String(input.location ?? '').trim(),
+    instructorId: mentor._id, ...(coMentorIds.length ? { coInstructorIds: coMentorIds } : {}),
+    meetingMode: meeting.mode, ...(meeting.url ? { meetingUrl: meeting.url } : {}),
+    courseId: course._id, ...s, timezone: DEFAULT_TZ, isOnline, location: String(input.location ?? '').trim(),
     studentIds: ids, status: 'active', source: actor.role === 'portal' ? 'portal' : 'lms',
     ...(actor.id && Types.ObjectId.isValid(actor.id) ? { createdById: new Types.ObjectId(actor.id) } : {}),
     createdByEmail: actor.email ?? String(input.createdByEmail ?? ''), createdByName: actor.name ?? String(input.createdByName ?? ''),
