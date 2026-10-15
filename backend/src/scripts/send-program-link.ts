@@ -82,10 +82,16 @@ if (!APPLY) { console.log('\nDry run — nothing sent. Re-run with --apply.'); a
 
 const { sendClassUpdateWhatsApp } = await import('@/services/whatsapp.service.ts')
 const { mintSigninCode } = await import('@/services/signinLink.service.ts')
+const { normalizeWhatsAppNumber } = await import('@/utils/normalizeWhatsAppNumber.ts')
 let sent = 0, failed = 0
+const unusable: string[] = []
 for (const u of todo) {
   if (sent >= LIMIT) break
   const slug = orgSlugFor(u.organizationId)
+  /* A number WhatsApp cannot take (two numbers run together, too short) is skipped by the sender
+     without an error — so it is checked here, reported, and NOT logged as sent: fixed later, a
+     re-run reaches them. */
+  if (!normalizeWhatsAppNumber(u.enrollmentApplication.phone)) { unusable.push(`${u.name} — ${u.enrollmentApplication.phone}`); continue }
   try {
     const code = await mintSigninCode(String(u._id), '/class-bookings')
     await sendClassUpdateWhatsApp(u.enrollmentApplication.phone, u.name ?? '', p.title, when(slug), message(slug), code)
@@ -96,6 +102,7 @@ for (const u of todo) {
     failed++; console.log(`  failed for ${u.name}: ${(err as Error).message}`)
   }
 }
-console.log(`\nSent: ${sent}   Failed: ${failed}   (see admin → WhatsApp Logs, template class_update_v1)`)
+console.log(`\nSent: ${sent}   Failed: ${failed}   Unusable number: ${unusable.length}   (see admin → WhatsApp Logs, template class_update_v1)`)
+if (unusable.length) { console.log('Not sent — fix the number in admin, then re-run:'); unusable.forEach(x => console.log('  ' + x)) }
 await new Promise(r => setTimeout(r, 3000))
 await done(failed ? 1 : 0)
