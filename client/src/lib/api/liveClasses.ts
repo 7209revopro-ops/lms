@@ -30,6 +30,8 @@ export interface LiveClass {
   isOnline?:      boolean
   location?:      string
   room?:          string
+  /** Hybrid class: the in-person class and its online twin share it. */
+  hybridPairId?:  string
 
   /* External-only. The Meet URL itself is NEVER in a list payload — it is
      released by POST /live-classes/:id/join, on the click, inside the window

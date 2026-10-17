@@ -1318,6 +1318,10 @@ export interface ILiveClass extends Document {
      from the same "repeat weekly" action. Not a foreign-key relation;
      there is no separate series/template document. */
   seriesId?:      Types.ObjectId
+  /* Hybrid class (plan.md §12): an in-person class and its online twin, made
+     together, share this id. A pure tag like seriesId — each is an ordinary
+     class; the booking route lets a student hold a seat in only one of them. */
+  hybridPairId?:  Types.ObjectId
   /* Set on every class of a Program (ProgramModel): a class that repeats weekly or monthly for the students picked
      for it — and only for them (GET /live-classes hides it from everyone else). */
   programId?:     Types.ObjectId
@@ -1424,6 +1428,7 @@ const LiveClassSchema = new Schema<ILiveClass>(
     hostSeatsLeft:               { type: Number, min: 0 },
     overflowSeatsLeft:           { type: Number, min: 0 },
     seriesId:                    { type: Schema.Types.ObjectId },
+    hybridPairId:                { type: Schema.Types.ObjectId },
     programId:                   { type: Schema.Types.ObjectId, ref: 'Program' },
     importJobId:                 { type: Schema.Types.ObjectId },
     importRef:                   { type: String, maxlength: 200 },
@@ -1491,6 +1496,7 @@ LiveClassSchema.index({ muxLiveStreamId: 1 }, { sparse: true })
 LiveClassSchema.index({ cltRoomName: 1 }, { sparse: true })
 LiveClassSchema.index({ organizationId: 1 })
 LiveClassSchema.index({ seriesId: 1 }, { sparse: true })
+LiveClassSchema.index({ hybridPairId: 1 }, { sparse: true })
 LiveClassSchema.index({ programId: 1, scheduledStart: 1 }, { sparse: true })
 LiveClassSchema.index({ importJobId: 1 }, { sparse: true })
 /* Partial, not sparse: only imported classes carry a ref, and the uniqueness is
@@ -3476,6 +3482,24 @@ ChatMessageSchema.index(
 )
 
 export const ChatMessageModel = mongoose.model<IChatMessage>('ChatMessage', ChatMessageSchema)
+
+/* ─────────────────────────────────────────────────────
+   MUTEX — a short-lived lock: one document per key, the unique index is the
+   lock. Taken with create(), released with deleteOne(); expiresAt (TTL) frees
+   a lock whose holder died. Used where a check and the write after it must
+   not interleave — e.g. booking one twin of a hybrid class (bookings.routes).
+───────────────────────────────────────────────────── */
+export interface IMutex extends Document {
+  key:       string
+  expiresAt: Date
+}
+const MutexSchema = new Schema<IMutex>({
+  key:       { type: String, required: true, maxlength: 200 },
+  expiresAt: { type: Date, required: true },
+})
+MutexSchema.index({ key: 1 }, { unique: true })
+MutexSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 })
+export const MutexModel = mongoose.model<IMutex>('Mutex', MutexSchema)
 
 /* ─────────────────────────────────────────────────────
    CLASS ASSIGNMENT  (student → instructor, after a live class)

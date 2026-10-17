@@ -262,6 +262,59 @@ router.post('/', authenticate, requireEnrollmentApproval, validate(createBooking
       res.status(400).json({ success: false, error: { code: 'SESSION_FULL', message: 'This session is fully booked' } }); return
     }
 
+    /* Hybrid class (plan.md §12): the in-person class and its online twin are
+       one session in two rooms. A seat in one means the other is not yours too
+       — refuse with the way out, rather than hold two seats someone else
+       could have had. */
+    const pairId = (session as { hybridPairId?: unknown }).hybridPairId
+    if (pairId) {
+      /* The check below and the booking after it must not interleave: two
+         taps at once — one on each twin — both found no seat in the other and
+         both booked. One lock per student per hybrid class serialises them;
+         the second request waits briefly, then sees the first's seat and gets
+         TWIN_BOOKED. Released when this response ends, whatever it was. */
+      const { MutexModel } = await import('@/models/schema.ts')
+      const key = `hybrid-book:${userId}:${String(pairId)}`
+      let held = false
+      for (let i = 0; i < 30 && !held; i++) {
+        try {
+          await MutexModel.create({ key, expiresAt: new Date(Date.now() + 20_000) })
+          held = true
+        } catch (err: any) {
+          if (err?.code !== 11000) throw err
+          await MutexModel.deleteOne({ key, expiresAt: { $lt: new Date() } })   // a dead holder's lock
+          await new Promise(r => setTimeout(r, 100))
+        }
+      }
+      if (!held) {
+        res.status(409).json({ success: false, error: { code: 'BOOKING_IN_PROGRESS', message: 'Another booking for this class is in progress. Try again in a moment.' } }); return
+      }
+      let released = false
+      const release = () => { if (!released) { released = true; void MutexModel.deleteOne({ key }).catch(() => {}) } }
+      res.once('finish', release)
+      res.once('close', release)
+
+      /* A CANCELLED twin holds nobody: cancelling a class leaves its bookings
+         as they were, and counting them stranded every student of a cancelled
+         in-person class outside the online one they were moved to. */
+      const twins = await LiveClassModel.find({ hybridPairId: pairId, _id: { $ne: session._id }, status: { $ne: 'cancelled' } }).select('_id').lean()
+      const twinBooking = twins.length
+        ? await ClassBookingModel.findOne({
+            userId: new Types.ObjectId(userId),
+            liveClassId: { $in: twins.map(t => t._id) },
+            status: { $in: ['booked', 'attended'] },
+          }).select('_id').lean()
+        : null
+      if (twinBooking) {
+        const here = session.isOnline === false ? 'in person' : 'online'
+        const there = session.isOnline === false ? 'online' : 'in-person'
+        res.status(409).json({ success: false, error: {
+          code: 'TWIN_BOOKED',
+          message: `You are booked for the ${there} seat of this class. Cancel that booking first to join ${here}.`,
+        } }); return
+      }
+    }
+
     /* Check for existing booking (avoid duplicate) */
     const existing = await ClassBookingModel.findOne({
       userId: new Types.ObjectId(userId),

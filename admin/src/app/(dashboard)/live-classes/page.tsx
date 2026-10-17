@@ -10,7 +10,7 @@ import {
   ChevronRight, PlayCircle, CalendarDays, Pencil, Search, X, Plus,
   LayoutList, CalendarRange, ChevronLeft, GraduationCap,
   UserCheck, LayoutGrid, Building2, MapPin, UserPlus,
-  ChevronDown, User, Globe, Share2, Check, FileSpreadsheet, LifeBuoy,
+  ChevronDown, User, Globe, Share2, Check, FileSpreadsheet, LifeBuoy, Link2,
 } from 'lucide-react'
 import { useAllLiveClasses, useCreateLiveClass, useMyMeetings, markInstructorJoined, type LiveClass, type LiveClassType, type MentorMeeting } from '@/lib/api/liveClasses'
 import { CLASS_LANGUAGES, withFlagAndNative } from '@/lib/languages'
@@ -680,6 +680,7 @@ function TableRow({ live, index, showInstructor, onBackup }: { live: LiveClass; 
                   <LifeBuoy size={8} />Backup
                 </span>
               )}
+              <HybridChip live={live} />
               <SharedAcademiesChip live={live} />
             </div>
             <span className={`text-sm font-semibold text-white leading-tight max-w-[220px] truncate ${isCancelled ? 'line-through opacity-40' : ''}`}>
@@ -1296,6 +1297,20 @@ function DaySessionsModal({
 }
 
 /* ── Quick create modal ──────────────────────────────── */
+/* Hybrid class (plan.md §12): this row and its twin are one session in two
+   rooms — say so on both, so nobody edits one thinking it is the whole class. */
+function HybridChip({ live }: { live: LiveClass }) {
+  if (!live.hybridPairId) return null
+  const other = live.isOnline === false ? 'online' : 'in person'
+  return (
+    <span className="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[9px] font-semibold"
+      style={{ background: 'rgba(52,211,153,0.10)', color: '#6EE7B7', border: '1px solid rgba(52,211,153,0.25)' }}
+      title={`Hybrid — also running ${other} at the same time. Each class is edited on its own.`}>
+      <Link2 size={8} />Hybrid
+    </span>
+  )
+}
+
 function QuickCreateModal({ onClose, onSuccess, categoryProgram }: { onClose: () => void; onSuccess: () => void; categoryProgram?: string }) {
   const backdrop = useBackdropClose(onClose)
   const createMutation = useCreateLiveClass()
@@ -1774,6 +1789,7 @@ function GridCalendarView({ items, onEditClick }: { items: LiveClass[]; onEditCl
                           {isInternal ? 'In-App' : 'External'}
                         </span>
                       )}
+                      <HybridChip live={live} />
                       <SharedAcademiesChip live={live} />
                     </div>
 

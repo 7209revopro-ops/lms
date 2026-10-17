@@ -358,6 +358,8 @@ function toDTO(doc: any, entitled = true, staff = true, door?: LabelledDoor | un
     rescheduledReason: j.rescheduledReason,
 
     seriesId:       j.seriesId ? String(j.seriesId) : undefined,
+    /* Hybrid class: the in-person class and its online twin share it (plan.md §12). */
+    hybridPairId:   j.hybridPairId ? String(j.hybridPairId) : undefined,
 
     /* WHICH ACADEMY'S WALL CLOCK THIS CLASS IS READ IN.
 
@@ -1171,6 +1173,8 @@ export class LiveClassController {
       overflowSeats?:   number
       /* Shared course: open the class to the other academy too. */
       bothAcademies?:   boolean
+      /* Hybrid class: links an in-person class and its online twin (plan.md §12). */
+      hybridPairId?:    string
       /* Pins the host academy instead of inheriting the caller's. Only repeat
          uses it — see the note at its call site. */
       organizationId?:  string
@@ -1341,6 +1345,7 @@ export class LiveClassController {
          academy". A copy belongs to whoever owned the original. */
       organizationId:  dto.organizationId ?? req.user?.organizationId,
       seriesId,
+      ...(dto.hybridPairId ? { hybridPairId: dto.hybridPairId } : {}),
       importJobId:     opts.importJobId,
       importRef:       opts.importRef,
       notifyStudents:  opts.notifyStudents,
@@ -1459,6 +1464,10 @@ export class LiveClassController {
         )
         body.instructorId = req.user.id
       }
+      if (body.alsoOnline) {
+        await this.#createHybrid(body, req, res)
+        return
+      }
       const { live } = await this.#createOne(body, req)
       /* Warm the academy slug cache before rendering. toDTO builds
          servesAcademies and every cohort's organizationSlug from it, and it is
@@ -1478,6 +1487,47 @@ export class LiveClassController {
       }
       next(err)
     }
+  }
+
+  /* ── Hybrid class: in person, and online at the same time (plan.md §12) ──
+     One request makes both, linked by hybridPairId. The ONLINE twin is made
+     first: Google Meet is the step that can fail, and failing before anything
+     exists means there is never half a hybrid class. The in-person class is
+     made second and notifies students as any class does; the twin is made
+     silent, so every enrolled student hears about the class once — not two
+     in-app notices and two WhatsApps for one session. If the in-person class
+     is refused, the twin is deleted through the ordinary delete, which also
+     withdraws its Meet invite and removes a Mux stream. */
+  async #createHybrid(body: any, req: Request, res: Response): Promise<void> {
+    if (body.isOnline !== false) {
+      throw new LiveClassError('HYBRID_NEEDS_IN_PERSON',
+        'An online twin can only be added to an in-person class', 422)
+    }
+    const { alsoOnline, ...inPerson } = body as { alsoOnline: { type: 'external' | 'internal'; provider?: 'mux' | 'livekit'; sessionCapacity?: number } } & Record<string, any>
+    const hybridPairId = new Types.ObjectId().toString()
+
+    const { live: twin } = await this.#createOne({
+      ...inPerson,
+      isOnline:        true,
+      location:        undefined,
+      room:            undefined,
+      type:            alsoOnline.type,
+      provider:        alsoOnline.type === 'internal' ? alsoOnline.provider : undefined,
+      sessionCapacity: alsoOnline.sessionCapacity,
+      hybridPairId,
+    } as any, req, undefined, { notifyStudents: false })
+
+    let live
+    try {
+      ;({ live } = await this.#createOne({ ...inPerson, hybridPairId } as any, req))
+    } catch (err) {
+      const twinId = String((twin as any).id ?? (twin as any)._id)
+      await this.service.delete(twinId).catch(cleanupErr =>
+        logger.error({ err: cleanupErr, twinId }, 'hybrid class: online twin left behind after the in-person class failed'))
+      throw err
+    }
+    await ensureOrgSlugs()
+    sendSuccess(res, { ...toDTO(live), twin: toDTO(twin) }, 'Hybrid class scheduled', 201)
   }
 
   /* ── Repeat an existing class weekly ─────────────────

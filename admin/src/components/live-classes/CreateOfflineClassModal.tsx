@@ -4,7 +4,7 @@ import React, { useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
   X, Plus, AlertCircle, MapPin, Building2,
-  Users, Calendar, Clock, BookOpen, Globe, User, FileText,
+  Users, Calendar, Clock, BookOpen, Globe, User, FileText, Radio, Video, Wifi, Link2,
 } from 'lucide-react'
 import { useCreateLiveClass } from '@/lib/api/liveClasses'
 import { datetimeLocalToISO } from '@/lib/timezone'
@@ -13,7 +13,9 @@ import { useCourses } from '@/lib/api/courses'
 import { useCourseOutline } from '@/lib/api/outline'
 import { useProgramInstructors, useDropInstructorOutside } from '@/lib/api/users'
 import { Button } from '@/components/ui/button'
-import { DarkSelect, DarkDateTimePicker } from './FormWidgets'
+import { DarkSelect, DarkDateTimePicker, PillToggle } from './FormWidgets'
+import { IN_APP_RGB, MEET_RGB, ROOM_RGB, BROADCAST_RGB, LIVEKIT_MAX_SEATS, OPEN_SEATS_DEFAULT } from '@/lib/liveClassTheme'
+import type { LiveClassType } from '@/lib/api/liveClasses'
 import { CLASS_LANGUAGES, withFlag } from '@/lib/languages'
 import { useBackdropClose } from '@/hooks/useBackdropClose'
 
@@ -29,6 +31,12 @@ interface Props {
    French and Spanish, which the create validator rejects outright, so two of
    its eight options could only ever produce a 400. */
 const LANGUAGE_OPTIONS = CLASS_LANGUAGES.map(l => ({ value: l.value, label: withFlag(l) }))
+
+/* The online twin's seats follow its mode, exactly as in New Session: an
+   interactive room is capped by the meeting platform, Meet and broadcast are not. */
+const onlineSeatsFor = (t: LiveClassType, p: 'mux' | 'livekit') =>
+  t === 'internal' && p === 'livekit' ? LIVEKIT_MAX_SEATS : OPEN_SEATS_DEFAULT
+const GREEN = '52,211,153'
 
 export function CreateOfflineClassModal({ onClose, onSuccess, categoryProgram, prefillDate }: Props) {
   const backdrop = useBackdropClose(onClose)
@@ -54,6 +62,16 @@ export function CreateOfflineClassModal({ onClose, onSuccess, categoryProgram, p
   const [instructorId,    setInstructorId]    = useState('')
   const [language,        setLanguage]        = useState('English')
   const [error,           setError]           = useState<string | null>(null)
+  /* Hybrid class (plan.md §12): the same class, also online — one request
+     creates both, linked; students book one seat or the other. */
+  const [alsoOnline,      setAlsoOnline]      = useState(false)
+  const [onlineType,      setOnlineType]      = useState<LiveClassType>('internal')
+  const [onlineProvider,  setOnlineProvider]  = useState<'mux' | 'livekit'>('livekit')
+  const [onlineSeats,     setOnlineSeats]     = useState<number | ''>(onlineSeatsFor('internal', 'livekit'))
+  const chooseOnlineType = (t: LiveClassType) => { setOnlineType(t); setOnlineSeats(onlineSeatsFor(t, onlineProvider)) }
+  const chooseOnlineProvider = (p: 'mux' | 'livekit') => { setOnlineProvider(p); setOnlineSeats(onlineSeatsFor(onlineType, p)) }
+  const onlineOverCap = onlineType === 'internal' && onlineProvider === 'livekit'
+    && onlineSeats !== '' && Number(onlineSeats) > LIVEKIT_MAX_SEATS
   useDropInstructorOutside(instructorsQuery.isSuccess ? instructors : undefined, instructorId, setInstructorId)
 
   const { data: outline } = useCourseOutline(courseId)
@@ -69,6 +87,7 @@ export function CreateOfflineClassModal({ onClose, onSuccess, categoryProgram, p
     if (!title.trim()) { setError('Please enter a session title.'); return }
     if (!start)        { setError('Please select a date and start time.'); return }
     if (!location.trim()) { setError('Please enter the class location/venue.'); return }
+    if (alsoOnline && onlineOverCap) { setError(`An interactive room holds up to ${LIVEKIT_MAX_SEATS} people — lower the online seats or choose Broadcast.`); return }
     try {
       await createMutation.mutateAsync({
         courseId,
@@ -84,13 +103,18 @@ export function CreateOfflineClassModal({ onClose, onSuccess, categoryProgram, p
         sectionId:       sectionId || undefined,
         instructorId:    instructorId || undefined,
         language,
+        ...(alsoOnline ? { alsoOnline: {
+          type: onlineType,
+          ...(onlineType === 'internal' ? { provider: onlineProvider } : {}),
+          ...(onlineSeats !== '' ? { sessionCapacity: onlineSeats } : {}),
+        } } : {}),
       })
       onSuccess()
     } catch (err: any) {
       setError(
         err?.response?.data?.error?.message
         ?? err?.response?.data?.error?.details?.[0]?.message
-        ?? 'Could not create offline class.',
+        ?? (alsoOnline ? 'Could not create the hybrid class. Nothing was created — try again.' : 'Could not create offline class.'),
       )
     }
   }
@@ -121,7 +145,9 @@ export function CreateOfflineClassModal({ onClose, onSuccess, categoryProgram, p
               <h2 className="text-lg font-bold text-white" style={{ fontFamily: 'Bricolage Grotesque, sans-serif' }}>
                 New Offline Class
               </h2>
-              <p className="text-[11px]" style={{ color: 'rgba(255,255,255,0.35)' }}>In-person classroom session</p>
+              <p className="text-[11px]" style={{ color: 'rgba(255,255,255,0.35)' }}>
+                {alsoOnline ? 'In-person + online (hybrid)' : 'In-person classroom session'}
+              </p>
             </div>
           </div>
           <Button variant="ghost" size="icon-sm" onClick={onClose}
@@ -272,6 +298,98 @@ export function CreateOfflineClassModal({ onClose, onSuccess, categoryProgram, p
             </div>
           </div>
 
+          {/* Also online — a hybrid class (plan.md §12). One card, closed by
+              default so the ordinary in-person form looks as it always has;
+              switched on, it opens in place (no second modal) and takes the
+              same pills and colours as New Session, so the choice reads the
+              same in both forms. */}
+          <div className="rounded-xl transition-colors"
+            style={{
+              background: alsoOnline ? `rgba(${GREEN},0.06)` : 'rgba(255,255,255,0.03)',
+              border: `1px solid ${alsoOnline ? `rgba(${GREEN},0.30)` : 'rgba(255,255,255,0.08)'}`,
+            }}>
+            <button type="button" role="switch" aria-checked={alsoOnline}
+              onClick={() => setAlsoOnline(v => !v)}
+              className="flex w-full items-center gap-3 px-3 py-2.5 text-left">
+              <span className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg"
+                style={{ background: alsoOnline ? `rgba(${GREEN},0.15)` : 'rgba(255,255,255,0.05)' }}>
+                <Wifi size={14} style={{ color: alsoOnline ? `rgb(${GREEN})` : 'rgba(255,255,255,0.45)' }} />
+              </span>
+              <span className="min-w-0 flex-1">
+                <span className="block text-sm font-semibold text-white">Also run it online</span>
+                <span className="block text-[11px]" style={{ color: 'rgba(255,255,255,0.4)' }}>
+                  Create a linked online class at the same time, for students who can&apos;t come in
+                </span>
+              </span>
+              <span className="relative h-5 w-9 flex-shrink-0 rounded-full transition-colors"
+                style={{ background: alsoOnline ? `rgb(${GREEN})` : 'rgba(255,255,255,0.15)' }}>
+                <span className="absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-all"
+                  style={{ left: alsoOnline ? 18 : 2 }} />
+              </span>
+            </button>
+
+            <AnimatePresence initial={false}>
+              {alsoOnline && (
+                <motion.div
+                  initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }}
+                  transition={{ duration: 0.18 }}
+                  className="overflow-hidden">
+                  <div className="space-y-2.5 border-t px-3 pb-3 pt-2.5" style={{ borderColor: `rgba(${GREEN},0.18)` }}>
+                    <div className="flex flex-wrap items-end justify-between gap-3">
+                      <div>
+                        <p className="mb-1 text-[10px] font-semibold uppercase tracking-widest" style={{ color: 'rgba(255,255,255,0.35)' }}>Online via</p>
+                        <div className="flex gap-2">
+                          <PillToggle active={onlineType === 'internal'} onClick={() => chooseOnlineType('internal')} rgb={IN_APP_RGB}>
+                            <Radio size={11} />In-App Stream
+                          </PillToggle>
+                          <PillToggle active={onlineType === 'external'} onClick={() => chooseOnlineType('external')} rgb={MEET_RGB}>
+                            <Video size={11} />Google Meet
+                          </PillToggle>
+                        </div>
+                      </div>
+                      <div className="w-24">
+                        <p className="mb-1 text-[10px] font-semibold uppercase tracking-widest" style={{ color: 'rgba(255,255,255,0.35)' }}>Online seats</p>
+                        <input type="number" min={1} max={500} step={1} aria-label="Online seats"
+                          value={onlineSeats}
+                          onChange={e => setOnlineSeats(e.target.value === '' ? '' : Number(e.target.value))}
+                          className={base} style={{ ...iStyle, ...(onlineOverCap ? { borderColor: 'rgba(248,113,113,0.6)' } : {}) }} />
+                      </div>
+                    </div>
+
+                    {onlineType === 'internal' && (
+                      <div>
+                        <div className="flex gap-2">
+                          <PillToggle small active={onlineProvider === 'livekit'} onClick={() => chooseOnlineProvider('livekit')} rgb={ROOM_RGB}>
+                            Interactive room
+                          </PillToggle>
+                          <PillToggle small active={onlineProvider === 'mux'} onClick={() => chooseOnlineProvider('mux')} rgb={BROADCAST_RGB}>
+                            Broadcast
+                          </PillToggle>
+                        </div>
+                        <p className="mt-1.5 text-[10px]" style={{ color: onlineOverCap ? '#F87171' : 'rgba(255,255,255,0.35)' }}>
+                          {onlineProvider === 'mux'
+                            ? 'One-way stream. Students watch; no seat limit.'
+                            : `Two-way room — students can speak and share. Up to ${LIVEKIT_MAX_SEATS} seats.`}
+                        </p>
+                      </div>
+                    )}
+                    {onlineType === 'external' && (
+                      <p className="flex items-center gap-1 text-[10px]" style={{ color: `rgba(${MEET_RGB},0.75)` }}>
+                        <span className="inline-block h-1.5 w-1.5 rounded-full" style={{ background: `rgb(${MEET_RGB})` }} />
+                        A Google Meet link is created for the online class — the mentor is invited
+                      </p>
+                    )}
+
+                    <p className="flex items-start gap-1.5 text-[11px] leading-relaxed" style={{ color: 'rgba(255,255,255,0.5)' }}>
+                      <Link2 size={11} className="mt-0.5 flex-shrink-0" style={{ color: `rgb(${GREEN})` }} />
+                      <span>Same course, module, title, time and mentor. Students book <strong className="text-white/80">one</strong> seat — in the room or online — and are notified once.</span>
+                    </p>
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </div>
+
           {/* Description */}
           <div>
             <label className="mb-1 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-widest"
@@ -289,7 +407,9 @@ export function CreateOfflineClassModal({ onClose, onSuccess, categoryProgram, p
             style={{ background: 'rgba(52,211,153,0.07)', border: '1px solid rgba(52,211,153,0.18)' }}>
             <Building2 size={13} className="mt-0.5 flex-shrink-0" style={{ color: '#34D399' }} />
             <p className="text-[11px] leading-relaxed" style={{ color: 'rgba(255,255,255,0.45)' }}>
-              This is an <strong style={{ color: '#34D399' }}>offline in-person session</strong>. Students will receive location details in their booking confirmation. No online meeting link will be generated.
+              {alsoOnline
+                ? <>Two linked classes will be created: <strong style={{ color: '#34D399' }}>in person</strong> at the venue above, and <strong style={{ color: '#34D399' }}>online</strong> via {onlineType === 'external' ? 'Google Meet' : 'the in-app stream'}. Each is edited on its own afterwards.</>
+                : <>This is an <strong style={{ color: '#34D399' }}>offline in-person session</strong>. Students will receive location details in their booking confirmation. No online meeting link will be generated.</>}
             </p>
           </div>
 
@@ -310,7 +430,7 @@ export function CreateOfflineClassModal({ onClose, onSuccess, categoryProgram, p
               style={{ background: 'linear-gradient(135deg,#059669,#34D399)', color: '#fff' }}>
               {createMutation.isPending
                 ? <><Spinner size={14} />Creating…</>
-                : <><Plus size={14} />Create Offline Class</>}
+                : <><Plus size={14} />{alsoOnline ? 'Create Hybrid Class' : 'Create Offline Class'}</>}
             </Button>
           </div>
         </form>

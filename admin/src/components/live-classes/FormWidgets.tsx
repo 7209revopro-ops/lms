@@ -327,8 +327,15 @@ export function DarkDateTimePicker({ value, onChange }: {
     cells.push({ day: i, current: false, date: new Date(nyr, nmo, i) })
   }
 
+  /* The picked day is a WALL-CLOCK date (selDate is midnight in the device's
+     zone), so it is printed as that date, in UTC, explicitly. Without the
+     explicit zone, lib/timezone.ts formats it in the ACADEMY's zone — and on a
+     device east of it (India, for a Dubai class) midnight on the 20th is still
+     the 19th in Dubai: the label read one day early while the class saved on
+     the right day. */
   const displayDate = selDate
-    ? selDate.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' })
+    ? new Date(Date.UTC(selDate.getFullYear(), selDate.getMonth(), selDate.getDate()))
+        .toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' })
     : 'Select a date & time…'
 
   return (

@@ -107,6 +107,8 @@ export interface LiveClass {
   /* Weekly-repeat grouping tag — shared by every class generated from
      the same "repeat weekly" action. Absent on one-off classes. */
   seriesId?:      string
+  /** Hybrid class (plan.md §12): an in-person class and its online twin share it. */
+  hybridPairId?:  string
 
   /* WHICH ACADEMY'S WALL CLOCK THIS CLASS IS READ IN.
 
@@ -217,6 +219,9 @@ export interface CreateLiveClassInput {
   isOnline?:        boolean      // false = offline physical session
   location?:        string       // venue address (offline only)
   room?:            string       // classroom number (offline only)
+  /** Hybrid class: with isOnline:false, also create a linked online twin at the
+      same time (plan.md §12). The response then carries it as `twin`. */
+  alsoOnline?:      { type: LiveClassType; provider?: 'mux' | 'livekit'; sessionCapacity?: number }
   /* Super admin only — the backend answers CROSS_ACADEMY_FORBIDDEN otherwise,
      and only when the list is non-empty. */
   guestCohorts?:    GuestCohortInput[]

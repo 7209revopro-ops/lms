@@ -1274,6 +1274,17 @@ function SessionAction({
          under it — and "cancel your other seat" is useless advice in a list
          interleaving every cohort of the module across three weeks. */
       const other = group.bookedSlot
+      /* The seat they hold is THIS class in the other room (a hybrid class):
+         "move to this date" would be wrong — it is the same date. */
+      if (other && lc.hybridPairId && other.hybridPairId === lc.hybridPairId) {
+        const held = other.isOnline === false ? 'in person' : 'online'
+        const here = lc.isOnline === false ? 'in person' : 'online'
+        return (
+          <ActionNote icon={<AlertCircle size={12} strokeWidth={2} />}
+            title="One seat per class"
+            body={<>You are booked <strong>{held}</strong> for this class. Cancel that seat to join {here} instead.</>} />
+        )
+      }
       return (
         <ActionNote icon={<AlertCircle size={12} strokeWidth={2} />}
           title="One seat per weekly slot"

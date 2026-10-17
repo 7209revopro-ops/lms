@@ -1784,6 +1784,14 @@ const liveCreateSchema = withCohortRules(z.object({
   overflowSeats:   overflowField,
   /* Course shared by both academies: open the class to the other one too. */
   bothAcademies:   z.boolean().optional(),
+  /* Hybrid class (plan.md §12): with isOnline:false, also create a linked
+     online twin. Only meaningful for an in-person class — the controller
+     refuses it on anything else. */
+  alsoOnline:      z.object({
+    type:            z.enum(['external', 'internal']),
+    provider:        z.enum(['mux', 'livekit']).optional(),
+    sessionCapacity: z.coerce.number().int().min(1).max(500).optional(),
+  }).strict().optional(),
 }))
 const liveUpdateSchema = withCohortRules(z.object({
   title:           z.string().min(3).max(255).trim().optional(),

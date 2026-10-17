@@ -1338,3 +1338,85 @@ expired session.
 Attachments, voice, typing indicators, message edit/delete, email/WhatsApp
 alerts for chat, admin/sub-admin chatting. Each fits the model above without
 schema changes except attachments.
+
+---
+
+## 12. Hybrid classes — one in-person class, also online
+
+### 12.1 The problem
+
+Some classes run in a classroom and online at the same time: same course,
+module, instructor, start and length. Today an admin creates them twice — the
+in-person class in **New Offline Class**, then the online one in **New
+Session** — retyping everything, and the two are unrelated records: a student
+can book both seats, and nothing on screen says they are one class.
+
+### 12.2 The request, and what changes from it
+
+The request: a toggle on the offline form that also creates the online class,
+asking In-App or Google Meet. Kept, with four refinements:
+
+| Request | Built | Why |
+|---|---|---|
+| A pop-up asking In-App or Google Meet | The choice opens **inline** under the toggle | A modal on top of a modal loses context; the admin sees both halves of the class while choosing |
+| Create the online class after the offline one | **One request** creates both; the online twin is made first | Google Meet is the step that can fail. Twin first → a Meet failure creates nothing; an in-person failure deletes the twin (Meet invite withdrawn). Never half a hybrid class |
+| Same details | Same course, module, title, start, length, instructor, language, description. **Seats are separate** | A classroom holds 30; a Meet holds 500. Mode-based default, like New Session |
+| — | The two are **linked** (`hybridPairId`) | Shown as one class (a *Hybrid* chip on both); a student books **one** seat — in person or online, never both |
+| — | Students are told **once** | Each new class sends every enrolled student an in-app notice *and a WhatsApp*. Two classes would double the WhatsApps (and the bill). The twin is created silent |
+
+### 12.3 Rules
+
+| # | Rule |
+|---|---|
+| H1 | `alsoOnline` is accepted only with `isOnline: false`; anything else → 422. Without it the request is byte-for-byte today's. |
+| H2 | The twin copies course, module, title, description, start, duration, instructor, language, academy; it gets `isOnline: true`, no location/room, its own type/provider/seats. |
+| H3 | Online twin created first, `notifyStudents: false`; then the in-person class (notifies as today). In-person failure → twin deleted via the ordinary delete (Mux stream + Meet invite cleaned up). |
+| H4 | Both carry the same `hybridPairId`. Every other path (edit, cancel, reschedule, repeat, attendance, reminders, booking cutoffs 5 h / 15 min) treats them as two ordinary classes — exactly what they are today when made by hand. |
+| H5 | A student holding an active booking on one twin cannot book the other: 409 `TWIN_BOOKED` — "You are booked for the in-person seat of this class. Cancel it first to join online." (and the reverse). Admin bookings are not restricted. |
+| H6 | Instructor permissions, department scope, academy, module/course checks all run unchanged — both classes go through the same `#createOne`. |
+
+### 12.4 UI — New Offline Class
+
+Between *Mentor / Language* and *Description*, one card:
+
+```
+┌───────────────────────────────────────────────────────┐
+│ 📡  Also run it online                         [ ○  ] │
+│     Create a linked online class at the same time      │
+└───────────────────────────────────────────────────────┘
+          ↓ switched on — the card turns emerald and opens
+┌───────────────────────────────────────────────────────┐
+│ 📡  Also run it online                         [  ●] │
+│  [ In-App Stream ]  [ Google Meet ]      Online seats │
+│   (Interactive room | Broadcast)            [ 30 ]    │
+│  Students book one seat — in person or online.        │
+└───────────────────────────────────────────────────────┘
+```
+
+- Same pills and colours as **New Session** (`liveClassTheme`), so the choice reads identically in both forms.
+- Header subtitle → "In-person + online (hybrid)"; the info banner explains the two linked classes; the button → **Create Hybrid Class**.
+- Live classes list: a *Hybrid* chip on both rows.
+- Works wherever the modal is used (Live Classes, Timetable).
+
+### 12.5 QA round (2026-10-10)
+
+`hybridclass.suite.ts` 24 → 47 checks, three runs green; live in the QA sandbox as admin and student. Found and fixed:
+
+1. **Two taps at once booked both twins** (two seats, both counts up): the twin check read, then booked. Now a per-student-per-class lock (`MutexModel`, unique key, 20 s TTL) serialises check-and-book; the second request sees the first seat → `TWIN_BOOKED` (H1–H3).
+2. **Deleting one twin left the other marked Hybrid** with no partner → `service.delete` unlinks the survivor (I1).
+3. **A cancelled twin still blocked the other**: cancelling a class leaves its bookings as they were, so students of a cancelled in-person class could not move online → cancelled twins are ignored (N1).
+4. Student schedule said "Cancel that one to **move to this date**" for a twin on the same date → "One seat per class — you are booked in person for this class. Cancel that seat to join online instead."
+5. Not hybrid-specific, found on the way: the class **date picker labelled the day before the one clicked** on a device east of the academy (India for a Dubai class) — it saved the right day. Fixed in `FormWidgets` (every class form).
+
+Held: in-person refused after the twin exists → twin removed (G); instructor only for own course, both halves theirs (J); other department's sub-admin creates nothing (K); online seats 0/501/−5 refused (L); weekly repeat copies unlinked (M); admin book-for-student not restricted (O); Google Meet and Mux unavailable → clear error, nothing created; toggle on→off → one plain class; 31 seats in an interactive room refused client-side; card fits 343 px; Timetable has the toggle.
+
+### 12.6 Out of scope (v1)
+
+Editing/cancelling/rescheduling both twins at once (each is edited on its own, as a repeat series is today), repeating a hybrid pair weekly, sharing a hybrid class with the other academy. The link (`hybridPairId`) is what each of these would build on.
+
+### 12.7 Phases
+
+- [x] P1 backend: `hybridPairId` (schema, service create, DTO), `alsoOnline` (validation, controller `#createHybrid` with rollback), `TWIN_BOOKED` in booking
+- [x] P2 `hybridclass.suite.ts` — 24 checks: both created and linked, copied fields, separate seats, one notification per student, 422s, Meet failure creates nothing, one-seat rule both ways, plain create unchanged. Runs with every Google variable blanked and refuses to run otherwise: app.ts loads `.env` itself, and with `GOOGLE_CALENDAR_ID` left set the first draft made a real Meet room on the live account.
+- [x] P3 admin: toggle card in `CreateOfflineClassModal` (Live Classes + Timetable), Hybrid chip on both rows (table + grid). The student app needed nothing: its booking handler shows the server's TWIN_BOOKED sentence.
+- [x] P4 regression (2026-10-10): smoke 93, adminmatrix 268, client 153, departmentisolation 75, bookingsapi 81, bookingfixes 14, bookingcutoff 44, seatrelease 18, crossorgclass 23, sessionedits 24, programinstructors 12, joinclass 74, newsessiongate 14 — all green. classimport 62/72 fails identically on an untouched checkout of main (date-dependent, pre-existing). Live in the QA sandbox: the form created the in-person + in-app pair from the real UI, same start, linked; both rows show Hybrid.

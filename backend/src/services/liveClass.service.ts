@@ -393,6 +393,8 @@ export class LiveClassService {
     room?:            string
     organizationId?:  string
     seriesId?:        string
+    /* Hybrid class: shared by an in-person class and its online twin (plan.md §12). */
+    hybridPairId?:    string
     /* Timetable import only (classImport.service.ts). Stamped at insert, in
        the same write, so a crash can never leave an imported class without the
        ref that stops a resume from creating it again. */
@@ -571,6 +573,9 @@ export class LiveClassService {
 
     if (input.seriesId && Types.ObjectId.isValid(input.seriesId)) {
       doc.seriesId = new Types.ObjectId(input.seriesId)
+    }
+    if (input.hybridPairId && Types.ObjectId.isValid(input.hybridPairId)) {
+      ;(doc as any).hybridPairId = new Types.ObjectId(input.hybridPairId)
     }
 
     if (input.importJobId && Types.ObjectId.isValid(input.importJobId)) {
@@ -1796,6 +1801,16 @@ export class LiveClassService {
     }
 
     await this.liveRepo.hardDelete(id)
+
+    /* Hybrid class: with its twin gone the survivor is an ordinary class —
+       otherwise it keeps a Hybrid chip promising a partner that no longer
+       exists. Only when exactly one is left. */
+    const pairId = (live as { hybridPairId?: unknown }).hybridPairId
+    if (pairId) {
+      const { LiveClassModel } = await import('@/models/schema.ts')
+      const rest = await LiveClassModel.find({ hybridPairId: pairId }).select('_id').lean()
+      if (rest.length === 1) await LiveClassModel.updateOne({ _id: rest[0]!._id }, { $unset: { hybridPairId: 1 } })
+    }
   }
 
   /* ── Helpers ─────────────────────────────────────── */
