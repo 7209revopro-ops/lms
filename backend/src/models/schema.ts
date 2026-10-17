@@ -408,6 +408,9 @@ export const PERMISSION_RESOURCES = [
   'users', 'courses', 'live-classes', 'bookings',
   'orders', 'categories', 'coupons', 'reviews', 'reports', 'roles', 'support',
   'announcements',
+  /* Admin pages added 2026-10-17 — each guarded by requirePagePermission on the routes only that page uses. */
+  'enrollment-requests', 'devices', 'programs', 'mentor-calendar', 'class-verification', 'instructor-attendance',
+  'instructor-reviews', 'recordings', 'assignments', 'exams', 'send-message', 'audit-logs', 'settings',
 ] as const
 export type PermissionResource = typeof PERMISSION_RESOURCES[number]
 

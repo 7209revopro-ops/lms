@@ -433,7 +433,17 @@ export class AuthController {
           }
         : undefined
 
-      sendSuccess(res, { user, ...(impersonation && { impersonation }) })
+      /* A custom role's page permissions (2026-10-17) — the admin sidebar hides the pages it may not read. Only
+         for a staff account that has one (a super admin and anyone without one see their role's pages as before). */
+      let permissions: Array<Record<string, unknown>> | undefined
+      if (req.user!.customRoleId && req.user!.role !== 'super_admin') {
+        const { RoleModel } = await import('@/models/schema.ts')
+        const role = await RoleModel.findById(req.user!.customRoleId).select('permissions').lean()
+        permissions = ((role as { permissions?: Array<Record<string, unknown>> } | null)?.permissions ?? [])
+          .map(p => ({ resource: p['resource'], read: p['read'] === true, list: p['list'] === true, create: p['create'] === true, update: p['update'] === true, delete: p['delete'] === true }))
+      }
+
+      sendSuccess(res, { user, ...(impersonation && { impersonation }), ...(permissions && { permissions }) })
     } catch (err) {
       next(err)
     }

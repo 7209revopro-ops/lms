@@ -1,6 +1,7 @@
 'use client'
+import { createPortal } from 'react-dom'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
   ShieldCheck, Plus, Trash2, Edit2, Check, X,
@@ -47,6 +48,19 @@ const RESOURCE_LABELS: Record<PermissionResource, string> = {
   'roles':        'Roles',
   'support':      'Support',
   'announcements':'Announcements',
+  'enrollment-requests':   'Enrolment Requests',
+  'devices':               'Devices',
+  'programs':              'Programs',
+  'mentor-calendar':       'Mentor Calendar',
+  'class-verification':    'Class Verification',
+  'instructor-attendance': 'Instructor Attendance',
+  'instructor-reviews':    'Instructor Reviews',
+  'recordings':            'Recordings',
+  'assignments':           'Assignments',
+  'exams':                 'Exams',
+  'send-message':          'Send Message',
+  'audit-logs':            'Audit Logs',
+  'settings':              'Settings (menu only)',
 }
 
 function permissionsFromRole(role: Role): ResourcePermission[] {
@@ -259,6 +273,26 @@ interface RoleSelectProps {
 function RoleSelect({ userId, currentId, roles, disabled }: RoleSelectProps) {
   const assignMutation = useAssignRole()
   const [open, setOpen] = useState(false)
+  /* The menu is drawn on <body>, fixed beside the button — inside the table it was cut off by the table's
+     overflow-hidden. It opens upwards when there isn't room below. */
+  const btnRef = useRef<HTMLButtonElement>(null)
+  const [pos, setPos] = useState<{ left: number; top?: number; bottom?: number } | null>(null)
+  const place = () => {
+    const r = btnRef.current?.getBoundingClientRect()
+    if (!r) return
+    const menuH = Math.min(320, 48 + roles.length * 34)
+    const below = window.innerHeight - r.bottom
+    const left = Math.min(r.left, window.innerWidth - 216)
+    setPos(below < menuH + 12 && r.top > below ? { left, bottom: window.innerHeight - r.top + 4 } : { left, top: r.bottom + 4 })
+  }
+  useEffect(() => {
+    if (!open) return
+    place()
+    const close = () => setOpen(false)
+    window.addEventListener('scroll', close, true); window.addEventListener('resize', close)
+    return () => { window.removeEventListener('scroll', close, true); window.removeEventListener('resize', close) }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open])
 
   const currentRole = roles.find(r => r.id === currentId)
 
@@ -270,6 +304,7 @@ function RoleSelect({ userId, currentId, roles, disabled }: RoleSelectProps) {
   return (
     <div className="relative">
       <button
+        ref={btnRef}
         onClick={() => !disabled && setOpen(v => !v)}
         disabled={disabled || assignMutation.isPending}
         className="flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs transition-all disabled:opacity-50"
@@ -288,17 +323,18 @@ function RoleSelect({ userId, currentId, roles, disabled }: RoleSelectProps) {
         {!assignMutation.isPending && <ChevronDown size={10} style={{ color: 'rgba(255,255,255,0.3)' }} />}
       </button>
 
-      <AnimatePresence>
-        {open && (
+      {typeof document !== 'undefined' && createPortal(<AnimatePresence>
+        {open && pos && (
           <>
-            <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />
+            <div className="fixed inset-0 z-[90]" onClick={() => setOpen(false)} />
             <motion.div
               initial={{ opacity: 0, y: -4, scale: 0.97 }}
               animate={{ opacity: 1, y: 0, scale: 1 }}
               exit={{ opacity: 0, y: -4, scale: 0.97 }}
               transition={{ duration: 0.12 }}
-              className="absolute left-0 top-full z-20 mt-1 w-52 overflow-hidden rounded-xl py-1"
-              style={{ background: '#1A1D2E', border: '1px solid rgba(255,255,255,0.1)', boxShadow: '0 8px 32px rgba(0,0,0,0.5)' }}>
+              className="fixed z-[91] w-52 overflow-y-auto rounded-xl py-1"
+              style={{ left: pos.left, ...(pos.top != null ? { top: pos.top } : { bottom: pos.bottom }), maxHeight: 320,
+                background: '#1A1D2E', border: '1px solid rgba(255,255,255,0.1)', boxShadow: '0 8px 32px rgba(0,0,0,0.5)' }}>
               {/* No role option */}
               <button onClick={() => assign(null)}
                 className="flex w-full items-center gap-2 px-3 py-2 text-xs transition-colors hover:bg-white/5"
@@ -323,7 +359,7 @@ function RoleSelect({ userId, currentId, roles, disabled }: RoleSelectProps) {
             </motion.div>
           </>
         )}
-      </AnimatePresence>
+      </AnimatePresence>, document.body)}
     </div>
   )
 }

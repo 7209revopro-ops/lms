@@ -9,7 +9,7 @@ import { AdminController } from '@/controllers/admin.controller.ts'
 import { AuthController } from '@/controllers/auth.controller.ts'
 import { LiveClassController } from '@/controllers/liveClass.controller.ts'
 import { RolesController } from '@/controllers/roles.controller.ts'
-import { authenticateAdmin, requireRole, requireAdmin, requireAnyAdmin, requireInstructor, requireCourseAuthor, injectCategoryScope, requirePermission } from '@/middleware/auth.middleware.ts'
+import { authenticateAdmin, requireRole, requireAdmin, requireAnyAdmin, requireInstructor, requireCourseAuthor, injectCategoryScope, requirePermission, requirePagePermission } from '@/middleware/auth.middleware.ts'
 import { issueClassHandoff } from '@/controllers/classHandoff.controller.ts'
 import { validate } from '@/middleware/validate.middleware.ts'
 import { env } from '@/config/env.ts'
@@ -112,6 +112,27 @@ router.get ('/auth/me',      authenticateAdmin, authCtrl.me)
    ownership checks inside the controllers reject instructors who
    try to mutate courses they don't own. */
 router.use(authenticateAdmin, requireRole('super_admin', 'admin', 'sub_admin', 'support', 'instructor'), injectCategoryScope)
+
+/* ─── Custom-role page permissions (2026-10-17) ─────────
+   The admin pages that never had a per-route requirePermission, each guarded
+   once in front of the routes ONLY that page uses (GET reads; POST creates;
+   PATCH/PUT updates; DELETE deletes — requirePagePermission). Inert for super
+   admins and anyone without a custom role. Shared routes (course lists, users,
+   a class's details) are left to their own guards. */
+router.use('/enrollment-requests',     requirePagePermission('enrollment-requests'))
+router.use('/settings/finance-check',  requirePagePermission('enrollment-requests'))
+router.use('/devices',                 requirePagePermission('devices'))
+router.use('/settings/device-limit',   requirePagePermission('devices'))
+router.use('/programs',                requirePagePermission('programs'))
+/* The mentor list itself (GET /mentor-calendar) also feeds the Programs form: either page's Read lets it through. */
+router.use('/mentor-calendar', (req: Request, res: Response, next: NextFunction) =>
+  (req.path === '/' || req.path === '' ? requirePagePermission('mentor-calendar', 'programs') : requirePagePermission('mentor-calendar'))(req, res, next))
+router.use('/class-verification',      requirePagePermission('class-verification'))
+router.use('/live-classes/no-shows',   requirePagePermission('instructor-attendance'))
+router.use('/recordings',              requirePagePermission('recordings'))
+router.use('/exams',                   requirePagePermission('exams'))
+router.use('/courses/:courseId/exam',  requirePagePermission('exams'))
+router.use('/messages',                requirePagePermission('send-message'))
 
 /* ─── Own email-notification preferences ───────────────
    Self-service for every admin-side role: the router.use above already proves

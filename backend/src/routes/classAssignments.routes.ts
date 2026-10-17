@@ -1,6 +1,6 @@
 import { Router, type Request, type Response, type NextFunction } from 'express'
 import { z } from 'zod'
-import { authenticate, authenticateAny, authenticateAdmin, requireRole } from '@/middleware/auth.middleware.ts'
+import { authenticate, authenticateAny, authenticateAdmin, requireRole, requirePagePermission } from '@/middleware/auth.middleware.ts'
 import { validate } from '@/middleware/validate.middleware.ts'
 import { ClassAssignmentService } from '@/services/classAssignment.service.ts'
 import { requiredDocumentRef } from '@/utils/documentRef.ts'
@@ -112,6 +112,7 @@ router.get(
   '/review',
   authenticateAdmin,
   requireRole('super_admin', 'admin', 'sub_admin', 'support', 'instructor'),
+  requirePagePermission('assignments'),
   async (req: Request, res: Response, next: NextFunction) => {
     try {
       sendSuccess(res, await svc.listForReview(await reviewer(req), qs(req, 'status'), qs(req, 'instructorId')))
@@ -129,6 +130,7 @@ router.get(
   '/review/stats',
   authenticateAdmin,
   requireRole('super_admin', 'admin', 'sub_admin', 'support', 'instructor'),
+  requirePagePermission('assignments'),
   async (req: Request, res: Response, next: NextFunction) => {
     try {
       sendSuccess(res, await svc.reviewStats(await reviewer(req), qs(req, 'instructorId')))
@@ -140,6 +142,7 @@ router.patch(
   '/:id/review',
   authenticateAdmin,
   requireRole('super_admin', 'admin', 'sub_admin', 'support', 'instructor'),
+  requirePagePermission('assignments'),
   validate(reviewSchema),
   async (req: Request, res: Response, next: NextFunction) => {
     try {

@@ -1,6 +1,6 @@
 import { Router, type Request, type Response, type NextFunction } from 'express'
 import { z } from 'zod'
-import { authenticate, authenticateAdmin, requireRole, injectCategoryScope } from '@/middleware/auth.middleware.ts'
+import { authenticate, authenticateAdmin, requireRole, injectCategoryScope, requirePagePermission } from '@/middleware/auth.middleware.ts'
 import { validate } from '@/middleware/validate.middleware.ts'
 import { InstructorReviewService } from '@/services/instructorReview.service.ts'
 import { sendSuccess, buildPaginationMeta, parsePagination } from '@/utils/response.ts'
@@ -42,6 +42,7 @@ router.get(
   '/admin/leaderboard',
   authenticateAdmin,
   requireRole('super_admin', 'admin', 'sub_admin'),
+  requirePagePermission('instructor-reviews'),
   injectCategoryScope,
   async (req: Request, res: Response, next: NextFunction) => {
     try {
@@ -56,6 +57,7 @@ router.get(
   '/admin/instructor/:id',
   authenticateAdmin,
   requireRole('super_admin', 'admin', 'sub_admin'),
+  requirePagePermission('instructor-reviews'),
   injectCategoryScope,
   async (req: Request, res: Response, next: NextFunction) => {
     try {

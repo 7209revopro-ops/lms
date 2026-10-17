@@ -1,5 +1,5 @@
 import { Router, type Request, type Response, type NextFunction } from 'express'
-import { authenticateAdmin, requireAdmin } from '@/middleware/auth.middleware.ts'
+import { authenticateAdmin, requireAdmin, requirePagePermission } from '@/middleware/auth.middleware.ts'
 import { sendSuccess, parsePagination, buildPaginationMeta } from '@/utils/response.ts'
 import { AuditLogRepository } from '@/repositories/auditlog.repository.ts'
 
@@ -15,6 +15,7 @@ router.get(
   '/',
   authenticateAdmin,
   requireAdmin,
+  requirePagePermission('audit-logs'),
   async (req: Request, res: Response, next: NextFunction) => {
     try {
       const { page, per_page } = parsePagination(req.query as Record<string, unknown>)

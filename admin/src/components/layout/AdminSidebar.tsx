@@ -98,6 +98,20 @@ const instructorNavItems = [
    403 in the middle of it. */
 const settingsItem = { label: 'Settings', href: '/settings', icon: Settings }
 
+/* Which Roles & Permissions resource each page is (2026-10-17). With a custom role, a page whose resource it may
+   neither Read nor List is hidden — the backend refuses its data anyway. Pages not listed always show. */
+const PAGE_RESOURCE: Record<string, string> = {
+  '/users': 'users', '/students': 'users', '/instructors': 'users', '/viewers': 'users', '/express-members': 'users',
+  '/courses': 'courses', '/live-classes': 'live-classes', '/bookings': 'bookings', '/orders': 'orders',
+  '/categories': 'categories', '/coupons': 'coupons', '/reviews': 'reviews', '/reports': 'reports', '/roles': 'roles',
+  '/support': 'support', '/announcements': 'announcements',
+  '/enrollment-requests': 'enrollment-requests', '/devices': 'devices', '/programs': 'programs',
+  '/mentor-calendar': 'mentor-calendar', '/class-verification': 'class-verification',
+  '/instructor-attendance': 'instructor-attendance', '/instructor-reviews': 'instructor-reviews',
+  '/recordings': 'recordings', '/assignments': 'assignments', '/exams': 'exams', '/send-message': 'send-message',
+  '/audit-logs': 'audit-logs', '/settings': 'settings',
+}
+
 interface SidebarContentProps {
   collapsed: boolean
   onClose?:  () => void
@@ -130,7 +144,14 @@ function SidebarContent({ collapsed, onClose }: SidebarContentProps) {
   // (requireSuperAdmin, not requireAdmin) on GET /email-logs.
   /* Send message — admin and super admin only, as the route allows. */
   const sendItem = { label: 'Send Message', href: '/send-message', icon: Send }
-  const navItems  = user?.role === 'super_admin'
+  const canView = (href: string) => {
+    const perms = user?.permissions
+    const resource = PAGE_RESOURCE[href]
+    if (!perms || !resource || user?.role === 'super_admin') return true
+    const row = perms.find(p => p.resource === resource)
+    return !!row && (row.read || row.list)
+  }
+  const allNavItems = user?.role === 'super_admin'
     ? [...withClassroom, sendItem,
         { label: 'Roles',      href: '/roles',       icon: ShieldCheck },
         { label: 'Email Logs', href: '/email-logs',  icon: Mail },
@@ -138,8 +159,9 @@ function SidebarContent({ collapsed, onClose }: SidebarContentProps) {
         { label: 'Chats',      href: '/chats',       icon: MessagesSquare },
       ]
     : user?.role === 'admin' ? [...withClassroom, sendItem] : withClassroom
+  const navItems = allNavItems.filter(i => canView(i.href))
   const roleLabel = isInstructor ? 'Instructor' : isManager ? 'Manager' : 'Admin'
-  const bottomItems = isInstructor ? [] : [settingsItem]
+  const bottomItems = (isInstructor ? [] : [settingsItem]).filter(i => canView(i.href))
 
   const isActive = (href: string) =>
     href === '/' ? pathname === '/' : pathname.startsWith(href)
