@@ -4,13 +4,15 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Repository Layout
 
-Three independent sub-projects in one monorepo:
+Independent sub-projects in one monorepo:
 
 | Directory | Role | Default port | Package manager |
 |-----------|------|-------------|-----------------|
 | `backend/` | Express + Bun + MongoDB REST API | 8000 | **Bun** |
 | `admin/` | Next.js 15 admin dashboard | 3001 (3002 in preview) | npm |
 | `client/` | Next.js 15 student-facing app | 3000 (3003 in preview) | npm |
+| `mobile/` | Expo (React Native) student app — plan.md §13 | Metro 8081 | npm (`npx expo install` for packages) |
+| `shared/` | Types + pure rules used by `mobile/` (and `client/` later); no dependencies | — | — |
 
 > **Worktree note**: This repo is open in a Claude worktree at `.claude/worktrees/objective-hypatia-c27ed3`. The main project lives at `C:\Users\MSI-PC\Delta\lms\`. Changes that affect both must be applied in **both** locations.
 

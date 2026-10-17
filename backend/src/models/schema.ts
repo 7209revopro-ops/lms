@@ -547,6 +547,9 @@ export const DeviceModel = mongoose.model<IDevice>('Device', DeviceSchema)
 ───────────────────────────────────────────────────── */
 export type AuthTokenPurpose =
   | 'reset-password' | 'verify-email' | 'otp-login' | 'login-link' | 'change-email' | 'join-link' | 'signin-link'
+  /* A 6-digit code that confirms "delete my account" for a student with no
+     password (email-code / link sign-in) — see AuthService.deleteAccount. */
+  | 'account-delete'
 
 export interface IAuthToken extends Document {
   id:        string
@@ -570,7 +573,7 @@ const AuthTokenSchema = new Schema<IAuthToken>(
   {
     userId:    { type: Schema.Types.ObjectId, ref: 'User', required: true },
     tokenHash: { type: String, required: true, unique: true },
-    purpose:   { type: String, enum: ['reset-password', 'verify-email', 'otp-login', 'login-link', 'change-email', 'join-link', 'signin-link'], required: true },
+    purpose:   { type: String, enum: ['reset-password', 'verify-email', 'otp-login', 'login-link', 'change-email', 'join-link', 'signin-link', 'account-delete'], required: true },
     expiresAt: { type: Date, required: true },
     usedAt:    { type: Date },
     useCount:  { type: Number },
@@ -1094,6 +1097,41 @@ NotificationSchema.index({ userId: 1, readAt: 1 })
 export const NotificationModel = mongoose.model<INotification>('Notification', NotificationSchema)
 
 /* ─────────────────────────────────────────────────────
+   PUSH TOKEN — an installed copy of the student app that may receive push
+   notifications (plan.md §13.4 B3). One row per Expo push token: the token
+   identifies the phone's install, so when another account signs in on the
+   same phone the row moves to that account instead of duplicating — a phone
+   only ever receives the pushes of whoever is signed in on it.
+───────────────────────────────────────────────────── */
+export interface IPushToken extends Document {
+  id:          string
+  userId:      Types.ObjectId
+  token:       string
+  platform:    'ios' | 'android'
+  deviceId?:   string
+  appVersion?: string
+  lastSeenAt:  Date
+  createdAt:   Date
+  updatedAt:   Date
+}
+
+const PushTokenSchema = new Schema<IPushToken>(
+  {
+    userId:     { type: Schema.Types.ObjectId, ref: 'User', required: true },
+    token:      { type: String, required: true, maxlength: 255 },
+    platform:   { type: String, enum: ['ios', 'android'], required: true },
+    deviceId:   { type: String, maxlength: 64 },
+    appVersion: { type: String, maxlength: 32 },
+    lastSeenAt: { type: Date, default: Date.now },
+  },
+  baseSchemaOptions,
+)
+PushTokenSchema.index({ token: 1 }, { unique: true })
+PushTokenSchema.index({ userId: 1 })
+
+export const PushTokenModel = mongoose.model<IPushToken>('PushToken', PushTokenSchema)
+
+/* ─────────────────────────────────────────────────────
    FAVORITE — user saves a course for later
 ───────────────────────────────────────────────────── */
 export interface IFavorite extends Document {
@@ -1588,7 +1626,10 @@ export interface IQuizAttempt extends Document {
 
 const QuizAttemptAnswerSchema = new Schema<IQuizAttemptAnswer>({
   questionId: { type: String, required: true },
-  answer:     { type: String, required: true },
+  /* NOT required: an unanswered question is recorded as '' (scored wrong).
+     Mongoose's `required` rejects an empty string, which turned any attempt
+     with a blank question — including every timed-out one — into a 500. */
+  answer:     { type: String, default: '' },
 }, { _id: false })
 
 const QuizAttemptSchema = new Schema<IQuizAttempt>(

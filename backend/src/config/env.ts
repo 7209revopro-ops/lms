@@ -138,7 +138,22 @@ const envSchema = z.object({
      access token. Blank API key ⇒ console-log sender (dev), same convention
      as every other integration in this file. */
   WHATSAPP_API_BASE_URL:     z.string().default('https://connect.creatyvot.com'),
-  WHATSAPP_API_KEY:          opt(z.string().min(1).regex(/^wc_/, 'WHATSAPP_API_KEY must start with wc_ — that is Creatyvot\'s own key, never a Meta access token')),
+  /* Student mobile app (plan.md §13.4 B5) — GET /app/config. Semver strings. */
+  MOBILE_MIN_VERSION:     opt(z.string().regex(/^\d+\.\d+\.\d+$/, 'MOBILE_MIN_VERSION must be x.y.z')),
+  MOBILE_LATEST_VERSION:  opt(z.string().regex(/^\d+\.\d+\.\d+$/, 'MOBILE_LATEST_VERSION must be x.y.z')),
+  MOBILE_IOS_STORE_URL:   opt(z.string().url()),
+  MOBILE_ANDROID_STORE_URL: opt(z.string().url()),
+  MOBILE_MAINTENANCE:     opt(z.string()),
+  /* Push to the student app through Expo's push service (plan.md §13.4 B3).
+     OFF unless PUSH_ENABLED is true/1/on: like every other outbound channel,
+     a dev or test box must never reach real phones by accident — when off,
+     each push is only logged. EXPO_ACCESS_TOKEN is needed only if "enhanced
+     push security" is switched on in the Expo project. EXPO_PUSH_URL exists
+     so a test can point it at a local stub. */
+  PUSH_ENABLED:           opt(z.string()),
+  EXPO_ACCESS_TOKEN:      opt(z.string().min(1)),
+  EXPO_PUSH_URL:          z.string().url().default('https://exp.host/--/api/v2/push/send'),
+  WHATSAPP_API_KEY:         opt(z.string().min(1).regex(/^wc_/, 'WHATSAPP_API_KEY must start with wc_ — that is Creatyvot\'s own key, never a Meta access token')),
   WHATSAPP_PHONE_NUMBER_ID:  opt(z.string().min(1)),
   WHATSAPP_WABA_ID:          opt(z.string().min(1)),
   /* Phase 2 — inbound delivery-status / reply webhook (not wired yet). */

@@ -1,5 +1,6 @@
 import { NotificationRepository } from '@/repositories/notification.repository.ts'
 import type { NotificationKind } from '@/models/schema.ts'
+import { pushToUser } from './push.service.ts'
 
 export class NotificationError extends Error {
   constructor(
@@ -19,13 +20,18 @@ export class NotificationService {
      wrap this in try/catch so a notification failure never breaks the
      main flow. */
   async create(userId: string, payload: { kind: NotificationKind; title: string; body?: string; link?: string }) {
-    return this.repo.createOne({
+    const doc = await this.repo.createOne({
       userId,
       kind:  payload.kind,
       title: payload.title.slice(0, 255),
       body:  payload.body?.slice(0, 1000),
       link:  payload.link?.slice(0, 1024),
     })
+    /* The same notification on the student's phone (plan.md §13.4 B3).
+       Not awaited: pushToUser never throws, and the action that raised this
+       notification must not wait on Expo. */
+    void pushToUser(userId, { title: payload.title, body: payload.body, link: payload.link, kind: payload.kind })
+    return doc
   }
 
   async list(userId: string, params: { page: number; perPage: number; unreadOnly?: boolean }) {

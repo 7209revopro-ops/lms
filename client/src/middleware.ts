@@ -10,7 +10,10 @@ const GUEST_ONLY = ['/login', '/register']
 /* `/imp/enter` redeems an impersonation handoff code. It must be reachable
    with no session: the super admin arriving from the admin portal has no
    client cookie yet, and bouncing them to /login would discard the code. */
-const PUBLIC = ['/forgot-password', '/reset-password', '/verify-email', '/imp/enter', '/continue', '/j', '/s']
+/* `/terms`, `/privacy` — the store listings and the app link to them.
+   `/.well-known` — Apple and Google fetch the app-link files there with no
+   session, and must get them, not a redirect to /login (lib/appLinks.ts). */
+const PUBLIC = ['/forgot-password', '/reset-password', '/verify-email', '/imp/enter', '/continue', '/j', '/s', '/.well-known', '/terms', '/privacy']
 
 /* A live client-portal impersonation rides its own cookie, so a super admin
    arriving with only that one is authenticated as far as routing is concerned.

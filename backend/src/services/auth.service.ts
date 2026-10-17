@@ -5,7 +5,7 @@ import { hashPassword, comparePassword } from '@/utils/hash.ts'
 import { generateTokenPair, verifyRefreshToken, toSeconds, type TokenAudience } from '@/utils/jwt.ts'
 import { refreshTtl } from '@/utils/refreshTtl.ts'
 import { logger } from '@/utils/logger.ts'
-import { sendPasswordReset, sendVerifyEmail, sendRegistrationAttempt, sendLoginCode, sendCourseInvite, sendDeviceApprovalRequest } from '@/services/email.service.ts'
+import { sendPasswordReset, sendVerifyEmail, sendRegistrationAttempt, sendLoginCode, sendAccountDeleteCode, sendCourseInvite, sendDeviceApprovalRequest } from '@/services/email.service.ts'
 import { wantsStaffEmail, isStaffEmailCategory, type EmailPrefs } from '@/utils/emailPrefs.ts'
 import { TotpService } from '@/services/totp.service.ts'
 import { resolveDeviceForLogin, isDeviceApproved, type DeviceOutcome } from '@/services/device.service.ts'
@@ -585,12 +585,39 @@ export class AuthService {
        data. Enrollment + lesson progress are kept but
        repointed (orphaned) for analytics integrity —
        PII has been removed. */
-  async deleteAccount(userId: string, currentPassword: string): Promise<void> {
+  /* ── Account deletion: emailed confirmation code ───
+       The re-auth for an account WITHOUT a password — a student who signs in
+       by email code or link. Store rules (Apple 5.1.1(v)) need every account
+       to be deletable in the app, and "confirm your password" is impossible
+       for them. Same shape as the sign-in code: 6 digits, hashed and bound to
+       the user, single use, 10 minutes, only the latest valid. */
+  async requestAccountDeleteCode(userId: string): Promise<{ devCode?: string }> {
+    const user = await this.userRepo.findById(userId)
+    if (!user || !user.isActive) throw new AuthError('USER_NOT_FOUND', 'Account not found.', 404)
+    await this.authTokenRepo.invalidateForUser(userId, 'account-delete')
+    const code      = String(randomInt(0, 1_000_000)).padStart(6, '0')
+    const tokenHash = this.#hashToken(`${userId}:${code}`)
+    await this.authTokenRepo.create_({ userId, tokenHash, purpose: 'account-delete', expiresAt: new Date(Date.now() + 10 * 60 * 1000) })
+    await sendAccountDeleteCode(user.email, user.name, code)
+    logger.info({ userId }, 'account-delete code sent')
+    const echo = process.env.NODE_ENV !== 'production' && process.env.OTP_DEV_ECHO === '1'
+    return echo ? { devCode: code } : {}
+  }
+
+  /* Re-auth: the current password, OR the emailed code above. An account
+     that has a password may use either — the code proves control of the
+     mailbox, which is what a password reset proves too. */
+  async deleteAccount(userId: string, proof: { password?: string; code?: string }): Promise<void> {
     const user = await this.userRepo.findById(userId)
     if (!user) {
       throw new AuthError('USER_NOT_FOUND', 'Account not found.', 404)
     }
-    await this.#verifyCurrentPassword(userId, currentPassword)
+    if (proof.code) {
+      const claimed = await this.authTokenRepo.claim(this.#hashToken(`${userId}:${proof.code.trim()}`), 'account-delete')
+      if (!claimed) throw new AuthError('INVALID_OTP', 'That code is invalid or has expired. Request a new one.', 400)
+    } else {
+      await this.#verifyCurrentPassword(userId, proof.password ?? '')
+    }
 
     /* Cascade the user-attached personal records first. Shared with the ADMIN
        delete path, which used to do none of this and left every enrolment

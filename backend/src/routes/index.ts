@@ -39,6 +39,8 @@ import documentRoutes    from './documents.routes.ts'
 import classAssignmentRoutes from './classAssignments.routes.ts'
 import instructorReviewRoutes from './instructorReviews.routes.ts'
 import chatRoutes from './chat.routes.ts'
+import appRoutes from './app.routes.ts'
+import pushRoutes from './push.routes.ts'
 import portalRoutes        from './portal.routes.ts'
 import portalActivityRoutes from './portalActivity.routes.ts'
 
@@ -135,5 +137,7 @@ router.use('/documents',       documentRoutes)
 router.use('/class-assignments', classAssignmentRoutes)
 router.use('/instructor-reviews', instructorReviewRoutes)
 router.use('/chat', chatRoutes)
+router.use('/app', appRoutes)
+router.use('/push-tokens', pushRoutes)
 
 export default router

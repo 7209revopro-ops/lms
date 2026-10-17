@@ -25,6 +25,9 @@ export type DeviceOutcome =
  *  apart in the approval list, without a UA-parsing dependency. */
 export function labelFromUserAgent(ua?: string): string {
   if (!ua) return 'Unknown device'
+  /* The mobile app: "DeltaLMS/1.0.0 (iPhone 15; iOS 18.1)" → "Delta app · iPhone 15 (iOS 18.1)". */
+  const app = /^DeltaLMS\/[\w.\-]+ \(([^;)]{1,60});\s*([^)]{1,40})\)/.exec(ua)
+  if (app) return `Delta app · ${app[1]!.trim()} (${app[2]!.trim()})`
   const browser =
     /Edg\//.test(ua)            ? 'Edge'    :
     /OPR\/|Opera/.test(ua)      ? 'Opera'   :

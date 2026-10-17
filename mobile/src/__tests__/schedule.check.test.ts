@@ -1,0 +1,425 @@
+/* The website's own checks for the schedule rules (client/src/lib/classSchedule.check.ts),
+   run against the SHARED port. Kept textually close to the original on purpose:
+   if the website's file gains a check, it is copied here, and both copies of the
+   rules must pass the same list. */
+/* ─────────────────────────────────────────────────────────────────────────
+   Checks for the catalogue builder.  Run:  bunx --bun bun src/lib/classSchedule.check.ts
+
+   These exist because the thing most likely to go wrong here is invisible on
+   screen: a guest student's module list silently ordered, named or described
+   by the HOST academy's module. That reads perfectly well and is wrong, and
+   no amount of clicking around a dev database where nothing is shared would
+   ever show it. So the guest rows are synthesised, with the host fields
+   deliberately set to different values, and the tree is asserted to have
+   used neither.
+   ───────────────────────────────────────────────────────────────────────── */
+import { buildCatalog, GENERAL_MODULE_ID, groupKeyOf, slotPattern,
+         moduleFacets, showFacet, filterGroups, buildGroups,
+         groupByDay, getSlotStatus, bookingClosedAt, bookingCutoffLabel,
+         BOOKING_CUTOFF_MINS, IN_PERSON_BOOKING_CUTOFF_MINS } from '@shared'
+import type { LiveClass, MyBooking } from '@shared'
+
+let pass = 0
+const failures: string[] = []
+const check = (name: string, ok: boolean, detail = '') => {
+  if (ok) pass++
+  else failures.push(name + (detail ? ' — ' + detail : ''))
+}
+
+const future = (days: number) => new Date(Date.now() + days * 86_400_000).toISOString()
+const past   = (days: number) => new Date(Date.now() - days * 86_400_000).toISOString()
+/* A Monday safely ahead (UTC midnight, two weeks out). These checks once used
+   a fixed date, 2026-10-05, and started failing the week it passed: the
+   catalogue rightly hides sessions that are over. */
+const A_FUTURE_MONDAY = (() => {
+  const d = new Date(); d.setUTCHours(0, 0, 0, 0)
+  d.setUTCDate(d.getUTCDate() + 14 + ((8 - d.getUTCDay()) % 7))
+  return d.toISOString()
+})()
+
+type Row = Partial<LiveClass> & Record<string, unknown>
+const row = (o: Row): LiveClass => ({
+  id: 'x', title: 'Class', status: 'scheduled', scheduledStart: future(3), durationMins: 60,
+  sessionCapacity: 20, bookedCount: 0, isOnline: true,
+  instructor: { id: 'i1', name: 'Rania Haddad' },
+  createdAt: '', updatedAt: '',
+  ...o,
+} as unknown as LiveClass)
+
+/* The HOST's own course and module, identical on every row below, and always
+   different from the guest's — so any leak is unmistakable. */
+const HOST = {
+  course:    { id: 'host-course', title: 'HOST COURSE', slug: 'h', thumbnailUrl: '/host.png',
+               description: 'HOST BLURB', level: 'advanced' },
+  sectionId: { id: 'host-sec', title: 'HOST MODULE', order: 99, description: 'HOST BLURB' },
+}
+
+const guest = (n: number, sec: { id: string; title: string; order?: number; description?: string }) => row({
+  ...HOST,
+  id: `g${n}`, title: 'Options Strategy Lab', scheduledStart: future(n),
+  language: n % 2 ? 'Malayalam' : 'English',
+  isEnrolled: true, isEntitled: true,
+  yourCohort: {
+    courseId: 'guest-course', courseTitle: 'Advanced Derivatives', program: '4x-trading',
+    courseDescription: 'Guest course blurb', courseLevel: 'beginner',
+    sectionId: sec.id, sectionTitle: sec.title,
+    sectionOrder: sec.order, sectionDescription: sec.description,
+  },
+})
+
+/* Numeric order deliberately DISAGREES with alphabetical order: "Volatility"
+   comes second in the alphabet and first in the course. If a module's own
+   `order` is ever ignored, the localeCompare tie-break puts Contracts first
+   and A6 fails - which is the whole point of naming them this way. */
+const M2 = { id: 'gs-2', title: 'Volatility and Greeks',   order: 1, description: 'Greeks blurb' }
+const M1 = { id: 'gs-1', title: 'Contracts and Settlement', order: 2, description: 'Expiry blurb' }
+
+const noBookings = new Map<string, MyBooking>()
+
+console.log('\nA. A guest never sees the host\'s catalogue')
+{
+  const cat = buildCatalog([guest(1, M2), guest(2, M2), guest(3, M1)], noBookings)
+  check('A1 one course, and it is the GUEST\'s', cat.length === 1 && cat[0]!.title === 'Advanced Derivatives',
+    JSON.stringify(cat.map(c => c.title)))
+  check('A2 it is flagged as shared with you', cat[0]!.shared === true)
+  check('A3 the host\'s thumbnail is NOT borrowed', cat[0]!.thumbnailUrl === undefined, String(cat[0]!.thumbnailUrl))
+  check('A4 the guest\'s programme, not the host\'s', cat[0]!.program === '4x-trading')
+
+  const mods = cat[0]!.modules
+  check('A5 two modules, both the guest\'s', mods.length === 2 && mods.every(m => m.title !== 'HOST MODULE'),
+    JSON.stringify(mods.map(m => m.title)))
+  check("A6 ordered by the GUEST module's own order, against the alphabet",
+    mods[0]!.title === 'Volatility and Greeks' && mods[1]!.title === 'Contracts and Settlement',
+    JSON.stringify(mods.map(m => [m.title, m.order])))
+  check("A7 the guest module's own description, not the host's",
+    mods[0]!.description === 'Greeks blurb', String(mods[0]!.description))
+  check('A7b no module carries the host blurb', mods.every(m => m.description !== 'HOST BLURB'),
+    JSON.stringify(mods.map(m => m.description)))
+  check('A8 the host order 99 was never used', mods.every(m => m.order !== 99))
+  check('A9 session counts add up', mods[0]!.sessionCount === 2 && mods[1]!.sessionCount === 1,
+    JSON.stringify(mods.map(m => m.sessionCount)))
+  check('A10 course total equals the sum of its modules',
+    cat[0]!.sessionCount === mods.reduce((n, m) => n + m.sessionCount, 0))
+  check('A12 the guest course\'s own blurb, not the host\'s',
+    cat[0]!.description === 'Guest course blurb', String(cat[0]!.description))
+  check('A13 the guest course\'s own level, not the host\'s',
+    cat[0]!.level === 'beginner', String(cat[0]!.level))
+  check('A11 both languages counted on the shared module',
+    mods[0]!.languages.length === 2, JSON.stringify(mods[0]!.languages))
+}
+
+console.log('\nB. A host caller still sees their own')
+{
+  const cat = buildCatalog([row({ ...HOST, id: 'h1', isEnrolled: true, isEntitled: true, language: 'English' })], noBookings)
+  check('B1 the host course', cat[0]!.title === 'HOST COURSE')
+  check('B2 not flagged shared', cat[0]!.shared === false)
+  check('B3 its own thumbnail IS used', cat[0]!.thumbnailUrl === '/host.png')
+  check('B5 the host course keeps its own blurb and level',
+    cat[0]!.description === 'HOST BLURB' && cat[0]!.level === 'advanced',
+    `${cat[0]!.description} / ${cat[0]!.level}`)
+  check('B4 the host module, with its own order', cat[0]!.modules[0]!.title === 'HOST MODULE' && cat[0]!.modules[0]!.order === 99)
+}
+
+console.log('\nC. The catalogue is a catalogue, not a diary')
+{
+  const cat = buildCatalog([
+    row({ ...HOST, id: 'old', scheduledStart: past(30), title: 'Long gone' }),
+    row({ ...HOST, id: 'gone', scheduledStart: future(2), status: 'cancelled', title: 'Cancelled' }),
+    row({ ...HOST, id: 'soon', scheduledStart: future(2), title: 'Still ahead' }),
+  ], noBookings)
+  const titles = cat.flatMap(c => c.modules.flatMap(m => m.groups.map(g => g.title)))
+  check('C1 a finished session is dropped', !titles.includes('Long gone'), JSON.stringify(titles))
+  check('C2 a cancelled session is dropped', !titles.includes('Cancelled'), JSON.stringify(titles))
+  check('C3 an upcoming one is kept', titles.includes('Still ahead'))
+}
+
+console.log('\nD. A blocked module is locked, not hidden')
+{
+  const blocked = buildCatalog([row({ ...HOST, id: 'b1', isEnrolled: true, isEntitled: false })], noBookings)
+  check('D1 still listed', blocked[0]!.modules.length === 1)
+  check('D2 and marked blocked', blocked[0]!.modules[0]!.blocked === true)
+
+  const mixed = buildCatalog([
+    row({ ...HOST, id: 'b2', isEnrolled: true, isEntitled: false }),
+    row({ ...HOST, id: 'b3', title: 'Other', isEnrolled: true, isEntitled: true }),
+  ], noBookings)
+  check('D3 one open session unblocks the module', mixed[0]!.modules[0]!.blocked === false)
+
+  const notBought = buildCatalog([row({ ...HOST, id: 'b4', isEnrolled: false, isEntitled: false })], noBookings)
+  check('D4 merely not being enrolled is NOT a block', notBought[0]!.modules[0]!.blocked === false)
+}
+
+console.log('\nE. Sessions with no module')
+{
+  const cat = buildCatalog([
+    row({ course: HOST.course, id: 'n1', sectionId: undefined, title: 'Unmoduled' }),
+    row({ ...HOST, id: 'n2', title: 'Moduled' }),
+  ], noBookings)
+  const mods = cat[0]!.modules
+  check('E1 a General bucket exists', mods.some(m => m.id === GENERAL_MODULE_ID))
+  check('E2 and it sorts LAST', mods[mods.length - 1]!.id === GENERAL_MODULE_ID,
+    JSON.stringify(mods.map(m => m.title)))
+}
+
+console.log('\nF. A class taught in two languages is TWO series, not one')
+{
+  /* Caught on screen, not by a test: a module card read "2 Languages,
+     8 Sessions" and the sheet beneath it listed ONE English slot holding all
+     eight. The group key ignored language, so the Malayalam sessions were
+     swallowed into the English group, the modal's single language badge
+     mislabelled half of them, and the weekly pattern could never form
+     because two interleaved schedules never agree on a weekday. */
+  const series = (lang: string, dayOffset: number, hour: number) =>
+    [0, 1, 2, 3].map(w => {
+      const d = new Date(A_FUTURE_MONDAY)                  // a Monday
+      d.setUTCDate(d.getUTCDate() + w * 7 + dayOffset)
+      d.setUTCHours(hour, 0, 0, 0)
+      return row({ ...HOST, id: `${lang}${w}`, title: 'Core Concepts', language: lang,
+                   scheduledStart: d.toISOString(), isEnrolled: true, isEntitled: true })
+    })
+
+  const rows = [...series('English', 1, 15), ...series('Malayalam', 3, 6)]
+  const cat  = buildCatalog(rows, noBookings)
+  const mod  = cat[0]!.modules[0]!
+
+  check('F1 the two languages are two groups', mod.groups.length === 2,
+    JSON.stringify(mod.groups.map(g => g.slots.length)))
+  check('F2 neither group mixes languages',
+    mod.groups.every(g => new Set(g.slots.map(s => (s as { language?: string }).language)).size === 1),
+    JSON.stringify(mod.groups.map(g => g.slots.map(s => (s as { language?: string }).language))))
+  check('F3 every session is still accounted for',
+    mod.groups.reduce((n, g) => n + g.slots.length, 0) === 8 && mod.sessionCount === 8,
+    String(mod.sessionCount))
+  check('F4 the module still counts two languages', mod.languages.length === 2,
+    JSON.stringify(mod.languages))
+  check('F5 the count and the slots agree - what the screen got wrong',
+    mod.languages.length === mod.groups.length)
+
+  /* The weekly pattern is only findable once the schedules are separated. */
+  check('F6 each group now claims its weekday',
+    mod.groups.every(g => slotPattern(g.slots) !== null),
+    JSON.stringify(mod.groups.map(g => slotPattern(g.slots))))
+  check('F7 and a merged group would NOT have', slotPattern(rows) === null)
+
+  check('F8 language is part of the key', groupKeyOf(rows[0]!) !== groupKeyOf(rows[4]!),
+    `${groupKeyOf(rows[0]!)} vs ${groupKeyOf(rows[4]!)}`)
+}
+
+console.log('\nG. Four weekly slots of one class are FOUR slots')
+{
+  /* Caught on screen: a module offering Monday 7am, Tuesday 8pm, Wednesday
+     9pm and Saturday 3:30pm — four genuinely different weekly cohorts of the
+     same class — rendered as "English · 1 SLOT" holding sixteen sessions.
+     The key had the title, instructor, course, module and language, all of
+     which those four share, and nothing about WHEN. And because sixteen
+     sessions spread over four weekdays never agree, slotPattern correctly
+     refused to name a weekday and the card fell back to a bare date, so the
+     student was shown one slot where there were four and could not tell
+     which cohort they were joining. */
+  const weekly = (label: string, dayOffset: number, hour: number, minute = 0) =>
+    [0, 1, 2, 3].map(w => {
+      const d = new Date(A_FUTURE_MONDAY)                  // a Monday
+      d.setUTCDate(d.getUTCDate() + w * 7 + dayOffset)
+      d.setUTCHours(hour, minute, 0, 0)
+      return row({ ...HOST, id: `${label}${w}`, title: 'Core Concepts', language: 'English',
+                   scheduledStart: d.toISOString(), isEnrolled: true, isEntitled: true })
+    })
+
+  const rows = [
+    ...weekly('mon', 0, 7),
+    ...weekly('tue', 1, 20),
+    ...weekly('wed', 2, 21),
+    ...weekly('sat', 5, 15, 30),
+  ]
+  const mod = buildCatalog(rows, noBookings)[0]!.modules[0]!
+
+  check('G1 four slots, not one', mod.groups.length === 4,
+    JSON.stringify(mod.groups.map(g => g.slots.length)))
+  check('G2 each holds its own four dates',
+    mod.groups.every(g => g.slots.length === 4),
+    JSON.stringify(mod.groups.map(g => g.slots.length)))
+  check('G3 all sixteen sessions are still counted', mod.sessionCount === 16, String(mod.sessionCount))
+  check('G4 every slot can now name its weekday',
+    mod.groups.every(g => slotPattern(g.slots) !== null),
+    JSON.stringify(mod.groups.map(g => slotPattern(g.slots))))
+  check('G5 and they are four DIFFERENT weekdays',
+    new Set(mod.groups.map(g => slotPattern(g.slots)?.weekday)).size === 4,
+    JSON.stringify(mod.groups.map(g => slotPattern(g.slots)?.weekday)))
+  check('G6 one language throughout, so the module still says one',
+    mod.languages.length === 1, JSON.stringify(mod.languages))
+  check('G7 the recurrence is part of the key',
+    groupKeyOf(rows[0]!) !== groupKeyOf(rows[4]!),
+    `${groupKeyOf(rows[0]!)} vs ${groupKeyOf(rows[4]!)}`)
+  check('G8 but two dates of the SAME weekly slot share it',
+    groupKeyOf(rows[0]!) === groupKeyOf(rows[1]!))
+}
+
+console.log('\nH. A filter offers what is THERE, and nothing else')
+{
+  /* The rule the owner asked for: the language picker on a module taught in
+     English and Hindi offers exactly English and Hindi — never the five the
+     system accepts, because choosing Urdu could only ever empty the screen.
+     And a module with one instructor gets no instructor picker at all: a
+     control whose every option returns the same list is furniture. */
+  const at = (dayOffset: number, hour: number) => {
+    const d = new Date(A_FUTURE_MONDAY)                  // a Monday
+    d.setUTCDate(d.getUTCDate() + dayOffset)
+    d.setUTCHours(hour, 0, 0, 0)
+    return d.toISOString()
+  }
+  const slot = (id: string, lang: string, tutor: { id: string; name: string }, dayOffset: number, hour: number) =>
+    row({ ...HOST, id, title: 'Core Concepts', language: lang, instructor: tutor,
+          scheduledStart: at(dayOffset, hour), isEnrolled: true, isEntitled: true })
+
+  const alex  = { id: 'i-alex',  name: 'Alex Kim' }
+  const rania = { id: 'i-rania', name: 'Rania Haddad' }
+
+  /* Two languages, ONE instructor — the exact case in the screenshot. */
+  const oneTutor = buildGroups([
+    slot('a', 'English', alex, 0, 18),
+    slot('b', 'Hindi',   alex, 2, 11),
+  ], noBookings)
+  const f1 = moduleFacets(oneTutor)
+
+  check('H1 both languages are offered', JSON.stringify(f1.languages) === '["English","Hindi"]',
+    JSON.stringify(f1.languages))
+  check('H2 and ONLY those two', f1.languages.length === 2)
+  check('H3 the language filter is shown', showFacet(f1.languages) === true)
+  check('H4 the single instructor is NOT offered as a filter', showFacet(f1.instructors) === false,
+    JSON.stringify(f1.instructors.map(i => i.name)))
+
+  /* Add a second instructor and the picker earns its place. */
+  const twoTutors = buildGroups([
+    slot('a', 'English', alex,  0, 18),
+    slot('b', 'Hindi',   alex,  2, 11),
+    slot('c', 'English', rania, 4, 9),
+  ], noBookings)
+  const f2 = moduleFacets(twoTutors)
+
+  check('H5 now the instructor filter appears', showFacet(f2.instructors) === true)
+  check('H6 with both instructors, sorted by name',
+    JSON.stringify(f2.instructors.map(i => i.name)) === '["Alex Kim","Rania Haddad"]',
+    JSON.stringify(f2.instructors.map(i => i.name)))
+  check('H7 and still only the two real languages',
+    JSON.stringify(f2.languages) === '["English","Hindi"]', JSON.stringify(f2.languages))
+
+  /* The filtering itself. */
+  check('H8 language narrows', filterGroups(twoTutors, 'Hindi', null).length === 1)
+  check('H9 instructor narrows', filterGroups(twoTutors, null, 'i-rania').length === 1)
+  check('H10 the two combine', filterGroups(twoTutors, 'English', 'i-alex').length === 1)
+  check('H11 a combination with no slots yields none',
+    filterGroups(twoTutors, 'Hindi', 'i-rania').length === 0)
+  check('H12 nulls mean all', filterGroups(twoTutors, null, null).length === twoTutors.length)
+
+  /* A module with nothing in it must not offer anything. */
+  const none = moduleFacets([])
+  check('H13 no slots, no facets', none.languages.length === 0 && none.instructors.length === 0)
+  check('H14 and neither filter is drawn',
+    showFacet(none.languages) === false && showFacet(none.instructors) === false && showFacet(none.modes) === false)
+
+  /* Online and in person at the same hour — the Malayalam batch's two groups. */
+  const both = buildGroups([
+    slot('o1', 'Malayalam', alex, 0, 18),
+    row({ ...HOST, id: 'f1', title: 'Core Concepts · offline', language: 'Malayalam', instructor: alex,
+          scheduledStart: at(0, 18), isEnrolled: true, isEntitled: true, isOnline: false, location: 'AL QUSAIS', room: 'Room 1' }),
+  ], noBookings)
+  const f3 = moduleFacets(both)
+  check('H15 both modes are offered, online first', JSON.stringify(f3.modes) === '["online","offline"]', JSON.stringify(f3.modes))
+  check('H16 so the mode filter is drawn', showFacet(f3.modes) === true)
+  const inRoom = filterGroups(both, null, null, 'offline'), onLink = filterGroups(both, null, null, 'online')
+  check('H17 "In person" keeps only the in-person class',
+    inRoom.length === 1 && inRoom[0]!.slots.every(s => s.isOnline === false), String(inRoom.length))
+  check('H18 "Online" keeps only the online one',
+    onLink.length === 1 && onLink[0]!.slots.every(s => s.isOnline !== false), String(onLink.length))
+  check('H19 mode combines with language and instructor', filterGroups(both, 'Malayalam', 'i-alex', 'offline').length === 1)
+  check('H20 an online-only module offers no mode filter',
+    JSON.stringify(f2.modes) === '["online"]' && showFacet(f2.modes) === false, JSON.stringify(f2.modes))
+}
+
+console.log('\nI. Sessions bucket by the STUDENT\'S day, soonest first')
+{
+  /* Level 3 now lists dated sessions rather than weekly slots, headed
+     "Today", "Tomorrow", then the date. Two things are easy to get wrong and
+     both are silent: reading "today" off the device clock instead of the
+     server's, and naming the weekday by formatting a midnight instant, which
+     slips a day in zones far from UTC. */
+  const NOON = Date.parse('2026-10-07T12:00:00Z')        // a Wednesday
+  const at = (dayOffset: number, hour: number, id: string) => {
+    const d = new Date('2026-10-07T00:00:00Z')
+    d.setUTCDate(d.getUTCDate() + dayOffset)
+    d.setUTCHours(hour, 0, 0, 0)
+    return row({ ...HOST, id, scheduledStart: d.toISOString() })
+  }
+
+  /* Deliberately out of order going in. */
+  const days = groupByDay([
+    at(2, 14, 'c'), at(0, 18, 'a2'), at(1, 9, 'b'), at(0, 9, 'a1'),
+  ], NOON)
+
+  check('I1 three days', days.length === 3, JSON.stringify(days.map(d => d.label)))
+  check('I2 soonest day first, then the rest in order',
+    days[0]!.key < days[1]!.key && days[1]!.key < days[2]!.key,
+    JSON.stringify(days.map(d => d.key)))
+  check('I3 the first is Today', days[0]!.label === 'Today' && days[0]!.today === true, days[0]!.label)
+  check('I4 the second is Tomorrow', days[1]!.label === 'Tomorrow', days[1]!.label)
+  check('I5 the third is a date, not a word',
+    /\d/.test(days[2]!.label) && days[2]!.label !== 'Tomorrow', days[2]!.label)
+  check('I6 only the first is flagged today', days.filter(d => d.today).length === 1)
+  check('I7 sessions inside a day are in time order',
+    days[0]!.items.length === 2 && days[0]!.items[0]!.id === 'a1' && days[0]!.items[1]!.id === 'a2',
+    JSON.stringify(days[0]!.items.map(i => i.id)))
+  check('I8 every session survives the bucketing',
+    days.reduce((n, d) => n + d.items.length, 0) === 4)
+
+  /* The clock is the CALLER'S, so a server-anchored now decides what today
+     is. Move it forward a day and the same sessions relabel. */
+  const shifted = groupByDay([at(1, 9, 'b')], NOON + 86_400_000)
+  check('I9 "today" follows the clock it is given',
+    shifted[0]!.label === 'Today', shifted[0]!.label)
+
+  check('I10 nothing in, nothing out', groupByDay([], NOON).length === 0)
+}
+
+/* ── J · Booking deadlines: 15 minutes before online, 5 hours before in person ──
+   The in-person rule used to be the calendar day (no booking on the day of
+   the class); it is now a time, and the same day is fine until 5 hours out. */
+{
+  const MIN = 60_000
+  const inMins   = (m: number) => new Date(Date.now() + m * MIN).toISOString()
+  const online   = (m: number, o: Row = {}) => row({ id: `on${m}`, scheduledStart: inMins(m), ...o })
+  const inPerson = (m: number, o: Row = {}) =>
+    row({ id: `ip${m}`, scheduledStart: inMins(m), isOnline: false, location: 'AL QUSAIS', room: 'Room 1', ...o })
+  const held = (lc: LiveClass) => ({ id: 'b1', status: 'booked', liveClassId: lc.id }) as unknown as MyBooking
+
+  check('J1 the fallback cut-offs are 15 minutes and 5 hours',
+    BOOKING_CUTOFF_MINS === 15 && IN_PERSON_BOOKING_CUTOFF_MINS === 300)
+  const on = online(120), ip = inPerson(600)
+  check('J2 without a server deadline, online closes 15 minutes before',
+    new Date(on.scheduledStart).getTime() - bookingClosedAt(on) === 15 * MIN)
+  check('J3 and in person 5 hours before',
+    new Date(ip.scheduledStart).getTime() - bookingClosedAt(ip) === 300 * MIN)
+  const sent = inPerson(600, { bookingClosesAt: inMins(1) })
+  check('J4 the server deadline wins when it is sent',
+    bookingClosedAt(sent) === new Date(sent.bookingClosesAt!).getTime())
+  check('J5 the rule in words', bookingCutoffLabel(on) === '15 minutes' && bookingCutoffLabel(ip) === '5 hours',
+    `${bookingCutoffLabel(on)} / ${bookingCutoffLabel(ip)}`)
+
+  check('J6 online: 16 minutes out is bookable', getSlotStatus(online(16), undefined, false) === 'bookable',
+    getSlotStatus(online(16), undefined, false))
+  check('J7 online: 14 minutes out is live, no longer bookable', getSlotStatus(online(14), undefined, false) === 'live',
+    getSlotStatus(online(14), undefined, false))
+  check('J8 in person: 5 h 1 min out is bookable, whatever the day', getSlotStatus(inPerson(301), undefined, false) === 'bookable',
+    getSlotStatus(inPerson(301), undefined, false))
+  check('J9 in person: 4 h 59 min out is closed', getSlotStatus(inPerson(299), undefined, false) === 'closed',
+    getSlotStatus(inPerson(299), undefined, false))
+  check('J10 in person: a seat already held stays booked past the cut-off',
+    getSlotStatus(inPerson(120), held(inPerson(120)), false) === 'booked',
+    getSlotStatus(inPerson(120), held(inPerson(120)), false))
+  check('J11 in person: a server deadline already passed closes it, however far off the class',
+    getSlotStatus(inPerson(24 * 60, { bookingClosesAt: inMins(-1) }), undefined, false) === 'closed')
+}
+
+test(`the website's schedule checks pass on the shared rules (${pass} passed)`, () => {
+  expect(failures).toEqual([])
+  expect(pass).toBeGreaterThan(80)
+})

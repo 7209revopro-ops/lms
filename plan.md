@@ -1420,3 +1420,240 @@ Editing/cancelling/rescheduling both twins at once (each is edited on its own, a
 - [x] P2 `hybridclass.suite.ts` — 24 checks: both created and linked, copied fields, separate seats, one notification per student, 422s, Meet failure creates nothing, one-seat rule both ways, plain create unchanged. Runs with every Google variable blanked and refuses to run otherwise: app.ts loads `.env` itself, and with `GOOGLE_CALENDAR_ID` left set the first draft made a real Meet room on the live account.
 - [x] P3 admin: toggle card in `CreateOfflineClassModal` (Live Classes + Timetable), Hybrid chip on both rows (table + grid). The student app needed nothing: its booking handler shows the server's TWIN_BOOKED sentence.
 - [x] P4 regression (2026-10-10): smoke 93, adminmatrix 268, client 153, departmentisolation 75, bookingsapi 81, bookingfixes 14, bookingcutoff 44, seatrelease 18, crossorgclass 23, sessionedits 24, programinstructors 12, joinclass 74, newsessiongate 14 — all green. classimport 62/72 fails identically on an untouched checkout of main (date-dependent, pre-existing). Live in the QA sandbox: the form created the in-person + in-app pair from the real UI, same start, linked; both rows show Hybrid.
+
+---
+
+## 13. Student mobile app — React Native + Expo, TypeScript
+
+### 13.1 Goal
+
+A native Android + iOS app for **students** that does what the student website
+does today — sign in, learn, book and join classes, chat, get notified — on the
+**same backend**, with the things only an app can do well: instant push
+notifications, join links that open the app, and protected video.
+
+Admin, instructors and the commission portal stay on the web. They work at
+desks, and an admin app would double the surface for little gain.
+
+### 13.2 Decisions
+
+| # | Decision | Why |
+|---|---|---|
+| M1 | **Expo (managed, latest SDK) + React Native + TypeScript strict** | One codebase for both stores, the team's language, OTA updates, cloud builds — no Mac needed to build iOS |
+| M2 | **Expo Router** (file-based) | Same mental model as Next.js App Router in `client/`; typed routes; deep links map to files |
+| M3 | **TanStack Query + Zod + axios**, same as `client/` | API code and its patterns port almost unchanged (`lib/api/*.ts`) |
+| M4 | **Same API, no new backend app.** `https://api-lms.deltainstitutions.com/api/v1`, called directly (no Vercel relay) | One source of truth for every rule — booking cut-offs, device limit, module blocking, one-seat-per-class. The app never re-implements a rule, it shows the server's answer |
+| M5 | **Token auth, not cookies** — access + refresh tokens in `expo-secure-store` (Keychain / Keystore), sent as `Authorization: Bearer` | Native has no browser cookie jar to rely on. The middleware already accepts Bearer (auth.middleware.ts); login does not return tokens in the body yet (§13.4 B1) |
+| M6 | **No purchasing inside the app in v1** | Apple (3.1.1) and Google Play require their own billing — 15–30% — for digital courses sold in-app, and forbid steering to a web checkout. Enrolment already arrives through sales/CRM imports and the website; the app shows what the student is enrolled on, with no prices and no Buy button. Revisit only as a business decision |
+| M7 | **Students' device time zone** for every date — the rule `client/` already follows | Same student, same times on web and phone |
+| M8 | **`mobile/` as a fourth sub-project** in this repo, plus **`shared/`** for pure TypeScript (types, Zod schemas, `classSchedule` rules, formatting) imported by `mobile/` first; `client/` switches to it later, file by file | Shares without a risky monorepo migration on day one; nothing in `client/` changes until it is proven |
+| M9 | **English first, i18n wired from day one** (`i18next`, all strings through `t()`); Arabic + RTL as a later phase | Retrofitting strings and layout direction is the expensive part; the scaffolding is cheap now |
+
+### 13.3 Architecture
+
+```
+ ┌──────────────── mobile/ (Expo) ────────────────┐
+ │ app/            Expo Router screens            │
+ │ src/api/        axios + Query hooks (Bearer)   │──► api-lms.deltainstitutions.com/api/v1
+ │ src/auth/       SecureStore tokens, refresh    │        (same Express backend, + §13.4)
+ │ src/push/       expo-notifications             │◄── Expo Push ◄── NotificationService
+ │ src/video/      expo-video (HLS: Mux, records) │
+ │ src/links/      /j /s universal + app links    │◄── WhatsApp / email Join buttons
+ └────────────────────────────────────────────────┘
+        ▲ imports
+ shared/  types · zod schemas · classSchedule rules · formatters
+```
+
+### 13.4 Backend changes (small, additive — the website is untouched)
+
+| # | Change | Detail |
+|---|---|---|
+| B1 | **Token-in-body auth for the app** | When the request carries `X-Client: mobile`, `POST /auth/login`, `/login/2fa`, `/otp/verify`, `/join-link/redeem`, `/signin-link/redeem` also return `{ accessToken, refreshToken }` in the body (cookies still set for the web). `POST /auth/refresh` accepts the refresh token in the body. Same rotation, same reuse detection, same audience (`client`). Web requests unchanged byte for byte |
+| B2 | **Device identity for the device limit** | The app generates a 32-byte id once, keeps it in SecureStore, sends `X-Device-Id`. `resolveDeviceId` reads it when there is no `lms_device` cookie; the label comes from the OS ("iPhone 15 · iOS 18"). Same approve/pending flow on the admin Devices page |
+| B3 | **Push notifications** | `PushTokenModel {userId, token, platform, appVersion, lastSeenAt}`; `POST /me/push-tokens`, `DELETE /me/push-tokens/:token` (logout). `NotificationService.create` fans out through the Expo Push API (`expo-server-sdk`), respecting the user's notification preferences; `DeviceNotRegistered` receipts delete the token. Fire-and-forget, never blocks the action that caused it |
+| B4 | **Universal / App Links** | `client/public/.well-known/apple-app-site-association` and `assetlinks.json` claim `/j/*`, `/s/*`, `/messages*`, `/class-bookings*`, `/my-bookings*` for the app. Installed → the WhatsApp/email Join button opens the app; not installed → the website, exactly as today |
+| B5 | **App config / forced update** | `GET /app/config` → `{ minVersion, latestVersion, storeUrls, maintenance }`. Below `minVersion` the app shows only "Update to continue" — the escape hatch for a breaking API change |
+| B6 | **Account deletion in the app** (Apple 5.1.1(v)) | Use the existing `DELETE /auth/account`; confirm it is a real deletion request flow (not deactivation only) and document what is kept for legal/finance |
+| B7 | **Rate limiting for direct calls** | The app reaches the API directly, so keys come from `req.ip` (behind nginx `trust proxy`), not the relay's `x-lms-client-ip`. Verify per-user keys for authenticated routes (ratelimitkey.suite) |
+
+Every B-item gets a backend suite in the existing style, and the web suites
+(client, cookies, devices, joinlink, signinlink) must stay green.
+
+### 13.5 App structure (Expo Router)
+
+```
+mobile/app/
+  _layout.tsx                 providers: Query, auth gate, theme, push, links
+  (auth)/  login.tsx  otp.tsx  register.tsx  forgot-password.tsx
+  (tabs)/  _layout.tsx        Home · Schedule · My Learning · Messages · Profile
+           index.tsx          home: next class (Join), continue learning, announcements
+           schedule/          course → module → slots, Book / Cancel (class-bookings)
+           learning/          my courses → course → lesson (video, notes, quiz)
+           messages/          instructor list → thread (chat, §11)
+           profile/           account, devices, notifications, support, delete account
+  class/[id].tsx              class detail + Join
+  watch/[id].tsx              in-app stream / recording player
+  j/[token].tsx  s/[token].tsx   deep-link landings (same redeem endpoints as web)
+  update-required.tsx
+```
+
+### 13.6 Version 1 — screens and the API behind each
+
+| Area | Screens | Existing API |
+|---|---|---|
+| Auth | password login, email-code login, 2FA, register (full KYC upload via camera/files), forgot password, pending-approval state | `/auth/*`, `/uploads/signup-doc` |
+| Home | next booked class with live Join, continue learning, announcements | `/live-classes/upcoming`, `/enrollments/me`, `/announcements/active` |
+| Schedule | course → module → weekly slots, mode filter (online / in person), Book, Cancel, cut-off notes, hybrid one-seat rule | `/live-classes`, `/bookings` |
+| My bookings | upcoming / past, Join, cancel | `/bookings` |
+| Learning | enrolled courses, modules, lessons, video, progress, notes, quizzes, assignments | `/courses`, `/progress`, `/notes`, `/quizzes`, `/class-assignments` |
+| Classes | join Meet / in-app, recordings, rate a class | `/live-classes/:id/join`, `/live-classes/:id/watch`, `/instructor-reviews` |
+| Messages | instructors of my programme, threads, unread badge | `/chat/*` |
+| Notifications | in-app list + push | `/notifications` |
+| Profile | details, devices, notification prefs, support tickets, sign out, delete account | `/auth/me`, `/support` |
+
+Deliberately **not** in v1: catalogue purchase/checkout (M6), AI tutor, learning
+paths, achievements/streaks, discussions, favourites — each a later phase.
+
+### 13.7 Live classes in the app
+
+| Class | v1 | Later |
+|---|---|---|
+| Google Meet | `POST /live-classes/:id/join` (records attendance, as the web does) → open the returned URL with `Linking.openURL` — the Meet app opens if installed | — |
+| In-app **broadcast** (Mux) | `GET /live-classes/:id/watch` → `playbackUrl` (HLS) in `expo-video`, with the watermark overlay ported from `components/video/WatermarkOverlay.tsx` | picture-in-picture |
+| In-app **interactive room** (LiveKit via Delta Connect) | open the meeting platform's join page in an in-app browser (`expo-web-browser`), the same hand-off as `joinMode: 'redirect'` | native room with `@livekit/react-native` once Delta Connect hands the app a LiveKit token (its `POST /api/lms/join` already returns `token`, `ws_url`) |
+| In person | location, room, map link, "booked" state; no Join | — |
+| Recordings | `expo-video` with the signed URL the API already issues for protected `videos/` | offline download (needs DRM — separate decision) |
+
+### 13.8 Push notifications
+
+| Event | Today | In the app |
+|---|---|---|
+| Class starts in 5 min / started | email + WhatsApp with `/j` link | push → opens the class, one tap to Join |
+| Instructor replied in chat | in-app bell (one per unread run) | push → opens the thread |
+| Booking confirmed / cancelled, class moved or cancelled | email/WhatsApp/in-app | push |
+| Enrolment approved | email/WhatsApp | push → opens Home |
+
+Push is added beside the existing channels, not instead of them, until the
+install base justifies trimming WhatsApp (which costs per message).
+
+### 13.9 Security
+
+- Tokens only in SecureStore; never AsyncStorage, never logged. Refresh on 401 with a single in-flight refresh and a **timeout** (the lesson of the 9 Oct join-link incident, where a refresh with no timeout left a page spinning).
+- `expo-screen-capture` blocks screenshots/recording on video and lesson screens (Android FLAG_SECURE; iOS detects and blurs).
+- Watermark overlay on all video, as on the web.
+- No secrets in the bundle (only public config via `EXPO_PUBLIC_*`); separate dev / preview / production API URLs per EAS profile.
+- Impersonation stays web-only; the app never accepts an impersonation token.
+- Sentry (`@sentry/react-native`) for crashes, release-tagged.
+
+### 13.10 Engineering
+
+- **Builds & releases:** EAS Build (iOS + Android in the cloud), EAS Submit to the stores, **EAS Update** for JS-only fixes without a store review. Channels: `development`, `preview` (internal testers via TestFlight / Play internal testing), `production`.
+- **Identifiers:** `com.deltainstitutions.lms` (both stores); app name "Delta Institutions".
+- **Quality gates:** TypeScript strict, ESLint, Jest + React Native Testing Library for units (schedule rules, auth refresh), **Maestro** end-to-end flows on real devices for the money paths: sign in → book → join; deep link `/j` → class; chat send/receive; push tap → screen.
+- **Design:** the existing brand tokens (colours, Bricolage Grotesque / DM Sans) as a theme; light + dark; accessibility labels and dynamic type; tested on a small Android (360 px) and an iPhone SE.
+- **Performance:** list virtualisation (FlashList) for schedules; images via `expo-image` with caching; Hermes engine.
+
+### 13.11 Store readiness
+
+Apple Developer Program ($99/yr, organisation account — needs a D-U-N-S number,
+apply early) · Google Play Console ($25 once, organisation) · privacy policy URL ·
+Apple privacy labels and Google Data safety form (we collect name, email, phone,
+ID documents, usage) · in-app account deletion (B6) · screenshots and listing
+text · a reviewer demo account with a booked class · age rating · export
+compliance (standard HTTPS only). No "Sign in with Apple" requirement: the LMS
+has no third-party social login.
+
+### 13.12 Phases
+
+| Phase | Scope | Exit criteria | Est. (1 senior RN dev + backend support) |
+|---|---|---|---|
+| P0 Foundations | `mobile/` Expo app, Router, theme, i18n scaffold, env profiles, Sentry, CI; `shared/` with types + schedule rules; B1 + B2 + B5 with suites | A dev build signs in with password and email code on a real phone; device approval works; web suites green | 2 weeks |
+| P1 Core student loop | Home, Schedule (book/cancel, cut-offs, hybrid rule), My bookings, class detail, Join (Meet, broadcast, interactive via browser), recordings | A student books and joins each class type from the phone; attendance recorded as on the web | 3–4 weeks |
+| P2 Learning | courses, lessons, video with watermark + screen-capture guard, progress, notes, quizzes, assignments | A lesson can be completed end to end; progress matches the web | 3 weeks |
+| P3 Messages + notifications | chat (§11 API), notification list, **B3 push**, **B4 universal/app links** | WhatsApp Join button opens the app at the class; a reply pushes and opens the thread | 2 weeks |
+| P4 Store release | registration with KYC upload, profile/devices/support, B6 deletion, store listings, TestFlight + Play internal beta with real students, fixes | Both stores approve; beta crash-free sessions ≥ 99.5% | 2–3 weeks |
+| Later | native LiveKit room, Arabic + RTL, offline downloads (DRM), AI tutor, learning paths, streaks | — | — |
+
+**About 12–14 weeks to both stores.** The critical path outside code is the
+Apple organisation account (D-U-N-S can take 1–2 weeks) — start it in P0.
+
+### 13.12a Progress
+
+**P0 Foundations — built 2026-10-17 (uncommitted)**
+
+- [x] Backend B1 — `utils/mobileClient.ts`: `X-Client: mobile` → every sign-in route (password, 2FA, email code, login/sign-in/join links, register) answers with `{ tokens: { accessToken, refreshToken } }` and sets **no cookie**; `/auth/refresh` and `/auth/logout` take the refresh token in the body. Web responses unchanged.
+- [x] Backend B2 — `X-Device-Id` (64 hex) is the phone's identity for the device whitelist; missing/malformed → 400 `DEVICE_ID_REQUIRED`; devices labelled "Delta app · Pixel 8 (Android 15)".
+- [x] Backend B5 — `GET /app/config` from `MOBILE_MIN_VERSION`, `MOBILE_LATEST_VERSION`, `MOBILE_IOS_STORE_URL`, `MOBILE_ANDROID_STORE_URL`, `MOBILE_MAINTENANCE`.
+- [x] `mobileauth.suite.ts` 31/31 (tokens not cookies, Bearer, rotation, reuse past the 2 s race grace kills the family, body logout, device rules, email code, browser unchanged, config). Web auth suites green: cookies 37, devices 35, security 39, 2fa 37, signup 41, passwordflows 44, nopassword 24, joinlink 33, signinlink 38, impersonation 27, clientimp 56, devicetoggle 40, ratelimitkey 21, client 153, smoke 93, adminmatrix 268.
+- [x] `shared/` — API envelope + `problemOf`, sign-in types, `compareVersions`/`updateState`; no dependencies.
+- [x] `mobile/` — Expo SDK 58, RN 0.88, TypeScript strict, Expo Router (`src/app`), secure-store tokens, device id, single-flight refresh with 15 s deadline, auth provider (students only; offline at launch → retry, never a silent sign-out), update/maintenance gate, sign-in (password · email code · 2FA · device-pending screen), five tabs (Home + Profile live; Schedule/Learning/Messages land in P1–P3), website colour tokens light/dark, DM Sans + Bricolage, i18n, Sentry (only with a DSN), EAS profiles.
+- [x] Checks: `tsc` clean · `expo lint` clean · Jest 24/24 (refresh rules, versions, errors) · `expo-doctor` 20/20 · Android production bundle exports (Hermes, 5.1 MB).
+- [ ] **On-device sign-in not yet seen**: this machine could not download Expo Go (expo.dev CDN) or Gradle 9.4.1 (`services.gradle.org` connect timeout), so neither a dev build nor Expo Go could be installed on the emulator. Next: build once on a machine/network that reaches those hosts, or `eas build --profile development --platform android` in the cloud, then run the P0 exit check on a real phone.
+
+**P1 Core student loop — built 2026-10-17 (uncommitted)**
+
+- [x] `shared/` gains the student class model (`liveClass.ts`: LiveClass, MyBooking, WatchAccess, normalisers, `isInteractiveRoom`), the website's schedule rules ported as-is (`schedule.ts`: getSlotStatus, buildCatalog, groupKeyOf, slotPattern, facets, cut-offs — minus the CSS colour table) and the join window (`joinWindow.ts`).
+- [x] Parity proof: the website's own `classSchedule.check.ts` runs in the app's Jest against the shared port — **85/85**, identical to the website. It had been failing 3 checks on main since 2026-10-12 (a fixed `2026-10-05` date that passed into history); both copies now use a Monday two weeks ahead.
+- [x] Screens: Home (next class with live Join, coming up), Schedule (courses → modules → weekly slots; online / in-person and language filters; Book / Cancel; cut-off notes; one seat per weekly slot and per hybrid class, with the twin wording), My bookings (upcoming / past), Class detail (Meet → `POST /join` then the Meet app; interactive room → `POST /handoff` in an in-app browser; broadcast → native player; recording), Watch (expo-video, email watermark, follows the stream as it starts).
+- [x] Loading / failed / empty are three different states on every list (the class-schedule silent-error lesson).
+- [x] Every string through i18n; clock ticks fast only near a join boundary (shared `joinTickMs`).
+- [x] Checks: tsc · lint clean · Jest 31/31 · Android bundle exports.
+- [ ] On-device run: Gradle now installs (wrapper timeout raised — GitHub takes 12–15 s to connect from this network, the wrapper gave up at 10 s; distribution fetched with curl, checksum verified). The native C++ build (Reanimated, gesture-handler codegen) then fails on the Windows 260-character path limit. **Short folders do not fix it**: a `subst` drive breaks node's path resolution, and even a copy at `C:\b\mobile` produces 300+ character CMake object paths. Two ways forward: (1) Windows long paths — `LongPathsEnabled=1` (admin PowerShell) + reboot, **and** a newer CMake from the Android SDK Manager (3.22.1's bundled Ninja 1.10.2 is not long-path aware; Ninja ≥ 1.12 is); or (2) `eas build --profile development` in the cloud after `eas login`. As of 2026-10-17 the registry value was still 0 and the machine had not rebooted.
+
+**P2 Learning — built 2026-10-17 (uncommitted)**
+
+- [x] `shared/src/learning.ts` — enrolment / course / lesson / quiz / class-assignment types and normalisers, and the rules the screens use: My-learning buckets (the website's), outline order (module order, then lesson order — lessons of a deleted module kept, not dropped), Resume, the lesson gate, video resume point, watch-time counting, quiz answers, assignment file checks.
+- [x] Screens (Learning tab, its own stack): **My learning** (filters, progress, Assignments entry) · **Course** (modules → lessons; done / locked / open; Start / Resume) · **Lesson** — video (signed play URL, resume, watch-time, email watermark), article (plain-text body; image inline; PDF / link in the in-app browser), quiz (summary → answer, with the time limit → result), Mark complete (& next), Previous / Next across modules, a private note · **Class assignments** (list with the mentor's verdict; submit with class picker, title, note, up to 10 PDF/image files; revision after a rejection). Home gains "Continue learning".
+- [x] Screen capture is blocked on lesson and class-video screens (`expo-screen-capture`; Android FLAG_SECURE, iOS cannot block recording — the watermark is the deterrent there). **Unverified on a device:** whether the native full-screen player keeps FLAG_SECURE and the watermark — check in the first device run.
+- [x] Deliberate differences from the website, each a fix of a website bug:
+  - module lock checked on the lesson's **module** id — the website compares `blockedLessons` (module ids) to the *lesson* id, so its lock screen never shows (the server still refuses the video);
+  - a timed quiz submits the answers given **at time-up** — the website's timer submits the answers from when the quiz started (blank);
+  - watch-time counts **played** seconds only — a forward seek is not "watched", a report never exceeds the server's 300 s cap (the website can send > 300 after a seek and be refused), and the seconds since the last report are sent on leaving the lesson.
+- [x] **Backend fix found by the new suite:** `QuizAttempt.answers[].answer` was `required`, and Mongoose rejects `''`, so any attempt with an unanswered question — every timed-out one on the website — returned **500** and was not recorded. Now `default: ''` (scored wrong, as intended). client 153/153, smoke 93/93 unchanged.
+- [x] `backend/src/tests/mobilelearning.suite.ts` (`bun run test:mobilelearning`, in the chain): signs in as the app does and feeds the real responses through the shared normalisers — **45/45**. Covers order across modules, no raw video URL, the app's module gate agreeing with the server's `MODULE_LOCKED`, the watch-time cap, complete → progress → Resume, notes (empty = DELETE), quiz answers by index and no answer key on a fail, upload + submit + duplicate + revision, and a pending student.
+- [x] Checks: mobile `tsc` · `expo lint` clean · Jest **69/69** (+38 learning rules) · `expo-doctor` 20/20 · Android bundle exports (5.2 MB). Backend type-check clean for the new code (36 errors in the committed `changewhatsapp.suite.ts` predate this).
+- [ ] Not in P2 (website features left for later): lesson transcript, Q&A / discussion, video bookmarks, AI notes, certificates.
+
+**P3 Messages + notifications — built 2026-10-17 (uncommitted)**
+
+- [x] **B3 push (backend).** `PushTokenModel` (one row per Expo token — a phone that signs in as another student *moves* its token, so a phone only ever gets the pushes of whoever is signed in). `POST /push-tokens` (signed in; Expo tokens only; device id recorded) and `DELETE /push-tokens` — **by token alone, no session**, because an app whose session already died must still be able to stop that account's pushes (the token is the phone's own secret). `services/push.service.ts`: `NotificationService.create` — the one door every in-app notification already goes through — now also pushes, fire-and-forget (never throws, 10 s deadline, never awaited); one Expo request per 100 phones; `DeviceNotRegistered` deletes the token; blocked accounts get nothing. **Off unless `PUSH_ENABLED=true`** (only logged otherwise), like every other outbound channel. Path is `/push-tokens`, not the `/me/push-tokens` first sketched in §13.4.
+- [x] **B4 links (website).** `client/src/app/.well-known/apple-app-site-association` and `…/assetlinks.json` route handlers, built from env (`APPLE_TEAM_ID`, `ANDROID_CERT_SHA256`) and answering **404 until those are set** — a guessed Team ID or fingerprint would silently break the feature. `/.well-known` added to the middleware's public paths. Claimed paths (`client/src/lib/appLinks.ts`): `/j/*`, `/s/*`, `/messages*`, `/class-bookings*`, `/my-bookings*`. Without the app nothing changes.
+- [x] **App.** Messages tab (mentors of my programme, unread first; thread with 3 s polling paused in the background, optimistic send with ✓/✓✓, retry only where a retry can help, older pages, day labels; pending students read but see why they cannot write) with an unread **tab badge**; Notifications screen (paged, mark one / all read, tap opens the matching screen) behind a **bell with a count** on Home; push registration after sign-in (Android channel `default`), unregistered on sign-out **and** when the session is lost; a tapped push — including one that cold-starts the app — opens its screen; `/j/<code>` (join link: redeem → sign in if needed → straight into Meet, countdown if early, in-app classes to their screen) and `/s/<code>` (sign-in link) work signed in or out; `+native-intent` maps every incoming website URL (`shared/src/links.ts` — the same mapping push uses) and sends unknown website pages Home, not to "not found". `app.json`: iOS `associatedDomains`, Android verified `intentFilters`, `expo-notifications` plugin.
+- [x] Tests: `backend/src/tests/mobilepush.suite.ts` **34/34** (local Expo stub — register / move / unregister, fan-out payload, dead tokens, chat reply → push → app route, blocked account, switch off, Expo 500 and unreachable never break the action, join + sign-in links from the app, notification list). Regressions green: chat 72, bookingsapi 81, assignments 171, joinlink 33, signinlink 38, smoke 93, client 153, hybridclass 47, mobileauth 31, mobilelearning 45. Mobile: tsc · lint · Jest **104/104** · expo-doctor 20/20 · Android bundle 5.4 MB. Website type-check clean; the `.well-known` routes verified on the dev server (404 unconfigured, no login redirect) and with env set (correct JSON, a malformed Team ID refused).
+- [ ] **Needs the owner before push / links work for real:**
+  1. `eas init` (Expo account) — the project id that push tokens are issued for; until then the app quietly skips registration.
+  2. Push credentials in EAS: an **FCM v1 service-account key** (Firebase project for `com.deltainstitutions.lms`) and an **APNs key** (Apple Developer account).
+  3. Backend `.env` on the server: `PUSH_ENABLED=true` (and `EXPO_ACCESS_TOKEN` only if "enhanced push security" is turned on in Expo).
+  4. Vercel env for the website: `APPLE_TEAM_ID` and `ANDROID_CERT_SHA256` (the Play App Signing certificate's SHA-256, plus the EAS upload key if internal builds should verify).
+- [ ] Not verified on a device yet (no build — see P1): permission prompt, notification tap from a killed app, a WhatsApp Join link opening the app.
+
+**P4 Store release — code built 2026-10-17 (uncommitted); submission waits on the owner (mobile/store/STORE.md §1)**
+
+- [x] **Registration in the app**, express and full (four steps), the website's rules and request body ported to `shared/src/register.ts` (+ the website's 158-country list, `shared/src/countries.ts`, with a Jest parity check that reads the website's file). Documents from the camera, photos or files; photos shrunk and re-encoded to JPEG (which also converts iPhone HEIC — the website refuses HEIC); uploads first (`/uploads/signup-doc`, 45 s deadline, one retry on no answer, never re-upload a file that went through); 422 details mapped back to the field's label and step; `EMAIL_TAKEN` offers Sign in; device refusals get the device screen. Deliberate differences from the website: `signupType: 'full'` sent explicitly; a start date of **today** is accepted (the website compares UTC midnight with now and refuses it).
+- [x] **Profile** rebuilt as a stack: details (name; password change), **signed-in devices** (this phone marked; sign out any), notifications status → phone settings, **Help & support** (requests list, new request, thread with replies), privacy policy, terms, sign out, **Delete account**.
+- [x] **B6 account deletion, store-proof.** Deletion was already a real cascade (`services/userCascade.ts`), but required the password — impossible for students who sign in by email code or link. New `POST /auth/account/delete-code` emails a 6-digit code (`account-delete` token purpose: hashed, user-bound, single use, 10 min, latest only; a **sign-in** code cannot delete); `DELETE /auth/account` takes `{ password }` **or** `{ code }`. The cascade now also removes the account's **push tokens**. Website body unchanged.
+- [x] **Fixes found on the way (backend):**
+  - changing the password from the app signed the app out — every session is revoked and the new one was only set as cookies; now issued in the body for the app (`issueSession`);
+  - `GET /auth/sessions` / `DELETE /auth/sessions/:id` could not tell which session is the phone's (they read the browser's cookie); the app now names its own with `X-Refresh-Token` (`utils/mobileClient.currentSessionToken`), and gets `revokedCurrent` when it signs itself out. No header → nothing marked, never a wrong guess.
+- [x] **Website:** public `/terms` (the registration dialog's own text, moved to `lib/legal/terms.ts` so a server page can render it — verified byte-identical) and `/privacy` (**DRAFT, flagged on the page** — written from what the code stores; needs the owner's legal review, a contact address, retention periods, and a fix to the Terms' "no third parties" line, which the service providers contradict). Both public in the middleware.
+- [x] `app.json`: specific camera / photo-library permission reasons, microphone off and `RECORD_AUDIO` blocked.
+- [x] **Store pack** `mobile/store/STORE.md`: owner checklist, listing text, Apple privacy label / Play Data safety mapped to the real data, store rules the app follows, reviewer notes + demo-account recipe, beta plan, and one **decision**: the "Payment method" question in the full application (recommend hiding it in the app for the first review).
+- [x] Tests: `mobileaccount.suite.ts` **38/38** (express + full registration with uploads from the app, forged document → 422 mapped to its step, passwordless deletion by code incl. wrong / crossed / reused codes and the cascade, website deletion unchanged, password change keeps the app signed in, sessions marking + revoke, support with a Bearer). Regressions green: passwordflows 44, cookies 37, devices 35, signup 41, security 39, nopassword 24, kyc 30, enrolledcount 57, registrationvalidation 31, mobileauth 31, mobilelearning 45, mobilepush 34. Mobile: tsc · lint · Jest **129/129** · expo-doctor 20/20 · Android bundle 5.8 MB. Website type-check clean; `/terms` and `/privacy` 200 signed out, 375 px without horizontal scroll.
+- [ ] Owner: STORE.md §1 (Apple/Google organisation accounts, `eas init`, push keys, env, privacy review, payment-method decision, demo account, backend deploy). Then TestFlight + Play internal testing.
+- [ ] Not in the app (website only, for now): changing the email address, completing an express account's full application later (`/complete-registration`), 2FA setup. A passwordless student can delete their account in the app but still not on the website (the website asks for a password).
+
+### 13.13 Risks
+
+| Risk | Mitigation |
+|---|---|
+| Store rejection over payments | M6: no purchase UI, no prices, no links to checkout in the app |
+| Store rejection over account deletion or demo access | B6 before submission; reviewer account with a booked class |
+| An API change breaks old installs | B5 forced-update gate; additive API changes only; app version in a header for logs |
+| Device limit blocks students switching to the app | B2 labels the device clearly; the pending-device screen says what to do; admins warned before launch |
+| Push not delivered (battery savers, denied permission) | Push is in addition to email/WhatsApp, never instead, until measured |
+| Two front ends drift on rules | Rules stay on the server (M4); pure client rules live once in `shared/` |
+
+### 13.14 Out of scope (v1)
+
+Admin / instructor app, in-app purchases, offline downloads, native interactive
+room, Arabic/RTL, tablets-specific layouts, smart-TV casting.

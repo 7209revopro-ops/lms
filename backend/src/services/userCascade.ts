@@ -29,7 +29,7 @@ export async function cascadeUserDeletion(userId: string | Types.ObjectId): Prom
      top-level import here closes a cycle at module load. */
   const {
     ReviewModel, EnrollmentModel, LessonProgressModel, AuthTokenModel,
-    CourseModel, DeviceModel, ClassBookingModel,
+    CourseModel, DeviceModel, ClassBookingModel, PushTokenModel,
   } = await import('@/models/schema.ts')
   const { releaseSeat } = await import('@/services/seatPool.service.ts')
 
@@ -63,6 +63,9 @@ export async function cascadeUserDeletion(userId: string | Types.ObjectId): Prom
        in the admin approvals list that can never be actioned. */
     DeviceModel.deleteMany({ userId }).exec(),
     ClassBookingModel.deleteMany({ userId }).exec(),
+    /* The app on their phone must stop receiving pushes for an account that
+       is gone (plan.md §13.4 B3). */
+    PushTokenModel.deleteMany({ userId }).exec(),
   ])
 
   /* Sequential, not Promise.all: two seats on the SAME class would otherwise

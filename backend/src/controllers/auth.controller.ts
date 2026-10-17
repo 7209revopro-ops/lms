@@ -15,6 +15,7 @@ import {
   clearImpersonationCookie,
   resolveDeviceId,
 } from '@/utils/authCookies.ts'
+import { currentSessionToken, issueSession, isMobileClient, mobileDeviceId, presentedRefreshToken } from '@/utils/mobileClient.ts'
 import { refreshTtl } from '@/utils/refreshTtl.ts'
 
 /* ─────────────────────────────────────────────────────
@@ -35,6 +36,11 @@ function sessionMeta(
      even when the sign-in is then blocked (a pending device keeps its identity
      for an admin to approve). Only the student sign-in paths pass `res`; admin
      paths omit it, since staff are exempt from the device whitelist. */
+  /* The app must say which device it is: without it, every sign-in would look
+     like a new phone and land in the admin's approval queue (plan.md §13.4 B2). */
+  if (res && isMobileClient(req) && !mobileDeviceId(req)) {
+    throw new AuthError('DEVICE_ID_REQUIRED', 'The app did not identify this device. Update the app and try again.', 400)
+  }
   const deviceId = res ? resolveDeviceId(req, res) : undefined
   return { userAgent, ip, deviceId }
 }
@@ -98,8 +104,7 @@ export class AuthController {
         return
       }
 
-      setAuthCookies(res, result.tokens)
-      sendSuccess(res, { user: result.user }, 'Account created successfully', 201)
+      sendSuccess(res, { user: result.user, ...issueSession(req, res, result.tokens) }, 'Account created successfully', 201)
     } catch (err) {
       next(err)
     }
@@ -124,8 +129,7 @@ export class AuthController {
          claim (refreshTtl(), auth.service.ts#issueTokens) — read here too so
          the cookie's Max-Age agrees with it instead of always defaulting to
          the full 30 days regardless of what the student chose. */
-      setAuthCookies(res, result.tokens, refreshTtl(req.body.remember))
-      sendSuccess(res, { user: result.user }, 'Signed in successfully')
+      sendSuccess(res, { user: result.user, ...issueSession(req, res, result.tokens, refreshTtl(req.body.remember)) }, 'Signed in successfully')
     } catch (err) {
       next(err)
     }
@@ -150,8 +154,7 @@ export class AuthController {
     try {
       const { email, code } = req.body as { email: string; code: string }
       const result = await this.service.verifyLoginOtp(email, code, sessionMeta(req, res))
-      setAuthCookies(res, result.tokens)
-      sendSuccess(res, { user: result.user }, 'Signed in successfully')
+      sendSuccess(res, { user: result.user, ...issueSession(req, res, result.tokens) }, 'Signed in successfully')
     } catch (err) {
       next(err)
     }
@@ -163,8 +166,7 @@ export class AuthController {
   redeemLoginLink = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     try {
       const result = await this.service.redeemLoginLink(String(req.body.token), sessionMeta(req, res))
-      setAuthCookies(res, result.tokens)
-      sendSuccess(res, { user: result.user }, 'Signed in successfully')
+      sendSuccess(res, { user: result.user, ...issueSession(req, res, result.tokens) }, 'Signed in successfully')
     } catch (err) {
       next(err)
     }
@@ -177,8 +179,8 @@ export class AuthController {
     try {
       const signedIn = req.user && req.user.role === 'student' ? req.user.id : undefined
       const result = await this.service.redeemSigninLink(String(req.body.token), signedIn ?? (req.user ? `staff:${req.user.id}` : undefined), sessionMeta(req, res))
-      if (result.tokens) setAuthCookies(res, result.tokens)
-      sendSuccess(res, { next: result.next, signedIn: !!result.tokens })
+      const session = result.tokens ? issueSession(req, res, result.tokens) : {}
+      sendSuccess(res, { next: result.next, signedIn: !!result.tokens, ...session })
     } catch (err) {
       next(err)
     }
@@ -191,8 +193,8 @@ export class AuthController {
     try {
       const signedIn = req.user && req.user.role === 'student' ? req.user.id : undefined
       const result = await this.service.redeemJoinLink(String(req.body.token), signedIn ?? (req.user ? `staff:${req.user.id}` : undefined), sessionMeta(req, res))
-      if (result.tokens) setAuthCookies(res, result.tokens)
-      sendSuccess(res, { liveClassId: result.liveClassId, inApp: result.inApp, signedIn: !!result.tokens })
+      const session = result.tokens ? issueSession(req, res, result.tokens) : {}
+      sendSuccess(res, { liveClassId: result.liveClassId, inApp: result.inApp, signedIn: !!result.tokens, ...session })
     } catch (err) {
       next(err)
     }
@@ -212,8 +214,7 @@ export class AuthController {
     try {
       const { challengeToken, code } = req.body as { challengeToken: string; code: string }
       const { user, tokens } = await this.service.loginTwoFactor(challengeToken, code, sessionMeta(req, res))
-      setAuthCookies(res, tokens)
-      sendSuccess(res, { user }, 'Signed in successfully')
+      sendSuccess(res, { user, ...issueSession(req, res, tokens) }, 'Signed in successfully')
     } catch (err) {
       next(err)
     }
@@ -222,7 +223,8 @@ export class AuthController {
   /* ── POST /auth/refresh ─────────────────────────── */
   refresh = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     try {
-      const rawToken = req.cookies?.[REFRESH_COOKIE]
+      /* The app presents its refresh token in the body (plan.md §13.4 B1). */
+      const rawToken = presentedRefreshToken(req, REFRESH_COOKIE)
 
       if (!rawToken) {
         /* No refresh cookie means the session cannot be recovered, so drop
@@ -238,8 +240,8 @@ export class AuthController {
       }
 
       const tokens = await this.service.refresh(rawToken, sessionMeta(req, res))
-      setAuthCookies(res, tokens)
-      sendSuccess(res, null, 'Session refreshed')
+      const session = issueSession(req, res, tokens)
+      sendSuccess(res, isMobileClient(req) ? session : null, 'Session refreshed')
     } catch (err) {
       if (isDeadSession(err)) clearAuthCookies(res)
       next(err)
@@ -249,9 +251,9 @@ export class AuthController {
   /* ── POST /auth/logout ──────────────────────────── */
   logout = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     try {
-      const rawToken = req.cookies?.[REFRESH_COOKIE]
+      const rawToken = presentedRefreshToken(req, REFRESH_COOKIE)
       if (rawToken) await this.service.logout(rawToken)
-      clearAuthCookies(res)
+      if (!isMobileClient(req)) clearAuthCookies(res)
       sendSuccess(res, null, 'Signed out successfully')
     } catch (err) {
       next(err)
@@ -474,8 +476,11 @@ export class AuthController {
     try {
       const { currentPassword, newPassword } = req.body as { currentPassword: string; newPassword: string }
       const tokens = await this.service.changePassword(req.user!.id, currentPassword, newPassword, sessionMeta(req))
-      setAuthCookies(res, tokens)
-      sendSuccess(res, null, 'Password changed successfully. Other devices have been signed out.')
+      /* Every session is revoked — this one too — and a fresh one issued: as
+         cookies for the browser, in the body for the app (which would
+         otherwise be signed out by its own password change). */
+      const session = issueSession(req, res, tokens)
+      sendSuccess(res, isMobileClient(req) ? session : null, 'Password changed successfully. Other devices have been signed out.')
     } catch (err) {
       next(err)
     }
@@ -592,7 +597,7 @@ export class AuthController {
   /* ── GET /auth/sessions ─────────────────────────── */
   listSessions = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     try {
-      const currentRefreshToken = req.cookies?.[REFRESH_COOKIE]
+      const currentRefreshToken = currentSessionToken(req, REFRESH_COOKIE)
       const sessions = await this.service.listSessions(req.user!.id, currentRefreshToken)
       sendSuccess(res, sessions)
     } catch (err) {
@@ -603,13 +608,13 @@ export class AuthController {
   /* ── DELETE /auth/sessions/:id ──────────────────── */
   revokeSession = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     try {
-      const currentRefreshToken = req.cookies?.[REFRESH_COOKIE]
+      const currentRefreshToken = currentSessionToken(req, REFRESH_COOKIE)
       const { revokedCurrent } = await this.service.revokeSession(
         req.user!.id,
         String(req.params['id'] ?? ''),
         currentRefreshToken,
       )
-      if (revokedCurrent) clearAuthCookies(res)
+      if (revokedCurrent && !isMobileClient(req)) clearAuthCookies(res)
       sendSuccess(res, { revokedCurrent }, 'Session revoked.')
     } catch (err) {
       next(err)
@@ -628,12 +633,22 @@ export class AuthController {
     }
   }
 
+  /* ── POST /auth/account/delete-code ─────────────── */
+  requestAccountDeleteCode = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    try {
+      const { devCode } = await this.service.requestAccountDeleteCode(req.user!.id)
+      sendSuccess(res, devCode ? { sent: true, devCode } : { sent: true }, 'We emailed you a confirmation code.')
+    } catch (err) {
+      next(err)
+    }
+  }
+
   /* ── DELETE /auth/account ───────────────────────── */
   deleteAccount = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     try {
-      const { password } = req.body as { password: string }
-      await this.service.deleteAccount(req.user!.id, password)
-      clearAuthCookies(res)
+      const { password, code } = req.body as { password?: string; code?: string }
+      await this.service.deleteAccount(req.user!.id, { password, code })
+      if (!isMobileClient(req)) clearAuthCookies(res)
       sendSuccess(res, null, 'Account permanently deleted.')
     } catch (err) {
       next(err)

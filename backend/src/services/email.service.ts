@@ -510,6 +510,27 @@ export async function sendLoginCode(to: string, name: string, code: string): Pro
   })
 }
 
+/* Confirms a student's own request to delete their account — the re-auth for
+   an account with no password (plan.md §13.4 B6). Worded so a code that
+   arrives unasked reads as a warning, not a routine sign-in. */
+export async function sendAccountDeleteCode(to: string, name: string, code: string): Promise<void> {
+  const subject = `${code} confirms deleting your Delta account`
+  const html = wrap(subject, `
+    <h2 style="margin:0 0 16px;font-size:20px;font-weight:700;color:#0D0F1A">Confirm account deletion</h2>
+    <p>Hi ${escapeHtml(name)},</p>
+    <p>Someone signed in to your account asked to <strong>permanently delete it</strong>. Enter this code to confirm. It expires in 10 minutes.</p>
+    <p style="margin:24px 0;font-size:34px;font-weight:700;letter-spacing:0.18em;color:#EF4444">${escapeHtml(code)}</p>
+    <p>Deleting removes your profile, enrolments, bookings, progress and reviews, and cannot be undone.</p>
+    <p style="font-size:12px;color:#9CA3AF">Didn't ask for this? Do not share the code — your account stays as it is. Consider changing your password.</p>
+  `)
+  await sender.send({
+    to,
+    subject,
+    html,
+    text: `Your code to confirm deleting your Delta account is ${code}. It expires in 10 minutes. If you did not ask for this, ignore this email and do not share the code.`,
+  })
+}
+
 /* Tells an admin a student is waiting on a second-device approval, so the
    request doesn't sit unseen until someone happens to open the Devices page.
    Best-effort — a mail failure never blocks the sign-in flow it describes. */

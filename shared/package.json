@@ -1,0 +1,8 @@
+{
+  "name": "@delta/shared",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Types and pure rules shared by the student website (client/) and the mobile app (mobile/). No dependencies.",
+  "main": "src/index.ts",
+  "types": "src/index.ts"
+}

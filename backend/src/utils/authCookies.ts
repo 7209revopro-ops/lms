@@ -1,4 +1,5 @@
 import { randomBytes } from 'node:crypto'
+import { mobileDeviceId } from '@/utils/mobileClient.ts'
 import type { Request, Response } from 'express'
 import { env } from '@/config/env.ts'
 import type { TokenPair } from '@/types/index.ts'
@@ -237,6 +238,10 @@ export function clearImpersonationCookie(res: Response): void {
    approve. Never cleared on logout — it identifies the browser, not the
    session. Returns the id to check against the whitelist. */
 export function resolveDeviceId(req: Request, res: Response): string {
+  /* The mobile app's id (X-Device-Id, kept in its secure storage) — the same
+     whitelist, no cookie set (plan.md §13.4 B2). */
+  const appId = mobileDeviceId(req)
+  if (appId) return appId
   const existing = req.cookies?.[DEVICE_COOKIE]
   if (typeof existing === 'string' && existing.length > 0) return existing
 

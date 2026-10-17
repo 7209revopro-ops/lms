@@ -170,7 +170,7 @@ try {
     check('the seat is counted', await storedCount(course._id) === 1)
 
     const { AuthService } = await import('@/services/auth.service.ts')
-    await new AuthService().deleteAccount(String(student._id), PW)
+    await new AuthService().deleteAccount(String(student._id), { password: PW })
 
     check('and released when the account is deleted',
       await storedCount(course._id) === 0, `got ${await storedCount(course._id)}`)

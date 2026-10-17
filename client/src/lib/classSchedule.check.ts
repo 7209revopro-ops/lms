@@ -24,6 +24,14 @@ const check = (name: string, ok: boolean, detail = '') => {
 
 const future = (days: number) => new Date(Date.now() + days * 86_400_000).toISOString()
 const past   = (days: number) => new Date(Date.now() - days * 86_400_000).toISOString()
+/* A Monday safely ahead (UTC midnight, two weeks out). These checks once used
+   a fixed date, 2026-10-05, and started failing the week it passed: the
+   catalogue rightly hides sessions that are over. */
+const A_FUTURE_MONDAY = (() => {
+  const d = new Date(); d.setUTCHours(0, 0, 0, 0)
+  d.setUTCDate(d.getUTCDate() + 14 + ((8 - d.getUTCDay()) % 7))
+  return d.toISOString()
+})()
 
 type Row = Partial<LiveClass> & Record<string, unknown>
 const row = (o: Row): LiveClass => ({
@@ -159,7 +167,7 @@ console.log('\nF. A class taught in two languages is TWO series, not one')
      because two interleaved schedules never agree on a weekday. */
   const series = (lang: string, dayOffset: number, hour: number) =>
     [0, 1, 2, 3].map(w => {
-      const d = new Date('2026-10-05T00:00:00Z')            // a Monday
+      const d = new Date(A_FUTURE_MONDAY)                  // a Monday
       d.setUTCDate(d.getUTCDate() + w * 7 + dayOffset)
       d.setUTCHours(hour, 0, 0, 0)
       return row({ ...HOST, id: `${lang}${w}`, title: 'Core Concepts', language: lang,
@@ -206,7 +214,7 @@ console.log('\nG. Four weekly slots of one class are FOUR slots')
      which cohort they were joining. */
   const weekly = (label: string, dayOffset: number, hour: number, minute = 0) =>
     [0, 1, 2, 3].map(w => {
-      const d = new Date('2026-10-05T00:00:00Z')            // a Monday
+      const d = new Date(A_FUTURE_MONDAY)                  // a Monday
       d.setUTCDate(d.getUTCDate() + w * 7 + dayOffset)
       d.setUTCHours(hour, minute, 0, 0)
       return row({ ...HOST, id: `${label}${w}`, title: 'Core Concepts', language: 'English',
@@ -250,7 +258,7 @@ console.log('\nH. A filter offers what is THERE, and nothing else')
      And a module with one instructor gets no instructor picker at all: a
      control whose every option returns the same list is furniture. */
   const at = (dayOffset: number, hour: number) => {
-    const d = new Date('2026-10-05T00:00:00Z')            // a Monday
+    const d = new Date(A_FUTURE_MONDAY)                  // a Monday
     d.setUTCDate(d.getUTCDate() + dayOffset)
     d.setUTCHours(hour, 0, 0, 0)
     return d.toISOString()

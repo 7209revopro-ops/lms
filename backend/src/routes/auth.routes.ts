@@ -195,6 +195,13 @@ const reauthSchema = z.object({
   password: z.string().min(1, 'Password is required'),
 })
 
+/* Deleting the account: the password, or — for an account without one —
+   the code from POST /auth/account/delete-code (plan.md §13.4 B6). */
+const deleteAccountSchema = z.object({
+  password: z.string().min(1).optional(),
+  code:     z.string().trim().regex(/^\d{6}$/, 'Enter the six-digit code from your email').optional(),
+}).refine(b => !!b.password || !!b.code, { message: 'Confirm with your password or the emailed code', path: ['password'] })
+
 /* The same shape the signup form validates against, so an address accepted
    here cannot be one that could never have registered in the first place. */
 const emailChangeSchema = z.object({
@@ -238,6 +245,7 @@ router.post  ('/resend-verification', authRateLimit, authenticate, auth.resendVe
 router.get   ('/sessions',            authenticate, auth.listSessions)
 router.delete('/sessions/:id',        authenticate, auth.revokeSession)
 router.post  ('/deactivate',          authRateLimit, authenticate, validate(reauthSchema), auth.deactivateAccount)
-router.delete('/account',             authRateLimit, authenticate, validate(reauthSchema), auth.deleteAccount)
+router.post  ('/account/delete-code', authRateLimit, authenticate, auth.requestAccountDeleteCode)
+router.delete('/account',             authRateLimit, authenticate, validate(deleteAccountSchema), auth.deleteAccount)
 
 export default router
