@@ -130,15 +130,13 @@ try {
   section('H · the Meet link on WhatsApp')
   const added = await M.NotificationModel.findOne({ userId: stu._id, title: 'New program: NY session' }).lean() as any
   check('the "added" notice gives the link, and the language', String(added?.body).includes(`Join on Google Meet: ${LINK}`) && / in Malayalam,/.test(String(added?.body)), String(added?.body))
-  const addedWa = (await M.WhatsAppOutboxModel.find({ templateName: 'course_update_v1', to: '971500000201' }).lean() as any[]).find(r => r.params?.[1] === 'NY session')
-  check('...so does its WhatsApp', String(addedWa?.params?.[2]).includes(LINK), JSON.stringify(addedWa?.params))
+  /* No WhatsApp when it is made (2026-10-17) — in-app only. */
+  check('...but no WhatsApp', (await M.WhatsAppOutboxModel.countDocuments({ templateName: 'course_update_v1', to: '971500000201' })) === 0)
   await M.LiveClassModel.updateOne({ _id: classes[1]._id }, { $set: { scheduledStart: new Date(Date.now() + 6 * 60_000) } })
   const { runFiveMinReminders } = await import('@/jobs/reminders.job.ts')
   await runFiveMinReminders()
-  const five = await M.WhatsAppOutboxModel.findOne({ templateName: 'class_update_v1', to: '971500000201' }).lean() as any
-  check('5 minutes before: class_update_v1 with its Meet link', five?.params?.[1] === 'NY session' && five?.params?.[3] === `It starts in 5 minutes. Join directly on Google Meet: ${LINK}`, JSON.stringify(five?.params))
-  const tok = five?.buttonParam ? await M.AuthTokenModel.findOne({ tokenHash: hashSigninCode(five.buttonParam), purpose: 'signin-link' }).lean() as any : null
-  check('...and its button still signs them in to the class page', tok?.nextPath === `/live-classes/${String(classes[1]._id)}/watch`, String(tok?.nextPath))
+  /* A programme class: no WhatsApp 5 minutes before (2026-10-17) — only "Join now" at its start. */
+  check('5 minutes before: no WhatsApp at all', (await M.WhatsAppOutboxModel.countDocuments({ templateName: { $in: ['class_update_v1', 'class_starts_in_5_min_v2', 'class_starts_in_5_min'] }, to: '971500000201' })) === 0)
   check('...instead of the usual 5-minute template', (await M.WhatsAppOutboxModel.countDocuments({ templateName: /class_starts_in_5_min/, to: '971500000201' })) === 0)
 } catch (err) {
   fail++; lines.push(`  FAIL  suite threw — ${(err as Error).message}\n${(err as Error).stack}`)

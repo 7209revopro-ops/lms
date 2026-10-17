@@ -110,12 +110,9 @@ try {
     await until(async () => (await M.NotificationModel.countDocuments({ userId: { $in: gl.map(u => u._id) }, title: 'New program: Gladiators weekly review' })) === 3))
   const note = await M.NotificationModel.findOne({ userId: g1._id, title: /^New program/ }).lean() as any
   check('...saying when it meets, where, and that they are booked', /3 classes, every .* at 07:00 PM GST, at Room 4 — from .* to .*\. You are booked on every one\./.test(String(note?.body)), String(note?.body))
-  check('every student gets WhatsApp course_update_v1',
-    await until(async () => (await M.WhatsAppOutboxModel.countDocuments({ templateName: 'course_update_v1' })) === 3))
-  const wa = await M.WhatsAppOutboxModel.findOne({ templateName: 'course_update_v1', to: /1001$/ }).lean() as any
-  check('...name, the program, and the schedule', wa?.params?.[0] === g1.name && wa?.params?.[1] === 'Gladiators weekly review' && /^You have been added to this program\. 3 classes/.test(String(wa?.params?.[2])), JSON.stringify(wa?.params))
-  const tok = wa?.buttonParam ? await M.AuthTokenModel.findOne({ tokenHash: hashSigninCode(wa.buttonParam), purpose: 'signin-link' }).lean() as any : null
-  check('...its button signs them in to the Class Schedule', tok?.nextPath === '/class-bookings', String(tok?.nextPath))
+  /* No WhatsApp when a program is made (2026-10-17) — the in-app notice only. */
+  await new Promise(r => setTimeout(r, 600))
+  check('no WhatsApp when it is made (in-app only)', (await M.WhatsAppOutboxModel.countDocuments({})) === 0)
   check('nobody outside the program is told', (await M.NotificationModel.countDocuments({ userId: { $in: [e1._id, e2._id, noTeam._id] }, title: /^New program/ })) === 0)
 
   section('C2 · students added later are not messaged (only at creation)')

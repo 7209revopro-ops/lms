@@ -9,6 +9,8 @@ export interface Program {
   id: string; title: string; description: string; status: 'active' | 'stopped'; source: 'lms' | 'portal'
   repeat: 'weekly' | 'monthly'; weekdays: number[]; monthDay: number | null; startDate: string; endDate: string
   time: string; timezone: string; durationMins: number; isOnline: boolean; location: string
+  /** The shareable link — {student app}/p/{joinCode}: sign in, or a form for people without an LMS account. */
+  joinCode?: string; joinUrl?: string
   mentor: ProgramPerson | null; coMentors?: ProgramPerson[]; meetingMode?: 'auto' | 'link' | 'app'; meetingUrl?: string; language?: string
   students: ProgramPerson[]; createdByName: string; createdByEmail: string
   classes: { id: string; startsAt: string; status: string }[]; nextClassAt: string | null; missing?: string[]
@@ -51,3 +53,10 @@ export const useCreateProgram = () => useProgramMutation((input: ProgramInput) =
 export const useChangeProgramStudents = () => useProgramMutation((v: { id: string; add?: string[]; remove?: string[] }) => apiPost<Program>(`/admin/programs/${v.id}/students`, { add: v.add, remove: v.remove }))
 export const useRescheduleProgram = () => useProgramMutation((v: { id: string } & Partial<ProgramInput>) => apiPatch<Program>(`/admin/programs/${v.id}`, v))
 export const useStopProgram = () => useProgramMutation((id: string) => apiPost<Program>(`/admin/programs/${id}/stop`))
+
+/* Who filled in the programme link's form (people without an LMS account). */
+export interface ProgramGuest { id: string; name: string; email: string; phone: string; joins: number; firstAt: string; lastJoinAt: string | null }
+export const useProgramGuests = (id: string, enabled: boolean) => useQuery({
+  queryKey: [...KEY, id, 'guests'], enabled, staleTime: 30_000,
+  queryFn: () => apiGet<ProgramGuest[]>(`/admin/programs/${id}/guests`),
+})

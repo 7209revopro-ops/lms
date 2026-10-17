@@ -275,8 +275,106 @@ async function cancelUpcoming(programId: Types.ObjectId, reason: string): Promis
 }
 
 /* ── The answer ────────────────────────────────────────────────────────── */
+/* ── The shareable link (2026-10-17) ───────────────────────────────────────
+   {CLIENT_URL}/p/{joinCode}: an LMS student on it signs in and joins as usual; anyone else fills in a short form
+   (name, email, phone) and gets the class's Join button. Copied from the LMS admin's and the commission portal's
+   programme lists. */
+const JOIN_ALPHABET = 'abcdefghjkmnpqrstuvwxyz23456789'
+const newJoinCode = () => Array.from(crypto.randomBytes(8), b => JOIN_ALPHABET[b % JOIN_ALPHABET.length]).join('')
+export const programJoinUrl = (code: string) => `${String(process.env['CLIENT_URL'] ?? 'http://localhost:3000').replace(/\/+$/, '')}/p/${code}`
+
+/** Its join code — made the first time a program is shown, for programs made before links existed. */
+async function joinCodeOf(p: any): Promise<string> {
+  if (p.joinCode) return p.joinCode
+  const { ProgramModel } = await import('@/models/schema.ts')
+  for (let i = 0; i < 5; i++) {
+    const code = newJoinCode()
+    try {
+      const r = await ProgramModel.updateOne({ _id: p._id, joinCode: { $exists: false } }, { $set: { joinCode: code } })
+      if (r.modifiedCount) { p.joinCode = code; return code }
+      const again = await ProgramModel.findById(p._id).select('joinCode').lean<{ joinCode?: string }>()
+      if (again?.joinCode) { p.joinCode = again.joinCode; return again.joinCode }
+    } catch { /* a code already taken (unique) — try another */ }
+  }
+  throw new ProgramError('Could not make a link for this program', 500)
+}
+
+/* The class a link opens: the one on now, else the next. Joinable from 15 minutes before it starts until it ends. */
+async function currentClassOf(programId: unknown) {
+  const { LiveClassModel } = await import('@/models/schema.ts')
+  const now = Date.now()
+  const rows = await LiveClassModel.find({ programId, status: { $in: ['scheduled', 'live'] } })
+    .sort({ scheduledStart: 1 }).select('scheduledStart durationMins status type meetingUrl isOnline location').lean() as any[]
+  const cls = rows.find(c => new Date(c.scheduledStart).getTime() + (c.durationMins ?? 60) * 60_000 > now)
+  if (!cls) return null
+  const start = new Date(cls.scheduledStart).getTime(), end = start + (cls.durationMins ?? 60) * 60_000
+  return { cls, start, end, joinable: now >= start - 15 * 60_000 && now < end }
+}
+
+/** What the link's page shows — public, so nothing about who is on it. */
+export async function programPublic(code: string) {
+  const { ProgramModel, UserModel } = await import('@/models/schema.ts')
+  const p: any = /^[a-z0-9]{6,16}$/.test(code) ? await ProgramModel.findOne({ joinCode: code }).lean() : null
+  if (!p) throw new ProgramError('This program link is not valid', 404)
+  const mentor = await UserModel.findById(p.instructorId).select('name').lean() as any
+  const cur = p.status === 'active' ? await currentClassOf(p._id) : null
+  return {
+    title: p.title, description: p.description ?? '', mentor: mentor?.name ?? '', language: p.language || 'English',
+    thumbnailUrl: p.thumbnailUrl ?? '', isOnline: p.isOnline !== false, location: p.location ?? '',
+    status: p.status, repeat: p.repeat, weekdays: p.weekdays ?? [], monthDay: p.monthDay ?? null, time: p.time, timezone: p.timezone,
+    nextClass: cur ? { id: String(cur.cls._id), startsAt: new Date(cur.start).toISOString(), endsAt: new Date(cur.end).toISOString(), joinable: cur.joinable } : null,
+  }
+}
+
+/**
+ * Someone without an LMS account fills in the link's form: kept as a guest of the program (one per email), and given
+ * the class's join link when it can be joined. An LMS student on the program is told to sign in instead.
+ */
+export async function joinAsGuest(code: string, input: { name?: unknown; email?: unknown; phone?: unknown }) {
+  const { ProgramModel, ProgramGuestModel, UserModel } = await import('@/models/schema.ts')
+  const name = String(input.name ?? '').trim(), email = String(input.email ?? '').trim().toLowerCase(), phone = String(input.phone ?? '').trim()
+  if (name.length < 2 || name.length > 120) throw new ProgramError('Please enter your name')
+  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email) || email.length > 200) throw new ProgramError('Please enter a valid email')
+  if (phone.replace(/\D/g, '').length < 8 || phone.length > 30) throw new ProgramError('Please enter your phone number with the country code')
+  const p: any = /^[a-z0-9]{6,16}$/.test(code) ? await ProgramModel.findOne({ joinCode: code }).lean() : null
+  if (!p) throw new ProgramError('This program link is not valid', 404)
+  if (p.status !== 'active') throw new ProgramError('This program has ended')
+
+  const member = await UserModel.findOne({ email, _id: { $in: p.studentIds ?? [] } }).select('_id').lean()
+  if (member) return { member: true as const }
+
+  const cur = await currentClassOf(p._id)
+  await ProgramGuestModel.updateOne(
+    { programId: p._id, email },
+    { $set: { name, phone, ...(cur?.joinable ? { lastJoinAt: new Date() } : {}) }, $inc: { joins: cur?.joinable ? 1 : 0 } },
+    { upsert: true },
+  )
+  const meet = cur && cur.cls.isOnline !== false && cur.cls.type === 'external' && /^https:\/\/meet\.google\.com\//i.test(String(cur.cls.meetingUrl ?? ''))
+    ? String(cur.cls.meetingUrl) : null
+  return {
+    member: false as const,
+    nextClass: cur ? { startsAt: new Date(cur.start).toISOString(), endsAt: new Date(cur.end).toISOString(), joinable: cur.joinable } : null,
+    /* Only while it can be joined — not handed out days ahead. */
+    joinUrl: cur?.joinable ? meet : null,
+    /* An in-app (LMS) stream or an in-person class has no link to give a guest. */
+    note: !cur ? 'No class is coming up for this program.'
+      : cur.cls.isOnline === false ? `This class is in person${cur.cls.location ? ` — ${cur.cls.location}` : ''}.`
+      : !meet ? 'This class is in the LMS app — ask your counsellor for an LMS account to join.'
+      : cur.joinable ? '' : 'The Join button opens 15 minutes before the class starts — come back to this link then.',
+  }
+}
+
+/** Who filled in the program's form — for who may see the program. */
+export async function listProgramGuests(id: string, actor: Actor) {
+  const { ProgramGuestModel } = await import('@/models/schema.ts')
+  const p = await load(id, actor)
+  const rows = await ProgramGuestModel.find({ programId: p._id }).sort({ createdAt: -1 }).limit(2000).lean() as any[]
+  return rows.map(g => ({ id: String(g._id), name: g.name, email: g.email, phone: g.phone, joins: g.joins ?? 0, firstAt: g.createdAt, lastJoinAt: g.lastJoinAt ?? null }))
+}
+
 async function present(p: any) {
   const { LiveClassModel, UserModel } = await import('@/models/schema.ts')
+  const joinCode = await joinCodeOf(p)
   const [students, mentor, classes, coMentors] = await Promise.all([
     UserModel.find({ _id: { $in: p.studentIds ?? [] } }).select('name email').lean() as Promise<any[]>,
     UserModel.findById(p.instructorId).select('name email').lean() as Promise<any>,
@@ -294,6 +392,7 @@ async function present(p: any) {
     thumbnailUrl: p.thumbnailUrl ?? '',
     students: students.map(s => ({ id: String(s._id), name: s.name, email: s.email })),
     createdByName: p.createdByName ?? '', createdByEmail: p.createdByEmail ?? '',
+    joinCode, joinUrl: programJoinUrl(joinCode),
     /* Each class's Google Meet link — the program's own link, else the room made for that class (2026-10-15: the portal
        shows the program's link). In person, none. */
     classes: classes.map(c => ({ id: String(c._id), startsAt: c.scheduledStart, status: c.status,
@@ -353,7 +452,7 @@ export async function createProgram(input: Record<string, any>, actor: Actor) {
     meetingMode: meeting.mode, ...(meeting.url ? { meetingUrl: meeting.url } : {}), language,
     ...(image ? { thumbnailUrl: image } : {}),
     courseId: course._id, ...s, timezone: DEFAULT_TZ, isOnline, location: String(input.location ?? '').trim(),
-    studentIds: ids, status: 'active', source: actor.role === 'portal' ? 'portal' : 'lms',
+    studentIds: ids, status: 'active', source: actor.role === 'portal' ? 'portal' : 'lms', joinCode: newJoinCode(),
     ...(actor.id && Types.ObjectId.isValid(actor.id) ? { createdById: new Types.ObjectId(actor.id) } : {}),
     createdByEmail: actor.email ?? String(input.createdByEmail ?? ''), createdByName: actor.name ?? String(input.createdByName ?? ''),
   })
@@ -505,10 +604,9 @@ export async function programAudienceStudents(orgId: string | null, pick: { team
 }
 
 /* ── Telling the students a program was made for them ─────────────────────
-   In-app, an email, and WhatsApp course_update_v1 ("there's an update about
-   your course {program}: {when it meets}") with a sign-in button to their Class
-   Schedule. The days and time in each READER's academy clock, read off the
-   classes actually made. */
+   In the app only (2026-10-17 — no email, no WhatsApp; the one programme WhatsApp
+   is "Join now" at each class's start). The days and time in each READER's
+   academy clock, read off the classes actually made. */
 function scheduleFor(p: any, starts: Date[], slug: string | null | undefined): string {
   if (!starts.length) return 'No classes are left to come.'
   const zone = academyClock(starts[0]!, slug).zone
@@ -535,16 +633,12 @@ function scheduleFor(p: any, starts: Date[], slug: string | null | undefined): s
 export async function notifyProgramCreated(p: any): Promise<{ notified: number; emailed: number; whatsapp: number }> {
   const { UserModel, LiveClassModel } = await import('@/models/schema.ts')
   const { NotificationService } = await import('@/services/notification.service.ts')
-  const { sendProgramAdded } = await import('@/services/email.service.ts')
-  const { sendTemplateMessage } = await import('@/services/whatsapp.service.ts')
-  const { mintSigninCode } = await import('@/services/signinLink.service.ts')
   const { ensureOrgSlugs, orgSlugFor } = await import('@/utils/orgSlugs.ts')
   const { SCHEDULE_LINK } = await import('@/utils/clientLinks.ts')
   const notifications = new NotificationService()
   await ensureOrgSlugs().catch(() => {})
   const starts = (await LiveClassModel.find({ programId: p._id, status: 'scheduled', scheduledStart: { $gt: new Date() } })
     .sort({ scheduledStart: 1 }).select('scheduledStart').lean() as any[]).map(c => new Date(c.scheduledStart))
-  const mentor = await UserModel.findById(p.instructorId).select('name').lean() as any
   const students = await UserModel.find({ _id: { $in: p.studentIds ?? [] } }).select('name email organizationId enrollmentApplication.phone').lean() as any[]
   const tally = { notified: 0, emailed: 0, whatsapp: 0 }
   for (const u of students) {
@@ -553,18 +647,8 @@ export async function notifyProgramCreated(p: any): Promise<{ notified: number; 
       await notifications.create(String(u._id), { kind: 'system', title: `New program: ${p.title}`, body: schedule, link: SCHEDULE_LINK })
       tally.notified++
     } catch (err) { logger.warn({ err, userId: String(u._id) }, 'program: in-app notice failed') }
-    if (u.email) {
-      try { await sendProgramAdded(u.email, u.name ?? '', p.title, schedule, mentor?.name ?? '', p.description ?? ''); tally.emailed++ }
-      catch (err) { logger.warn({ err, to: u.email }, 'program: email failed') }
-    }
-    const phone = u.enrollmentApplication?.phone
-    if (phone) {
-      try {
-        const code = await mintSigninCode(String(u._id), '/class-bookings')
-        await sendTemplateMessage(phone, 'course_update_v1', [u.name || 'there', p.title, `You have been added to this program. ${schedule}`], code, 'program')
-        tally.whatsapp++
-      } catch (err) { logger.warn({ err, userId: String(u._id) }, 'program: WhatsApp failed') }
-    }
+    /* No email and no WhatsApp (2026-10-17, the user): a program's students are told in the app only; the one
+       WhatsApp they get is "Join now" when each class starts. */
   }
   logger.info({ programId: String(p._id), students: students.length, ...tally }, 'program: students told')
   return tally

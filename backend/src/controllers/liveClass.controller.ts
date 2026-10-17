@@ -515,7 +515,9 @@ export async function notifySessionEdited(notice: SessionEditNotice): Promise<{
      class's start — only a class not yet over is worth a message. */
   const phoneOf = new Map<string, { phone?: string; name?: string; slug?: string }>()
   let classStart: Date | null = null
-  if (notice.linkChanged) {
+  /* A Program's class (2026-10-17): in-app only — no WhatsApp, no digest email. */
+  const program = !!(await (await import('@/models/schema.ts')).LiveClassModel.findById(notice.liveClassId).select('programId').lean<{ programId?: unknown }>())?.programId
+  if (notice.linkChanged && !program) {
     const { UserModel, LiveClassModel } = await import('@/models/schema.ts')
     const cls = await LiveClassModel.findById(notice.liveClassId).select('scheduledStart durationMins status').lean() as any
     const end = cls ? new Date(cls.scheduledStart).getTime() + (cls.durationMins ?? 60) * 60_000 : 0
@@ -578,8 +580,8 @@ export async function notifySessionEdited(notice: SessionEditNotice): Promise<{
       }
 
       /* Standard tier: it joins tonight's digest rather than becoming mail of
-         its own. */
-      try {
+         its own. Not for a Program's class (in-app only). */
+      if (!program) try {
         await queueDigestItem({
           userId,
           kind:  'session-updated',
@@ -651,6 +653,8 @@ export async function notifyBookedStudents(notice: BookingChangeNotice): Promise
 
   /* One query for every recipient rather than one per booking. */
   const userIds = bookings.map(b => b.userId)
+  /* A Program's class (2026-10-17): its students hear in-app only — no email, no WhatsApp about changes. */
+  const programClass = !!(await (await import('@/models/schema.ts')).LiveClassModel.findById(notice.liveClassId).select('programId').lean<{ programId?: unknown }>())?.programId
   /* organizationId, because the bell below renders a time and the reader's
      academy is the only thing that says which clock it is in. Without it on
      the projection the renderer has nothing to resolve a zone from and falls
@@ -734,7 +738,7 @@ export async function notifyBookedStudents(notice: BookingChangeNotice): Promise
         logger.error({ err, userId: String(u._id) }, 'booking change: in-app notification failed')
       }
 
-      if (u.email && m.kind) {
+      if (u.email && m.kind && !programClass) {
         try {
           await parkCriticalMail({
             liveClassId: notice.liveClassId,

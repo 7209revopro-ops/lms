@@ -2033,6 +2033,14 @@ router.get('/programs/:id', requireInstructor, async (req: Request, res: Respons
   } catch (err) { next(err) }
 })
 
+/* Who filled in the programme link's form (people without an LMS account). */
+router.get('/programs/:id/guests', requireInstructor, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { listProgramGuests } = await import('@/services/program.service.ts')
+    sendSuccess(res, await listProgramGuests(String(req.params['id'] ?? ''), await programActor(req)))
+  } catch (err) { next(err) }
+})
+
 router.post('/programs/:id/students', requireInstructor, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { changeStudents } = await import('@/services/program.service.ts')

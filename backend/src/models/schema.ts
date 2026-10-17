@@ -3037,6 +3037,8 @@ export interface IProgram extends Document {
   language?:       string
   /** Its picture — also its hidden course's, which the student app shows on the class cards (2026-10-15). */
   thumbnailUrl?:   string
+  /** The programme's shareable join link: {CLIENT_URL}/p/{joinCode}. */
+  joinCode?:       string
   courseId:        Types.ObjectId
   repeat:          'weekly' | 'monthly'
   weekdays:        number[]          // weekly: 0 = Sunday … 6 = Saturday
@@ -3070,6 +3072,8 @@ const ProgramSchema = new Schema<IProgram>(
     meetingUrl:     { type: String, maxlength: 2048 },
     language:       { type: String, default: 'English', maxlength: 40 },
     thumbnailUrl:   { type: String, maxlength: 2048 },
+    /* The shareable link (2026-10-17): {CLIENT_URL}/p/{joinCode} — a form for people without an LMS account. */
+    joinCode:       { type: String, unique: true, sparse: true },
     courseId:       { type: Schema.Types.ObjectId, ref: 'Course', required: true },
     repeat:         { type: String, enum: ['weekly', 'monthly'], required: true },
     weekdays:       { type: [Number], default: [] },
@@ -3093,6 +3097,35 @@ const ProgramSchema = new Schema<IProgram>(
 ProgramSchema.index({ studentIds: 1 })
 
 export const ProgramModel = mongoose.model<IProgram>('Program', ProgramSchema)
+
+/* ─────────────────────────────────────────────────────
+   PROGRAM GUEST — someone without an LMS account who opened a programme's
+   link (/p/{joinCode}) and filled in its form (2026-10-17): kept for the
+   programme's makers, never an account. One per programme and email.
+───────────────────────────────────────────────────── */
+export interface IProgramGuest extends Document {
+  programId:   Types.ObjectId
+  name:        string
+  email:       string
+  phone:       string
+  joins:       number
+  lastJoinAt?: Date
+  createdAt:   Date
+  updatedAt:   Date
+}
+const ProgramGuestSchema = new Schema<IProgramGuest>(
+  {
+    programId:  { type: Schema.Types.ObjectId, ref: 'Program', required: true },
+    name:       { type: String, required: true, trim: true, maxlength: 120 },
+    email:      { type: String, required: true, trim: true, lowercase: true, maxlength: 200 },
+    phone:      { type: String, required: true, trim: true, maxlength: 30 },
+    joins:      { type: Number, default: 0 },
+    lastJoinAt: { type: Date },
+  },
+  baseSchemaOptions,
+)
+ProgramGuestSchema.index({ programId: 1, email: 1 }, { unique: true })
+export const ProgramGuestModel = mongoose.model<IProgramGuest>('ProgramGuest', ProgramGuestSchema)
 
 /* ─────────────────────────────────────────────────────
    MENTOR MEETING — time booked with a mentor that is not a class

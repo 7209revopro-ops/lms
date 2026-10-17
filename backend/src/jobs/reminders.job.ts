@@ -311,7 +311,7 @@ export async function runDayBeforeReminders(): Promise<void> {
          academy clock. On a shared class the student's academy and the class's
          differ, and an unlabelled ninety-minute gap is a missed class. */
       .populate<{ userId: BookingWithRefs['userId'] }>('userId', 'name email organizationId enrollmentApplication.phone')
-      .populate<{ liveClassId: BookingWithRefs['liveClassId'] }>('liveClassId', 'id title scheduledStart meetingUrl muxPlaybackId status')
+      .populate<{ liveClassId: BookingWithRefs['liveClassId'] }>('liveClassId', 'id title scheduledStart meetingUrl muxPlaybackId status programId')
       .lean({ virtuals: true }) as unknown as BookingWithRefs[]
 
     const due = dueBetween(bookings, from, to)
@@ -322,14 +322,15 @@ export async function runDayBeforeReminders(): Promise<void> {
       const joinUrl  = getJoinUrl(b.liveClassId)
       const slug     = orgSlugFor((b.userId as { organizationId?: unknown }).organizationId)
 
-      await dispatch(userId, b.liveClassId.title, start, 'day-before', () =>
+      const program = isProgramClass(b.liveClassId)
+      await dispatch(userId, b.liveClassId.title, start, 'day-before', program ? noEmail : () =>
         sendSessionLinkReminder(
           b.userId.email, b.userId.name, b.liveClassId.title,
           fmtFull(start, slug),
           joinUrl,
         ),
         undefined, slug,
-        () => sendClassReminderTomorrowWhatsApp(b.userId.enrollmentApplication?.phone, b.liveClassId.title, fmtFull(start, slug)),
+        program ? undefined : () => sendClassReminderTomorrowWhatsApp(b.userId.enrollmentApplication?.phone, b.liveClassId.title, fmtFull(start, slug)),
       )
 
       await ClassBookingModel.findByIdAndUpdate(b._id, { reminderDayBeforeSent: true })
@@ -358,7 +359,7 @@ export async function runDayOfReminders(): Promise<void> {
          academy clock. On a shared class the student's academy and the class's
          differ, and an unlabelled ninety-minute gap is a missed class. */
       .populate<{ userId: BookingWithRefs['userId'] }>('userId', 'name email organizationId')
-      .populate<{ liveClassId: BookingWithRefs['liveClassId'] }>('liveClassId', 'id title scheduledStart meetingUrl muxPlaybackId status')
+      .populate<{ liveClassId: BookingWithRefs['liveClassId'] }>('liveClassId', 'id title scheduledStart meetingUrl muxPlaybackId status programId')
       .lean({ virtuals: true }) as unknown as BookingWithRefs[]
 
     const due = dueBetween(bookings, start, end)
@@ -374,7 +375,7 @@ export async function runDayOfReminders(): Promise<void> {
          "today" when it is already tomorrow for them — and the mail used to
          carry a clock time and nothing else, so there was no date on it to
          notice that by. The day is now stated instead of asserted. */
-      await dispatch(userId, b.liveClassId.title, classAt, 'day-of', () =>
+      await dispatch(userId, b.liveClassId.title, classAt, 'day-of', isProgramClass(b.liveClassId) ? noEmail : () =>
         sendDayOfReminder(
           b.userId.email, b.userId.name, b.liveClassId.title,
           fmtFull(classAt, slug),
@@ -480,7 +481,7 @@ export async function runPreSessionReminders(): Promise<void> {
          academy clock. On a shared class the student's academy and the class's
          differ, and an unlabelled ninety-minute gap is a missed class. */
       .populate<{ userId: BookingWithRefs['userId'] }>('userId', 'name email organizationId')
-      .populate<{ liveClassId: BookingWithRefs['liveClassId'] }>('liveClassId', 'id title scheduledStart meetingUrl muxPlaybackId status')
+      .populate<{ liveClassId: BookingWithRefs['liveClassId'] }>('liveClassId', 'id title scheduledStart meetingUrl muxPlaybackId status programId')
       .lean({ virtuals: true }) as unknown as BookingWithRefs[]
 
     const due = dueBetween(bookings, from, to)
@@ -493,7 +494,7 @@ export async function runPreSessionReminders(): Promise<void> {
       /* The mail itself carries no time, but the in-app notice and the
          email-failure notice both do, so the reader's academy still has to
          reach dispatch. */
-      await dispatch(userId, b.liveClassId.title, classAt, 'pre-session', () =>
+      await dispatch(userId, b.liveClassId.title, classAt, 'pre-session', isProgramClass(b.liveClassId) ? noEmail : () =>
         sendPreSessionReminder(b.userId.email, b.userId.name, b.liveClassId.title, 30),
         undefined, slug,
       )
@@ -506,6 +507,11 @@ export async function runPreSessionReminders(): Promise<void> {
     logger.error({ err }, '[Reminders] pre-session job error')
   }
 }
+
+/* A Program's class (2026-10-17, the user): its students get the in-app notices only — no email, no WhatsApp —
+   except the WhatsApp at its start ("Join now", class_has_started_v2). */
+const isProgramClass = (lc: unknown) => !!(lc as { programId?: unknown } | null)?.programId
+const noEmail = async () => {}
 
 /* ── 5-min job ───────────────────────────────────────── */
 export async function runFiveMinReminders(): Promise<void> {
@@ -528,8 +534,6 @@ export async function runFiveMinReminders(): Promise<void> {
       .lean({ virtuals: true }) as unknown as BookingWithRefs[]
 
     const due = dueBetween(bookings, from, to)
-    const { mintSigninCode } = await import('@/services/signinLink.service.ts')
-    const { sendClassUpdateWhatsApp } = await import('@/services/whatsapp.service.ts')
 
     for (const b of due) {
       const userId  = b.userId.id ?? b.userId._id?.toString()
@@ -558,12 +562,9 @@ export async function runFiveMinReminders(): Promise<void> {
           /* A Program's Google Meet class: its own Meet link in the message, to join on Google directly
              (class_update_v1 — the 5-minute template has no room for a link); the button still signs
              them in to the class page, where joining is recorded. */
-          : (b.liveClassId as { programId?: unknown }).programId && /^https:\/\/meet\.google\.com\//i.test(String(b.liveClassId.meetingUrl ?? ''))
-          ? async () => sendClassUpdateWhatsApp(
-              phone, b.userId.name, b.liveClassId.title, `${fmtShortDay(classAt, slug)}, ${fmtTime(classAt, slug)}`,
-              `It starts in 5 minutes. Join directly on Google Meet: ${b.liveClassId.meetingUrl}`,
-              await mintSigninCode(userId, `/live-classes/${classIdOf(b.liveClassId)}/watch`),
-            )
+          /* A Program's class: no WhatsApp 5 minutes before — only the one at its start. */
+          : isProgramClass(b.liveClassId)
+          ? undefined
           : code
           ? () => sendClassStartsIn5MinV2WhatsApp(
               phone, b.userId.name, b.liveClassId.title,
@@ -1234,7 +1235,7 @@ export async function runReviewRequestDispatch(): Promise<void> {
          above; a class from before this field existed must still match. */
       reviewRequestSent: { $ne: true },
       scheduledStart: { $gte: earliest, $lt: now },
-    }).select('_id title instructorId courseId').lean()
+    }).select('_id title instructorId courseId programId').lean()
 
     if (candidates.length === 0) return
 
@@ -1266,7 +1267,8 @@ export async function runReviewRequestDispatch(): Promise<void> {
               logger.error({ err, userId: b.userId, classId: cls._id }, 'in-app review-request notification failed')
             }
 
-            if (student.email) {
+            /* A Program's class: the in-app request only. */
+            if (student.email && !isProgramClass(cls)) {
               try {
                 await sendInstructorReviewRequestEmail(student.email, studentName, instructorName, cls.title)
               } catch (err) {
@@ -1274,7 +1276,7 @@ export async function runReviewRequestDispatch(): Promise<void> {
               }
             }
 
-            if (student.phone) {
+            if (student.phone && !isProgramClass(cls)) {
               try {
                 await sendInstructorReviewRequestWhatsApp(student.phone, studentName, cls.title)
               } catch (err) {
