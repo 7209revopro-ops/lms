@@ -30,7 +30,14 @@ export interface EmailMessage {
   subject: string
   html:    string
   text?:   string
+  /** Urgent mail (password reset, sign-in code, verify, welcome) goes before any other. */
+  urgent?:    boolean
+  /** A reminder is worthless after this: closed, never sent. */
+  expiresAt?: Date
 }
+
+/* How long a time-sensitive reminder is worth sending. */
+const inHours = (h: number) => new Date(Date.now() + h * 3600_000)
 
 export interface EmailSender {
   send(msg: EmailMessage): Promise<void>
@@ -158,6 +165,9 @@ export interface PooledTransport {
   transporter:   Transporter
   from:          string
   cooldownUntil: number
+  /* Kept for urgent mail only (2026-10-17): the backup mailbox, so a password reset or sign-in code always has a
+     mailbox with allowance left, however much class mail went out that day. SMTP_BACKUP_URGENT_ONLY=off shares it. */
+  urgentOnly?:   boolean
 }
 
 const COOLDOWN_MS = Number(process.env['SMTP_QUOTA_COOLDOWN_MIN'] ?? 60) * 60_000
@@ -175,15 +185,18 @@ export class PooledEmailSender implements EmailSender {
 
   async send(msg: EmailMessage): Promise<void> {
     const now = Date.now()
-    const available = this.transports.filter(t => t.cooldownUntil <= now)
+    /* Urgent mail may use every mailbox, main first then the backup; other mail never the one kept for urgent. */
+    const available = this.transports.filter(t => t.cooldownUntil <= now && (!t.urgentOnly || msg.urgent))
 
     /* Every mailbox is parked. Throwing keeps the outbox row pending so the
        drain replays it once a cooldown lapses — the message is late, not lost. */
     if (available.length === 0) {
-      throw new Error('All email transports are in quota cooldown')
+      throw new Error(msg.urgent ? 'All email transports are in quota cooldown'
+        : 'All email transports are in quota cooldown (the backup is kept for urgent mail)')
     }
 
     let lastErr: unknown
+    let allQuota = true
     for (const t of available) {
       try {
         const info = await t.transporter.sendMail({
@@ -207,8 +220,14 @@ export class PooledEmailSender implements EmailSender {
           )
           continue
         }
+        allQuota = false
         logger.warn({ via: t.name, err }, 'transient send failure — trying next transport')
       }
+    }
+    /* Every mailbox it could use ran out just now: a wait, like any other cooldown — not a failed try. */
+    if (allQuota) {
+      throw new Error(msg.urgent ? 'All email transports are in quota cooldown'
+        : 'All email transports are in quota cooldown (the backup is kept for urgent mail)')
     }
     throw lastErr instanceof Error ? lastErr : new Error('All email transports failed')
   }
@@ -300,12 +319,17 @@ function buildSender(): EmailSender {
     buildTransport(PRIMARY_KEYS, 'primary'),
     buildTransport(BACKUP_KEYS, 'backup'),
   ].filter((t): t is PooledTransport => t !== null)
+  /* With both mailboxes, the backup is for urgent mail only — unless SMTP_BACKUP_URGENT_ONLY=off. One mailbox serves all. */
+  if (transports.length > 1 && !/^(off|false|0|no)$/i.test(process.env['SMTP_BACKUP_URGENT_ONLY'] ?? '')) {
+    const backup = transports.find(t => t.name === 'backup')
+    if (backup) backup.urgentOnly = true
+  }
 
   if (transports.length > 0) {
     const pool = new PooledEmailSender(transports)
     emailPool = pool
     logger.info(
-      { mailboxes: transports.map(t => t.name + ' <' + t.from + '>') },
+      { mailboxes: transports.map(t => t.name + ' <' + t.from + '>' + (t.urgentOnly ? ' (urgent mail only)' : '')) },
       'Email backend: SMTP pool of ' + transports.length + ' mailbox(es), failover on quota',
     )
     return pool
@@ -347,19 +371,24 @@ export function backoffFor(attempts: number): number {
 /** Attempt one already-persisted row. Exported so the drain job reuses it. */
 export async function deliverOutboxRow(row: {
   id: string; to: string; subject: string; html: string; text?: string; attempts: number
+  /** Urgent mail is retried every 2 minutes while the mailboxes are cooling, not on the long backoff. */
+  urgent?: boolean
 }): Promise<'sent' | 'retry' | 'failed'> {
   const { EmailOutboxModel } = await import('@/models/schema.ts')
   try {
-    await rawSender.send({ to: row.to, subject: row.subject, html: row.html, text: row.text })
+    await rawSender.send({ to: row.to, subject: row.subject, html: row.html, text: row.text, ...(row.urgent ? { urgent: true } : {}) })
     await EmailOutboxModel.updateOne({ _id: row.id }, {
       $set: { status: 'sent', sentAt: new Date() }, $unset: { lastError: 1 },
     })
     return 'sent'
   } catch (err) {
-    const attempts   = row.attempts + 1
+    const message    = String((err as Error)?.message ?? err).slice(0, 500)
+    /* Every mailbox out of its daily allowance is a wait, not a failed try of this message: it does not use up
+       an attempt, or an urgent email retried every 2 minutes would be dropped before the allowance came back. */
+    const cooling    = /quota cooldown/i.test(message)
+    const attempts   = cooling ? row.attempts : row.attempts + 1
     const permanent  = err instanceof PermanentEmailError
     const exhausted  = attempts >= MAX_EMAIL_ATTEMPTS
-    const message    = String((err as Error)?.message ?? err).slice(0, 500)
 
     if (permanent || exhausted) {
       await EmailOutboxModel.updateOne({ _id: row.id }, {
@@ -370,7 +399,7 @@ export async function deliverOutboxRow(row: {
     }
 
     await EmailOutboxModel.updateOne({ _id: row.id }, {
-      $set: { attempts, lastError: message, nextAttemptAt: new Date(Date.now() + backoffFor(attempts)) },
+      $set: { attempts, lastError: message, nextAttemptAt: new Date(Date.now() + (row.urgent && cooling ? 2 * 60_000 : backoffFor(Math.max(1, attempts)))) },
     })
     return 'retry'
   }
@@ -393,13 +422,14 @@ const sender: EmailSender = {
        picks it up; if we sent first, the record of it would not exist. */
     const row = await EmailOutboxModel.create({
       to: clean.to, subject: clean.subject, html: clean.html, text: clean.text,
+      ...(msg.urgent ? { priority: 10 } : {}), ...(msg.expiresAt ? { expiresAt: msg.expiresAt } : {}),
     })
 
     /* Try immediately so normal mail is not delayed by the drain interval.
        A failure is already recorded, so it is safe to swallow here. */
     await deliverOutboxRow({
       id: String(row._id), to: clean.to, subject: clean.subject,
-      html: clean.html, text: clean.text, attempts: 0,
+      html: clean.html, text: clean.text, attempts: 0, ...(msg.urgent ? { urgent: true } : {}),
     })
   },
 }
@@ -459,7 +489,7 @@ export async function sendPasswordReset(to: string, name: string, resetUrl: stri
     <p style="font-size:12px;color:#6B7280">Or paste this URL into your browser:<br><span style="color:#0057b8">${escapeHtml(resetUrl)}</span></p>
     <p style="font-size:12px;color:#9CA3AF">If you didn't request this, ignore this email and your password will stay the same.</p>
   `)
-  await sender.send({
+  await sender.send({ urgent: true, 
     to,
     subject,
     html,
@@ -502,7 +532,7 @@ export async function sendLoginCode(to: string, name: string, code: string): Pro
     <p style="margin:24px 0;font-size:34px;font-weight:700;letter-spacing:0.18em;color:#0057b8">${escapeHtml(code)}</p>
     <p style="font-size:12px;color:#9CA3AF">Didn't try to sign in? You can ignore this email — nobody can get in without the code.</p>
   `)
-  await sender.send({
+  await sender.send({ urgent: true, 
     to,
     subject,
     html,
@@ -560,7 +590,7 @@ export async function sendRegistrationAttempt(to: string, name: string, signInUr
     </p>
     <p style="font-size:12px;color:#9CA3AF">If it wasn't you, no action is needed — your account is untouched and no one gained access to it.</p>
   `)
-  await sender.send({
+  await sender.send({ urgent: true, 
     to,
     subject,
     html,
@@ -581,7 +611,7 @@ export async function sendVerifyEmail(to: string, name: string, verifyUrl: strin
     <p style="font-size:12px;color:#6B7280">Or paste this URL into your browser:<br><span style="color:#0057b8">${escapeHtml(verifyUrl)}</span></p>
     <p style="font-size:12px;color:#9CA3AF">The link expires in 24 hours.</p>
   `)
-  await sender.send({
+  await sender.send({ urgent: true, 
     to,
     subject,
     html,
@@ -785,7 +815,7 @@ export async function sendInstructor15MinReminder(
     </p>
     <p style="font-size:12px;color:#6B7280">Link: <a href="${escapeHtml(sanitiseUrl(meetLink))}" style="color:#0057b8">${escapeHtml(sanitiseUrl(meetLink))}</a></p>
   `)
-  await sender.send({
+  await sender.send({ expiresAt: inHours(2), 
     to,
     subject,
     html,
@@ -821,7 +851,7 @@ export async function sendMentorJoinReminder(
       </a>
     </p>
   `)
-  await sender.send({
+  await sender.send({ expiresAt: inHours(2), 
     to, subject, html,
     text: `Hi ${name},\n\n"${liveTitle}" was scheduled to start now, and we haven't seen you join yet. Students may already be waiting.\n\nJoin now: ${joinUrl}`,
   })
@@ -881,7 +911,7 @@ export async function sendMentorNoShowAlert(
     <p><strong>${escapeHtml(mentorName)}</strong> has not joined <strong>${escapeHtml(liveTitle)}</strong>, scheduled for <strong>${escapeHtml(when)}</strong> — it has now been more than 5 minutes since the scheduled start.</p>
     <p style="color:#6B7280;font-size:13px">This is an automated alert. The mentor has already been reminded once and may still join late — check the Instructor Attendance page in the admin panel for the current status.</p>
   `)
-  await sender.send({
+  await sender.send({ expiresAt: inHours(2), 
     to, subject, html,
     text: `Hi ${recipientName},\n\n${mentorName} has not joined "${liveTitle}", scheduled for ${when} — it has now been more than 5 minutes since the scheduled start.\n\nThis is an automated alert. Check the Instructor Attendance page in the admin panel for the current status.`,
   })
@@ -906,7 +936,7 @@ export async function sendMentorNoShowSelfAlert(
     <p><strong>${escapeHtml(liveTitle)}</strong> was scheduled for <strong>${escapeHtml(when)}</strong>, and it has now been more than 5 minutes since the scheduled start without you joining.</p>
     <p style="color:#6B7280;font-size:13px">Your organization admin and program coordinators have also been notified. Please join now if you can, or contact your admin if something is preventing you.</p>
   `)
-  await sender.send({
+  await sender.send({ expiresAt: inHours(2), 
     to, subject, html,
     text: `Hi ${name},\n\n"${liveTitle}" was scheduled for ${when}, and it has now been more than 5 minutes since the scheduled start without you joining.\n\nYour organization admin and program coordinators have also been notified. Please join now if you can, or contact your admin if something is preventing you.`,
   })
@@ -1232,7 +1262,7 @@ export async function sendSessionLinkReminder(
       </a>
     </p>
   `)
-  await sender.send({ to, subject, html, text: `${sessionTitle} is tomorrow at ${date}. Join: ${joinUrl}` })
+  await sender.send({ expiresAt: inHours(18),  to, subject, html, text: `${sessionTitle} is tomorrow at ${date}. Join: ${joinUrl}` })
 }
 
 /* This mail used to ASSERT the day — subject "Today: …", body "is happening
@@ -1261,7 +1291,7 @@ export async function sendDayOfReminder(
       </a>
     </p>
   `)
-  await sender.send({ to, subject, html, text: `${sessionTitle} is scheduled for ${when}. Join: ${joinUrl}` })
+  await sender.send({ expiresAt: inHours(12),  to, subject, html, text: `${sessionTitle} is scheduled for ${when}. Join: ${joinUrl}` })
 }
 
 /**
@@ -1286,7 +1316,7 @@ export async function sendPreSessionReminder(
       </a>
     </p>
   `)
-  await sender.send({ to, subject, html, text: `${sessionTitle} starts in ${minutesLeft} minutes. The join link will be sent 5 minutes before the session.` })
+  await sender.send({ expiresAt: inHours(2),  to, subject, html, text: `${sessionTitle} starts in ${minutesLeft} minutes. The join link will be sent 5 minutes before the session.` })
 }
 
 /** 5-min reminder — WITH join link */
@@ -1323,7 +1353,7 @@ export async function sendFiveMinReminder(
     <p style="margin:0 0 4px;color:#374151">See you in class!</p>
     <p style="margin:0;color:#374151"><strong>Delta Academy</strong></p>
   `)
-  await sender.send({ to, subject, html, text: `Dear ${name},\n\nThis is a reminder that your class will begin in 5 minutes.\n\nDate: ${dateStr}\nTime: ${timeStr}\n\nJoin the session here: ${joinUrl}\n\nPlease join a few minutes early to ensure a smooth start.\n\nSee you in class!\nDelta Academy` })
+  await sender.send({ expiresAt: inHours(2),  to, subject, html, text: `Dear ${name},\n\nThis is a reminder that your class will begin in 5 minutes.\n\nDate: ${dateStr}\nTime: ${timeStr}\n\nJoin the session here: ${joinUrl}\n\nPlease join a few minutes early to ensure a smooth start.\n\nSee you in class!\nDelta Academy` })
 }
 
 /** At-time reminder — WITH join link, sent when class has just started */
@@ -1347,7 +1377,7 @@ export async function sendClassStartingReminder(
     <p style="margin:0 0 24px;color:#374151">We look forward to your participation.</p>
     <p style="margin:0;color:#374151"><strong>Delta Academy</strong></p>
   `)
-  await sender.send({ to, subject, html, text: `Dear ${name},\n\nYour scheduled class has now started.\n\nIf you have not already joined, please use your session link to enter the class: ${joinUrl}\n\nWe look forward to your participation.\n\nDelta Academy` })
+  await sender.send({ expiresAt: inHours(2),  to, subject, html, text: `Dear ${name},\n\nYour scheduled class has now started.\n\nIf you have not already joined, please use your session link to enter the class: ${joinUrl}\n\nWe look forward to your participation.\n\nDelta Academy` })
 }
 
 export async function sendRescheduledNotification(
@@ -1831,7 +1861,7 @@ export async function sendImportedStudentWelcome(
   `, `You're receiving this email because you are enrolled as a student at Delta International.
               If you think this was sent in error, please contact our support team.`)
   const text = `Dear ${name},\n\nWelcome to the ${prog} program at Delta International! Your student portal account has already been created and approved. Set your password to activate it (link valid 7 days):\n${setPasswordUrl}\n\nThen sign in at ${loginUrl} with this email address.\nIf the link expires, use "Forgot password?" on the login page.\n\nAdmin Team — ${prog}\nDelta International`
-  await sender.send({ to, subject, html, text })
+  await sender.send({ urgent: true,  to, subject, html, text })
 }
 
 export async function sendEnrollmentCancelled(

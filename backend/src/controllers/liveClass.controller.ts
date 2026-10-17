@@ -760,8 +760,8 @@ export async function notifyBookedStudents(notice: BookingChangeNotice): Promise
   }
 
   /* ── Everyone enrolled in the course who has NOT booked it ───────────────
-     Same three changes, their own wording: in-app now, email + WhatsApp from
-     the same buffer as the booked students' (audience 'enrolled'). */
+     Same three changes, their own wording — in the app only (no email since
+     2026-10-17, no WhatsApp since the template switch). */
   let enrolledNotified = 0
   const enrolled = await enrolledAudienceFor(notice.liveClassId, new Set(userIds.map(String)))
   for (const user of enrolled) {
@@ -783,18 +783,8 @@ export async function notifyBookedStudents(notice: BookingChangeNotice): Promise
       } catch (err) {
         logger.error({ err, userId: String(u._id) }, 'class change (enrolled): in-app notification failed')
       }
-      if (!u.email) continue
-      try {
-        await parkCriticalMail({
-          liveClassId: notice.liveClassId, userId: String(u._id), email: u.email, name: u.name ?? '',
-          kind: m.kind, title: notice.title, audience: 'enrolled',
-          scheduledStart: notice.newStart ?? notice.oldStart, oldStart, newStart,
-          ...(notice.instructorChanged ? { oldInstructorName: nameOf(notice.oldInstructorId), newInstructorName: nameOf(notice.newInstructorId) } : {}),
-        })
-        parked++
-      } catch (err) {
-        logger.error({ err, to: u.email }, 'class change (enrolled): could not park email')
-      }
+      /* In-app only (2026-10-17): emailing every enrolled student about each change ran the mailboxes out of
+         their daily allowance, and sign-in codes waited behind it. Booked students still get the email. */
     }
   }
 

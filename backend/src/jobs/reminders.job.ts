@@ -541,7 +541,10 @@ export async function runFiveMinReminders(): Promise<void> {
       const slug    = orgSlugFor((b.userId as { organizationId?: unknown }).organizationId)
       const phone   = b.userId.enrollmentApplication?.phone
 
-      await dispatch(userId, b.liveClassId.title, classAt, 'five-min', () =>
+      /* A Program's class: no 5-minute email (2026-10-17 — a program is hundreds or thousands of students, and the
+         mailboxes' daily allowance went on it); the in-app notice and the WhatsApp at its start still go. */
+      const programClass = !!(b.liveClassId as { programId?: unknown }).programId
+      await dispatch(userId, b.liveClassId.title, classAt, 'five-min', programClass ? async () => {} : () =>
         sendFiveMinReminder(
           b.userId.email, b.userId.name, b.liveClassId.title, joinUrl, classAt, slug,
         ),
@@ -598,7 +601,7 @@ export async function runAtTimeReminders(): Promise<void> {
          academy clock. On a shared class the student's academy and the class's
          differ, and an unlabelled ninety-minute gap is a missed class. */
       .populate<{ userId: BookingWithRefs['userId'] }>('userId', 'name email organizationId enrollmentApplication.phone')
-      .populate<{ liveClassId: BookingWithRefs['liveClassId'] }>('liveClassId', 'id title scheduledStart meetingUrl muxPlaybackId status isOnline')
+      .populate<{ liveClassId: BookingWithRefs['liveClassId'] }>('liveClassId', 'id title scheduledStart meetingUrl muxPlaybackId status isOnline programId')
       .lean({ virtuals: true }) as unknown as BookingWithRefs[]
 
     const due = dueBetween(bookings, from, to)
@@ -619,7 +622,8 @@ export async function runAtTimeReminders(): Promise<void> {
          while the window is open, and honest about it once it is not. */
       const liveClassId = String((b.liveClassId as { id?: string; _id?: unknown }).id
         ?? (b.liveClassId as { _id?: unknown })._id)
-      await dispatch(userId, b.liveClassId.title, classAt, 'at-time', () =>
+      /* A Program's class: no "has started" email (see the 5-minute job) — the WhatsApp below still goes. */
+      await dispatch(userId, b.liveClassId.title, classAt, 'at-time', (b.liveClassId as { programId?: unknown }).programId ? async () => {} : () =>
         sendClassStartingReminder(b.userId.email, b.userId.name, b.liveClassId.title, joinUrl),
         `/live-classes/${liveClassId}/watch`,
         orgSlugFor((b.userId as { organizationId?: unknown }).organizationId),

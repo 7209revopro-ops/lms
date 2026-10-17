@@ -2680,6 +2680,10 @@ export interface IEmailOutbox extends Document {
   lastError?:    string
   sentVia?:      string        // which mailbox accepted it
   sentAt?:       Date
+  /** 10 = urgent (password reset, sign-in code, verify, welcome): sent before any other mail. */
+  priority?:     number
+  /** A reminder is worthless after this — closed, not sent. */
+  expiresAt?:    Date
   createdAt:     Date
   updatedAt:     Date
 }
@@ -2696,12 +2700,17 @@ const EmailOutboxSchema = new Schema<IEmailOutbox>(
     lastError:     { type: String, maxlength: 500 },
     sentVia:       { type: String },
     sentAt:        { type: Date },
+    /* Urgent first (2026-10-17): a sign-in code or password reset must never wait behind thousands of class
+       notices when the mailboxes are out of their daily allowance. */
+    priority:      { type: Number, default: 0 },
+    expiresAt:     { type: Date },
   },
   baseSchemaOptions,
 )
 
-/* The drain query: oldest due work first. */
+/* The drain query: urgent first, then oldest due work. */
 EmailOutboxSchema.index({ status: 1, nextAttemptAt: 1 })
+EmailOutboxSchema.index({ status: 1, priority: -1, nextAttemptAt: 1 })
 
 /* Delivered mail is kept 30 days as a send log, then swept. Pending and failed
    rows are NEVER auto-removed — losing them is the failure this exists to
