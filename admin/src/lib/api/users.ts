@@ -298,6 +298,15 @@ export function useRecheckCs() {
   })
 }
 
+/* ─── Set a student's password (admin, super admin, or the student's sub-admin) ───
+   Ends every session they have and emails them the new password. */
+export function useSetStudentPassword() {
+  return useMutation({
+    mutationFn: async (v: { id: string; password: string }) =>
+      (await api.post<{ success: true; data: { email: string } }>(`/admin/users/${v.id}/set-password`, { password: v.password })).data.data,
+  })
+}
+
 /* ─── Update user (role / isActive / isVerified / name / email) ─── */
 export function useUpdateUser() {
   const qc = useQueryClient()

@@ -662,6 +662,33 @@ router.post('/users/:id/recheck-cs', requirePermission('users','update'), requir
   })
 router.delete('/users/:id', requirePermission('users','delete'),           requireAdmin, requireSameOrgUser('id'), audit('user.delete', 'User', r => String(r.params['id'] ?? '')), ctrl.deleteUser)
 
+/* POST /admin/users/:id/set-password — set a STUDENT's password (2026-10-17). Admins and super admins for any
+   student of their academy; a sub_admin only for students of its own programme (mayAccessStudent, as for devices).
+   Every session is ended and the student is emailed the new password. Audited (never the password itself). */
+const setPasswordSchema = z.object({
+  password: z.string().min(8, 'At least 8 characters').max(128, 'At most 128 characters'),
+})
+router.post('/users/:id/set-password', requireRole('super_admin', 'admin', 'sub_admin'), requireSameOrgUser('id'),
+  validate(setPasswordSchema),
+  audit('user.setPassword', 'User', r => String(r.params['id'] ?? '')),
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const id = String(req.params['id'] ?? '')
+      if (isDepartmentScoped(req)) {
+        const { UserModel } = await import('@/models/schema.ts')
+        const target = await UserModel.findById(id)
+          .select('category categories enrollmentStatus enrollmentApplication.programs').lean<Parameters<typeof mayAccessStudent>[1]>()
+        if (!(await mayAccessStudent(req, target))) {
+          res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Student not found' } })
+          return
+        }
+      }
+      const { UserService } = await import('@/services/user.service.ts')
+      const r = await new UserService().adminSetStudentPassword(id, String((req.body as { password: string }).password))
+      sendSuccess(res, { email: r.email }, 'Password set — the student is signed out everywhere and has been emailed the new password.')
+    } catch (err) { next(err) }
+  })
+
 /* POST /admin/users/:id/reset-2fa — clear a user's second factor.
    For the lost-device case. Nothing else in the codebase could write
    twoFactorEnabled, so a user who lost their authenticator had no route back

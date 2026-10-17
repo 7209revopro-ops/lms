@@ -523,6 +523,27 @@ export async function sendCourseInvite(to: string, name: string, link: string, c
 
 /* Passwordless sign-in code (email → OTP login). Mirrors the reset email's
    shell so it reads as the same sender. The code expires in 10 minutes. */
+/* An admin set this student's password (POST /admin/users/:id/set-password) — the new password, as the user chose
+   to send it. Urgent: never behind class notices. */
+export async function sendPasswordSetByAdmin(to: string, name: string, password: string): Promise<void> {
+  const subject = 'Your new Delta password'
+  const loginUrl = `${process.env['CLIENT_URL'] ?? 'http://localhost:3000'}/login`
+  const html = wrap(subject, `
+    <h2 style="margin:0 0 16px;font-size:20px;font-weight:700;color:#0D0F1A">Your password has been set</h2>
+    <p>Hi ${escapeHtml(name)},</p>
+    <p>An administrator has set a new password for your Delta account.</p>
+    <p style="margin:20px 0;padding:14px 18px;background:#F4F5F8;border-radius:12px;font-size:16px">
+      Email: <strong>${escapeHtml(to)}</strong><br>Password: <strong style="font-family:monospace">${escapeHtml(password)}</strong>
+    </p>
+    <p style="margin:24px 0">
+      <a href="${escapeHtml(loginUrl)}" style="display:inline-block;background:linear-gradient(135deg,#0057b8,#2F6BFF);color:#fff;font-weight:600;padding:12px 24px;border-radius:12px;text-decoration:none">Sign in</a>
+    </p>
+    <p style="font-size:12px;color:#6B7280">You have been signed out of every device. You can change this password any time from your profile. If you did not ask for this, contact support.</p>
+  `)
+  await sender.send({ urgent: true, to, subject, html,
+    text: `Hi ${name},\n\nAn administrator has set a new password for your Delta account.\n\nEmail: ${to}\nPassword: ${password}\n\nSign in: ${loginUrl}\n\nYou have been signed out of every device. If you did not ask for this, contact support.` })
+}
+
 export async function sendLoginCode(to: string, name: string, code: string): Promise<void> {
   const subject = `${code} is your Delta sign-in code`
   const html = wrap(subject, `

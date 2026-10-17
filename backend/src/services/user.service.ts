@@ -44,6 +44,23 @@ export class UserService {
     await this.refreshRepo.revokeAllForUser(id, 'security')
   }
 
+  /* A student's password, set by an admin (2026-10-17). Stored hashed like any other; every session the student
+     has is ended, so the old password stops working at once; the new one is emailed to them (urgent mail). */
+  async adminSetStudentPassword(id: string, password: string): Promise<{ email: string }> {
+    const { UserModel } = await import('@/models/schema.ts')
+    const user = await UserModel.findById(id).select('role email name').lean<{ role?: string; email?: string; name?: string }>()
+    if (!user) throw new UserError('USER_NOT_FOUND', 'User not found.', 404)
+    if (user.role !== 'student') throw new UserError('NOT_A_STUDENT', 'Only a student\'s password can be set here.', 400)
+    const passwordHash = await hashPassword(password)
+    await UserModel.updateOne({ _id: id }, { $set: { passwordHash } })
+    await this.refreshRepo.revokeAllForUser(id, 'security')
+    if (user.email) {
+      const { sendPasswordSetByAdmin } = await import('@/services/email.service.ts')
+      void sendPasswordSetByAdmin(user.email, user.name ?? '', password).catch(() => {})
+    }
+    return { email: user.email ?? '' }
+  }
+
   /* Admin-only updates: role change, deactivate/activate, force-verify.
      Deactivation also revokes all refresh tokens for that user. */
   async adminUpdate(

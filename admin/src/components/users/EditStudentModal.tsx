@@ -7,13 +7,13 @@ import {
   Lock, Unlock, BookOpen, Plus, Trash2,
   ChevronDown, ChevronUp, FileText, ExternalLink,
   Phone, MapPin, CreditCard, ClipboardList, Camera,
-  TrendingUp, Cpu, BarChart2,
+  TrendingUp, Cpu, BarChart2, KeyRound, Eye, EyeOff, Copy, Wand2,
 } from 'lucide-react'
 import { api } from '@/lib/axios'
 import Spinner from '@/components/ui/Spinner'
 import {
   useUpdateUser, useStudentEnrollments, useUpdateEnrollmentAccess,
-  useEnrollStudent, useRemoveEnrollment, type AdminUser,
+  useEnrollStudent, useRemoveEnrollment, type AdminUser, useSetStudentPassword,
 } from '@/lib/api/users'
 import { useCourseOutline } from '@/lib/api/outline'
 import { useCourses } from '@/lib/api/courses'
@@ -881,6 +881,9 @@ export function EditStudentModal({ user, onClose, onSuccess }: Props) {
               )}
             </div>
 
+            {/* Password — admins, super admins, the student's sub-admin */}
+            {(me?.role === 'admin' || me?.role === 'super_admin' || me?.role === 'sub_admin') && <SetPasswordSection userId={user.id} />}
+
             {/* Footer */}
             <div className="sticky bottom-0 flex-shrink-0 px-6 pb-5 pt-3"
               style={{ background: '#161829', borderTop: '1px solid rgba(255,255,255,0.06)' }}>
@@ -912,5 +915,63 @@ export function EditStudentModal({ user, onClose, onSuccess }: Props) {
         </motion.div>
       </motion.div>
     </AnimatePresence>
+  )
+}
+
+/* Set the student's password (POST /admin/users/:id/set-password). Its own button — never saved by "Save changes" —
+   so a password is only ever set on purpose. The student is signed out everywhere and emailed the new one. */
+function SetPasswordSection({ userId }: { userId: string }) {
+  const setPw = useSetStudentPassword()
+  const [pw, setPwValue] = useState('')
+  const [show, setShow] = useState(false)
+  const [done, setDone] = useState('')
+  const [err, setErr] = useState('')
+  const generate = () => {
+    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789'
+    const bytes = crypto.getRandomValues(new Uint8Array(10))
+    setPwValue(Array.from(bytes, b => chars[b % chars.length]).join('') + '!' + (bytes[0]! % 90 + 10))
+    setShow(true); setDone(''); setErr('')
+  }
+  const save = async () => {
+    setErr(''); setDone('')
+    try {
+      const r = await setPw.mutateAsync({ id: userId, password: pw })
+      setDone(`Password set — they're signed out everywhere${r.email ? ` and it was emailed to ${r.email}` : ''}.`)
+    } catch (e) {
+      setErr((e as any)?.response?.data?.error?.message || (e as Error).message || 'Could not set the password')
+    }
+  }
+  return (
+    <div className="px-6 pb-4">
+      <div className="mb-3 flex items-center gap-2">
+        <KeyRound size={13} style={{ color: 'rgba(255,255,255,0.4)' }} />
+        <p className="text-[10px] font-semibold uppercase tracking-widest" style={{ color: 'rgba(255,255,255,0.35)' }}>Password</p>
+      </div>
+      <div className="flex items-center gap-2">
+        <div className="relative flex-1">
+          <input type={show ? 'text' : 'password'} value={pw} onChange={e => { setPwValue(e.target.value); setDone(''); setErr('') }}
+            placeholder="New password — at least 8 characters" autoComplete="new-password"
+            className="w-full rounded-full border border-white/10 bg-white/5 py-2.5 pl-4 pr-20 text-sm outline-none" />
+          <div className="absolute right-2 top-1/2 flex -translate-y-1/2 items-center gap-1">
+            <button type="button" onClick={() => setShow(s => !s)} aria-label={show ? 'Hide password' : 'Show password'} className="rounded-full p-1.5 opacity-60 hover:opacity-100">
+              {show ? <EyeOff size={14} /> : <Eye size={14} />}
+            </button>
+            <button type="button" disabled={!pw} onClick={() => { void navigator.clipboard?.writeText(pw) }} aria-label="Copy password" className="rounded-full p-1.5 opacity-60 hover:opacity-100 disabled:opacity-20">
+              <Copy size={14} />
+            </button>
+          </div>
+        </div>
+        <button type="button" onClick={generate} className="flex items-center gap-1 rounded-full border border-white/10 px-3 py-2.5 text-xs opacity-80 hover:opacity-100">
+          <Wand2 size={13} />Generate
+        </button>
+        <button type="button" disabled={pw.length < 8 || setPw.isPending} onClick={() => void save()}
+          className="rounded-full bg-blue-600 px-4 py-2.5 text-xs font-semibold text-white disabled:opacity-40">
+          {setPw.isPending ? 'Setting…' : 'Set password'}
+        </button>
+      </div>
+      <p className="mt-1.5 text-[11px] opacity-50">Replaces their password at once, signs them out of every device, and emails them the new one.</p>
+      {done && <p className="mt-1.5 text-xs text-emerald-400">{done}</p>}
+      {err && <p className="mt-1.5 text-xs text-rose-400">{err}</p>}
+    </div>
   )
 }
