@@ -68,8 +68,11 @@ export async function drainOutboxOnce(): Promise<{ sent: number; retry: number; 
   /* Before selecting work, drop anything too old to be worth sending. */
   await expireStale(now)
 
+  /* While urgent mail waits, only urgent mail is sent — bulk would spend the allowance a mailbox just got back. */
+  const { urgentWaiting } = await import('@/services/email.service.ts')
+  const onlyUrgent = await urgentWaiting()
   const due = await EmailOutboxModel
-    .find({ status: 'pending', nextAttemptAt: { $lte: now } })
+    .find({ status: 'pending', nextAttemptAt: { $lte: now }, ...(onlyUrgent ? { priority: { $gt: 0 } } : {}) })
     /* Urgent first (sign-in codes, password resets): never behind a backlog of class notices. */
     .sort({ priority: -1, nextAttemptAt: 1 })
     .limit(BATCH)

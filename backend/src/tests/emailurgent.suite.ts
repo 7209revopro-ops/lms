@@ -7,6 +7,7 @@
      B. the queue sends urgent mail before older bulk mail
      C. a reminder past its use (expiresAt) is closed, never sent
      D. the urgent senders mark their mail urgent; reminders carry an expiry
+     E. while urgent mail waits, other mail is held back
    Run: bun --no-env-file src/tests/emailurgent.suite.ts
 ───────────────────────────────────────────────────────────── */
 process.env.DATABASE_URL = 'mongodb://localhost:27017/lms_emailurgent'
@@ -76,7 +77,9 @@ try {
   await drainOutboxOnce()   // one batch of 5
   const reset = await M.EmailOutboxModel.findOne({ to: 'me@t.local' }).lean() as any
   const bulkLeft = await M.EmailOutboxModel.countDocuments({ subject: /Class cancelled/, status: 'pending' })
-  check('the reset went in the first batch, ahead of 12 older notices', reset?.status === 'sent' && bulkLeft === 8, `${reset?.status} / ${bulkLeft} left`)
+  check('the reset goes first; the 12 older notices are held while it waits', reset?.status === 'sent' && bulkLeft === 12, `${reset?.status} / ${bulkLeft} left`)
+  await drainOutboxOnce()
+  check('...and go once it is out (a batch of 5)', (await M.EmailOutboxModel.countDocuments({ subject: /Class cancelled/, status: 'pending' })) === 7)
 
   section('C · a reminder past its use')
   await M.EmailOutboxModel.collection.insertOne({ to: 'late@t.local', subject: '🔔 Your Class Starts in 5 Minutes', html: '<p/>', status: 'pending',
@@ -95,6 +98,20 @@ try {
   check('sign-in code is urgent', (await row('c@t.local'))?.priority === 10)
   const five = await row('f@t.local')
   check('the 5-minute reminder is not urgent, and expires within about 2 hours', !five?.priority && five?.expiresAt && Math.abs(new Date(five.expiresAt).getTime() - Date.now() - 2 * 3600_000) < 60_000, JSON.stringify({ p: five?.priority, e: five?.expiresAt }))
+
+  section('E · while urgent mail waits, bulk mail is held back')
+  await M.EmailOutboxModel.deleteMany({})
+  await M.EmailOutboxModel.collection.insertOne({ to: 'stuck@t.local', subject: 'Reset your Delta password', html: '<p/>', status: 'pending',
+    attempts: 0, priority: 10, nextAttemptAt: new Date(Date.now() + 3600_000), createdAt: new Date(), updatedAt: new Date() } as any)
+  await E.sendFiveMinReminder('bulk@t.local', 'B', 'MBT 1', 'https://lms.example/j/x', new Date(Date.now() + 5 * 60_000))
+  const held = await M.EmailOutboxModel.findOne({ to: 'bulk@t.local' }).lean() as any
+  check('a new class reminder is queued, not sent, while a reset waits', held?.status === 'pending' && !held?.attempts, JSON.stringify({ s: held?.status, a: held?.attempts }))
+  await M.EmailOutboxModel.updateOne({ to: 'bulk@t.local' }, { $set: { nextAttemptAt: new Date(Date.now() - 1000) } })
+  await drainOutboxOnce()
+  check('...and the queue does not send it either', (await M.EmailOutboxModel.findOne({ to: 'bulk@t.local' }).lean() as any)?.status === 'pending')
+  await M.EmailOutboxModel.updateOne({ to: 'stuck@t.local' }, { $set: { status: 'sent', sentAt: new Date() } })
+  await drainOutboxOnce()
+  check('once the urgent mail is out, it goes', (await M.EmailOutboxModel.findOne({ to: 'bulk@t.local' }).lean() as any)?.status === 'sent')
 } catch (err) {
   fail++; lines.push(`  FAIL  suite threw — ${(err as Error).message}\n${(err as Error).stack}`)
 } finally {

@@ -170,7 +170,9 @@ export interface PooledTransport {
   urgentOnly?:   boolean
 }
 
-const COOLDOWN_MS = Number(process.env['SMTP_QUOTA_COOLDOWN_MIN'] ?? 60) * 60_000
+/* 15, not 60 (2026-10-17): Gmail's allowance comes back gradually over a rolling 24 hours, so a full mailbox is
+   re-tried sooner — the queue holds bulk mail back while urgent mail waits, so the re-try is spent on urgent mail. */
+const COOLDOWN_MS = Number(process.env['SMTP_QUOTA_COOLDOWN_MIN'] ?? 15) * 60_000
 
 export class PooledEmailSender implements EmailSender {
   constructor(private readonly transports: PooledTransport[]) {}
@@ -357,6 +359,7 @@ const rawSender = buildSender()
    anyone who would rather have the old behaviour back.
 ─────────────────────────────────────────────────────── */
 const OUTBOX_ENABLED = process.env['EMAIL_OUTBOX'] !== 'off'
+const URGENT_ONLY = /^(on|true|1|yes)$/i.test(process.env['EMAIL_URGENT_ONLY'] ?? '')
 
 /* 1m, 5m, 15m, 1h, 4h, 12h, then daily — a quota block clears in hours, not
    seconds, so the tail is deliberately long rather than a tight retry spin. */
@@ -405,6 +408,12 @@ export async function deliverOutboxRow(row: {
   }
 }
 
+/** Is any urgent email (password reset, sign-in code, verify, welcome) still waiting to go? */
+export async function urgentWaiting(): Promise<boolean> {
+  const { EmailOutboxModel } = await import('@/models/schema.ts')
+  return !!(await EmailOutboxModel.exists({ status: 'pending', priority: { $gt: 0 } }))
+}
+
 /* Subjects embed caller-supplied record fields (class titles, course names).
    Strip CR/LF centrally so no call site can forge extra SMTP headers, and cap
    the length. Wrapping the sender means a new helper cannot forget to do it. */
@@ -413,17 +422,30 @@ const sender: EmailSender = {
     const clean = { ...msg, subject: sanitiseSubject(msg.subject) }
 
     if (!OUTBOX_ENABLED) {
+      if (URGENT_ONLY && !msg.urgent) return
       await rawSender.send(clean)
       return
     }
 
     const { EmailOutboxModel } = await import('@/models/schema.ts')
+    /* EMAIL_URGENT_ONLY=on (2026-10-17, while the Gmail mailboxes are out of allowance): only urgent mail —
+       password reset, sign-in code, verify, registration, welcome — is sent. Anything else is logged as not sent,
+       never queued, so it can't pile up and come out later. */
+    if (URGENT_ONLY && !msg.urgent) {
+      await EmailOutboxModel.create({ to: clean.to, subject: clean.subject, html: clean.html, text: clean.text,
+        status: 'failed', lastError: 'not sent: urgent-only mode (EMAIL_URGENT_ONLY)' })
+      return
+    }
     /* Persist FIRST. If the process dies between here and the send, the drain
        picks it up; if we sent first, the record of it would not exist. */
     const row = await EmailOutboxModel.create({
       to: clean.to, subject: clean.subject, html: clean.html, text: clean.text,
       ...(msg.urgent ? { priority: 10 } : {}), ...(msg.expiresAt ? { expiresAt: msg.expiresAt } : {}),
     })
+
+    /* Urgent mail first, always: while any urgent email waits, other mail is not tried now — it would take the
+       allowance a mailbox has just got back. It stays queued; the drain sends it once the urgent mail is out. */
+    if (!msg.urgent && await urgentWaiting()) return
 
     /* Try immediately so normal mail is not delayed by the drain interval.
        A failure is already recorded, so it is safe to swallow here. */
@@ -489,7 +511,7 @@ export async function sendPasswordReset(to: string, name: string, resetUrl: stri
     <p style="font-size:12px;color:#6B7280">Or paste this URL into your browser:<br><span style="color:#0057b8">${escapeHtml(resetUrl)}</span></p>
     <p style="font-size:12px;color:#9CA3AF">If you didn't request this, ignore this email and your password will stay the same.</p>
   `)
-  await sender.send({ urgent: true, 
+  await sender.send({ urgent: true, expiresAt: inHours(1.5), 
     to,
     subject,
     html,
@@ -553,7 +575,7 @@ export async function sendLoginCode(to: string, name: string, code: string): Pro
     <p style="margin:24px 0;font-size:34px;font-weight:700;letter-spacing:0.18em;color:#0057b8">${escapeHtml(code)}</p>
     <p style="font-size:12px;color:#9CA3AF">Didn't try to sign in? You can ignore this email — nobody can get in without the code.</p>
   `)
-  await sender.send({ urgent: true, 
+  await sender.send({ urgent: true, expiresAt: inHours(1.5), 
     to,
     subject,
     html,
