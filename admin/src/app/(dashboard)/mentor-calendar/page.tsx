@@ -101,7 +101,8 @@ export default function MentorCalendarPage() {
             {days.map(d => {
               const key = dayKey(d)
               const slots = m.slots.filter(s => s.dayOfWeek === d.getDay())
-              const classes = m.classes.filter(c => dayKey(c.startsAt) === key && c.status !== 'cancelled' && classShown(c))
+              // Cancelled ones too, marked (2026-10-17): a day emptied by cancellations says so rather than looking free.
+              const classes = m.classes.filter(c => dayKey(c.startsAt) === key && classShown(c))
               const meetings = m.meetings.filter(v => dayKey(v.startsAt) === key && meetingShown(v))
               return (
                 <div key={key} className="min-h-[72px] rounded-lg border border-white/5 p-2 text-[11px]">
@@ -109,9 +110,11 @@ export default function MentorCalendarPage() {
                   {slots.map((s, i) => <p key={i} className="mb-1 rounded bg-emerald-500/10 px-1 text-emerald-400">{s.startTime}–{s.endTime}</p>)}
                   {classes.map(c => (
                     <button type="button" key={c.id} disabled={!c.mine} onClick={() => setInfoFor(c.id)}
-                      className="mb-1 block w-full rounded bg-blue-500/10 px-1 text-left text-blue-300 enabled:hover:bg-blue-500/20"
-                      title={c.mine ? `${c.booked}/${c.capacity} booked — click for its Info` : 'Another academy'}>
-                      {at(c.startsAt)} {c.mine ? (c.title || 'Class') : 'Booked elsewhere'}{c.mine && c.course && <span className="block opacity-60">{c.course}{c.module ? ` · ${c.module}` : ''}</span>}
+                      className={`mb-1 block w-full rounded px-1 text-left ${c.status === 'cancelled' ? 'bg-white/5 text-white/40 line-through' : 'bg-blue-500/10 text-blue-300 enabled:hover:bg-blue-500/20'}`}
+                      title={c.status === 'cancelled' ? 'Cancelled' : c.mine ? `${c.booked}/${c.capacity} booked — click for its Info` : 'Another academy'}>
+                      {at(c.startsAt)} {c.mine ? (c.title || 'Class') : 'Booked elsewhere'}
+                      {c.status === 'cancelled' && <span className="ml-1 inline-block rounded bg-rose-500/15 px-1 text-[10px] font-medium text-rose-400">Cancelled</span>}
+                      {c.mine && c.course && <span className="block opacity-60">{c.course}{c.module ? ` · ${c.module}` : ''}</span>}
                     </button>
                   ))}
                   {meetings.map(v => (
