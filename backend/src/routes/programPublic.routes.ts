@@ -1,6 +1,7 @@
 import { Router, type Request, type Response, type NextFunction } from 'express'
 import { sendSuccess } from '@/utils/response.ts'
 import { authRateLimit } from '@/middleware/rateLimit.middleware.ts'
+import { optionalAuthenticate } from '@/middleware/auth.middleware.ts'
 
 /* ─────────────────────────────────────────────────────────────
    A programme's shareable link — /p/{joinCode} in the student app (2026-10-17).
@@ -17,6 +18,15 @@ router.get('/:code', async (req: Request, res: Response, next: NextFunction) => 
   try {
     const { programPublic } = await import('@/services/program.service.ts')
     sendSuccess(res, await programPublic(String(req.params['code'] ?? '').toLowerCase()))
+  } catch (err) { next(err) }
+})
+
+/* GET /public/programs/:code/me — is the visitor already signed in, and on this programme? So an LMS student
+   opening the link goes straight to the class instead of the sign-in page (2026-10-17). Never refuses. */
+router.get('/:code/me', optionalAuthenticate, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { programVisitor } = await import('@/services/program.service.ts')
+    sendSuccess(res, await programVisitor(String(req.params['code'] ?? '').toLowerCase(), req.user?.role === 'student' ? req.user.id : null))
   } catch (err) { next(err) }
 })
 

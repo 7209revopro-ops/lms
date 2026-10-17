@@ -8,6 +8,7 @@
      E. the admin sees who filled it in
      F. its reminders: in-app only; at its start the WhatsApp "Join now" only
      G. a change (cancelled): in-app only — no email, no WhatsApp
+     H. the link knows an LMS student who is signed in: on it → straight to the class
    Run: bun --no-env-file src/tests/programlink.suite.ts
 ───────────────────────────────────────────────────────────── */
 process.env.DATABASE_URL = 'mongodb://localhost:27017/lms_programlink'
@@ -128,6 +129,23 @@ try {
   await settle()
   check('in-app', (await M.NotificationModel.countDocuments({ userId: stu._id, title: /cancelled/i })) >= 1)
   check('no email, no WhatsApp', (await M.EmailOutboxModel.countDocuments({ to: 'stu@pl.local' })) === 0 && (await M.WhatsAppOutboxModel.countDocuments({})) === 0)
+
+  section('H · an LMS student opening the link, signed in')
+  const out = await call('GET', `/public/programs/${code}/me`, null)
+  check('signed out: nothing known', out.status === 200 && out.body?.data?.signedIn === false && out.body.data.member === false, why(out))
+  const sj: Jar = new Map()
+  const sl = await call('POST', '/auth/login', sj, { email: 'stu@pl.local', password: PW })
+  if (sl.status === 200) {
+    const me = await call('GET', `/public/programs/${code}/me`, sj)
+    check('on the programme: member, with the class to open', me.body?.data?.member === true && !!me.body.data.classId, JSON.stringify(me.body?.data))
+  } else check('student signs in (device check)', sl.body?.error?.code === 'DEVICE_PENDING', why(sl))
+  await mk('Other', 'other@pl.local', 'student')
+  const oj: Jar = new Map()
+  const ol = await call('POST', '/auth/login', oj, { email: 'other@pl.local', password: PW })
+  if (ol.status === 200) {
+    const me2 = await call('GET', `/public/programs/${code}/me`, oj)
+    check('a student not on it: signed in, not a member (gets the form)', me2.body?.data?.signedIn === true && me2.body.data.member === false, JSON.stringify(me2.body?.data))
+  }
 } catch (err) {
   fail++; lines.push(`  FAIL  suite threw — ${(err as Error).message}\n${(err as Error).stack}`)
 } finally {

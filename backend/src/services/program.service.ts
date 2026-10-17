@@ -364,6 +364,17 @@ export async function joinAsGuest(code: string, input: { name?: unknown; email?:
   }
 }
 
+/** The visitor of a programme's link: signed in as a student, and on it? With the class to open when they are. */
+export async function programVisitor(code: string, studentId: string | null) {
+  const { ProgramModel } = await import('@/models/schema.ts')
+  if (!studentId) return { signedIn: false, member: false, classId: null, joinable: false }
+  const p: any = /^[a-z0-9]{6,16}$/.test(code) ? await ProgramModel.findOne({ joinCode: code }).select('studentIds status').lean() : null
+  if (!p) throw new ProgramError('This program link is not valid', 404)
+  const member = (p.studentIds ?? []).some((id: unknown) => String(id) === studentId)
+  const cur = member && p.status === 'active' ? await currentClassOf(p._id) : null
+  return { signedIn: true, member, classId: cur ? String(cur.cls._id) : null, joinable: !!cur?.joinable }
+}
+
 /** Who filled in the program's form — for who may see the program. */
 export async function listProgramGuests(id: string, actor: Actor) {
   const { ProgramGuestModel } = await import('@/models/schema.ts')

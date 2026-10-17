@@ -84,7 +84,8 @@ api.interceptors.response.use(
     /* `/imp/enter` establishes a session rather than consuming one, so a 401
        there is the normal starting state, not an expired session. Redirecting
        would throw away the handoff code before it can be redeemed. */
-    if (path === '/login' || path === '/register' || path.startsWith('/imp/')) {
+    /* `/p/<code>` — a programme's public link: a signed-out visitor is normal there, never "session expired". */
+    if (path === '/login' || path === '/register' || path.startsWith('/imp/') || path.startsWith('/p/')) {
       return Promise.reject(err)
     }
 

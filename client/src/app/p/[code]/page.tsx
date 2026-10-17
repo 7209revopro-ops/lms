@@ -41,12 +41,25 @@ export default function ProgramLinkPage({ params }: { params: Promise<{ code: st
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
   const [answer, setAnswer] = useState<JoinAnswer | null>(null)
+  /* An LMS student already signed in and on this programme goes straight to the class — no sign-in page. */
+  const [opening, setOpening] = useState(false)
+  const [memberNoClass, setMemberNoClass] = useState(false)
 
   useEffect(() => {
     api.get<{ data: PublicProgram }>(`/public/programs/${encodeURIComponent(code)}`)
       .then(r => setProg(r.data.data))
       .catch(e => setLoadErr(errText(e, 'We could not open this link. Check your internet connection and try again.')))
+    api.get<{ data: { signedIn: boolean; member: boolean; classId: string | null } }>(`/public/programs/${encodeURIComponent(code)}/me`)
+      .then(r => {
+        const v = r.data.data
+        if (!v.member) return
+        if (v.classId) { setOpening(true); window.location.replace(`/live-classes/${v.classId}/watch`) }
+        else setMemberNoClass(true)
+      })
+      .catch(() => { /* signed out or offline — the page as it is */ })
   }, [code])
+  /* Sign in once, then back to this link — which then opens the class. */
+  const signInHref = `/login?method=email&from=${encodeURIComponent(`/p/${code}`)}`
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -89,14 +102,22 @@ export default function ProgramLinkPage({ params }: { params: Promise<{ code: st
                 {prog.nextClass && <p className="font-semibold" style={{ color: 'var(--color-text-primary)' }}>Next class: {when(prog.nextClass.startsAt)}{prog.nextClass.joinable ? ' — on now' : ''}</p>}
               </div>
 
-              {prog.status !== 'active' ? (
+              {opening ? (
+                <div className="flex flex-col items-center gap-2 py-4"><Spinner size={22} /><p className="text-sm" style={{ color: 'var(--color-text-muted)' }}>Opening your class…</p></div>
+              ) : memberNoClass ? (
+                <div className="space-y-3 rounded-2xl p-4" style={{ background: 'var(--color-primary-light)' }}>
+                  <p className="text-sm font-semibold" style={{ color: 'var(--color-text-primary)' }}>You&apos;re on this program.</p>
+                  <p className="text-sm" style={{ color: 'var(--color-text-secondary)' }}>No class is coming up right now — your Class Schedule shows the next one.</p>
+                  <Link href="/class-bookings" className="block rounded-xl py-3 text-center text-sm font-bold text-white" style={{ background: 'var(--color-primary)' }}>Open my Class Schedule</Link>
+                </div>
+              ) : prog.status !== 'active' ? (
                 <p className="rounded-xl p-3 text-sm" style={{ background: 'var(--color-bg-inset)', color: 'var(--color-text-secondary)' }}>This program has ended.</p>
               ) : answer ? (
                 answer.member ? (
                   <div className="space-y-3 rounded-2xl p-4" style={{ background: 'var(--color-primary-light)' }}>
                     <p className="text-sm font-semibold" style={{ color: 'var(--color-text-primary)' }}>You're on this program in the LMS.</p>
-                    <p className="text-sm" style={{ color: 'var(--color-text-secondary)' }}>Sign in — the class and its Join button are in your Class Schedule.</p>
-                    <Link href={`/login?method=email&from=${encodeURIComponent('/class-bookings')}`} className="block rounded-xl py-3 text-center text-sm font-bold text-white" style={{ background: 'var(--color-primary)' }}>Sign in</Link>
+                    <p className="text-sm" style={{ color: 'var(--color-text-secondary)' }}>Sign in once — this link then takes you straight into the class.</p>
+                    <Link href={signInHref} className="block rounded-xl py-3 text-center text-sm font-bold text-white" style={{ background: 'var(--color-primary)' }}>Sign in</Link>
                   </div>
                 ) : answer.joinUrl ? (
                   <a href={answer.joinUrl} target="_blank" rel="noopener noreferrer" className="block rounded-xl py-3.5 text-center text-base font-bold text-white" style={{ background: '#16a34a' }}>
@@ -111,7 +132,7 @@ export default function ProgramLinkPage({ params }: { params: Promise<{ code: st
                 )
               ) : (
                 <>
-                  <Link href={`/login?method=email&from=${encodeURIComponent('/class-bookings')}`}
+                  <Link href={signInHref}
                     className="block rounded-xl border py-3 text-center text-sm font-semibold" style={{ borderColor: 'var(--color-border)', color: 'var(--color-primary)' }}>
                     Have an LMS account? Sign in
                   </Link>
