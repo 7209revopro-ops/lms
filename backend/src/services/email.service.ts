@@ -32,6 +32,8 @@ export interface EmailMessage {
   text?:   string
   /** Urgent mail (password reset, sign-in code, verify, welcome) goes before any other. */
   urgent?:    boolean
+  /** Within urgent mail: 20 = most important (sign-in code, verify email, forgot password), 10 = the rest. */
+  priority?:  number
   /** A reminder is worthless after this: closed, never sent. */
   expiresAt?: Date
 }
@@ -440,7 +442,7 @@ const sender: EmailSender = {
        picks it up; if we sent first, the record of it would not exist. */
     const row = await EmailOutboxModel.create({
       to: clean.to, subject: clean.subject, html: clean.html, text: clean.text,
-      ...(msg.urgent ? { priority: 10 } : {}), ...(msg.expiresAt ? { expiresAt: msg.expiresAt } : {}),
+      ...(msg.urgent ? { priority: msg.priority ?? 10 } : {}), ...(msg.expiresAt ? { expiresAt: msg.expiresAt } : {}),
     })
 
     /* Urgent mail first, always: while any urgent email waits, other mail is not tried now — it would take the
@@ -511,7 +513,7 @@ export async function sendPasswordReset(to: string, name: string, resetUrl: stri
     <p style="font-size:12px;color:#6B7280">Or paste this URL into your browser:<br><span style="color:#0057b8">${escapeHtml(resetUrl)}</span></p>
     <p style="font-size:12px;color:#9CA3AF">If you didn't request this, ignore this email and your password will stay the same.</p>
   `)
-  await sender.send({ urgent: true, expiresAt: inHours(1.5), 
+  await sender.send({ urgent: true, priority: 20, expiresAt: inHours(1.5), 
     to,
     subject,
     html,
@@ -575,7 +577,7 @@ export async function sendLoginCode(to: string, name: string, code: string): Pro
     <p style="margin:24px 0;font-size:34px;font-weight:700;letter-spacing:0.18em;color:#0057b8">${escapeHtml(code)}</p>
     <p style="font-size:12px;color:#9CA3AF">Didn't try to sign in? You can ignore this email — nobody can get in without the code.</p>
   `)
-  await sender.send({ urgent: true, expiresAt: inHours(1.5), 
+  await sender.send({ urgent: true, priority: 20, expiresAt: inHours(1.5), 
     to,
     subject,
     html,
@@ -654,7 +656,7 @@ export async function sendVerifyEmail(to: string, name: string, verifyUrl: strin
     <p style="font-size:12px;color:#6B7280">Or paste this URL into your browser:<br><span style="color:#0057b8">${escapeHtml(verifyUrl)}</span></p>
     <p style="font-size:12px;color:#9CA3AF">The link expires in 24 hours.</p>
   `)
-  await sender.send({ urgent: true, 
+  await sender.send({ urgent: true, priority: 20, 
     to,
     subject,
     html,

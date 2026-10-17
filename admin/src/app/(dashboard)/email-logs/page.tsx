@@ -6,7 +6,7 @@ import {
   Mail, ChevronLeft, ChevronRight, ChevronDown, Search, X,
   AlertCircle, CheckCircle2, Clock, XCircle, Check, Inbox,
 } from 'lucide-react'
-import { useEmailLogs, useEmailLogSummary, fetchEmailLogHtml, type EmailLog, type EmailLogStatus } from '@/lib/api/emailLogs'
+import { useEmailLogs, useEmailLogSummary, fetchEmailLogHtml, useSendEmailNow, type EmailLog, type EmailLogStatus } from '@/lib/api/emailLogs'
 import { LogSummary, DateRange } from '@/components/logs/LogSummary'
 import Spinner from '@/components/ui/Spinner'
 
@@ -154,7 +154,15 @@ function LogRow({ log, index }: { log: EmailLog; index: number }) {
 
         {/* Subject */}
         <td className="px-4 py-3">
-          <p className="text-xs truncate max-w-[260px]" style={{ color: 'rgba(255,255,255,0.7)' }}>{log.subject}</p>
+          <p className="text-xs truncate max-w-[260px]" style={{ color: 'rgba(255,255,255,0.7)' }}>
+            {(log.priority ?? 0) > 0 && (
+              <span className="mr-1.5 rounded px-1.5 py-0.5 text-[9px] font-bold uppercase" title="Sent before any other email"
+                style={{ background: (log.priority ?? 0) >= 20 ? 'rgba(245,158,11,0.18)' : 'rgba(59,130,246,0.18)', color: (log.priority ?? 0) >= 20 ? '#FBBF24' : '#93C5FD' }}>
+                {(log.priority ?? 0) >= 20 ? 'Urgent' : 'Priority'}
+              </span>
+            )}
+            {log.subject}
+          </p>
         </td>
 
         {/* Status */}
@@ -177,8 +185,9 @@ function LogRow({ log, index }: { log: EmailLog; index: number }) {
           {log.lastError ?? '—'}
         </td>
 
-        {/* Expand indicator */}
-        <td className="px-4 py-3">
+        {/* Send now (not yet sent) + expand indicator */}
+        <td className="px-4 py-3 whitespace-nowrap">
+          {log.status !== 'sent' && <SendNow id={log.id} />}
           <span className="text-[10px] font-semibold" style={{ color: 'rgba(255,255,255,0.25)' }}>
             {expanded ? '▲ hide' : '▼ view'}
           </span>
@@ -349,5 +358,26 @@ export default function EmailLogsPage() {
         )}
       </div>
     </div>
+  )
+}
+
+/* Send this one email now, past the queue — a waiting, failed or stopped one. */
+function SendNow({ id }: { id: string }) {
+  const send = useSendEmailNow()
+  const [note, setNote] = useState('')
+  return (
+    <span className="mr-2 inline-flex items-center gap-1.5" onClick={e => e.stopPropagation()}>
+      <button type="button" disabled={send.isPending}
+        onClick={async () => {
+          setNote('')
+          try { await send.mutateAsync(id); setNote('Sent') }
+          catch (e) { setNote((e as any)?.response?.data?.error?.message || 'Not sent') }
+        }}
+        className="rounded-md px-2 py-1 text-[10px] font-bold text-white disabled:opacity-50"
+        style={{ background: '#2563EB' }}>
+        {send.isPending ? 'Sending…' : 'Send now'}
+      </button>
+      {note && <span className="max-w-[160px] truncate text-[10px]" title={note} style={{ color: note === 'Sent' ? '#34D399' : '#F87171' }}>{note}</span>}
+    </span>
   )
 }

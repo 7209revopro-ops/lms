@@ -94,8 +94,12 @@ try {
   await E.sendLoginCode('c@t.local', 'C', '123456')
   await E.sendFiveMinReminder('f@t.local', 'F', 'MBT 1', 'https://lms.example/j/x', new Date(Date.now() + 5 * 60_000))
   const row = async (to: string) => M.EmailOutboxModel.findOne({ to }).lean() as any
-  check('password reset is urgent', (await row('r@t.local'))?.priority === 10)
-  check('sign-in code is urgent', (await row('c@t.local'))?.priority === 10)
+  check('password reset: top priority (20)', (await row('r@t.local'))?.priority === 20)
+  check('sign-in code: top priority (20)', (await row('c@t.local'))?.priority === 20)
+  await E.sendVerifyEmail('v@t.local', 'V', 'https://lms.example/verify?t=x')
+  check('verify email: top priority (20)', (await row('v@t.local'))?.priority === 20)
+  await E.sendImportedStudentWelcome('w@t.local', 'W', '4x-trading', 'https://lms.example/reset?token=x')
+  check('welcome: urgent, below them (10)', (await row('w@t.local'))?.priority === 10)
   const five = await row('f@t.local')
   check('the 5-minute reminder is not urgent, and expires within about 2 hours', !five?.priority && five?.expiresAt && Math.abs(new Date(five.expiresAt).getTime() - Date.now() - 2 * 3600_000) < 60_000, JSON.stringify({ p: five?.priority, e: five?.expiresAt }))
 
@@ -112,6 +116,26 @@ try {
   await M.EmailOutboxModel.updateOne({ to: 'stuck@t.local' }, { $set: { status: 'sent', sentAt: new Date() } })
   await drainOutboxOnce()
   check('once the urgent mail is out, it goes', (await M.EmailOutboxModel.findOne({ to: 'bulk@t.local' }).lean() as any)?.status === 'sent')
+
+  section('F · Send now, from the Email Logs page')
+  const app = (await import('@/app.ts')).default
+  const server = app.listen(0); await new Promise<void>(r => server.once('listening', () => r()))
+  const BASE = `http://127.0.0.1:${(server.address() as { port: number }).port}/api/v1`
+  const { hashPassword } = await import('@/utils/hash.ts')
+  const org = await M.OrganizationModel.create({ name: 'Dubai Academy', slug: 'dubai', currency: 'AED', paymentGateway: 'abzer' })
+  await M.UserModel.create({ name: 'SA', email: 'sa@t.local', passwordHash: await hashPassword('CorrectHorse1'), role: 'super_admin', isActive: true, isVerified: true, organizationId: org._id })
+  await M.UserModel.create({ name: 'AD', email: 'ad@t.local', passwordHash: await hashPassword('CorrectHorse1'), role: 'admin', isActive: true, isVerified: true, organizationId: org._id })
+  const login = async (email: string) => { const r = await fetch(`${BASE}/admin/auth/login`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ email, password: 'CorrectHorse1' }) }); return (r.headers.getSetCookie?.() ?? []).map(c => c.split(';')[0]).join('; ') }
+  const sa = await login('sa@t.local'), ad = await login('ad@t.local')
+  const stopped = await M.EmailOutboxModel.collection.insertOne({ to: 'stopped@t.local', subject: 'Class cancelled — MBT', html: '<p/>', status: 'failed',
+    lastError: 'stopped 2026-10-17: queue cleared by admin, not sent', attempts: 0, nextAttemptAt: new Date(), createdAt: new Date(), updatedAt: new Date() } as any)
+  const post = (id: unknown, cookie: string) => fetch(`${BASE}/email-logs/${String(id)}/send-now`, { method: 'POST', headers: { cookie } })
+  const r1 = await post(stopped.insertedId, sa)
+  const after = await M.EmailOutboxModel.findById(stopped.insertedId).lean() as any
+  check('a stopped email is sent at once', r1.status === 200 && after?.status === 'sent', `${r1.status} ${after?.status}`)
+  check('...not twice (already sent → refused)', (await post(stopped.insertedId, sa)).status === 409)
+  check('only a super admin may', (await post(stopped.insertedId, ad)).status === 403)
+  server.close()
 } catch (err) {
   fail++; lines.push(`  FAIL  suite threw — ${(err as Error).message}\n${(err as Error).stack}`)
 } finally {

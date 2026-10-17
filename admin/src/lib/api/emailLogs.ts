@@ -1,5 +1,5 @@
 'use client'
-import { useQuery } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from '@/lib/axios'
 import type { PaginationMeta } from '@/types/index'
 
@@ -17,6 +17,8 @@ export interface EmailLog {
   sentVia?:      string
   sentAt?:       string
   createdAt:     string
+  /** 20 = sign-in code / verify / forgot password, 10 = other urgent (welcome, registration); sent first. */
+  priority?:     number
 }
 
 interface EmailLogFilter {
@@ -75,5 +77,14 @@ export function useEmailLogSummary() {
     queryKey: ['admin', 'email-logs', 'summary'],
     queryFn: async () => (await api.get<{ success: true; data: import('@/components/logs/LogSummary').LogSummaryData }>('/email-logs/summary')).data.data,
     staleTime: 30_000, retry: false,
+  })
+}
+
+/** Send this email now — past the queue (POST /email-logs/:id/send-now). */
+export function useSendEmailNow() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async (id: string) => (await api.post<{ success: true; data: { status: string } }>(`/email-logs/${id}/send-now`)).data.data,
+    onSettled: () => qc.invalidateQueries({ queryKey: ['admin', 'email-logs'] }),
   })
 }
