@@ -280,6 +280,18 @@ router.post('/programs/:id/stop', wrap(async (req, res) => {
 
 /* Exams (2026-10-10, portalExams.service.ts): an academy's published exams, and one student's — with their state and
    a sign-in link straight into each. Read only (a student's list mints their usual 24-hour sign-in links). */
+/* A student's emails (2026-10-17, portalStudentEmails.service.ts): the email queue's rows for their address — the
+   list without bodies, and one email's body. Read only. */
+router.get('/student-emails', wrap(async (req, res) => {
+  const { studentEmailsForPortal } = await import('@/services/portalStudentEmails.service.ts')
+  sendSuccess(res, await studentEmailsForPortal(req.query.email, req.query.limit), 'Student emails')
+}))
+
+router.get('/student-emails/:id', wrap(async (req, res) => {
+  const { studentEmailForPortal } = await import('@/services/portalStudentEmails.service.ts')
+  sendSuccess(res, await studentEmailForPortal(req.params['id'], req.query.email), 'Student email')
+}))
+
 router.get('/exams', wrap(async (req, res) => {
   const { listExamsForPortal } = await import('@/services/portalExams.service.ts')
   sendSuccess(res, await listExamsForPortal(req.query.academy), 'Exams')
