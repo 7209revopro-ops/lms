@@ -67,6 +67,9 @@ export default function ProgramLinkPage({ params }: { params: Promise<{ code: st
     try {
       const r = await api.post<{ data: JoinAnswer }>(`/public/programs/${encodeURIComponent(code)}/join`, f)
       setAnswer(r.data.data)
+      /* Straight to Google Meet once the form is in — any time, not only near class time (2026-10-18).
+         Same tab: a new tab opened after an await is blocked as a popup on phones. */
+      if (!r.data.data.member && r.data.data.joinUrl) window.location.assign(r.data.data.joinUrl)
     } catch (e2) { setErr(errText(e2, 'Something went wrong — please try again.')) }
     finally { setBusy(false) }
   }
@@ -120,9 +123,13 @@ export default function ProgramLinkPage({ params }: { params: Promise<{ code: st
                     <Link href={signInHref} className="block rounded-xl py-3 text-center text-sm font-bold text-white" style={{ background: 'var(--color-primary)' }}>Sign in</Link>
                   </div>
                 ) : answer.joinUrl ? (
-                  <a href={answer.joinUrl} target="_blank" rel="noopener noreferrer" className="block rounded-xl py-3.5 text-center text-base font-bold text-white" style={{ background: '#16a34a' }}>
-                    Join now
-                  </a>
+                  <div className="space-y-2.5">
+                    <p className="text-center text-sm" style={{ color: 'var(--color-text-secondary)' }}>Opening Google Meet…</p>
+                    {/* If the browser did not follow the redirect. */}
+                    <a href={answer.joinUrl} className="block rounded-xl py-3.5 text-center text-base font-bold text-white" style={{ background: '#16a34a' }}>
+                      Join on Google Meet
+                    </a>
+                  </div>
                 ) : (
                   <div className="space-y-2 rounded-2xl p-4" style={{ background: 'var(--color-bg-inset)' }}>
                     <p className="text-sm font-semibold" style={{ color: 'var(--color-text-primary)' }}>Thank you, {f.name.split(' ')[0]}!</p>

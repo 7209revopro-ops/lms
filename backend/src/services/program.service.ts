@@ -344,23 +344,27 @@ export async function joinAsGuest(code: string, input: { name?: unknown; email?:
   if (member) return { member: true as const }
 
   const cur = await currentClassOf(p._id)
+  const isMeet = (u: unknown) => /^https:\/\/meet\.google\.com\//i.test(String(u ?? ''))
+  /* The Google Meet link — the coming class's, else the program's own pasted link. Handed over
+     whenever the form is sent, not only near class time (2026-10-18, the user: "redirect to Google
+     Meet any time"); the page sends the visitor straight there. */
+  const meet = cur && cur.cls.isOnline !== false && cur.cls.type === 'external' && isMeet(cur.cls.meetingUrl)
+    ? String(cur.cls.meetingUrl)
+    : (!cur || cur.cls.isOnline !== false) && p.isOnline !== false && isMeet(p.meetingUrl) ? String(p.meetingUrl) : null
   await ProgramGuestModel.updateOne(
     { programId: p._id, email },
-    { $set: { name, phone, ...(cur?.joinable ? { lastJoinAt: new Date() } : {}) }, $inc: { joins: cur?.joinable ? 1 : 0 } },
+    { $set: { name, phone, ...(meet ? { lastJoinAt: new Date() } : {}) }, $inc: { joins: meet ? 1 : 0 } },
     { upsert: true },
   )
-  const meet = cur && cur.cls.isOnline !== false && cur.cls.type === 'external' && /^https:\/\/meet\.google\.com\//i.test(String(cur.cls.meetingUrl ?? ''))
-    ? String(cur.cls.meetingUrl) : null
   return {
     member: false as const,
     nextClass: cur ? { startsAt: new Date(cur.start).toISOString(), endsAt: new Date(cur.end).toISOString(), joinable: cur.joinable } : null,
-    /* Only while it can be joined — not handed out days ahead. */
-    joinUrl: cur?.joinable ? meet : null,
+    joinUrl: meet,
     /* An in-app (LMS) stream or an in-person class has no link to give a guest. */
-    note: !cur ? 'No class is coming up for this program.'
+    note: meet ? ''
+      : !cur ? 'No class is coming up for this program.'
       : cur.cls.isOnline === false ? `This class is in person${cur.cls.location ? ` — ${cur.cls.location}` : ''}.`
-      : !meet ? 'This class is in the LMS app — ask your counsellor for an LMS account to join.'
-      : cur.joinable ? '' : 'The Join button opens 15 minutes before the class starts — come back to this link then.',
+      : 'This class is in the LMS app — ask your counsellor for an LMS account to join.',
   }
 }
 
