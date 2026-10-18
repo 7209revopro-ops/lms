@@ -4,7 +4,7 @@
      B. it has a link ({CLIENT_URL}/p/{code}) in the admin list
      C. the link's page (no sign-in): what it is and when; a bad code is 404
      D. the form: checked; a guest is kept (once per email); the Meet link only
-        while the class can be joined; an LMS student on it is told to sign in
+        while the class can be joined; an LMS student on it goes straight to Meet too (2026-10-18)
      E. the admin sees who filled it in
      F. its reminders: in-app only; at its start the WhatsApp "Join now" only
      G. a change (cancelled): in-app only — no email, no WhatsApp
@@ -100,7 +100,9 @@ try {
   check('5 minutes before: the Meet link', now.body?.data?.joinUrl === LINK, JSON.stringify(now.body?.data))
   check('one guest per email (kept once), each redirect counted', (await M.ProgramGuestModel.countDocuments({ programId: prog.id })) === 1 && (await M.ProgramGuestModel.findOne({ email: 'ann@x.com' }).lean() as any)?.joins === 2)
   const member = await call('POST', `/public/programs/${code}/join`, null, { name: 'Stu', email: 'stu@pl.local', phone: '+971500000401' })
-  check('an LMS student on it: told to sign in, not kept as a guest', member.body?.data?.member === true && (await M.ProgramGuestModel.countDocuments({ email: 'stu@pl.local' })) === 0, JSON.stringify(member.body?.data))
+  check('an LMS student on it: straight to Meet too, not kept as a guest (2026-10-18)', member.body?.data?.member === true && member.body.data.joinUrl === LINK && (await M.ProgramGuestModel.countDocuments({ email: 'stu@pl.local' })) === 0, JSON.stringify(member.body?.data))
+  check('...their join recorded on their seat (the class is 5 minutes away)', !!(await M.ClassBookingModel.findOne({ liveClassId: first!._id, userId: stu._id }).lean() as any)?.attendedAt)
+  await M.ClassBookingModel.updateMany({ liveClassId: first!._id }, { $unset: { attendedAt: 1, attendanceSource: 1 } })
 
   section('E · the admin sees them')
   const guests = await call('GET', `/admin/programs/${prog.id}/guests`, admin)
@@ -159,7 +161,7 @@ try {
   const sl = await call('POST', '/auth/login', sj, { email: 'stu@pl.local', password: PW })
   if (sl.status === 200) {
     const me = await call('GET', `/public/programs/${code}/me`, sj)
-    check('on the programme: member, with the class to open', me.body?.data?.member === true && !!me.body.data.classId, JSON.stringify(me.body?.data))
+    check('on the programme: member, with the Meet link to go straight to', me.body?.data?.member === true && !!me.body.data.classId && me.body.data.meetUrl === LINK, JSON.stringify(me.body?.data))
   } else check('student signs in (device check)', sl.body?.error?.code === 'DEVICE_PENDING', why(sl))
   await mk('Other', 'other@pl.local', 'student')
   const oj: Jar = new Map()

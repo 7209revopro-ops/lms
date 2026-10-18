@@ -340,17 +340,19 @@ export async function joinAsGuest(code: string, input: { name?: unknown; email?:
   if (!p) throw new ProgramError('This program link is not valid', 404)
   if (p.status !== 'active') throw new ProgramError('This program has ended')
 
-  const member = await UserModel.findOne({ email, _id: { $in: p.studentIds ?? [] } }).select('_id').lean()
-  if (member) return { member: true as const }
-
   const cur = await currentClassOf(p._id)
-  const isMeet = (u: unknown) => /^https:\/\/meet\.google\.com\//i.test(String(u ?? ''))
-  /* The Google Meet link — the coming class's, else the program's own pasted link. Handed over
-     whenever the form is sent, not only near class time (2026-10-18, the user: "redirect to Google
-     Meet any time"); the page sends the visitor straight there. */
-  const meet = cur && cur.cls.isOnline !== false && cur.cls.type === 'external' && isMeet(cur.cls.meetingUrl)
-    ? String(cur.cls.meetingUrl)
-    : (!cur || cur.cls.isOnline !== false) && p.isOnline !== false && isMeet(p.meetingUrl) ? String(p.meetingUrl) : null
+  const meet = meetLinkOf(p, cur)
+
+  /* An LMS student on the program goes straight to Meet too (2026-10-18, the user: "everyone to go
+     straight to Meet, not to the LMS") — their join recorded as from the class page. Only with no
+     Meet link to give (an in-app stream) are they still sent to sign in. */
+  const member = await UserModel.findOne({ email, _id: { $in: p.studentIds ?? [] } }).select('_id').lean() as { _id: unknown } | null
+  if (member) {
+    if (!meet) return { member: true as const, joinUrl: null }
+    await recordProgramJoin(member._id, cur)
+    return { member: true as const, joinUrl: meet, nextClass: cur ? { startsAt: new Date(cur.start).toISOString(), endsAt: new Date(cur.end).toISOString(), joinable: cur.joinable } : null, note: '' }
+  }
+
   await ProgramGuestModel.updateOne(
     { programId: p._id, email },
     { $set: { name, phone, ...(meet ? { lastJoinAt: new Date() } : {}) }, $inc: { joins: meet ? 1 : 0 } },
@@ -368,15 +370,40 @@ export async function joinAsGuest(code: string, input: { name?: unknown; email?:
   }
 }
 
-/** The visitor of a programme's link: signed in as a student, and on it? With the class to open when they are. */
+/** The visitor of a programme's link: signed in as a student, and on it? With the Meet link to go
+    straight to (2026-10-18), else the class to open. */
 export async function programVisitor(code: string, studentId: string | null) {
   const { ProgramModel } = await import('@/models/schema.ts')
-  if (!studentId) return { signedIn: false, member: false, classId: null, joinable: false }
-  const p: any = /^[a-z0-9]{6,16}$/.test(code) ? await ProgramModel.findOne({ joinCode: code }).select('studentIds status').lean() : null
+  if (!studentId) return { signedIn: false, member: false, classId: null, joinable: false, meetUrl: null }
+  const p: any = /^[a-z0-9]{6,16}$/.test(code) ? await ProgramModel.findOne({ joinCode: code }).select('studentIds status isOnline meetingUrl').lean() : null
   if (!p) throw new ProgramError('This program link is not valid', 404)
   const member = (p.studentIds ?? []).some((id: unknown) => String(id) === studentId)
   const cur = member && p.status === 'active' ? await currentClassOf(p._id) : null
-  return { signedIn: true, member, classId: cur ? String(cur.cls._id) : null, joinable: !!cur?.joinable }
+  const meetUrl = member && p.status === 'active' ? meetLinkOf(p, cur) : null
+  if (meetUrl) await recordProgramJoin(studentId, cur)
+  return { signedIn: true, member, classId: cur ? String(cur.cls._id) : null, joinable: !!cur?.joinable, meetUrl }
+}
+
+/** The Google Meet link a program's link hands over: the coming class's, else the program's own pasted link.
+    Any time, not only near class time (2026-10-18, the user: "redirect to Google Meet any time"). In person,
+    or an in-app stream: none. */
+function meetLinkOf(p: any, cur: Awaited<ReturnType<typeof currentClassOf>>): string | null {
+  const isMeet = (u: unknown) => /^https:\/\/meet\.google\.com\//i.test(String(u ?? ''))
+  if (cur && cur.cls.isOnline !== false && cur.cls.type === 'external' && isMeet(cur.cls.meetingUrl)) return String(cur.cls.meetingUrl)
+  if ((!cur || cur.cls.isOnline !== false) && p.isOnline !== false && isMeet(p.meetingUrl)) return String(p.meetingUrl)
+  return null
+}
+
+/* An LMS student taken to Meet from the program's link: their seat marked joined, as a click on the class
+   page's Join does (first click wins; runAttendanceFinalization makes it 'attended'). Only while the class
+   can be joined (15 minutes before to its end) — opening the link a day early is not attending. */
+async function recordProgramJoin(studentId: unknown, cur: Awaited<ReturnType<typeof currentClassOf>>) {
+  if (!cur?.joinable) return
+  const { ClassBookingModel } = await import('@/models/schema.ts')
+  await ClassBookingModel.updateOne(
+    { userId: new Types.ObjectId(String(studentId)), liveClassId: cur.cls._id, status: 'booked', attendedAt: { $exists: false } },
+    { $set: { attendedAt: new Date(), attendanceSource: 'click' } },
+  ).catch(err => logger.warn({ err, liveClassId: String(cur.cls._id) }, 'program link: join not recorded'))
 }
 
 /** Who filled in the program's form — for who may see the program. */
