@@ -568,6 +568,34 @@ export async function sendPasswordSetByAdmin(to: string, name: string, password:
     text: `Hi ${name},\n\nAn administrator has set a new password for your Delta account.\n\nEmail: ${to}\nPassword: ${password}\n\nSign in: ${loginUrl}\n\nYou have been signed out of every device. If you did not ask for this, contact support.` })
 }
 
+/* A chat message still unread CHAT_EMAIL_DELAY_MINS after it arrived
+   (jobs/chatEmail.job.ts) — to a student from their mentor, or to a mentor
+   from a student. One per unread run, never one per message. Normal priority:
+   it waits behind sign-in codes and resets, and EMAIL_URGENT_ONLY drops it. */
+export async function sendChatMessageEmail(to: string, opts: {
+  name: string; from: string; preview: string; unread: number; url: string; toMentor: boolean
+}): Promise<void> {
+  const more    = opts.unread > 1 ? ` (${opts.unread} unread)` : ''
+  const subject = `New message from ${opts.from}${more}`
+  const html = wrap(subject, `
+    <h2 style="margin:0 0 16px;font-size:20px;font-weight:700;color:#0D0F1A">You have a new message</h2>
+    <p>Hi ${escapeHtml(opts.name)},</p>
+    <p><strong>${escapeHtml(opts.from)}</strong> ${opts.toMentor ? 'sent you a message' : 'replied to you'} on Delta${opts.unread > 1 ? ` — ${opts.unread} messages are waiting` : ''}:</p>
+    <p style="margin:16px 0;padding:14px 18px;background:#F4F5F8;border-radius:12px;font-size:15px;color:#1F2937">${escapeHtml(opts.preview)}</p>
+    <p style="margin:24px 0">
+      <a href="${escapeHtml(opts.url)}" style="display:inline-block;background:linear-gradient(135deg,#0057b8,#2F6BFF);color:#fff;font-weight:600;padding:12px 24px;border-radius:12px;text-decoration:none">${opts.toMentor ? 'Reply' : 'Open the chat'}</a>
+    </p>
+    <p style="font-size:12px;color:#6B7280">You get this email when a message has waited ${CHAT_EMAIL_DELAY_LABEL} unread. Open the chat to read it.</p>
+  `)
+  await sender.send({ to, subject, html, expiresAt: inHours(24),
+    text: `Hi ${opts.name},\n\n${opts.from} ${opts.toMentor ? 'sent you a message' : 'replied to you'} on Delta${more}:\n\n"${opts.preview}"\n\nOpen the chat: ${opts.url}` })
+}
+const CHAT_EMAIL_DELAY_LABEL = (() => {
+  const n = Number(process.env['CHAT_EMAIL_DELAY_MINS'])
+  const m = Number.isFinite(n) && n >= 0 ? Math.floor(n) : 10
+  return m === 1 ? '1 minute' : `${m} minutes`
+})()
+
 export async function sendLoginCode(to: string, name: string, code: string): Promise<void> {
   const subject = `${code} is your Delta sign-in code`
   const html = wrap(subject, `

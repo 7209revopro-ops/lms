@@ -5,6 +5,7 @@ import { usePathname } from 'next/navigation'
 import { useStaffConversations, useStaffUnread } from '@/lib/api/chat'
 import { useCurrentUser } from '@/lib/api/user'
 import { useUIStore } from '@/store/ui.store'
+import { showDesktopAlert } from '@/lib/desktopAlerts'
 
 /* WhatsApp-style ping for an instructor (plan.md §11.6): when a student's
    message arrives anywhere but that very conversation, a toast says who and
@@ -29,6 +30,14 @@ export function ChatNotifier() {
     if (seen.current) {
       const fresh = firstPage.filter(c =>
         c.lastSenderRole === 'student' && c.unread > 0 && seen.current!.get(c.id) !== c.lastMessageAt)
+      /* Not looking at the app (another tab, minimised, installed app in the
+         background): the browser's own alert, if the mentor turned them on. */
+      if (fresh.length) {
+        const c = fresh[0]!
+        void showDesktopAlert(
+          fresh.length === 1 ? `New message from ${c.student?.name ?? 'a student'}` : `${fresh.length} new conversations`,
+          c.lastMessagePreview, fresh.length === 1 ? `/messages?c=${c.id}` : '/messages')
+      }
       /* On the Messages page the list itself shows it; the open thread marks it read. */
       if (fresh.length && !pathname.startsWith('/messages')) {
         const c = fresh[0]!

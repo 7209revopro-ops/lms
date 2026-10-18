@@ -1,10 +1,10 @@
 'use client'
 /* ─────────────────────────────────────────────────────────────
-   "Install app" without a popup. The browser's install offer
-   (beforeinstallprompt) is caught once for the whole app and kept here; the
-   More drawer shows an "Install app" row while one is available and calls
-   promptInstall(). iPhones never fire the event — the row there explains
-   Share → Add to Home Screen instead.
+   "Install app". The browser's install offer (beforeinstallprompt) is caught
+   once for the whole app and kept here; the More drawer's "Install app" row
+   and the install popup (components/pwa/InstallPopup.tsx, since 2026-10-18)
+   call promptInstall() while one is available. iPhones never fire the event —
+   both explain Share → Add to Home Screen instead.
 ───────────────────────────────────────────────────────────── */
 import { useEffect, useState } from 'react'
 
@@ -28,7 +28,7 @@ export function isIOS(): boolean {
   return /iphone|ipad|ipod/i.test(navigator.userAgent)
 }
 
-/** Call once (InstallCapture in the dashboard layout). */
+/** Call once (PwaRegister in the root layout). */
 export function captureInstallPrompt(): () => void {
   const onPrompt = (e: Event) => { e.preventDefault(); deferred = e as BeforeInstallPromptEvent; notify() }
   const onInstalled = () => { deferred = null; notify() }

@@ -12,13 +12,18 @@ import { PROGRAM_LABEL } from '@/lib/programScope'
 import { useOrgStore } from '@/store/org.store'
 import { useOrganizations } from '@/lib/api/organizations'
 import { AvatarImg } from '@/components/ui/AvatarImg'
+import { useAdminNotifications, useMarkNotificationRead, useMarkAllNotificationsRead } from '@/lib/api/notifications'
+import { useDesktopAlerts } from '@/lib/desktopAlerts'
 
-const notifications = [
-  { id: 1, type: 'enroll',     text: 'New enrollment: UI/UX Design Mastery', time: '2m ago',  unread: true },
-  { id: 2, type: 'review',     text: 'New 5★ review on TypeScript course',   time: '14m ago', unread: true },
-  { id: 3, type: 'instructor', text: 'Alex Kim submitted new course draft',   time: '1h ago',  unread: false },
-  { id: 4, type: 'enroll',     text: '25 new students this hour',             time: '2h ago',  unread: false },
-]
+/* "2m ago" for the bell. */
+function ago(iso: string) {
+  const m = Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 60_000))
+  if (m < 1) return 'just now'
+  if (m < 60) return `${m}m ago`
+  const h = Math.round(m / 60)
+  if (h < 24) return `${h}h ago`
+  return `${Math.round(h / 24)}d ago`
+}
 
 /* Same hues the enrolment screens use for these programmes, so one person
    reads as the same colour wherever they appear. */
@@ -37,7 +42,12 @@ export function AdminTopbar() {
   const [avatarOpen,  setAvatarOpen]  = useState(false)
   const [orgOpen,     setOrgOpen]     = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
-  const unreadCount = notifications.filter(n => n.unread).length
+  const feed = useAdminNotifications()
+  const notifications = feed.data?.items ?? []
+  const unreadCount = feed.data?.unreadCount ?? 0
+  const markRead = useMarkNotificationRead()
+  const markAll  = useMarkAllNotificationsRead()
+  const alerts   = useDesktopAlerts()
 
   const { data: user } = useCurrentUser()
   const router = useRouter()
@@ -264,17 +274,18 @@ export function AdminTopbar() {
         {/* ── Notifications ────────────────────────── */}
         <div className="relative">
           <motion.button
-            onClick={() => { setNotifOpen(v => !v); setQuickOpen(false) }}
+            onClick={() => { setNotifOpen(v => { if (!v) void feed.refetch(); return !v }); setQuickOpen(false) }}
             whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}
+            aria-label={unreadCount ? `Notifications, ${unreadCount} unread` : 'Notifications'}
             className="relative flex h-8 w-8 items-center justify-center rounded-xl transition-colors hover:bg-white/[0.08]"
             style={{ color: 'rgba(255,255,255,0.55)' }}>
             <Bell size={16} />
             {unreadCount > 0 && (
               <motion.span
                 initial={{ scale: 0 }} animate={{ scale: 1 }} transition={{ type: 'spring', stiffness: 400 }}
-                className="absolute -right-0.5 -top-0.5 flex h-4 w-4 items-center justify-center rounded-full text-[9px] font-bold text-white"
+                className="absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full px-1 text-[9px] font-bold text-white"
                 style={{ background: '#0057b8' }}>
-                {unreadCount}
+                {unreadCount > 99 ? '99+' : unreadCount}
               </motion.span>
             )}
           </motion.button>
@@ -288,25 +299,48 @@ export function AdminTopbar() {
                 style={{ background: '#13162A', border: '1px solid rgba(255,255,255,0.08)', boxShadow: '0 20px 60px rgba(0,0,0,0.5)' }}>
                 <div className="flex items-center justify-between px-4 py-3" style={{ borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
                   <span className="text-sm font-semibold text-white">Notifications</span>
-                  <button className="text-[11px] font-medium" style={{ color: '#0057b8' }}>Mark all read</button>
+                  {unreadCount > 0 && (
+                    <button onClick={() => markAll.mutate()} disabled={markAll.isPending}
+                      className="text-[11px] font-medium disabled:opacity-50" style={{ color: '#60A5FA' }}>Mark all read</button>
+                  )}
                 </div>
-                {notifications.map((n, i) => (
-                  <motion.div key={n.id}
-                    initial={{ opacity: 0, x: 12 }} animate={{ opacity: 1, x: 0 }}
-                    transition={{ delay: i * 0.05 }}
-                    className="flex items-start gap-3 px-4 py-3 transition-colors hover:bg-white/[0.04] cursor-pointer"
-                    style={{ borderBottom: i < notifications.length - 1 ? '1px solid rgba(255,255,255,0.04)' : 'none' }}>
-                    <div className="mt-0.5 flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-lg"
-                      style={{ background: n.unread ? 'rgba(0,87,184,0.15)' : 'rgba(255,255,255,0.05)' }}>
-                      <Bell size={12} style={{ color: n.unread ? '#0057b8' : 'rgba(255,255,255,0.3)' }} />
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-xs leading-relaxed" style={{ color: n.unread ? 'rgba(255,255,255,0.85)' : 'rgba(255,255,255,0.45)' }}>{n.text}</p>
-                      <p className="mt-0.5 text-[10px]" style={{ color: 'rgba(255,255,255,0.25)' }}>{n.time}</p>
-                    </div>
-                    {n.unread && <div className="mt-1.5 h-1.5 w-1.5 flex-shrink-0 rounded-full" style={{ background: '#0057b8' }} />}
-                  </motion.div>
-                ))}
+                {alerts.canAsk && (
+                  <button onClick={() => void alerts.ask()}
+                    className="flex w-full items-center gap-2 px-4 py-2.5 text-left text-[11px] font-medium hover:bg-white/[0.04]"
+                    style={{ color: '#60A5FA', borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
+                    <Bell size={12} />Turn on desktop alerts for new messages
+                  </button>
+                )}
+                <div className="max-h-[60vh] overflow-y-auto overscroll-contain">
+                  {feed.isLoading && <p className="px-4 py-6 text-center text-xs" style={{ color: 'rgba(255,255,255,0.4)' }}>Loading…</p>}
+                  {!feed.isLoading && notifications.length === 0 && (
+                    <p className="px-4 py-8 text-center text-xs" style={{ color: 'rgba(255,255,255,0.4)' }}>You&apos;re all caught up.</p>
+                  )}
+                  {notifications.map((n, i) => {
+                    const unread = !n.readAt
+                    return (
+                      <button key={n._id} type="button"
+                        onClick={() => {
+                          if (unread) markRead.mutate(n._id)
+                          setNotifOpen(false)
+                          if (n.link) router.push(n.link)
+                        }}
+                        className="flex w-full items-start gap-3 px-4 py-3 text-left transition-colors hover:bg-white/[0.04]"
+                        style={{ borderBottom: i < notifications.length - 1 ? '1px solid rgba(255,255,255,0.04)' : 'none' }}>
+                        <div className="mt-0.5 flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-lg"
+                          style={{ background: unread ? 'rgba(0,87,184,0.15)' : 'rgba(255,255,255,0.05)' }}>
+                          <Bell size={12} style={{ color: unread ? '#60A5FA' : 'rgba(255,255,255,0.3)' }} />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-xs font-semibold leading-relaxed" style={{ color: unread ? 'rgba(255,255,255,0.9)' : 'rgba(255,255,255,0.5)' }}>{n.title}</p>
+                          {n.body && <p className="truncate text-[11px]" style={{ color: 'rgba(255,255,255,0.45)' }}>{n.body}</p>}
+                          <p className="mt-0.5 text-[10px]" style={{ color: 'rgba(255,255,255,0.25)' }}>{ago(n.createdAt)}</p>
+                        </div>
+                        {unread && <div className="mt-1.5 h-1.5 w-1.5 flex-shrink-0 rounded-full" style={{ background: '#0057b8' }} />}
+                      </button>
+                    )
+                  })}
+                </div>
               </motion.div>
             )}
           </AnimatePresence>

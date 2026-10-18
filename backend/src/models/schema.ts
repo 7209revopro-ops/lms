@@ -3499,6 +3499,13 @@ export interface IChatConversation extends Document {
   instructorUnread:     number
   studentLastReadAt?:   Date
   instructorLastReadAt?: Date
+  /* When this side's current unread run began, and whether its "you have a
+     message" email is still owed — sent by jobs/chatEmail.job.ts once the run
+     is CHAT_EMAIL_DELAY_MINS old and still unread; reading clears it. */
+  studentUnreadSince?:    Date
+  instructorUnreadSince?: Date
+  studentEmailDue?:       boolean
+  instructorEmailDue?:    boolean
   createdAt:            Date
   updatedAt:            Date
 }
@@ -3515,9 +3522,16 @@ const ChatConversationSchema = new Schema<IChatConversation>(
     instructorUnread:     { type: Number, default: 0, min: 0 },
     studentLastReadAt:    { type: Date },
     instructorLastReadAt: { type: Date },
+    studentUnreadSince:    { type: Date },
+    instructorUnreadSince: { type: Date },
+    studentEmailDue:       { type: Boolean },
+    instructorEmailDue:    { type: Boolean },
   },
   baseSchemaOptions,
 )
+/* The chat-email job's two sweeps. Sparse: only conversations owing a mail carry the flag. */
+ChatConversationSchema.index({ instructorEmailDue: 1, instructorUnreadSince: 1 }, { sparse: true })
+ChatConversationSchema.index({ studentEmailDue: 1, studentUnreadSince: 1 }, { sparse: true })
 /* One conversation per pair — the first send's upsert relies on it. */
 ChatConversationSchema.index({ studentId: 1, instructorId: 1 }, { unique: true })
 ChatConversationSchema.index({ instructorId: 1, lastMessageAt: -1 })

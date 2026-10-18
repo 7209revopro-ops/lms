@@ -25,3 +25,17 @@ self.addEventListener("fetch", (event) => {
   if (event.request.mode !== "navigate") return;
   event.respondWith(fetch(event.request).catch(() => caches.match(OFFLINE)));
 });
+
+/* Tapping a "new message" alert (lib/desktopAlerts.ts): focus an open window
+   of this app and take it to the chat, or open one if none is open. */
+self.addEventListener("notificationclick", (event) => {
+  event.notification.close();
+  const url = new URL(event.notification.data?.url || "/", self.location.origin).href;
+  event.waitUntil(
+    self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((list) => {
+      const open = list.find((c) => c.url.startsWith(self.location.origin));
+      if (open) return open.focus().then((c) => (c && "navigate" in c ? c.navigate(url) : undefined));
+      return self.clients.openWindow(url);
+    }),
+  );
+});

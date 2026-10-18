@@ -46,7 +46,9 @@ function useConversationPages(door: 'staff' | 'oversight', params: { q?: string;
       ...(q ? { q } : {}), ...(params.instructorId ? { instructorId: params.instructorId } : {}), ...(pageParam ? { cursor: pageParam } : {}),
     }),
     getNextPageParam: last => last.nextCursor,
-    refetchInterval: door === 'staff' ? LIST_POLL : 30_000, refetchIntervalInBackground: false,
+    /* The mentor's inbox keeps polling in a background tab: that is when a
+       desktop alert (lib/desktopAlerts.ts) is the only way they would know. */
+    refetchInterval: door === 'staff' ? LIST_POLL : 30_000, refetchIntervalInBackground: door === 'staff',
     staleTime: door === 'staff' ? 5_000 : 10_000, retry: no4xxRetry,
   })
   return {

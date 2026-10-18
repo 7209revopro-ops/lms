@@ -290,3 +290,33 @@ select:focus, select:focus-visible {
 html:not([data-auth-ready]) .auth-shell [style*="opacity:0"] {
   animation: auth-reveal 0.3s ease-out 2s forwards;
 }
+
+/* ── Messages fills the screen (2026-10-18) ──────────
+   Phones / tablets: the page height minus the dashboard padding and the
+   bottom tab bar, so only the chat's own panes scroll; an open conversation
+   leaves the page entirely (.chat-thread-full) and takes the whole screen.
+   Laptops: pinned to the window under the header, edge to edge, keeping
+   clear of the right panel when it is open (--chat-right). */
+.chat-page {
+  height: calc(100dvh - var(--app-header-h) - 1.5rem - 96px - env(safe-area-inset-bottom, 0px));
+  min-height: 420px;
+}
+@media (min-width: 640px) {
+  .chat-page { height: calc(100dvh - var(--app-header-h) - 2rem - 104px - env(safe-area-inset-bottom, 0px)); }
+}
+@media (min-width: 1024px) {
+  .chat-page {
+    position: fixed; z-index: 10; height: auto; min-height: 0;
+    top: calc(var(--app-header-h) + 1.25rem); bottom: 1.25rem;
+    left: 2rem; right: var(--chat-right, 2rem);
+    transition: right 300ms ease-out;
+  }
+}
+@media (max-width: 767px) {
+  .chat-thread-full {
+    position: fixed; inset: 0; z-index: 60;
+    background: var(--color-bg-surface);
+    padding-top: env(safe-area-inset-top, 0px);
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+}

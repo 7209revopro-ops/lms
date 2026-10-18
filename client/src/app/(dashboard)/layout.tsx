@@ -11,7 +11,8 @@ import { MissedPopup } from '@/components/notifications/MissedPopup'
 import { RightSidebar, RightSidebarToggle } from '@/components/layout/RightSidebar'
 import { VerifyEmailBanner } from '@/components/auth/VerifyEmailBanner'
 import { EnrollmentStatusBanner } from '@/components/auth/EnrollmentStatusBanner'
-import { InstallCapture } from '@/components/pwa/InstallCapture'
+import { InstallPopup } from '@/components/pwa/InstallPopup'
+import { ChatAlerts } from '@/components/chat/ChatAlerts'
 import { AnnouncementPopup } from '@/components/announcements/AnnouncementPopup'
 import { Toaster } from '@/components/ui/Toaster'
 import { RootPortalHistoryBridge } from '@/components/RootPortalHistoryBridge'
@@ -55,7 +56,8 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       <MissedPopup />
       <RightSidebar />
       <RightSidebarToggle />
-      <InstallCapture />
+      <InstallPopup />
+      <ChatAlerts />
       <AnnouncementPopup />
       <Toaster />
     </div>

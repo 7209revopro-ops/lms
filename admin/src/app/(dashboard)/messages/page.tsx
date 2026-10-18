@@ -22,8 +22,10 @@ function Inbox() {
   const list = useStaffConversations(isInstructor, useSettled(search))
 
   return (
-    <div className="space-y-5">
-      <div>
+    /* Screen height minus the top bar (60px) and the page padding, so the
+       chat fills the window and only its own panes scroll. */
+    <div className="flex h-[calc(100dvh-60px-2rem)] flex-col gap-4 sm:h-[calc(100dvh-60px-3rem)]">
+      <div className="shrink-0">
         <div className="flex items-center gap-2.5">
           <div className="flex h-9 w-9 items-center justify-center rounded-xl"
             style={{ background: 'rgba(0,87,184,0.18)', border: '1px solid rgba(0,87,184,0.4)' }}>
@@ -38,8 +40,10 @@ function Inbox() {
       {me && !isInstructor ? (
         <p className="text-sm" style={{ color: 'rgba(255,255,255,0.5)' }}>Messages are for instructors. Super admins can read every chat under Chats.</p>
       ) : (
-        <ChatPanel mode="staff" list={list} search={search} onSearch={setSearch}
-          emptyText="No messages yet. When a student writes to you, the conversation appears here." />
+        <div className="min-h-0 flex-1">
+          <ChatPanel mode="staff" list={list} search={search} onSearch={setSearch}
+            emptyText="No messages yet. When a student writes to you, the conversation appears here." />
+        </div>
       )}
     </div>
   )
