@@ -121,6 +121,28 @@ try {
   check('one WhatsApp: "Join now" at its start', JSON.stringify(wa) === JSON.stringify(['class_has_started_v2']), JSON.stringify(wa))
   check('in-app reminders still come', (await M.NotificationModel.countDocuments({ userId: stu._id })) >= 3)
 
+  section('F2 · program WhatsApp switched off (PROGRAM_WHATSAPP, 2026-10-18)')
+  const F = await import('@/utils/featureFlags.ts')
+  const env = { pw: process.env.PROGRAM_WHATSAPP, ne: process.env.NODE_ENV }
+  process.env.PROGRAM_WHATSAPP = ''; process.env.NODE_ENV = 'production'
+  check('unset in production: off', F.programWhatsAppOn() === false)
+  process.env.PROGRAM_WHATSAPP = 'on'
+  check('PROGRAM_WHATSAPP=on: on', F.programWhatsAppOn() === true)
+  process.env.NODE_ENV = env.ne; process.env.PROGRAM_WHATSAPP = 'off'
+  check('off: the program "added" message is refused', F.whatsappTemplateOn('course_update_v1', 'program') === false)
+  check('off: other templates unaffected', F.whatsappTemplateOn('class_has_started_v2') === true)
+  await M.WhatsAppOutboxModel.deleteMany({}); await M.NotificationModel.deleteMany({})
+  await M.ClassBookingModel.updateMany({ liveClassId: first!._id }, { $set: { reminderAtTimeSent: false, reminder5MinSent: false } })
+  await M.LiveClassModel.updateOne({ _id: first!._id }, { $set: { scheduledStart: new Date(Date.now() + 5 * 60_000) } })
+  await R.runFiveMinReminders()
+  await M.LiveClassModel.updateOne({ _id: first!._id }, { $set: { scheduledStart: new Date(Date.now() - 60_000) } })
+  await R.runAtTimeReminders()
+  await settle()
+  check('off: no WhatsApp at its start', (await M.WhatsAppOutboxModel.countDocuments({})) === 0, JSON.stringify((await M.WhatsAppOutboxModel.find({}).lean() as any[]).map(r => r.templateName)))
+  check('off: the in-app notices still come', (await M.NotificationModel.countDocuments({ userId: stu._id })) >= 1)
+  check('off: the booking is marked, so nothing goes later', !!(await M.ClassBookingModel.findOne({ liveClassId: first!._id, userId: stu._id }).lean() as any)?.reminderAtTimeSent)
+  if (env.pw === undefined) delete process.env.PROGRAM_WHATSAPP; else process.env.PROGRAM_WHATSAPP = env.pw
+
   section('G · a change')
   await M.EmailOutboxModel.deleteMany({}); await M.WhatsAppOutboxModel.deleteMany({}); await M.NotificationModel.deleteMany({})
   const second = await M.LiveClassModel.findOne({ programId: prog.id, _id: { $ne: first!._id } })

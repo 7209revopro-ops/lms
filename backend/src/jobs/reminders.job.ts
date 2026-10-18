@@ -18,6 +18,7 @@
  */
 import cron from 'node-cron'
 import { logger } from '@/utils/logger.ts'
+import { programWhatsAppOn } from '@/utils/featureFlags.ts'
 import { ensureOrgSlugs, orgSlugFor } from '@/utils/orgSlugs.ts'
 import { academyClock, academyTime } from '@/utils/academyClock.ts'
 import { NotificationService } from '@/services/notification.service.ts'
@@ -412,6 +413,8 @@ export async function runTodaysClassesWhatsApp(academySlug: string, now = new Da
     const classes = await LiveClassModel.find({
       scheduledStart: { $gte: new Date(Math.max(start.getTime(), now.getTime())), $lt: end },
       status: { $ne: 'cancelled' },
+      /* A Program's classes stay off this WhatsApp while program WhatsApp is off. */
+      ...(programWhatsAppOn() ? {} : { programId: null }),
     }).select('_id title scheduledStart').lean<Array<{ _id: unknown; title: string; scheduledStart: Date }>>()
     if (!classes.length) return
     const classById = new Map(classes.map(c => [String(c._id), c]))
@@ -557,7 +560,9 @@ export async function runFiveMinReminders(): Promise<void> {
            join link (signs in, records the join, opens the meeting); v1 with
            the class page if no code could be made. In person there is nothing
            to join: the plain reminder (class_starting_soon_v5). */
-        b.liveClassId.isOnline === false
+        programClass && !programWhatsAppOn()
+          ? undefined
+          : b.liveClassId.isOnline === false
           ? () => sendClassStartingSoonWhatsApp(phone, b.liveClassId.title, '5')
           /* A Program's Google Meet class: its own Meet link in the message, to join on Google directly
              (class_update_v1 — the 5-minute template has no room for a link); the button still signs
@@ -631,7 +636,8 @@ export async function runAtTimeReminders(): Promise<void> {
         /* Online only: class_has_started, its Join button opening the same
            class page the in-app notice points at. An in-person class gets no
            WhatsApp at its start, as before — there is nothing to join. */
-        b.liveClassId.isOnline === false
+        /* A Program's class: no WhatsApp while program WhatsApp is off (featureFlags.programWhatsAppOn). */
+        b.liveClassId.isOnline === false || (isProgramClass(b.liveClassId) && !programWhatsAppOn())
           ? undefined
           : code
           ? () => sendClassHasStartedV2WhatsApp(

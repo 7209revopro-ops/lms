@@ -65,5 +65,22 @@ const WHATSAPP_ON: ReadonlySet<string> | 'all' = (() => {
 })()
 
 export function whatsappTemplateOn(name: string, use?: string): boolean {
+  /* A program's message goes only while program WhatsApp is on (below). */
+  if (use === 'program' && !programWhatsAppOn()) return false
   return WHATSAPP_ON === 'all' || WHATSAPP_ON.has(name) || (!!use && WHATSAPP_ON.has(`${name}@${use}`))
+}
+
+/* Program WhatsApp (the user, 2026-10-18 — "stop sending messages for programs").
+   OFF unless PROGRAM_WHATSAPP=on: a program's students get no WhatsApp at all —
+   not "class has started" (one class of BEGINNER PRACTICE SESSION was ~1,800 of
+   them), not the 5-minute one for an in-person class, not the "you've been
+   added" message (course_update_v1@program), and its classes leave the morning
+   "today's classes" list. The in-app notices still go, and so do the mentor's
+   own reminders. Ordinary live classes are untouched. Read per call, so a
+   restart with the variable changed is enough. Tests default to on, so the
+   suites keep asserting on their messages; programwhatsapp.suite.ts sets it. */
+export function programWhatsAppOn(): boolean {
+  const raw = (process.env['PROGRAM_WHATSAPP'] ?? '').trim().toLowerCase()
+  if (!raw) return process.env['NODE_ENV'] === 'test'
+  return raw === 'on' || raw === 'true' || raw === '1'
 }
