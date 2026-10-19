@@ -790,6 +790,94 @@ export async function sendLiveClassScheduled(
   })
 }
 
+/* ── A mentor's way into a class, in their emails (the user, 2026-10-18) ──────────────────────────────────
+   "Instead of the direct meeting link, show a Join now button that tracks their attendance — and the Meet link
+   too, below it." Join now opens /live-classes/<id>/join on the admin site, which records the mentor as joined
+   (what the no-show checks read) and then opens the room; the Meet link itself is shown under it. With the HRMS
+   meeting pod held for the class (services/classPod.service.ts), or that none is free. */
+export interface MentorClassPlace {
+  classId:   string
+  /** The room's own link (Google Meet), shown under Join now. */
+  meetLink?: string
+  pod?:      { state?: string; roomName?: string } | null
+}
+
+const adminBase = () => (process.env['ADMIN_URL'] ?? 'http://localhost:3001').replace(/\/+$/, '')
+/** The tracked door into a class: records the mentor as joined, then opens its room. */
+export const mentorJoinUrl = (classId: string) => `${adminBase()}/live-classes/${classId}/join`
+
+/** "Pod 6", or why there is none — undefined for a class with no pod to have. */
+export function podLine(pod?: MentorClassPlace['pod']): string | undefined {
+  if (!pod?.state) return undefined
+  if (pod.state === 'booked') return pod.roomName || 'Booked'
+  if (pod.state === 'no_room') return 'None free yet — you will be emailed when one is'
+  return 'Being booked — check the Pods page'
+}
+
+function podRowHtml(pod?: MentorClassPlace['pod']): string {
+  const line = podLine(pod)
+  if (!line) return ''
+  const booked = pod?.state === 'booked'
+  return `<tr><td style="padding:6px 0"><strong>Pod:</strong> <span style="${booked ? 'font-weight:700;color:#047857' : 'color:#B45309'}">${escapeHtml(line)}</span></td></tr>`
+}
+
+function mentorJoinHtml(place: MentorClassPlace, opts: { label?: string; color?: string; note?: string } = {}): string {
+  const join = mentorJoinUrl(place.classId)
+  const meet = place.meetLink ? sanitiseUrl(place.meetLink) : ''
+  return `
+    <p style="margin:24px 0 8px">
+      <a href="${escapeHtml(join)}" style="display:inline-block;background:${opts.color ?? 'linear-gradient(135deg,#0057b8,#2F6BFF)'};color:#fff;font-weight:700;padding:14px 28px;border-radius:12px;text-decoration:none;font-size:15px">
+        ${escapeHtml(opts.label ?? 'Join now →')}
+      </a>
+    </p>
+    <p style="margin:0 0 4px;font-size:12px;color:#6B7280">${escapeHtml(opts.note ?? 'Join now records your attendance and opens the class.')}</p>
+    ${meet ? `<p style="margin:12px 0 0;font-size:13px;color:#374151">Your joining link: <a href="${escapeHtml(meet)}" style="color:#0057b8;word-break:break-all">${escapeHtml(meet)}</a></p>` : ''}`
+}
+
+function mentorJoinText(place: MentorClassPlace): string {
+  const pod = podLine(place.pod)
+  return [
+    pod ? `Pod: ${pod}` : '',
+    `Join now (records your attendance): ${mentorJoinUrl(place.classId)}`,
+    place.meetLink ? `Your joining link: ${place.meetLink}` : '',
+  ].filter(Boolean).join('\n')
+}
+
+/** A class's pod was given, moved or lost after it was scheduled (classPod.service.ts) — its mentor is emailed. */
+export async function sendMentorPodChanged(
+  to: string,
+  name: string,
+  liveTitle: string,
+  startsAt: Date,
+  place: MentorClassPlace,
+  change: 'assigned' | 'changed' | 'lost',
+  academySlug?: string | null,
+): Promise<void> {
+  const pod = place.pod?.roomName
+  const subject = change === 'lost'
+    ? `No pod for your class now: ${liveTitle}`
+    : `Your pod for ${liveTitle}: ${pod}`
+  const when = academyClock(startsAt, academySlug).full
+  const lead = change === 'assigned'
+    ? `A meeting pod is now booked for your class: <strong>${escapeHtml(pod ?? '')}</strong>.`
+    : change === 'changed'
+      ? `Your class has moved to another meeting pod: <strong>${escapeHtml(pod ?? '')}</strong>.`
+      : 'Every meeting pod is booked at your class\'s time now, so it has none. You will be emailed if one becomes free.'
+  const html = wrap(subject, `
+    <h2 style="margin:0 0 16px;font-size:20px;font-weight:700;color:#0D0F1A">${change === 'lost' ? 'No pod for your class' : 'Your meeting pod'}</h2>
+    <p>Hi ${escapeHtml(name)},</p>
+    <p>${lead}</p>
+    <table cellpadding="0" cellspacing="0" style="margin:18px 0;background:#F4F5F8;border-radius:12px;padding:16px;width:100%">
+      <tr><td style="padding:6px 0"><strong>Session:</strong> ${escapeHtml(liveTitle)}</td></tr>
+      <tr><td style="padding:6px 0"><strong>When:</strong> ${escapeHtml(when)}</td></tr>
+      ${podRowHtml(place.pod)}
+    </table>
+    ${mentorJoinHtml(place, { note: 'Join now works from 15 minutes before the class, and records your attendance.' })}
+  `)
+  const text = `Hi ${name},\n\n${lead.replace(/<[^>]+>/g, '')}\n\n"${liveTitle}" — ${when}\n${mentorJoinText(place)}`
+  await sender.send({ to, subject, html, text })
+}
+
 export async function sendInstructorClassScheduled(
   to: string,
   name: string,
@@ -800,6 +888,8 @@ export async function sendInstructorClassScheduled(
   /* The academy whose wall clock this reader thinks in. Absent falls back to
      Dubai, which is what every one of these printed before — unlabelled. */
   academySlug?: string | null,
+  /* The class, for Join now, and its pod (2026-10-18). Absent: the old email, the Meet link only. */
+  place?: MentorClassPlace,
 ): Promise<void> {
   const subject = `You've been scheduled: ${liveTitle}`
   const when = academyClock(startsAt, academySlug).full
@@ -810,20 +900,22 @@ export async function sendInstructorClassScheduled(
     <table cellpadding="0" cellspacing="0" style="margin:18px 0;background:#F4F5F8;border-radius:12px;padding:16px;width:100%">
       <tr><td style="padding:6px 0"><strong>Session:</strong> ${escapeHtml(liveTitle)}</td></tr>
       <tr><td style="padding:6px 0"><strong>When:</strong> ${escapeHtml(when)}</td></tr>
-      <tr><td style="padding:6px 0"><strong>Meet link:</strong> <a href="${escapeHtml(sanitiseUrl(meetLink))}" style="color:#0057b8">${escapeHtml(sanitiseUrl(meetLink))}</a></td></tr>
+      ${place ? podRowHtml(place.pod) : `<tr><td style="padding:6px 0"><strong>Meet link:</strong> <a href="${escapeHtml(sanitiseUrl(meetLink))}" style="color:#0057b8">${escapeHtml(sanitiseUrl(meetLink))}</a></td></tr>`}
     </table>
-    <p style="margin:24px 0">
+    ${place
+      ? mentorJoinHtml({ ...place, meetLink }, { note: 'Join now works from 15 minutes before the class, and records your attendance.' })
+      : `<p style="margin:24px 0">
       <a href="${escapeHtml(sanitiseUrl(meetLink))}" style="display:inline-block;background:linear-gradient(135deg,#0057b8,#2F6BFF);color:#fff;font-weight:600;padding:12px 24px;border-radius:12px;text-decoration:none">
         Open Google Meet
       </a>
-    </p>
+    </p>`}
     <p style="font-size:12px;color:#9CA3AF">You will receive another reminder 15 minutes before the class starts.</p>
   `)
   await sender.send({
     to,
     subject,
     html,
-    text: `You've been scheduled to teach "${liveTitle}" (${courseTitle}) on ${when}.\nGoogle Meet: ${meetLink}`,
+    text: `You've been scheduled to teach "${liveTitle}" (${courseTitle}) on ${when}.\n${place ? mentorJoinText({ ...place, meetLink }) : `Google Meet: ${meetLink}`}`,
   })
 }
 
@@ -841,6 +933,7 @@ export async function sendInstructorBackupLink(
   /* The address made co-host of a generated Meet, when there is one. */
   cohost?:      string,
   academySlug?: string | null,
+  place?:       MentorClassPlace,
 ): Promise<void> {
   const subject = `New link for your class: ${liveTitle}`
   const when = academyClock(startsAt, academySlug).full
@@ -850,12 +943,12 @@ export async function sendInstructorBackupLink(
     <h2 style="margin:0 0 16px;font-size:20px;font-weight:700;color:#0D0F1A">Your class has a new link</h2>
     <p>Hi ${escapeHtml(name)},</p>
     <p><strong>${escapeHtml(liveTitle)}</strong> (${escapeHtml(when)}) now runs in a new room. Use this link to join — the old one no longer applies.</p>
-    <p style="margin:24px 0">
+    ${place ? `<table cellpadding="0" cellspacing="0" style="margin:12px 0">${podRowHtml(place.pod)}</table>${mentorJoinHtml({ ...place, meetLink: safe })}` : `<p style="margin:24px 0">
       <a href="${escapeHtml(safe)}" style="display:inline-block;background:linear-gradient(135deg,#0057b8,#2F6BFF);color:#fff;font-weight:600;padding:12px 24px;border-radius:12px;text-decoration:none">
         ${isMeet ? 'Open Google Meet' : 'Open the class link'}
       </a>
     </p>
-    <p style="font-size:13px;color:#374151;word-break:break-all">${escapeHtml(safe)}</p>
+    <p style="font-size:13px;color:#374151;word-break:break-all">${escapeHtml(safe)}</p>`}
     ${cohost ? `<p style="font-size:13px;color:#374151">You are co-host — join with <strong>${escapeHtml(cohost)}</strong> so Google gives you the host controls.</p>` : ''}
     <p style="font-size:12px;color:#9CA3AF">Students who press Join in the LMS now go to this link.</p>
   `)
@@ -863,7 +956,7 @@ export async function sendInstructorBackupLink(
     to,
     subject,
     html,
-    text: `"${liveTitle}" (${when}) now runs at a new link: ${safe}${cohost ? `\nYou are co-host — join with ${cohost}.` : ''}\nStudents who press Join in the LMS now go to this link.`,
+    text: `"${liveTitle}" (${when}) now runs at a new link: ${safe}${place ? `\n${mentorJoinText({ ...place, meetLink: safe })}` : ''}${cohost ? `\nYou are co-host — join with ${cohost}.` : ''}\nStudents who press Join in the LMS now go to this link.`,
   })
 }
 
@@ -874,25 +967,26 @@ export async function sendInstructor15MinReminder(
   startsAt: Date,
   meetLink: string,
   academySlug?: string | null,
+  place?: MentorClassPlace,
 ): Promise<void> {
   const subject = `⏰ Starting in 15 min: ${liveTitle}`
   const when = academyTime(startsAt, academySlug)
   const html = wrap(subject, `
     <h2 style="margin:0 0 16px;font-size:20px;font-weight:700;color:#0D0F1A">Your class starts in 15 minutes</h2>
     <p>Hi ${escapeHtml(name)},</p>
-    <p><strong>${escapeHtml(liveTitle)}</strong> starts at <strong>${escapeHtml(when)}</strong>. Open your Google Meet link now so you're ready when students join.</p>
-    <p style="margin:24px 0">
+    <p><strong>${escapeHtml(liveTitle)}</strong> starts at <strong>${escapeHtml(when)}</strong>. Join now so you're ready when students join.</p>
+    ${place ? `<table cellpadding="0" cellspacing="0" style="margin:12px 0">${podRowHtml(place.pod)}</table>${mentorJoinHtml({ ...place, meetLink })}` : `<p style="margin:24px 0">
       <a href="${escapeHtml(sanitiseUrl(meetLink))}" style="display:inline-block;background:linear-gradient(135deg,#0057b8,#2F6BFF);color:#fff;font-weight:600;padding:14px 28px;border-radius:12px;text-decoration:none;font-size:15px">
         Join Google Meet now →
       </a>
     </p>
-    <p style="font-size:12px;color:#6B7280">Link: <a href="${escapeHtml(sanitiseUrl(meetLink))}" style="color:#0057b8">${escapeHtml(sanitiseUrl(meetLink))}</a></p>
+    <p style="font-size:12px;color:#6B7280">Link: <a href="${escapeHtml(sanitiseUrl(meetLink))}" style="color:#0057b8">${escapeHtml(sanitiseUrl(meetLink))}</a></p>`}
   `)
   await sender.send({ expiresAt: inHours(2), 
     to,
     subject,
     html,
-    text: `Your class "${liveTitle}" starts at ${when} — join now: ${meetLink}`,
+    text: `Your class "${liveTitle}" starts at ${when}.\n${place ? mentorJoinText({ ...place, meetLink }) : `Join now: ${meetLink}`}`,
   })
 }
 
@@ -912,21 +1006,23 @@ export async function sendMentorJoinReminder(
   name: string,
   liveTitle: string,
   joinUrl: string,
+  /* An external class (2026-10-18): Join now goes through the LMS (records attendance), its Meet link under it. */
+  place?: MentorClassPlace,
 ): Promise<void> {
   const subject = `⏰ Your class "${liveTitle}" has started — join now`
   const html = wrap(subject, `
     <h2 style="margin:0 0 16px;font-size:20px;font-weight:700;color:#0D0F1A">Your class has started</h2>
     <p>Hi ${escapeHtml(name)},</p>
     <p><strong>${escapeHtml(liveTitle)}</strong> was scheduled to start now, and we haven't seen you join yet. Students may already be waiting.</p>
-    <p style="margin:24px 0">
+    ${place ? `<table cellpadding="0" cellspacing="0" style="margin:12px 0">${podRowHtml(place.pod)}</table>${mentorJoinHtml(place, { color: 'linear-gradient(135deg,#EF4444,#DC2626)' })}` : `<p style="margin:24px 0">
       <a href="${escapeHtml(sanitiseUrl(joinUrl))}" style="display:inline-block;background:linear-gradient(135deg,#EF4444,#DC2626);color:#fff;font-weight:700;padding:14px 28px;border-radius:12px;text-decoration:none;font-size:15px">
         Join now →
       </a>
-    </p>
+    </p>`}
   `)
   await sender.send({ expiresAt: inHours(2), 
     to, subject, html,
-    text: `Hi ${name},\n\n"${liveTitle}" was scheduled to start now, and we haven't seen you join yet. Students may already be waiting.\n\nJoin now: ${joinUrl}`,
+    text: `Hi ${name},\n\n"${liveTitle}" was scheduled to start now, and we haven't seen you join yet. Students may already be waiting.\n\n${place ? mentorJoinText(place) : `Join now: ${joinUrl}`}`,
   })
 }
 
@@ -1089,6 +1185,10 @@ export interface ScheduleMailItem {
   /** Where to join an online item (Meet link, or the LMS studio). */
   joinUrl?:      string
   joinLabel?:    string
+  /** A class's tracked Join now (records attendance, then opens the room) — shown first, joinUrl under it (2026-10-18). */
+  trackedJoinUrl?: string
+  /** The class's HRMS meeting pod line ("Pod 6", or none free yet). */
+  pod?:          string
   /** In-person only. */
   location?:     string
   room?:         string
@@ -1163,7 +1263,10 @@ export function renderInstructorDailySchedule(
     const sub = [it.subtitle, kindLabel].filter(Boolean).map(s => escapeHtml(String(s))).join(' · ')
 
     let where: string
-    if (it.online) {
+    if (it.online && it.trackedJoinUrl) {
+      where = `🎥 Online — <a href="${escapeHtml(sanitiseUrl(it.trackedJoinUrl))}" style="display:inline-block;background:#0057b8;color:#fff;font-weight:700;padding:6px 14px;border-radius:8px;text-decoration:none">Join now</a>`
+        + (it.joinUrl ? `<br><span style="font-size:12px;color:#6B7280">Your joining link: <a href="${escapeHtml(sanitiseUrl(it.joinUrl))}" style="color:#0057b8;word-break:break-all">${escapeHtml(sanitiseUrl(it.joinUrl))}</a></span>` : '')
+    } else if (it.online) {
       where = it.joinUrl
         ? `🎥 Online — <a href="${escapeHtml(sanitiseUrl(it.joinUrl))}" style="color:#0057b8;font-weight:600">${escapeHtml(it.joinLabel ?? 'Join link')}</a>`
         : '🎥 Online — link not set yet'
@@ -1182,6 +1285,7 @@ export function renderInstructorDailySchedule(
           <p style="margin:0;font-size:13px;font-weight:700;color:#0057b8">${escapeHtml(range)}</p>
           <p style="margin:4px 0 0;font-size:15px;font-weight:700;color:#0D0F1A">${escapeHtml(it.title)}</p>
           <p style="margin:2px 0 0;font-size:13px;color:#6B7280">${sub}</p>
+          ${it.pod ? `<p style="margin:8px 0 0;font-size:13px;color:#374151"><strong>Pod:</strong> ${escapeHtml(it.pod)}</p>` : ''}
           <p style="margin:8px 0 0;font-size:13px;color:#374151">${where}</p>
           ${extra ? `<p style="margin:4px 0 0;font-size:12px;color:#6B7280">${extra}</p>` : ''}
         </td></tr>
@@ -1200,7 +1304,7 @@ export function renderInstructorDailySchedule(
     '',
     ...items.map((it) => {
       const where = it.online
-        ? `Online${it.joinUrl ? ` — ${it.joinUrl}` : ''}`
+        ? `Online${it.trackedJoinUrl ? ` — Join now: ${it.trackedJoinUrl}` : ''}${it.joinUrl ? `${it.trackedJoinUrl ? '\n  Your joining link: ' : ' — '}${it.joinUrl}` : ''}${it.pod ? `\n  Pod: ${it.pod}` : ''}`
         : `In person${it.location || it.room ? ` — ${[it.location, it.room ? `Room ${it.room}` : ''].filter(Boolean).join(', ')}` : ''}`
       return `• ${scheduleRange(it.start, it.durationMins, academySlug)} — ${it.title}${it.subtitle ? ` (${it.subtitle})` : ''}\n  ${where}`
     }),

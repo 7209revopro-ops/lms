@@ -112,9 +112,12 @@ async function dubaiOrgId(): Promise<string> {
 
 type ClassRow = {
   _id: Types.ObjectId; title?: string; scheduledStart: Date; durationMins: number; status?: string; isOnline?: boolean
-  instructorId?: Types.ObjectId | null; pod?: { state?: string; bookingId?: string; roomId?: string; for?: string; at?: Date; alertedFor?: string } | null
+  instructorId?: Types.ObjectId | null
+  pod?: { state?: string; bookingId?: string; roomId?: string; roomName?: string; for?: string; at?: Date; alertedFor?: string } | null
+  organizationId?: unknown; meetSpace?: { name: string; host: string; cohost?: string; calendarEventId?: string } | null
+  meetingUrl?: string; type?: string; createdAt?: Date
 }
-type Mentor = { _id: Types.ObjectId; name?: string; email?: string; organizationId?: Types.ObjectId | null }
+type Mentor = { _id: Types.ObjectId; name?: string; email?: string; organizationId?: Types.ObjectId | null; role?: string; emailPrefs?: unknown }
 
 /** Why a class gets no pod, or null when it gets one. */
 export function whyNoPod(lc: ClassRow, mentor: Mentor | null | undefined, dubai: string, now = new Date()): string | null {
@@ -137,15 +140,21 @@ export function podWindow(lc: Pick<ClassRow, 'scheduledStart' | 'durationMins'>)
 const notifier = new NotificationService()
 const when = (d: Date) => d.toLocaleString('en-GB', { timeZone: 'Asia/Dubai', weekday: 'short', day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })
 
-/** Every pod taken: the mentor and the Dubai academy's admins are told — once for this stretch. */
-async function tellNoPod(lc: ClassRow, mentor: Mentor, key: string, dubai: string): Promise<void> {
+/**
+ * Every pod taken: the Dubai academy's admins are told in the app, and the mentor by email (the user, 2026-10-18:
+ * "only email for the mentor") — once for this stretch. Not a class made a moment ago: its "You've been scheduled"
+ * email already says no pod is free.
+ */
+async function tellNoPod(lc: ClassRow, mentor: Mentor, key: string, dubai: string, now: Date): Promise<void> {
   const claimed = await LiveClassModel.updateOne({ _id: lc._id, 'pod.alertedFor': { $ne: key } }, { $set: { 'pod.alertedFor': key } })
   if (!claimed.modifiedCount) return
+  const fresh = lc.createdAt && now.getTime() - new Date(lc.createdAt).getTime() < 5 * 60_000
+  if (!fresh) await emailMentor(lc, mentor, 'lost', null, now)
   const admins = await UserModel.find({
     isActive: { $ne: false },
     $or: [{ role: 'super_admin' }, { role: 'admin', organizationId: new Types.ObjectId(dubai) }],
   }).select('_id').lean() as Array<{ _id: unknown }>
-  const to = [...new Set([String(mentor._id), ...admins.map((a) => String(a._id))])]
+  const to = [...new Set(admins.map((a) => String(a._id)))]
   const title = `No pod free for "${lc.title ?? 'a class'}"`
   const body = `${mentor.name ?? 'The mentor'}'s online class on ${when(lc.scheduledStart)} (Dubai) has no meeting pod — every pod is booked then. Move it, or free a pod in the HRMS.`
   for (const u of to) {
@@ -153,17 +162,58 @@ async function tellNoPod(lc: ClassRow, mentor: Mentor, key: string, dubai: strin
   }
 }
 
+/** The mentor told by email that a class's pod was given, moved or lost — only for a class in the next 7 days. */
+async function emailMentor(lc: ClassRow, mentor: Mentor, change: 'assigned' | 'changed' | 'lost', roomName: string | null, now: Date): Promise<void> {
+  if (!mentor.email) return
+  const until = lc.scheduledStart.getTime() - now.getTime()
+  if (until < 0 || until > 7 * 864e5) return
+  try {
+    const { wantsStaffEmail } = await import('@/utils/emailPrefs.ts')
+    if (!wantsStaffEmail(mentor as never, 'classScheduled')) return
+    const { sendMentorPodChanged } = await import('@/services/email.service.ts')
+    const { ensureOrgSlugs, orgSlugFor } = await import('@/utils/orgSlugs.ts')
+    await ensureOrgSlugs().catch(() => undefined)
+    await sendMentorPodChanged(mentor.email, mentor.name ?? 'Mentor', lc.title ?? 'Class', lc.scheduledStart, {
+      classId: String(lc._id), meetLink: lc.type !== 'internal' ? lc.meetingUrl : undefined,
+      pod: change === 'lost' ? { state: 'no_room' } : { state: 'booked', roomName: roomName ?? '' },
+    }, change, orgSlugFor(lc.organizationId))
+  } catch (err) {
+    logger.warn({ err, classId: String(lc._id) }, '[pods] could not email the mentor about a pod change')
+  }
+}
+
+/** The mentor's calendar entry says where: the pod, or nothing once there is none. Quietly; never throws. */
+function calendarWhere(lc: ClassRow, roomName: string): void {
+  if (!lc.meetSpace?.calendarEventId) return
+  void import('@/services/googleMeet.service.ts')
+    .then(({ syncMeetSpace }) => syncMeetSpace(lc.meetSpace as never, { location: roomName }))
+    .catch((err) => logger.warn({ err, classId: String(lc._id) }, '[pods] could not put the pod on the calendar entry'))
+}
+
 /**
  * One class brought into line with the HRMS: a pod held for its stretch, moved, or let go. Never throws — what
  * went wrong is kept on the class and tried again by the sweep.
  */
-export async function syncClassPod(classId: string, now = new Date(), opts: { held?: boolean } = {}): Promise<'booked' | 'no_room' | 'released' | 'none' | 'error' | 'off'> {
+/* One at a time per class in this process: a save's own request and the "You've been scheduled" email both ask
+   right after a class is made, and two at once could each take a pod. */
+const inFlight = new Map<string, Promise<SyncOutcome>>()
+type SyncOutcome = 'booked' | 'no_room' | 'released' | 'none' | 'error' | 'off'
+
+export function syncClassPod(classId: string, now = new Date(), opts: { held?: boolean } = {}): Promise<SyncOutcome> {
+  const running = inFlight.get(classId)
+  if (running) return running
+  const p = syncClassPodOnce(classId, now, opts).finally(() => inFlight.delete(classId))
+  inFlight.set(classId, p)
+  return p
+}
+
+async function syncClassPodOnce(classId: string, now: Date, opts: { held?: boolean }): Promise<SyncOutcome> {
   if (!podsConfigured() || !Types.ObjectId.isValid(classId)) return 'off'
   const lc = await LiveClassModel.findById(classId)
-    .select('title scheduledStart durationMins status isOnline instructorId pod').lean() as ClassRow | null
+    .select('title scheduledStart durationMins status isOnline instructorId pod organizationId meetSpace meetingUrl type createdAt').lean() as ClassRow | null
   if (!lc) { await releaseClassPod(classId); return 'released' }
   const mentor = lc.instructorId
-    ? await UserModel.findById(lc.instructorId).select('name email organizationId').lean() as Mentor | null
+    ? await UserModel.findById(lc.instructorId).select('name email organizationId role emailPrefs').lean() as Mentor | null
     : null
   const dubai = await dubaiOrgId()
   try {
@@ -172,6 +222,7 @@ export async function syncClassPod(classId: string, now = new Date(), opts: { he
       if (lc.pod || opts.held) {
         await hrms('DELETE', `/meetings/class-pods/${lc._id}`)
         await LiveClassModel.updateOne({ _id: lc._id }, { $unset: { pod: '' } })
+        if (lc.pod?.roomName && lc.status !== 'cancelled') calendarWhere(lc, '')
         return 'released'
       }
       return 'none'
@@ -192,12 +243,20 @@ export async function syncClassPod(classId: string, now = new Date(), opts: { he
       await LiveClassModel.updateOne({ _id: lc._id }, { $set: {
         pod: { state: 'booked', roomId: r.booking.roomId, roomName: r.booking.roomName, bookingId: r.booking.id, for: w.key, at: now },
       } })
+      // Given or moved after it was scheduled: the mentor is emailed; their calendar entry says the pod either way.
+      const was = lc.pod
+      if (was?.roomName !== r.booking.roomName || was?.state !== 'booked') {
+        if (was?.state === 'booked' && was.roomName && was.roomName !== r.booking.roomName) await emailMentor(lc, mentor!, 'changed', r.booking.roomName, now)
+        else if (was?.state === 'no_room' || was?.state === 'error') await emailMentor(lc, mentor!, 'assigned', r.booking.roomName, now)
+        calendarWhere(lc, r.booking.roomName)
+      }
       return 'booked'
     }
     await LiveClassModel.updateOne({ _id: lc._id }, { $set: {
       'pod.state': 'no_room', 'pod.for': w.key, 'pod.at': now, 'pod.note': 'Every pod is booked at this time',
     }, $unset: { 'pod.roomId': '', 'pod.roomName': '', 'pod.bookingId': '' } })
-    await tellNoPod(lc, mentor!, w.key, dubai)
+    if (lc.pod?.roomName) calendarWhere(lc, '')
+    await tellNoPod(lc, mentor!, w.key, dubai, now)
     return 'no_room'
   } catch (err) {
     logger.warn({ err, classId }, '[pods] could not reach the HRMS for a class pod')

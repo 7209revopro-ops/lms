@@ -31,7 +31,7 @@ import { ensureOrgSlugs, orgSlugFor } from '@/utils/orgSlugs.ts'
 import { zoneForAcademy } from '@/utils/academyClock.ts'
 import { zoneDateKey, zoneHourMinute, addDaysToDateKey, zoneDayBounds } from '@/utils/zoneDay.ts'
 import { wantsStaffEmail, type EmailPrefs } from '@/utils/emailPrefs.ts'
-import { sendInstructorDailySchedule, type ScheduleMailItem } from '@/services/email.service.ts'
+import { sendInstructorDailySchedule, mentorJoinUrl, podLine, type ScheduleMailItem } from '@/services/email.service.ts'
 
 export const SCHEDULE_MAIL_HOUR = (() => {
   const raw = Number(process.env['INSTRUCTOR_SCHEDULE_HOUR'])
@@ -65,7 +65,7 @@ export async function buildScheduleFor(
       status: { $nin: OFF_SCHEDULE },
       scheduledStart: { $gte: start, $lt: end },
     })
-      .select('title scheduledStart durationMins type isOnline meetingUrl googleMeetCode location room bookedCount sessionCapacity courseId')
+      .select('title scheduledStart durationMins type isOnline meetingUrl googleMeetCode location room bookedCount sessionCapacity courseId pod')
       .populate<{ courseId: { title?: string } | null }>('courseId', 'title')
       .lean(),
     MentorMeetingModel.find({
@@ -102,6 +102,9 @@ export async function buildScheduleFor(
       online,
       joinUrl,
       joinLabel,
+      /* An external online class: Join now through the LMS first (records attendance), the link under it; its pod. */
+      trackedJoinUrl: online && c.type !== 'internal' && c.meetingUrl ? mentorJoinUrl(String(c._id)) : undefined,
+      pod: online ? podLine((c as { pod?: { state?: string; roomName?: string } }).pod) : undefined,
       location: online ? undefined : c.location,
       room: online ? undefined : c.room,
       seats: { booked: c.bookedCount ?? 0, capacity: c.sessionCapacity ?? 0 },

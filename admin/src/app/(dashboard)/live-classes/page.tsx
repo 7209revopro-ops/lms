@@ -1809,6 +1809,8 @@ function GridCalendarView({ items, onEditClick }: { items: LiveClass[]; onEditCl
                         <span className="truncate">{(live as any).location}{(live as any).room ? ` · ${(live as any).room}` : ''}</span>
                       </p>
                     )}
+                    {/* Its HRMS meeting pod (2026-10-18). */}
+                    {live.pod && <p className="text-xs"><PodBadge pod={live.pod} /></p>}
 
                     {/* Date · time · duration */}
                     <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs" style={{ color: 'rgba(255,255,255,0.40)' }}>

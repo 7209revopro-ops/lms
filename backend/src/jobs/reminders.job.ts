@@ -707,6 +707,8 @@ export async function runInstructor15MinReminders(): Promise<void> {
           new Date(cls.scheduledStart),
           cls.meetingUrl,
           orgSlugFor((cls as { organizationId?: unknown }).organizationId),
+          /* Join now through the LMS (records attendance), its pod (2026-10-18). */
+          { classId: String(cls._id), pod: (cls as { pod?: { state?: string; roomName?: string } }).pod ?? null },
         )
         await LiveClassModel.findByIdAndUpdate(cls._id, { reminderInstructor15MinSent: true })
         logger.info({ classId: cls._id, instructor: instructor.email }, '[Reminders] Instructor 15-min reminder sent')
@@ -840,7 +842,11 @@ export async function runMentorJoinReminder(): Promise<void> {
           link:  `/live-classes/${liveClassId}`,
         })
         if (wantsStaffEmail(instructor, 'classReminder')) {
-          await sendMentorJoinReminder(instructor.email, instructor.name ?? 'Instructor', cls.title, joinUrl)
+          await sendMentorJoinReminder(instructor.email, instructor.name ?? 'Instructor', cls.title, joinUrl,
+            /* External: Join now through the LMS (records attendance), the Meet link under it, its pod (2026-10-18). */
+            cls.type === 'external'
+              ? { classId: liveClassId, meetLink: cls.meetingUrl, pod: (cls as { pod?: { state?: string; roomName?: string } }).pod ?? null }
+              : undefined)
         }
         await LiveClassModel.findByIdAndUpdate(cls._id, { mentorReminderSent: true })
         logger.info({ classId: cls._id, instructor: instructor.email }, '[Reminders] Mentor join reminder sent')

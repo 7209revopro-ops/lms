@@ -111,7 +111,9 @@ await new Promise<void>((resolve) => hrms.listen(0, '127.0.0.1', resolve))
 const HRMS_URL = `http://127.0.0.1:${(hrms.address() as { port: number }).port}`
 
 const mongoose = (await import('mongoose')).default
-const { UserModel, LiveClassModel, OrganizationModel, NotificationModel } = await import('@/models/schema.ts') as any
+const { UserModel, LiveClassModel, OrganizationModel, NotificationModel, EmailOutboxModel } = await import('@/models/schema.ts') as any
+process.env.ADMIN_URL = 'https://admin.example.test'
+const mails = (subject: RegExp) => EmailOutboxModel.find({ subject }).lean()
 const pods = await import('@/services/classPod.service.ts')
 
 await mongoose.connect(process.env.DATABASE_URL!)
@@ -197,9 +199,11 @@ const eighth = await cls('One too many', mo, 5.5)
 check('an eighth at the same time: no pod free', await pods.syncClassPod(eighth, NOW) === 'no_room' && (await podOf(eighth))?.state === 'no_room')
 const told = await NotificationModel.find({ title: /No pod free for "One too many"/ }).lean()
 const whom = told.map((n: any) => String(n.userId)).sort()
-check('the mentor and the Dubai admin told — not Bangalore\'s admin', whom.includes(String(mo)) && whom.includes(String(admin)) && !whom.includes(String(blrAdmin)), j(whom))
+check('the Dubai admin told in the app — not Bangalore\'s admin, not the mentor', whom.includes(String(admin)) && !whom.includes(String(blrAdmin)) && !whom.includes(String(mo)), j(whom))
+const lostMail = await mails(/No pod for your class now: One too many/)
+check('the mentor told by email', lostMail.length === 1 && lostMail[0].to === 'mo@deltainstitutions.com' && /Every meeting pod is booked/.test(lostMail[0].html), j(lostMail.map((m: any) => m.to)))
 await pods.syncClassPod(eighth, NOW)
-check('…once, not every time it is tried', (await NotificationModel.countDocuments({ title: /No pod free for "One too many"/ })) === told.length)
+check('…once, not every time it is tried', (await NotificationModel.countDocuments({ title: /No pod free for "One too many"/ })) === told.length && (await mails(/No pod for your class now: One too many/)).length === 1)
 const quiet = await pods.runPodSweep(NOW)
 check('the sweep leaves it until it is due a retry', (await podOf(eighth))?.state === 'no_room' && quiet.synced === 0, j(quiet))
 const freed = heldBy(full[0]!)[0]!
@@ -207,6 +211,36 @@ freed.status = 'cancelled'                             // somebody freed a pod o
 await LiveClassModel.updateOne({ _id: full[0] }, { $set: { status: 'cancelled' } })
 await pods.runPodSweep(new Date(NOW.getTime() + 11 * 60_000))
 check('a pod freed, ten minutes on: the waiting class gets it', (await podOf(eighth))?.state === 'booked' && heldBy(eighth)[0]?.roomId === freed.roomId, j(await podOf(eighth)))
+const gotMail = await mails(/Your pod for One too many/)
+check('…and its mentor is emailed the pod, with Join now and the joining link', gotMail.length === 1 && gotMail[0].html.includes(`https://admin.example.test/live-classes/${eighth}/join`) && gotMail[0].html.includes('Join now'), j(gotMail.map((m: any) => m.subject)))
+
+step('Moved to another pod; far-off classes; the emails');
+const p1 = await cls('Moving class', mo, 30, { meetingUrl: 'https://meet.google.com/abc-defg-hij', type: 'external' })
+await pods.syncClassPod(p1, NOW)
+check('booked Pod 4 (no email: its first pod)', (await podOf(p1))?.roomName === 'Pod 4' && (await mails(/Moving class/)).length === 0)
+bookings.push({ id: 'staff1', roomId: 'room0', start: hrs(31.5), end: hrs(33), title: 'Staff', holder: 'HR', classRef: null, status: 'booked' })
+await LiveClassModel.updateOne({ _id: p1 }, { $set: { scheduledStart: hrs(32) } })
+await pods.syncClassPod(p1, NOW)
+const moved2 = await mails(/Your pod for Moving class: Pod 6/)
+check('moved to a time Pod 4 is taken: Pod 6, and the mentor emailed it', (await podOf(p1))?.roomName === 'Pod 6' && moved2.length === 1, j(await podOf(p1)))
+check('…Join now first (records attendance), the Meet link under it', moved2[0].html.indexOf('Join now') < moved2[0].html.indexOf('Your joining link') && moved2[0].html.includes('https://meet.google.com/abc-defg-hij'))
+const far = await cls('Far off', mo, 24 * 20)
+await pods.syncClassPod(far, NOW)
+bookings.push({ id: 'staff2', roomId: 'room0', start: hrs(24 * 20 - 1), end: hrs(24 * 20 + 2), title: 'Staff', holder: 'HR', classRef: null, status: 'booked' })
+heldBy(far)[0]!.status = 'cancelled'
+await LiveClassModel.updateOne({ _id: far }, { $set: { scheduledStart: hrs(24 * 20 + 0.5) } })
+await pods.syncClassPod(far, NOW)
+check('a class 20 days off changes pod: no email (only the next 7 days)', (await mails(/Far off/)).length === 0 && (await podOf(far))?.state === 'booked')
+const emails = await import('@/services/email.service.ts')
+await emails.sendInstructorClassScheduled('mo@deltainstitutions.com', 'Mo', 'Course', 'Scheduled one', hrs(48), 'https://meet.google.com/xyz-abcd-efg', 'dubai', { classId: 'c123', pod: { state: 'booked', roomName: 'Pod 9' } })
+const sched = (await mails(/You've been scheduled: Scheduled one/))[0]
+check('"You\'ve been scheduled": the pod, Join now (tracked) and the Meet link under it', !!sched && sched.html.includes('Pod 9') && sched.html.includes('https://admin.example.test/live-classes/c123/join')
+  && sched.html.indexOf('Join now') < sched.html.indexOf('Your joining link') && sched.text.includes('Pod: Pod 9'), sched?.text)
+await emails.sendInstructor15MinReminder('mo@deltainstitutions.com', 'Mo', 'Soon one', hrs(0.25), 'https://meet.google.com/aaa-bbbb-ccc', 'dubai', { classId: 'c456', pod: { state: 'no_room' } })
+const soon = (await mails(/Starting in 15 min: Soon one/))[0]
+check('the 15-minute reminder: no pod free said, Join now and the link', !!soon && /None free yet/.test(soon.html) && soon.html.includes('/live-classes/c456/join') && soon.html.includes('https://meet.google.com/aaa-bbbb-ccc'))
+const daily = emails.renderInstructorDailySchedule('Mo', hrs(24), [{ kind: 'class', title: 'Tomorrow class', start: hrs(26), durationMins: 60, online: true, joinUrl: 'https://meet.google.com/ttt-uuuu-vvv', trackedJoinUrl: 'https://admin.example.test/live-classes/c789/join', pod: 'Pod 7' }], 'dubai')
+check('tomorrow\'s schedule: each class\'s pod, Join now and the link under it', daily.html.includes('Pod 7') && daily.html.indexOf('c789/join') < daily.html.indexOf('ttt-uuuu-vvv') && daily.text.includes('Pod: Pod 7') && daily.text.includes('Join now: https://admin.example.test/live-classes/c789/join'))
 
 step('E. The HRMS down; put right by the sweep');
 const e1 = await cls('While down', sara, 8)
@@ -227,7 +261,7 @@ check('deleted without a word (a script): its pod let go by the sweep', heldBy(g
 step('F. The Pods page');
 const v = await pods.podsView(hrs(0), hrs(24), String(mo))
 check('the seven pods, in order', v.configured && v.pods.map((p) => p.name).join() === 'Pod 4,Pod 6,Pod 7,Pod 8,Pod 9,Pod 10,Pod 11', j(v.pods))
-check('who has each, the mentor\'s own marked', v.bookings.length === live().filter((b) => b.roomId !== 'room7').length && v.bookings.some((b) => b.mine) && v.bookings.every((b) => !b.mine || heldBy(b.classId!).length === 1), j(v.bookings.slice(0, 2)))
+check('who has each, the mentor\'s own marked', v.bookings.length === live().filter((b) => b.roomId !== 'room7' && b.start < hrs(24) && b.end > hrs(0)).length && v.bookings.some((b) => b.mine) && v.bookings.every((b) => !b.mine || heldBy(b.classId!).length === 1), j(v.bookings.slice(0, 2)))
 
 step('The backfill\'s dry run');
 const plan = await pods.planPodBackfill(NOW)

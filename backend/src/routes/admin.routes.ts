@@ -2115,12 +2115,14 @@ router.get('/live-classes/academy-schedule', requireInstructor, async (req: Requ
       status: { $ne: 'cancelled' },
       scheduledStart: { $gte: from, $lt: to },
     })
-      .select('title scheduledStart durationMins status type isOnline location room language instructorId courseId sectionId bookedCount sessionCapacity organizationId')
+      .select('title scheduledStart durationMins status type isOnline location room language instructorId courseId sectionId bookedCount sessionCapacity organizationId pod')
       .populate('instructorId', 'name').populate('courseId', 'title').populate('sectionId', 'title')
       .sort({ scheduledStart: 1 }).limit(3000).lean() as any[]
     sendSuccess(res, rows.map(c => ({
       id: String(c._id), title: c.title, scheduledStart: c.scheduledStart, durationMins: c.durationMins,
       status: c.status, type: c.type, isOnline: c.isOnline !== false, location: c.location ?? undefined, room: c.room ?? undefined,
+      /* Its HRMS meeting pod (2026-10-18) — every mentor's, as the timetable's "All mentors" view shows them. */
+      pod: c.pod?.state ? { state: c.pod.state, roomName: c.pod.roomName } : undefined,
       language: c.language ?? 'English',
       instructorId: c.instructorId ? String(c.instructorId._id) : '', instructor: c.instructorId ? { id: String(c.instructorId._id), name: c.instructorId.name } : undefined,
       courseId: c.courseId ? String(c.courseId._id) : '', course: c.courseId ? { id: String(c.courseId._id), title: c.courseId.title } : undefined,

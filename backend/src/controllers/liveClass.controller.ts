@@ -1454,6 +1454,13 @@ export class LiveClassController {
             CourseModel.findById(live.courseId).select('title').lean(),
           ])
           if (instructor && (instructor as any).email && wantsStaffEmail(instructor as never, 'classScheduled')) {
+            /* Its HRMS pod first (2026-10-18): booked a moment after the class is made, so this waits for it —
+               up to the HRMS call's own timeout — and the email names the pod. */
+            const liveId = String((live as { id?: string; _id?: unknown }).id ?? (live as { _id?: unknown })._id)
+            const { syncClassPod } = await import('@/services/classPod.service.ts')
+            await syncClassPod(liveId).catch(() => undefined)
+            const { LiveClassModel } = await import('@/models/schema.ts')
+            const pod = (await LiveClassModel.findById(liveId).select('pod').lean() as { pod?: { state?: string; roomName?: string } } | null)?.pod ?? null
             await sendInstructorClassScheduled(
               (instructor as any).email,
               (instructor as any).name ?? 'Instructor',
@@ -1464,6 +1471,7 @@ export class LiveClassController {
               /* The CLASS's academy — the same clock the admin panel shows this
                  instructor for this class. */
               orgSlugFor((live as { organizationId?: unknown }).organizationId),
+              { classId: liveId, pod },
             )
           }
         } catch (err) {
@@ -2008,8 +2016,10 @@ export class LiveClassController {
         void (async () => {
           await ensureOrgSlugs().catch(() => {})
           const { sendInstructorBackupLink } = await import('@/services/email.service.ts')
+          const { LiveClassModel } = await import('@/models/schema.ts')
+          const pod = (await LiveClassModel.findById(id).select('pod').lean() as { pod?: { state?: string; roomName?: string } } | null)?.pod ?? null
           await sendInstructorBackupLink(instructor.email, instructor.name, r.live.title, r.live.scheduledStart, r.url,
-            r.cohost, orgSlugFor((r.live as { organizationId?: unknown }).organizationId))
+            r.cohost, orgSlugFor((r.live as { organizationId?: unknown }).organizationId), { classId: id, pod })
         })().catch(err => logger.error({ err, liveClassId: id }, 'backup link: instructor email failed'))
       }
 
