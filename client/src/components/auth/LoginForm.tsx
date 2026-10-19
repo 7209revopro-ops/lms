@@ -7,6 +7,7 @@ import { z } from 'zod'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Eye, EyeOff, Mail, Lock, ArrowRight, ArrowLeft, AlertCircle, ShieldCheck } from 'lucide-react'
 import { api } from '@/lib/axios'
+import { safeRedirect } from '@/lib/safeRedirect'
 import Spinner from '@/components/ui/Spinner'
 
 /* ─── Validation schema ─────────────────────────── */
@@ -29,18 +30,6 @@ const fieldVariant = {
     x: 0,
     transition: { type: 'spring', stiffness: 300, damping: 24, delay: i * 0.06 },
   }),
-}
-
-/* ─── Safe post-login redirect ──────────────────── */
-function safeRedirect(raw: string | null): string {
-  if (!raw) return '/my-learning'
-  try {
-    const url = new URL(raw, window.location.origin)
-    if (url.origin !== window.location.origin) return '/my-learning'
-    return url.pathname.replace(/^\/+/, '/') + url.search + url.hash
-  } catch {
-    return '/my-learning'
-  }
 }
 
 interface LoginFormProps {

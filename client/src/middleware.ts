@@ -11,7 +11,7 @@ const GUEST_ONLY = ['/login', '/register']
    with no session: the super admin arriving from the admin portal has no
    client cookie yet, and bouncing them to /login would discard the code. */
 /* `/p/<code>` — a programme's shareable link (2026-10-17): its form is for people with no LMS account. */
-const PUBLIC = ['/forgot-password', '/reset-password', '/verify-email', '/imp/enter', '/continue', '/j', '/s', '/p']
+const PUBLIC = ['/forgot-password', '/reset-password', '/verify-email', '/imp/enter', '/continue', '/j', '/s', '/p', '/explore']
 
 /* A live client-portal impersonation rides its own cookie, so a super admin
    arriving with only that one is authenticated as far as routing is concerned.

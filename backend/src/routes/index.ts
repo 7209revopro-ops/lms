@@ -9,6 +9,7 @@ import lessonRoutes        from './lessons.routes.ts'
 import reviewRoutes        from './reviews.routes.ts'
 import adminRoutes         from './admin.routes.ts'
 import programPublicRoutes from '@/routes/programPublic.routes.ts'
+import guestCheckoutRoutes from '@/routes/guestCheckout.routes.ts'
 import liveClassRoutes     from './liveClasses.routes.ts'
 import notificationRoutes  from './notifications.routes.ts'
 import announcementRoutes  from './announcements.routes.ts'
@@ -91,6 +92,7 @@ router.use('/enrollments', enrollmentRoutes)
 router.use('/lessons',     lessonRoutes)
 router.use('/reviews',     reviewRoutes)
 router.use('/admin',         adminRoutes)
+router.use('/public/checkout', guestCheckoutRoutes)    // buying a course on /explore with no account
 router.use('/public/programs', programPublicRoutes)   // a programme's shareable link (no sign-in)
 router.use('/live-classes',  liveClassRoutes)
 router.use('/notifications', notificationRoutes)

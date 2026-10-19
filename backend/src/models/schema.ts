@@ -2133,6 +2133,8 @@ export interface IOrder extends Document {
   abzerPaymentId?:          string
   tamaraCheckoutId?:        string
   tamaraOrderId?:           string
+  /** Guest checkout (/explore): when the buyer's access email went — once per order. */
+  guestAccessSentAt?:       Date
   tamaraPaymentId?:         string
   /**
    * Where this order came from, when it came from outside.
@@ -2174,6 +2176,7 @@ const OrderSchema = new Schema<IOrder>(
     abzerPaymentId:          { type: String },
     tamaraCheckoutId:        { type: String },
     tamaraOrderId:           { type: String },
+    guestAccessSentAt:       { type: Date },
     tamaraPaymentId:         { type: String },
     externalRef: {
       source: { type: String },

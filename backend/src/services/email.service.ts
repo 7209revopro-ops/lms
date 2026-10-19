@@ -568,6 +568,31 @@ export async function sendPasswordSetByAdmin(to: string, name: string, password:
     text: `Hi ${name},\n\nAn administrator has set a new password for your Delta account.\n\nEmail: ${to}\nPassword: ${password}\n\nSign in: ${loginUrl}\n\nYou have been signed out of every device. If you did not ask for this, contact support.` })
 }
 
+/* A course bought on the public /explore page (guest checkout, 2026-10-18). A new account: the course is
+   open, a sign-in link, and a link to set a password (7 days). An account that already existed: the course
+   was added — sign in to open it (the buyer was not signed in, so the owner's inbox is the key). Urgent:
+   it is the buyer's only way back in, so it never waits behind bulk mail. */
+export async function sendGuestPurchaseAccess(to: string, name: string, courseTitle: string, opts: {
+  signInUrl: string; setPasswordUrl?: string; newAccount: boolean
+}): Promise<void> {
+  const subject = `You're enrolled: ${courseTitle}`
+  const btn = (href: string, label: string) =>
+    `<a href="${escapeHtml(sanitiseUrl(href))}" style="display:inline-block;background:linear-gradient(135deg,#0057b8,#2F6BFF);color:#fff;font-weight:600;padding:12px 24px;border-radius:12px;text-decoration:none">${label}</a>`
+  const html = wrap(subject, `
+    <h2 style="margin:0 0 16px;font-size:20px;font-weight:700;color:#0D0F1A">Payment received — you're in 🎓</h2>
+    <p>Hi ${escapeHtml(name)},</p>
+    <p>Thank you for your purchase. <strong>${escapeHtml(courseTitle)}</strong> is now open in your Delta student account.</p>
+    <p style="margin:24px 0">${btn(opts.signInUrl, 'Open my course')}</p>
+    ${opts.newAccount && opts.setPasswordUrl ? `
+    <p>We created your account with this email address. Set a password so you can sign in any time:</p>
+    <p style="margin:16px 0 24px"><a href="${escapeHtml(sanitiseUrl(opts.setPasswordUrl))}" style="color:#0057b8;font-weight:600">Set my password →</a> <span style="color:#9CA3AF">(link valid for 7 days)</span></p>` : `
+    <p>It has been added to your existing account — the button above signs you in.</p>`}
+    <p style="font-size:12px;color:#6B7280">The "Open my course" button works once and for 24 hours. After that, sign in at the student portal with this email${opts.newAccount ? ' and your password, or use "Forgot password?"' : ''}.</p>
+  `)
+  await sender.send({ urgent: true, priority: 10, to, subject, html,
+    text: `Hi ${name},\n\nThank you for your purchase. ${courseTitle} is now open in your Delta student account.\n\nOpen my course: ${opts.signInUrl}\n${opts.newAccount && opts.setPasswordUrl ? `\nSet your password (valid 7 days): ${opts.setPasswordUrl}\n` : '\nIt has been added to your existing account.\n'}` })
+}
+
 /* A chat message still unread CHAT_EMAIL_DELAY_MINS after it arrived
    (jobs/chatEmail.job.ts) — to a student from their mentor, or to a mentor
    from a student. One per unread run, never one per message. Normal priority:

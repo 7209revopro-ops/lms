@@ -55,6 +55,8 @@ export interface AbzerCreateOrderOptions {
   buyerEmail:  string
   buyerName:   string
   buyerPhone?: string
+  /** Where BillXPro sends the buyer back — the public /explore return page for a guest (2026-10-18). */
+  returnUrl?:  string
 }
 
 export interface AbzerCreateOrderResult {
@@ -92,7 +94,7 @@ export class AbzerService {
     const lastName  = parts.length > 1 ? parts.slice(1).join(' ') : parts[0]
 
     /* Step 1 — create the direct payment request */
-    const returnBase = `${env.CLIENT_URL}/payment-return`
+    const returnBase = opts.returnUrl ?? `${env.CLIENT_URL}/payment-return`
     const createResp = await fetch(`${env.ABZER_BASE_URL}/direct-payment-request/extended`, {
       method:  'POST',
       headers: {

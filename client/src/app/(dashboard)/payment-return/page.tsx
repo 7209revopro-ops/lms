@@ -37,6 +37,11 @@ function ReturnContent() {
   const isAbzer  = !gateway || gateway === 'abzer'
   const isTamara = gateway === 'tamara'
   const isTabby  = gateway === 'tabby'
+  /* Back to the checkout of the course being bought (remembered when the checkout started), else the catalogue. */
+  const [backToCheckout, setBackToCheckout] = useState('/courses')
+  useEffect(() => {
+    try { const s = sessionStorage.getItem('checkout-course'); if (s) setBackToCheckout(`/courses/${encodeURIComponent(s)}`) } catch { /* private mode */ }
+  }, [])
 
   /* Abzer uses a specific success status string.
      Tamara and Tabby redirect with no status param on success (orderId present). */
@@ -324,17 +329,20 @@ function ReturnContent() {
             Payment Cancelled
           </h1>
           <p className="text-sm leading-relaxed" style={{ color: 'var(--color-text-muted)' }}>
-            You cancelled the payment. No charge was made. You can try again whenever you're ready.
+            {isTabby
+              /* Tabby QA: its own sentence, word for word. */
+              ? 'You aborted the payment. Please retry or choose another payment method.'
+              : "You cancelled the payment. No charge was made. You can try again whenever you're ready."}
           </p>
         </div>
 
         <div className="flex flex-col gap-3 w-full">
-          <Link href="/courses">
+          <Link href={backToCheckout}>
             <motion.button
               whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}
               className="w-full flex items-center justify-center gap-2 rounded-2xl px-6 py-3 text-sm font-bold text-white"
               style={{ background: 'var(--color-primary)', boxShadow: '0 4px 16px rgba(0,87,184,0.30)' }}>
-              <RotateCcw size={14} />Back to Courses
+              <RotateCcw size={14} />Back to checkout
             </motion.button>
           </Link>
         </div>
@@ -358,8 +366,10 @@ function ReturnContent() {
           Payment Failed
         </h1>
         <p className="text-sm leading-relaxed" style={{ color: 'var(--color-text-muted)' }}>
-          Your payment could not be processed. No charge was made.
-          Please check your card details and try again.
+          {isTabby
+            /* Tabby QA: its own sentence, word for word. */
+            ? 'Sorry, Tabby is unable to approve this purchase. Please use an alternative payment method for your order'
+            : 'Your payment could not be processed. No charge was made. Please check your card details and try again.'}
         </p>
       </div>
 
@@ -372,7 +382,7 @@ function ReturnContent() {
       )}
 
       <div className="flex flex-col gap-3 w-full">
-        <Link href="/courses">
+        <Link href={backToCheckout}>
           <motion.button
             whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}
             className="w-full flex items-center justify-center gap-2 rounded-2xl px-6 py-3 text-sm font-bold text-white"

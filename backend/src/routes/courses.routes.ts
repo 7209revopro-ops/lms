@@ -32,6 +32,8 @@ const listQuerySchema = z.object({
   price_min:    z.coerce.number().min(0).optional(),
   price_max:    z.coerce.number().min(0).optional(),
   program:      z.enum(['4x-trading', 'digital-marketing', 'ai', 'jura']).optional(),
+  /* The public /explore page's academy switch — used only when nobody is signed in (course.controller.ts). */
+  academy:      z.enum(['dubai', 'bangalore']).optional(),
   /* Accept presets OR `${field}:${dir}` from admin table column sorts. */
   sort:         z.string().optional(),
 })

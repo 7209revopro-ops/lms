@@ -352,7 +352,8 @@ router.post('/abzer', async (req: Request, res: Response) => {
     const receiptId     = asString(payload?.receiptId)
 
     if (type === 'WH_RECEIPT_POSTING' && paymentStatus === 'Success' && orderId && receiptId) {
-      await orderSvc.fulfillAbzerFromWebhook(orderId, receiptId)
+      /* What was paid travels with it — fulfilment refuses a receipt that does not match the order. */
+      await orderSvc.fulfillAbzerFromWebhook(orderId, receiptId, { amount: payload?.receiptAmount, currency: payload?.collectedCurrency })
     } else {
       logger.debug({ type, paymentStatus, orderId }, 'Abzer webhook: ignored event')
     }
