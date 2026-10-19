@@ -1249,6 +1249,20 @@ export interface ILiveClass extends Document {
   isOnline:          boolean          // false = physical classroom session
   location?:         string           // venue / address (offline only)
   room?:             string           // classroom / room number (offline only)
+  /* The HRMS meeting room ("pod") held for this online class (2026-10-18, services/classPod.service.ts):
+     booked — `roomName` is it; no_room — every pod taken at that time; error — the HRMS could not be reached
+     (tried again). `for` is the stretch it was held for ("start|end"), so a moved class is re-held. */
+  pod?: {
+    state:      'booked' | 'no_room' | 'error'
+    roomId?:    string
+    roomName?:  string
+    bookingId?: string
+    for?:       string
+    note?:      string
+    at?:        Date
+    /* The stretch the "no pod free" notice went out for — once per stretch, not every minute. */
+    alertedFor?: string
+  }
 
   /* Reschedule tracking */
   rescheduledReason?: string          // admin-provided reason when class is rescheduled
@@ -1422,6 +1436,19 @@ const LiveClassSchema = new Schema<ILiveClass>(
     isOnline:          { type: Boolean, default: true },
     location:          { type: String, maxlength: 500 },
     room:              { type: String, maxlength: 100 },
+    pod: {
+      type: new Schema({
+        state:      { type: String, enum: ['booked', 'no_room', 'error'], required: true },
+        roomId:     { type: String },
+        roomName:   { type: String, maxlength: 80 },
+        bookingId:  { type: String },
+        for:        { type: String },
+        note:       { type: String, maxlength: 300 },
+        at:         { type: Date },
+        alertedFor: { type: String },
+      }, { _id: false }),
+      default: undefined,
+    },
     rescheduledReason:           { type: String, maxlength: 2000 },
     reminderInstructor15MinSent: { type: Boolean, default: false },
     mentorWhatsApp10MinSent:     { type: Boolean, default: false },

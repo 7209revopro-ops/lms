@@ -2083,6 +2083,22 @@ router.post('/programs/:id/stop', requireInstructor, async (req: Request, res: R
   } catch (err) { next(err) }
 })
 
+/* The HRMS meeting pods online classes are given (2026-10-18, services/classPod.service.ts) and who has each
+   over a stretch — staff meetings too — for the mentors' Pods page. At most 31 days at a time. */
+router.get('/pods', requireInstructor, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { podsView } = await import('@/services/classPod.service.ts')
+    const q = req.query as Record<string, string | undefined>
+    const at = (v?: string) => { const d = v ? new Date(v) : null; return d && !Number.isNaN(d.getTime()) ? d : null }
+    const from = at(q['from']) ?? new Date(new Date().setHours(0, 0, 0, 0))
+    const to = at(q['to']) ?? new Date(from.getTime() + 864e5)
+    if (!(to > from) || to.getTime() - from.getTime() > 31 * 864e5) {
+      res.status(400).json({ success: false, message: 'from and to: to after from, at most 31 days' }); return
+    }
+    sendSuccess(res, await podsView(from, to, String(req.user?.id ?? '')))
+  } catch (err) { next(err) }
+})
+
 router.get('/live-classes/academy-schedule', requireInstructor, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { LiveClassModel } = await import('@/models/schema.ts')

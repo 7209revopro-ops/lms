@@ -1,6 +1,7 @@
 'use client'
 
 import React, { useState, useMemo, useRef, useEffect } from 'react'
+import { PodBadge } from '@/components/live-classes/PodBadge'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { motion, AnimatePresence } from 'framer-motion'
@@ -681,6 +682,7 @@ function TableRow({ live, index, showInstructor, onBackup }: { live: LiveClass; 
                 </span>
               )}
               <SharedAcademiesChip live={live} />
+              <PodBadge pod={live.pod} />
             </div>
             <span className={`text-sm font-semibold text-white leading-tight max-w-[220px] truncate ${isCancelled ? 'line-through opacity-40' : ''}`}>
               {live.title}

@@ -355,6 +355,8 @@ function toDTO(doc: any, entitled = true, staff = true, door?: LabelledDoor | un
     isOnline:          j.isOnline ?? true,
     location:          j.location,
     room:              j.room,
+    /* The HRMS meeting pod held for an online class (services/classPod.service.ts): which, or why none. */
+    pod:               j.pod?.state ? { state: j.pod.state, roomName: j.pod.roomName, note: j.pod.state === 'booked' ? undefined : j.pod.note } : undefined,
     rescheduledReason: j.rescheduledReason,
 
     seriesId:       j.seriesId ? String(j.seriesId) : undefined,

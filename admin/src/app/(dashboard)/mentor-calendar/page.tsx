@@ -3,6 +3,7 @@
 import { useMemo, useState } from 'react'
 import { CalendarDays, ChevronLeft, ChevronRight, Plus, X } from 'lucide-react'
 import { PageHeader } from '@/components/ui/PageHeader'
+import { PodBadge } from '@/components/live-classes/PodBadge'
 import Spinner from '@/components/ui/Spinner'
 import { useCurrentUser } from '@/lib/api/user'
 import { useMentorCalendar, useBookMeeting, useCancelMeeting, useMentorClass, type CalendarMentor } from '@/lib/api/mentorCalendar'
@@ -157,6 +158,7 @@ function ClassInfoDialog({ id, tz, onClose }: { id: string; tz: string; onClose:
           <div>
             <p className="text-lg font-semibold">{c?.title || 'Class'}</p>
             {c && <p className="text-xs opacity-60">{[c.courseTitle, c.instructorName && `with ${c.instructorName}`, at(c.startsAt), `${c.booked}/${c.capacity} booked`].filter(Boolean).join(' · ')}</p>}
+            {c?.pod && <div className="mt-1"><PodBadge pod={c.pod} /></div>}
           </div>
           <button type="button" onClick={onClose} aria-label="Close" className="opacity-60 hover:opacity-100"><X className="h-4 w-4" /></button>
         </div>

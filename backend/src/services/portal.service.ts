@@ -1217,7 +1217,7 @@ export async function getClassForPortal(input: {
       'type', 'provider', 'meetingUrl', 'googleMeetCode', 'recordingUrl',
       'recordingDurationSecs', 'mentorNotes', 'sessionCapacity', 'bookedCount',
       'startedAt', 'endedAt', 'viewerCount', 'isOnline', 'location', 'room',
-      'courseId', 'instructorId', 'organizationId', 'instructorJoinedAt',
+      'courseId', 'instructorId', 'organizationId', 'instructorJoinedAt', 'pod',
     ].join(' '))
     .lean()
 
@@ -1250,6 +1250,10 @@ export async function getClassForPortal(input: {
     inPerson: live.isOnline === false,
     location: live.location ?? '',
     room: live.room ?? '',
+    /* The HRMS meeting pod held for it, when it is online (services/classPod.service.ts, 2026-10-18). */
+    pod: (live as { pod?: { state?: string; roomName?: string } }).pod?.state
+      ? { state: (live as any).pod.state as string, roomName: String((live as any).pod.roomName ?? '') }
+      : null,
     meetingUrl: live.meetingUrl ?? '',
     googleMeetCode: live.googleMeetCode ?? '',
     recordingUrl: live.recordingUrl ?? '',

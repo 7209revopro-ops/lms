@@ -8,7 +8,7 @@ import {
   LayoutDashboard, BookOpen, Users, GraduationCap,
   Tag, Star, Settings, ChevronLeft, ChevronRight, LogOut, X,
   ShoppingBag, Ticket, Map, ClipboardList, Video, CalendarDays, Repeat, BarChart3, ShieldCheck, UserCog, LifeBuoy,
-  ClipboardCheck, Film, MonitorSmartphone, FileCheck2, Megaphone, Mail, UserX, Award, MessageCircle, MessagesSquare, Send, ListChecks,
+  ClipboardCheck, Film, MonitorSmartphone, FileCheck2, Megaphone, Mail, UserX, Award, MessageCircle, MessagesSquare, Send, ListChecks, DoorOpen,
 } from 'lucide-react'
 import { useStaffUnread } from '@/lib/api/chat'
 import { useUIStore } from '@/store/ui.store'
@@ -28,6 +28,7 @@ const adminNavItems = [
   { label: 'Learning Paths', href: '/learning-paths',   icon: Map },
   { label: 'Live Classes',   href: '/live-classes',     icon: Video },
   { label: 'Mentor Calendar', href: '/mentor-calendar', icon: CalendarDays },
+  { label: 'Pods', href: '/pods', icon: DoorOpen },
   { label: 'Programs', href: '/programs', icon: Repeat },
   { label: 'Class Verification', href: '/class-verification', icon: ListChecks },
   { label: 'Instructor Attendance', href: '/instructor-attendance', icon: UserX },
@@ -81,6 +82,8 @@ const instructorNavItems = [
   { label: 'Bookings',      href: '/bookings',           icon: CalendarDays },
   { label: 'Availability',  href: '/availability',       icon: CalendarDays },
   { label: 'Mentor Calendar', href: '/mentor-calendar',   icon: CalendarDays },
+  /* The HRMS meeting pods online classes are given, and who has each (2026-10-18). */
+  { label: 'Pods',            href: '/pods',              icon: DoorOpen },
   { label: 'Programs',        href: '/programs',          icon: Repeat },
   { label: 'Assignments',   href: '/assignments',        icon: ClipboardCheck },
   { label: 'Exams',         href: '/exams',              icon: FileCheck2 },

@@ -3,6 +3,7 @@
 import { useState, useMemo } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
+import { PodBadge } from '@/components/live-classes/PodBadge'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
   ChevronLeft, ChevronRight, Calendar, Clock, Users,
@@ -154,6 +155,8 @@ function EventPopover({
               {(live as any).location}{(live as any).room ? ` · ${(live as any).room}` : ''}
             </p>
           )}
+          {/* Its HRMS meeting pod (2026-10-18). */}
+          {live.pod && <p className="flex items-center gap-2"><PodBadge pod={live.pod} /></p>}
         </div>
 
         {readOnly && (

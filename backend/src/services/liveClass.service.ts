@@ -18,6 +18,7 @@ import { tryEnsureRoom } from '@/services/clt.service.ts'
 import { adjustOverflow, allocatePools, addGuestCohort, setGuestFloor, removeGuestCohort, repointGuestCohort } from '@/services/seatPool.service.ts'
 import { academyClock } from '@/utils/academyClock.ts'
 import { ensureOrgSlugs, orgSlugFor } from '@/utils/orgSlugs.ts'
+import { kickClassPod, releaseClassPod } from '@/services/classPod.service.ts'
 
 /* CLT caps a LiveKit room at 50 participants and 8 concurrent rooms. Kept here
    as a named constant so the admin UI and the tests quote the same number. */
@@ -596,6 +597,8 @@ export class LiveClassService {
     }
 
     const created = await this.liveRepo.createOne(doc)
+    /* An online Dubai class asks the HRMS for a meeting pod now (services/classPod.service.ts); never holds this up. */
+    kickClassPod(created.id)
 
     /* Provision the CLT room AFTER the insert: the room name is derived from
        the class id, so it cannot be known before one exists. Best-effort by
@@ -1526,6 +1529,8 @@ export class LiveClassService {
       }
     }
 
+    /* Moved, cancelled, gone offline or to another mentor: its HRMS pod follows (services/classPod.service.ts). */
+    kickClassPod(id)
     return updated
   }
 
@@ -1796,6 +1801,8 @@ export class LiveClassService {
     }
 
     await this.liveRepo.hardDelete(id)
+    /* Its HRMS pod, if it held one, is let go (services/classPod.service.ts). */
+    void releaseClassPod(id)
   }
 
   /* ── Helpers ─────────────────────────────────────── */
