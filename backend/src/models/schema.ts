@@ -1262,6 +1262,7 @@ export interface ILiveClass extends Document {
     at?:        Date
     /* The stretch the "no pod free" notice went out for — once per stretch, not every minute. */
     alertedFor?: string
+    auto?: boolean
   }
 
   /* Reschedule tracking */
@@ -1446,6 +1447,8 @@ const LiveClassSchema = new Schema<ILiveClass>(
         note:       { type: String, maxlength: 300 },
         at:         { type: Date },
         alertedFor: { type: String },
+        /* An offline class's room the LMS picked itself (none was picked on the class), 2026-10-19. */
+        auto:       { type: Boolean },
       }, { _id: false }),
       default: undefined,
     },

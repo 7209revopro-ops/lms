@@ -2099,6 +2099,21 @@ router.get('/pods', requireInstructor, async (req: Request, res: Response, next:
   } catch (err) { next(err) }
 })
 
+/* Which offline class rooms are free for a class's time — the room picker in the offline class modals (2026-10-19). */
+router.get('/pods/rooms', requireInstructor, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { roomAvailability } = await import('@/services/classPod.service.ts')
+    const q = req.query as Record<string, string | undefined>
+    const start = q['start'] ? new Date(q['start']) : null
+    const mins = Number(q['durationMins'] ?? 0)
+    if (!start || Number.isNaN(start.getTime()) || !(mins > 0) || mins > 24 * 60) {
+      res.status(400).json({ success: false, message: 'start and durationMins (1–1440) are required' }); return
+    }
+    const classId = q['classId'] && /^[a-f0-9]{24}$/i.test(q['classId']) ? q['classId'] : undefined
+    sendSuccess(res, await roomAvailability(start, new Date(start.getTime() + mins * 60_000), classId))
+  } catch (err) { next(err) }
+})
+
 router.get('/live-classes/academy-schedule', requireInstructor, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { LiveClassModel } = await import('@/models/schema.ts')
