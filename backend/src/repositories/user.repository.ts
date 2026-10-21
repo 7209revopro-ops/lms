@@ -1,6 +1,6 @@
 import { Types } from 'mongoose'
 import { BaseRepository } from './base.repository.ts'
-import { UserModel, RefreshTokenModel, AuthTokenModel } from '@/models/schema.ts'
+import { UserModel, RefreshTokenModel, AuthTokenModel, PushTokenModel } from '@/models/schema.ts'
 import { sharedInstructorFilter, andFilter } from '@/utils/tenancy.ts'
 import type {
   IUser, IRefreshToken, IAuthToken, AuthTokenPurpose, RefreshTokenRevokeReason,
@@ -383,9 +383,13 @@ export class RefreshTokenRepository extends BaseRepository<IRefreshToken> {
   }
 
   /* ── Revoke a single token by hash ────────────── */
+  /* Only a live token: a revoked one keeps the reason it was revoked for.
+     Refresh reads that reason — 'rotation' / 'retired' raise the reuse alarm —
+     so a thief must not be able to log out with a token they already rotated
+     and turn it into a quiet 'logout'. */
   async revokeToken(tokenHash: string, reason: RefreshTokenRevokeReason = 'logout'): Promise<void> {
     await RefreshTokenModel.updateOne(
-      { tokenHash },
+      { tokenHash, isRevoked: false },
       { $set: { isRevoked: true, revokedReason: reason } },
     ).exec()
   }
@@ -405,12 +409,33 @@ export class RefreshTokenRepository extends BaseRepository<IRefreshToken> {
     ).exec()
   }
 
+  /* ── Retire a token that was issued but never delivered ──
+       Atomic (only one caller wins). Revoked as 'retired', not 'rotation':
+       nobody legitimate holds it, so presenting it later is theft (refresh
+       wipes every session) — never a benign rotation race. */
+  async retireIfActive(tokenHash: string): Promise<boolean> {
+    const r = await RefreshTokenModel.updateOne(
+      { tokenHash, isRevoked: false },
+      { $set: { isRevoked: true, revokedReason: 'retired' } },
+    ).exec()
+    return r.modifiedCount === 1
+  }
+
+  /* ── Record which token a rotation produced ──────── */
+  async linkSuccessor(tokenHash: string, successorHash: string): Promise<void> {
+    await RefreshTokenModel.updateOne({ tokenHash }, { $set: { replacedBy: successorHash } }).exec()
+  }
+
   /* ── Revoke all tokens for a user ───────────────── */
   async revokeAllForUser(userId: string, reason: RefreshTokenRevokeReason = 'security'): Promise<void> {
     await RefreshTokenModel.updateMany(
       { userId, isRevoked: false },
       { $set: { isRevoked: true, revokedReason: reason } },
     ).exec()
+    /* Signed out everywhere ⇒ no phone may keep receiving this account's
+       pushes (titles and chat text would still show on a phone whose session
+       is gone). A phone still signed in re-registers on its next launch. */
+    await PushTokenModel.deleteMany({ userId }).exec()
   }
 
   /* ── Delete expired tokens (maintenance) ────────── */

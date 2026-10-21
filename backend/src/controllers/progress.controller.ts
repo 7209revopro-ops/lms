@@ -18,8 +18,8 @@ export class ProgressController {
   recordWatchTime = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     try {
       const lessonId = String(req.params['id'] ?? '')
-      const { secs } = req.body as { secs: number }
-      await this.service.recordWatchTime(req.user!.id, lessonId, secs)
+      const { secs, position } = req.body as { secs: number; position?: number }
+      await this.service.recordWatchTime(req.user!.id, lessonId, secs, position)
       sendSuccess(res, null)
     } catch (err) {
       next(err)

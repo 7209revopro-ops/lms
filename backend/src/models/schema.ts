@@ -454,7 +454,10 @@ export const RoleModel = mongoose.model<IRole>('Role', RoleSchema)
 /* ─────────────────────────────────────────────────────
    REFRESH TOKEN
 ───────────────────────────────────────────────────── */
-export type RefreshTokenRevokeReason = 'rotation' | 'user' | 'logout' | 'security'
+/* 'retired' — a successor issued for a refresh whose answer was lost, then
+   retired when the client recovered (AuthService.refresh). Nobody legitimate
+   holds one, so presenting it is treated as theft. */
+export type RefreshTokenRevokeReason = 'rotation' | 'user' | 'logout' | 'security' | 'retired'
 
 export interface IRefreshToken extends Document {
   id:             string
@@ -471,6 +474,7 @@ export interface IRefreshToken extends Document {
   userAgent?:     string
   ip?:            string
   lastUsedAt?:    Date
+  replacedBy?:    string
   createdAt:      Date
   updatedAt:      Date
 }
@@ -480,11 +484,15 @@ const RefreshTokenSchema = new Schema<IRefreshToken>(
     userId:        { type: Schema.Types.ObjectId, ref: 'User', required: true },
     tokenHash:     { type: String, required: true, unique: true },
     isRevoked:     { type: Boolean, default: false },
-    revokedReason: { type: String, enum: ['rotation', 'user', 'logout', 'security'] },
+    revokedReason: { type: String, enum: ['rotation', 'user', 'logout', 'security', 'retired'] },
     expiresAt:     { type: Date, required: true },
     userAgent:     { type: String, maxlength: 500 },
     ip:            { type: String, maxlength: 64 },
     lastUsedAt:    { type: Date },
+    /* The hash of the token this one was rotated into. Lets a refresh whose
+       answer never arrived be recovered instead of read as theft — see
+       AuthService.refresh (LOST_ANSWER_RECOVERY_MS). */
+    replacedBy:    { type: String },
   },
   baseSchemaOptions,
 )
@@ -922,6 +930,10 @@ export interface ILessonProgress extends Document {
   courseId:       Types.ObjectId
   isCompleted:    boolean
   watchTimeSecs:  number
+  /* Where playback last was — what the player resumes from. Not watchTimeSecs:
+     that is TOTAL time watched, so rewatching 0–5 min twice made it 600 and
+     the next visit jumped to 10:00. Absent on rows from before 2026-10-21. */
+  lastPositionSecs?: number
   completedAt?:   Date
   createdAt:      Date
   updatedAt:      Date
@@ -934,6 +946,7 @@ const LessonProgressSchema = new Schema<ILessonProgress>(
     courseId:      { type: Schema.Types.ObjectId, ref: 'Course', required: true },
     isCompleted:   { type: Boolean, default: false },
     watchTimeSecs: { type: Number, default: 0 },
+    lastPositionSecs: { type: Number, min: 0 },
     completedAt:   { type: Date },
   },
   baseSchemaOptions,

@@ -49,6 +49,7 @@ export class ProgressService {
      watchTimeSecs on load. Always returns 0/false for new lessons. */
   async getMyLessonProgress(userId: string, lessonId: string): Promise<{
     watchTimeSecs: number
+    lastPositionSecs: number | null
     isCompleted:   boolean
     completedAt:   string | null
   }> {
@@ -59,12 +60,13 @@ export class ProgressService {
     const p = await LessonProgressModel.findOne({ userId, lessonId }).exec()
     return {
       watchTimeSecs: p?.watchTimeSecs ?? 0,
+      lastPositionSecs: p?.lastPositionSecs ?? null,
       isCompleted:   !!p?.isCompleted,
       completedAt:   p?.completedAt ? p.completedAt.toISOString() : null,
     }
   }
 
-  async recordWatchTime(userId: string, lessonId: string, secs: number): Promise<void> {
+  async recordWatchTime(userId: string, lessonId: string, secs: number, position?: number): Promise<void> {
     if (!Types.ObjectId.isValid(lessonId)) {
       throw new EnrollmentError('INVALID_LESSON_ID', 'Invalid lesson id', 400)
     }
@@ -76,7 +78,7 @@ export class ProgressService {
     const enrollment = await this.enrollRepo.findByUserCourse(userId, lesson.courseId)
     if (!enrollment) return  // silent for watch-time pings if unenrolled
 
-    await this.progressRepo.addWatchTime(userId, lessonId, lesson.courseId, secs)
+    await this.progressRepo.addWatchTime(userId, lessonId, lesson.courseId, secs, position)
     await this.enrollRepo.setLastLesson(enrollment.id, lessonId)
   }
 }

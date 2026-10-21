@@ -107,13 +107,16 @@ try {
   check('C2 no cookie on the refresh either', !authCookie(r1.cookies), r1.cookies.join(' | '))
   const meAfter = await call('GET', '/auth/me', { headers: { authorization: `Bearer ${t2?.accessToken}` } })
   check('C3 the new access token works', meAfter.status === 200, why(meAfter))
-  /* Past the 2-second race grace (auth.service ROTATION_RACE_GRACE_MS), where
-     two simultaneous refreshes are a race, not an attack. */
+  /* The client USES its new pair (t2 → t3), so a later presentation of t1 is a
+     real replay, not a lost answer (the server recovers a lost answer while
+     its successor is still unused — mobileadversarial.suite section I) — and
+     past the 2-second race grace (ROTATION_RACE_GRACE_MS). */
+  const t3 = (await call('POST', '/auth/refresh', { headers: appHeaders(PHONE_A), body: { refreshToken: t2?.refreshToken } })).body?.data?.tokens
   await new Promise(r => setTimeout(r, 2_200))
   const replay = await call('POST', '/auth/refresh', { headers: appHeaders(PHONE_A), body: { refreshToken: t1?.refreshToken } })
-  check('C4 replaying the spent refresh token: 401', replay.status === 401, why(replay))
-  const afterReuse = await call('POST', '/auth/refresh', { headers: appHeaders(PHONE_A), body: { refreshToken: t2?.refreshToken } })
-  check('C5 and reuse revoked the whole family — the newer token is dead too', afterReuse.status === 401, why(afterReuse))
+  check('C4 replaying a spent refresh token whose successor was already used: 401 TOKEN_REUSE', replay.status === 401 && replay.body?.error?.code === 'TOKEN_REUSE', why(replay))
+  const afterReuse = await call('POST', '/auth/refresh', { headers: appHeaders(PHONE_A), body: { refreshToken: t3?.refreshToken } })
+  check('C5 and reuse revoked the whole family — the newer token is dead too', !!t3?.refreshToken && afterReuse.status === 401 && afterReuse.body?.error?.code !== 'MISSING_REFRESH_TOKEN', why(afterReuse))
   const noBody = await call('POST', '/auth/refresh', { headers: appHeaders(PHONE_A), body: {} })
   check('C6 no refresh token at all: 401 MISSING_REFRESH_TOKEN', noBody.status === 401 && noBody.body?.error?.code === 'MISSING_REFRESH_TOKEN', why(noBody))
 

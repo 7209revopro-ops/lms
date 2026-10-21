@@ -35,6 +35,12 @@ export const LINK_MAX_SIGNINS = 3
    rotated token stays replayable. */
 const ROTATION_RACE_GRACE_MS = 2_000
 
+/* How long after a rotation a client that never received the answer may
+   still recover with the token it holds — but only while the pair it missed
+   is unused (see refresh). Long enough for an app's timeout plus a retry,
+   short enough that a stolen token is not a lasting key. */
+const LOST_ANSWER_RECOVERY_MS = 60_000
+
 /* How long the losing side of that race waits for the winner to publish the
    pair it is minting — only bridges the few milliseconds between the
    rotation becoming visible in the DB and the winner registering it. */
@@ -450,9 +456,39 @@ export class AuthService {
       throw new AuthError('INVALID_REFRESH_TOKEN', 'Refresh token is invalid or expired.', 401)
     }
     if (stored.isRevoked) {
+      /* A retired successor (see the lost-answer recovery below) was never
+         delivered to anyone legitimate: whoever presents it intercepted it,
+         or is the real client exposing a thief who recovered first. */
+      if (stored.revokedReason === 'retired') {
+        await this.tokenRepo.revokeAllForUser(payload.sub!, 'security')
+        logger.warn({ userId: payload.sub }, 'Retired refresh token presented — all sessions revoked')
+        throw new AuthError('TOKEN_REUSE', 'Security alert: session invalidated.', 401)
+      }
       if (stored.revokedReason === 'rotation') {
         const rotatedAgoMs = Date.now() - stored.updatedAt.getTime()
         if (rotatedAgoMs > ROTATION_RACE_GRACE_MS) {
+          /* A LOST ANSWER, not a replay: the rotation happened but its reply
+             never reached the client (a phone in a lift, a 15-s timeout on a
+             slow network, the app killed mid-request), so the client still
+             holds this token and its successor has never been used. Retire
+             that unused successor — atomically, so two recoveries cannot
+             both mint — and issue a fresh pair. Once the successor HAS been
+             used (rotated itself), this is a real reuse and falls through to
+             the full wipe below, as before. */
+          if (rotatedAgoMs <= LOST_ANSWER_RECOVERY_MS && stored.replacedBy) {
+            if (await this.tokenRepo.retireIfActive(stored.replacedBy)) {
+              const pending = this.#rotateTokens(payload.sub!, meta, audience)
+              /* Published like any rotation, so a twin request recovering
+                 the same lost answer at the same moment gets this pair. */
+              this.#rememberRotation(tokenHash, pending)
+              const fresh = await pending
+              await this.tokenRepo.linkSuccessor(tokenHash, this.#hashToken(fresh.refresh_token))
+              logger.info({ userId: payload.sub, rotatedAgoMs }, 'Refresh answer was lost — unused successor retired, fresh pair issued')
+              return fresh
+            }
+            const twin = await this.#awaitRotationSuccessor(tokenHash)
+            if (twin) return twin
+          }
           await this.tokenRepo.revokeAllForUser(payload.sub!, 'security')
           logger.warn({ userId: payload.sub }, 'Refresh token reuse detected — all sessions revoked')
           throw new AuthError('TOKEN_REUSE', 'Security alert: session invalidated.', 401)
@@ -504,6 +540,7 @@ export class AuthService {
     const pending = this.#rotateTokens(payload.sub!, meta, audience)
     this.#rememberRotation(tokenHash, pending)
     const tokens = await pending
+    await this.tokenRepo.linkSuccessor(tokenHash, this.#hashToken(tokens.refresh_token))
     logger.debug({ userId: payload.sub }, 'Tokens rotated')
     return tokens
   }

@@ -172,6 +172,17 @@ try {
   const savedSecs = lp1.data?.watchTimeSecs
   check('C6 the reports add up to the resume position', savedSecs === S.WATCH_REPORT_SECS + S.WATCH_REPORT_MAX, JSON.stringify(lp1.data))
   check('C7 and the app resumes from there in a long video', S.resumeAt(savedSecs, 3600) === savedSecs)
+  /* QA round 2026-10-21: resume from the playback POSITION, not the total
+     watched — rewatching 0–5 min must not jump the next visit to 10:00. */
+  const wp = await call('POST', `/lessons/${video._id}/watch-time`, { secs: 15, position: 95.7 })
+  const lp2 = (await call('GET', `/lessons/${video._id}/progress`)).data
+  check('C8 a report with the playback position stores it (floored) beside the total', wp.status === 200 && lp2?.lastPositionSecs === 95 && lp2?.watchTimeSecs === savedSecs + 15, JSON.stringify(lp2))
+  await call('POST', `/lessons/${video._id}/watch-time`, { secs: 300, position: 20 })   // rewound and rewatched
+  const lp3 = (await call('GET', `/lessons/${video._id}/progress`)).data
+  check('C9 after rewinding: the total keeps growing, but the app resumes at the real position (20 s)', lp3?.watchTimeSecs > 300 && S.savedPosition(lp3) === 20, JSON.stringify(lp3))
+  const badPos = await call('POST', `/lessons/${video._id}/watch-time`, { secs: 15, position: -1 })
+  check('C10 a negative position is refused (422)', badPos.status === 422, why(badPos))
+  check('C11 a row from before positions existed resumes from the total, as it always did', S.savedPosition({ watchTimeSecs: 120 }) === 120 && S.savedPosition({ watchTimeSecs: 120, lastPositionSecs: null }) === 120)
 
   /* ═══ D ═══ */
   section('D. Mark complete')

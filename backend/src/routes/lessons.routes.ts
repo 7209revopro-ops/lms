@@ -21,6 +21,8 @@ const enrollRepo = new EnrollmentRepository()
 
 const watchTimeSchema = z.object({
   secs: z.coerce.number().min(1).max(300),
+  /* Optional: the playback position, for resume (24 h is beyond any lesson). */
+  position: z.coerce.number().min(0).max(86_400).optional(),
 })
 
 const transcriptSaveSchema = z.object({

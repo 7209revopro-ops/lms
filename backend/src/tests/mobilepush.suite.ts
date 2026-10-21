@@ -273,6 +273,18 @@ try {
   const readAll = await call('POST', '/notifications/read-all', { bearer: amalT, headers: APP('a'.repeat(64)) })
   const count = await call('GET', '/notifications/unread-count', { bearer: amalT, headers: APP('a'.repeat(64)) })
   check('J3 mark all read → the bell count is 0', readAll.status === 200 && count.data?.unreadCount === 0, JSON.stringify(count.data))
+
+  /* ═══ K ═══ */
+  section('K. Signed out everywhere ⇒ no more pushes to those phones (QA round 2026-10-21)')
+  const kStudent = await mk('student', { category: '4x-trading', categories: ['4x-trading'], enrollmentStatus: 'approved' })
+  const kT = await appLogin(kStudent.email, 'e'.repeat(64))
+  await call('POST', '/push-tokens', { bearer: kT, headers: APP('e'.repeat(64)), body: { token: tok('kPhone'), platform: 'android' } })
+  const outAll = await call('POST', '/auth/logout-all', { bearer: kT, headers: APP('e'.repeat(64)) })
+  check('K1 "sign out of all devices": every push token of the account is gone', outAll.status === 200 && await M.PushTokenModel.countDocuments({ userId: kStudent._id }) === 0, why(outAll))
+  before = received.length
+  await notify.create(String(kStudent._id), { kind: 'system', title: 'Should not arrive' })
+  await quiet()
+  check('K2 so a notification afterwards reaches no phone', received.length === before)
 } catch (err) {
   check('suite crashed', false, (err as Error).stack ?? String(err))
 } finally {

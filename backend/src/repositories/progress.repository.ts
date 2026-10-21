@@ -27,11 +27,13 @@ export class LessonProgressRepository extends BaseRepository<ILessonProgress> {
     lessonId: string | Types.ObjectId,
     courseId: string | Types.ObjectId,
     secs: number,
+    position?: number,
   ): Promise<void> {
     await LessonProgressModel.updateOne(
       { userId, lessonId },
       {
         $inc:         { watchTimeSecs: secs },
+        ...(position !== undefined ? { $set: { lastPositionSecs: Math.floor(position) } } : {}),
         $setOnInsert: { userId, lessonId, courseId, isCompleted: false },
       },
       { upsert: true },
