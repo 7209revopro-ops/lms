@@ -8,6 +8,7 @@ import * as ImagePicker from 'expo-image-picker'
 import { useTranslation } from 'react-i18next'
 import { COUNTRIES, DOC_MAX_BYTES, isoDate } from '@shared'
 import { preparePhoto, type PreparedFile } from '@/lib/register'
+import { Glyph } from './ui'
 import { useTheme } from '@/theme'
 
 /* Form controls for registration and the profile screens: every one shows its
@@ -92,7 +93,7 @@ export function Select({ label, value, options, onChange, error, placeholder, ba
                 style={({ pressed }) => ({ flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 16, paddingVertical: 14, backgroundColor: pressed ? colors.bgMuted : 'transparent' })}>
                 <Text style={{ flex: 1, fontFamily: fonts.body, fontSize: 16, color: colors.textPrimary }}>{item.label}</Text>
                 {item.hint && <Text style={{ fontFamily: fonts.body, fontSize: 14, color: colors.textMuted }}>{item.hint}</Text>}
-                {item.value === value && <Ionicons name="checkmark" size={20} color={colors.primary} />}
+                {item.value === value && <Glyph name="checkmark" size={20} color={colors.primary} />}
               </Pressable>
             )}
           />
@@ -186,11 +187,12 @@ export function DateField({ label, value, onChange, error, min, max }: {
   )
 }
 
-export function Checkbox({ checked, onChange, children, error }: { checked: boolean; onChange: (v: boolean) => void; children: ReactNode; error?: string }) {
+/* `label` is what a screen reader says; without it Android also reads the icon's glyph. */
+export function Checkbox({ checked, onChange, children, error, label }: { checked: boolean; onChange: (v: boolean) => void; children: ReactNode; error?: string; label: string }) {
   const { colors } = useTheme()
   return (
     <View style={{ gap: 6 }}>
-      <Pressable onPress={() => onChange(!checked)} accessibilityRole="checkbox" accessibilityState={{ checked }}
+      <Pressable onPress={() => onChange(!checked)} accessibilityRole="checkbox" accessibilityState={{ checked }} accessibilityLabel={label}
         style={{ flexDirection: 'row', gap: 10, alignItems: 'flex-start' }}>
         <Ionicons name={checked ? 'checkbox' : 'square-outline'} size={24} color={error && !checked ? colors.danger : colors.primary} />
         <View style={{ flex: 1 }}>{children}</View>

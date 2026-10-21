@@ -6,7 +6,7 @@ import { useTranslation } from 'react-i18next'
 import { bucketOf, type LearningBucket, type MyEnrollment } from '@shared'
 import { useMyEnrollments } from '@/lib/api/learning'
 import { useAuth } from '@/lib/auth'
-import { Chip, Notice, ProgressBar } from '@/components/ui'
+import { Chip, Notice, ProgressBar, Glyph } from '@/components/ui'
 import { Empty, Failed, Loading } from '@/components/states'
 import { useTheme } from '@/theme'
 
@@ -38,7 +38,8 @@ export default function MyLearning() {
   const header = (
     <View style={{ gap: 14 }}>
       {pending && <Notice tone="info">{t('learning.pendingBody')}</Notice>}
-      <Pressable accessibilityRole="button" onPress={() => router.push('/learning/assignments')}
+      <Pressable accessibilityRole="button" accessibilityLabel={`${t('learning.assignments')}. ${t('learning.assignmentsBody')}`}
+        onPress={() => router.push('/learning/assignments')}
         style={({ pressed }) => ({
           flexDirection: 'row', alignItems: 'center', gap: 12, padding: 14, borderRadius: radius.lg,
           backgroundColor: colors.primaryLight, opacity: pressed ? 0.85 : 1,
@@ -91,8 +92,8 @@ function CourseRow({ e }: { e: MyEnrollment }) {
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
         <Text style={{ flex: 1, fontFamily: fonts.bold, fontSize: 16, color: colors.textPrimary }}>{course.title}</Text>
         {bucket === 'completed'
-          ? <Ionicons name="checkmark-circle" size={20} color={colors.success} />
-          : <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />}
+          ? <Glyph name="checkmark-circle" size={20} color={colors.success} />
+          : <Glyph name="chevron-forward" size={18} color={colors.textMuted} />}
       </View>
       {course.instructor && (
         <Text style={{ fontFamily: fonts.body, fontSize: 13, color: colors.textMuted }}>{course.instructor.name}</Text>

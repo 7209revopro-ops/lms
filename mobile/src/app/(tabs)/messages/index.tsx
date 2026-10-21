@@ -1,9 +1,9 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { FlatList, Pressable, RefreshControl, Text, View } from 'react-native'
 import { router, useLocalSearchParams } from 'expo-router'
 import Ionicons from '@expo/vector-icons/Ionicons'
 import { useTranslation } from 'react-i18next'
-import { sortInstructors, type ChatInstructor } from '@shared'
+import { programName, sortInstructors, type ChatInstructor } from '@shared'
 import { useChatInstructors } from '@/lib/api/chat'
 import { useAuth } from '@/lib/auth'
 import { fmtShort } from '@/components/classes'
@@ -24,11 +24,14 @@ export default function MessagesList() {
   const rows = useMemo(() => sortInstructors(list.data ?? []), [list.data])
   const pending = state.status === 'signedIn' && state.user.enrollmentStatus !== 'approved'
 
-  /* A link to one conversation: open it once the list says whose it is. */
+  /* A link to one conversation: open it once the list says whose it is.
+     Pushed over the list (not replacing it), so Back reaches the other
+     mentors; `opened` stops the list re-opening it on the way back. */
+  const opened = useRef<string | undefined>(undefined)
   useEffect(() => {
-    if (!c || !list.data) return
+    if (!c || !list.data || opened.current === c) return
     const who = list.data.find(i => i.conversation?.id === c)
-    if (who) openThread(who, true)
+    if (who) { opened.current = c; openThread(who) }
   }, [c, list.data])
 
   const refresh = async () => {
@@ -52,10 +55,8 @@ export default function MessagesList() {
   )
 }
 
-function openThread(i: ChatInstructor, replace = false) {
-  const href = { pathname: '/messages/[instructorId]' as const, params: { instructorId: i.id, name: i.name, c: i.conversation?.id ?? '' } }
-  if (replace) router.replace(href)
-  else router.push(href)
+function openThread(i: ChatInstructor) {
+  router.push({ pathname: '/messages/[instructorId]', params: { instructorId: i.id, name: i.name, c: i.conversation?.id ?? '' } })
 }
 
 function MentorRow({ i }: { i: ChatInstructor }) {
@@ -81,7 +82,7 @@ function MentorRow({ i }: { i: ChatInstructor }) {
         </View>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
           <Text numberOfLines={1} style={{ flex: 1, fontFamily: unread ? fonts.semibold : fonts.body, fontSize: 13, color: unread ? colors.textPrimary : colors.textMuted }}>
-            {conv ? preview : i.programs.join(' · ') || preview}
+            {conv ? preview : i.programs.map(programName).join(' · ') || preview}
           </Text>
           {unread > 0 && (
             <View style={{ minWidth: 20, height: 20, borderRadius: 10, paddingHorizontal: 6, backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center' }}>

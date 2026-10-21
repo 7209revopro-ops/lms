@@ -1,25 +1,40 @@
-import { forwardRef, type ComponentRef, type ReactNode } from 'react'
+import { forwardRef, useContext, type ComponentProps, type ComponentRef, type ReactNode } from 'react'
 import {
-  ActivityIndicator, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput,
+  ActivityIndicator, KeyboardAvoidingView, Pressable, ScrollView, StyleSheet, Text, TextInput,
   View, type TextInputProps,
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
+import { HeaderHeightContext } from 'expo-router/react-navigation'
+import Ionicons from '@expo/vector-icons/Ionicons'
 import { useTheme } from '@/theme'
 
 /* The handful of building blocks P0 needs, styled from the theme. */
 
 export function Screen({ children, scroll = true }: { children: ReactNode; scroll?: boolean }) {
   const { colors, space } = useTheme()
+  /* Under a navigator header: the header already clears the status bar, and
+     the keyboard is measured from below it. 0 / undefined when there is none. */
+  const headerHeight = useContext(HeaderHeightContext) ?? 0
   const body = scroll
     ? <ScrollView contentContainerStyle={{ padding: space.xl, gap: space.lg, flexGrow: 1 }} keyboardShouldPersistTaps="handled">{children}</ScrollView>
     : <View style={{ flex: 1, padding: space.xl, gap: space.lg }}>{children}</View>
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: colors.bgPage }}>
-      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+    <SafeAreaView style={{ flex: 1, backgroundColor: colors.bgPage }} edges={headerHeight ? ['left', 'right', 'bottom'] : undefined}>
+      {/* 'padding' on Android too: the app draws edge to edge, so the window no
+          longer shrinks for the keyboard and nothing else lifts the fields. */}
+      <KeyboardAvoidingView style={{ flex: 1 }} behavior="padding" keyboardVerticalOffset={headerHeight}>
         {body}
       </KeyboardAvoidingView>
     </SafeAreaView>
   )
+}
+
+/* A decorative icon inside a button or card. Hidden from screen readers:
+   Android otherwise reads its font glyph into the label of the button around
+   it ("Basics, , 4 weekly slots"). Not for an icon that is the only meaning —
+   give that one its own accessibilityLabel instead. */
+export function Glyph(props: ComponentProps<typeof Ionicons>) {
+  return <View importantForAccessibility="no-hide-descendants"><Ionicons {...props} /></View>
 }
 
 export function Title({ children }: { children: ReactNode }) {
@@ -39,8 +54,10 @@ export function Button({ title, onPress, loading, variant = 'primary', disabled 
   const primary = variant !== 'ghost'
   const off = disabled || loading
   return (
+    /* Labelled with its title: while loading only a spinner is inside, and
+       Android otherwise keeps announcing "busy" after it is done. */
     <Pressable
-      accessibilityRole="button" accessibilityState={{ disabled: !!off, busy: !!loading }}
+      accessibilityRole="button" accessibilityLabel={title} accessibilityState={{ disabled: !!off, busy: !!loading }}
       onPress={onPress} disabled={off}
       style={({ pressed }) => [styles.button, {
         borderRadius: radius.md,
@@ -56,7 +73,8 @@ export function Button({ title, onPress, loading, variant = 'primary', disabled 
 
 export type FieldRef = ComponentRef<typeof TextInput>
 
-export const Field = forwardRef<FieldRef, TextInputProps & { label: string }>(function Field({ label, style, ...props }, ref) {
+/* `invalid` draws the red border the form pickers (Select, DateField) draw. */
+export const Field = forwardRef<FieldRef, TextInputProps & { label: string; invalid?: boolean }>(function Field({ label, invalid, style, ...props }, ref) {
   const { colors, fonts, radius } = useTheme()
   return (
     <View style={{ gap: 6 }}>
@@ -67,7 +85,7 @@ export const Field = forwardRef<FieldRef, TextInputProps & { label: string }>(fu
         accessibilityLabel={label}
         style={[{
           fontFamily: fonts.body, fontSize: 16, color: colors.textPrimary,
-          backgroundColor: colors.bgSurface, borderColor: colors.border, borderWidth: 1,
+          backgroundColor: colors.bgSurface, borderColor: invalid ? colors.danger : colors.border, borderWidth: 1,
           borderRadius: radius.md, paddingHorizontal: 14, paddingVertical: 12,
         }, style]}
         {...props}

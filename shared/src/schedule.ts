@@ -614,3 +614,22 @@ export function buildCatalog(
 
   return [...courses.values()].sort((a, b) => a.title.localeCompare(b.title))
 }
+
+/* ── The badge, as distinct from the rule ──────────────────────────
+   getSlotStatus answers 'live' from LIVE_LEAD_MINS (15) before the start, so
+   the card already shows its join timing — but the server opens joining only
+   AT the start, so a "Live now" badge beside "Join opens at 1:05 PM" reads as
+   a contradiction (found on the device, 2026-10-21; the website has the same
+   gap). Before the start, unless the class has actually started, the badge
+   says "Starting soon". Display only — every rule still uses getSlotStatus.
+
+   "Actually started" is startedAt, not status: the SERVER also reports
+   status 'live' from 15 minutes before the start (backend utils/liveStatus.ts,
+   a display convenience), so status alone cannot tell a stream that went live
+   early from the clock. startedAt is set only when a stream really starts. */
+export type DisplayStatus = SlotStatus | 'startingSoon'
+
+export function displayStatus(status: SlotStatus, lc: Pick<LiveClass, 'scheduledStart'> & { startedAt?: string | null }, now: number): DisplayStatus {
+  if (status === 'live' && !lc.startedAt && now < new Date(lc.scheduledStart).getTime()) return 'startingSoon'
+  return status
+}

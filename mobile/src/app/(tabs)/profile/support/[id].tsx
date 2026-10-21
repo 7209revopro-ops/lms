@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { FlatList, KeyboardAvoidingView, Platform, Pressable, Text, TextInput, View } from 'react-native'
+import { FlatList, KeyboardAvoidingView, Pressable, Text, TextInput, View } from 'react-native'
 import { Stack, useLocalSearchParams } from 'expo-router'
 import { useHeaderHeight } from 'expo-router/react-navigation'
 import Ionicons from '@expo/vector-icons/Ionicons'
@@ -36,7 +36,7 @@ export default function Ticket() {
   return (
     <>
       <Stack.Screen options={{ title: subject ?? tk.subject }} />
-      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined} keyboardVerticalOffset={headerHeight}>
+      <KeyboardAvoidingView style={{ flex: 1 }} behavior="padding" keyboardVerticalOffset={headerHeight}>
         <FlatList
           data={tk.messages}
           keyExtractor={(m, i) => m._id ?? String(i)}

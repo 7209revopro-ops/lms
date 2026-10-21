@@ -78,7 +78,7 @@ export default function Profile() {
 function Row({ icon, label, onPress, danger, detail }: { icon: Icon; label: string; onPress: () => void; danger?: boolean; detail?: string }) {
   const { colors, fonts } = useTheme()
   return (
-    <Pressable onPress={onPress} accessibilityRole="button"
+    <Pressable onPress={onPress} accessibilityRole="button" accessibilityLabel={detail ? `${label}. ${detail}` : label}
       style={({ pressed }) => ({ flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 16, paddingVertical: 14, backgroundColor: pressed ? colors.bgMuted : 'transparent' })}>
       <Ionicons name={icon} size={20} color={danger ? colors.danger : colors.primary} />
       <View style={{ flex: 1, gap: 2 }}>

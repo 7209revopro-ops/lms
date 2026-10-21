@@ -1,6 +1,7 @@
 import { useMemo } from 'react'
-import { KeyboardAvoidingView, Platform, Pressable, ScrollView, Text, View } from 'react-native'
+import { KeyboardAvoidingView, Pressable, ScrollView, Text, View } from 'react-native'
 import { Stack, router, useLocalSearchParams } from 'expo-router'
+import { useHeaderHeight } from 'expo-router/react-navigation'
 import Ionicons from '@expo/vector-icons/Ionicons'
 import { useTranslation } from 'react-i18next'
 import { lessonGate, lessonSequence, type LessonGate, type LessonOutline } from '@shared'
@@ -10,7 +11,7 @@ import { errorText } from '@/lib/errors'
 import { ArticleView, LessonVideo, NoteCard } from '@/components/lesson'
 import { QuizPlayer } from '@/components/QuizPlayer'
 import { useContentGuard } from '@/components/protected'
-import { Button, Notice } from '@/components/ui'
+import { Button, Notice, Glyph } from '@/components/ui'
 import { Empty, Failed, Loading } from '@/components/states'
 import { useTheme } from '@/theme'
 
@@ -22,6 +23,7 @@ export default function Lesson() {
   const { t } = useTranslation()
   const { colors, fonts } = useTheme()
   const { state } = useAuth()
+  const headerHeight = useHeaderHeight()
   useContentGuard()
 
   const enrollmentStatus = state.status === 'signedIn' ? state.user.enrollmentStatus : undefined
@@ -49,7 +51,7 @@ export default function Lesson() {
   return (
     <>
       <Stack.Screen options={{ title: course.data.course.title }} />
-      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined} keyboardVerticalOffset={90}>
+      <KeyboardAvoidingView style={{ flex: 1 }} behavior="padding" keyboardVerticalOffset={headerHeight}>
         <ScrollView contentContainerStyle={{ paddingBottom: 32 }} keyboardShouldPersistTaps="handled">
           {gate !== 'open'
             ? <Locked gate={gate} />
@@ -118,7 +120,7 @@ function NavButton({ label, icon, onPress, trailing }: {
         minHeight: 46, borderRadius: radius.md, borderWidth: 1, borderColor: colors.border,
         backgroundColor: pressed ? colors.bgMuted : colors.bgSurface, opacity: off ? 0.4 : 1,
       })}>
-      <Ionicons name={icon} size={18} color={colors.primary} />
+      <Glyph name={icon} size={18} color={colors.primary} />
       <Text style={{ fontFamily: fonts.semibold, fontSize: 15, color: colors.primary }}>{label}</Text>
     </Pressable>
   )

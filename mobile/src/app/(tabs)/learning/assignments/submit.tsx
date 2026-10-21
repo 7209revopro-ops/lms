@@ -10,7 +10,7 @@ import {
 } from '@/lib/api/assignments'
 import { errorText } from '@/lib/errors'
 import { fmtWhen } from '@/components/classes'
-import { Body, Button, Field, Notice, Screen } from '@/components/ui'
+import { Body, Button, Field, Notice, Screen, Glyph } from '@/components/ui'
 import { Failed, Loading } from '@/components/states'
 import { useTheme } from '@/theme'
 
@@ -105,7 +105,7 @@ export default function SubmitAssignment() {
                     flexDirection: 'row', alignItems: 'center', gap: 10, padding: 12, borderRadius: radius.md, borderWidth: 1.5,
                     borderColor: on ? colors.primary : colors.border, backgroundColor: on ? colors.primaryLight : colors.bgSurface,
                   }}>
-                  <Ionicons name={on ? 'radio-button-on' : 'radio-button-off'} size={20} color={on ? colors.primary : colors.textMuted} />
+                  <Glyph name={on ? 'radio-button-on' : 'radio-button-off'} size={20} color={on ? colors.primary : colors.textMuted} />
                   <View style={{ flex: 1, gap: 2 }}>
                     <Text style={{ fontFamily: fonts.semibold, fontSize: 15, color: colors.textPrimary }}>{c.title}</Text>
                     <Text style={{ fontFamily: fonts.body, fontSize: 12, color: colors.textMuted }}>

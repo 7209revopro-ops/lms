@@ -84,7 +84,9 @@ export function useChatThread(conversationId: string | null, instructorId: strin
     if (!conversationId) return
     try {
       const r = await apiGet<ChatPage>(`/chat/conversations/${conversationId}/messages`)
-      update(() => r.messages)
+      /* Merge, never replace: a message sent while this page was loading keeps
+         its bubble (and its "retry" if it failed). */
+      update(prev => mergeMessages(prev, r.messages))
       setPeerRead(r.peerLastReadAt)
       setHasMore(r.messages.length >= CHAT_PAGE)
       void markRead(conversationId)

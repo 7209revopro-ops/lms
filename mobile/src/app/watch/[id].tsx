@@ -1,7 +1,7 @@
 import { useEffect } from 'react'
 import { StyleSheet, View } from 'react-native'
 import { Stack, useLocalSearchParams } from 'expo-router'
-import { useVideoPlayer, VideoView } from 'expo-video'
+import { useVideoPlayer, VideoView, type VideoPlayer } from 'expo-video'
 import { useTranslation } from 'react-i18next'
 import { useWatchAccess } from '@/lib/api/classes'
 import { Watermark, useContentGuard } from '@/components/protected'
@@ -14,6 +14,11 @@ import { useTheme } from '@/theme'
    was not just given. The watermark carries the student's email, as on the
    website, so a screen recording names its source, and the screen blocks
    capture where the OS allows it (plan.md §13.9). */
+/* The player is a native object driven by commands (outside the component). */
+function resume(player: VideoPlayer): void {
+  player.play()
+}
+
 export default function Watch() {
   const { id, recording } = useLocalSearchParams<{ id: string; recording?: string }>()
   const { t } = useTranslation()
@@ -24,14 +29,17 @@ export default function Watch() {
   const src = wantsRecording ? watch.data?.recordingUrl : (watch.data?.status === 'live' ? watch.data?.playbackUrl : undefined)
 
   const player = useVideoPlayer(src ?? null, p => { p.play() })
-  /* The live stream can start (or end) while the screen is open: follow the
-     address the poll hands back. */
+  /* The live stream can start while the screen is open. useVideoPlayer itself
+     swaps in the new address (replaceAsync) when src changes — loading it here
+     too would fetch every stream twice — so this only presses play. */
   useEffect(() => {
-    if (src) void player.replaceAsync(src).then(() => player.play()).catch(() => {})
+    if (src) resume(player)
   }, [src, player])
 
   if (watch.isLoading) return <Loading />
-  if (watch.error) return <Failed error={watch.error} onRetry={() => void watch.refetch()} />
+  /* Only when there is nothing to show: one failed 20-s poll must not unmount
+     a stream that is playing (the next poll recovers). */
+  if (watch.error && !watch.data) return <Failed error={watch.error} onRetry={() => void watch.refetch()} />
 
   return (
     <>

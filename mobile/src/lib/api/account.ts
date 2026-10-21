@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import type { ApiSuccess, SessionTokens } from '@shared'
 import { http, session } from '../http'
+import { registerForPush } from '../push'
 
 /* The signed-in student's own account: details, password, signed-in devices,
    and deleting the account (plan.md §13.4 B6). */
@@ -48,6 +49,9 @@ export async function changePassword(currentPassword: string, newPassword: strin
   const res = await http.patch<ApiSuccess<{ tokens?: SessionTokens }>>('/auth/me/password', { currentPassword, newPassword })
   const tokens = res.data.data?.tokens
   if (tokens) await session.set(tokens)
+  /* Signing out everywhere also dropped this phone's push registration
+     (server: revokeAllForUser) — register it again for the new session. */
+  void registerForPush()
 }
 
 export async function requestDeleteCode(): Promise<void> {

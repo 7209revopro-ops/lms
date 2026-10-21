@@ -30,6 +30,8 @@ export default function TabsLayout() {
       {TABS.map(tab => (
         <Tabs.Screen key={tab.name} name={tab.name} options={{
           title: t(`tabs.${tab.label}`),
+          /* Spelled out: left to Android, the icon's glyph is read too. */
+          tabBarAccessibilityLabel: `${t(`tabs.${tab.label}`)}${tab.name === 'messages' && unread > 0 ? `, ${unread} unread` : ''}`,
           tabBarBadge: tab.name === 'messages' && unread > 0 ? (unread > 99 ? '99+' : unread) : undefined,
           tabBarIcon: ({ color, size }) => <Ionicons name={tab.icon} color={String(color ?? colors.textMuted)} size={size} />,
         }} />

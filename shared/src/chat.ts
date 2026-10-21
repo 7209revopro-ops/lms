@@ -92,3 +92,10 @@ export function dayKey(iso: string): string {
   const d = new Date(iso)
   return `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`
 }
+
+/** Programme codes as students read them — the website's table
+ *  (client/src/app/(dashboard)/messages/page.tsx PROGRAM). */
+export const PROGRAM_NAMES: Record<string, string> = {
+  '4x-trading': 'Forex', 'digital-marketing': 'Digital Marketing', ai: 'AI', jura: 'Jura',
+}
+export const programName = (code: string): string => PROGRAM_NAMES[code] ?? code

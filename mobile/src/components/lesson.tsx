@@ -4,11 +4,12 @@ import { useEventListener } from 'expo'
 import { useVideoPlayer, VideoView, type VideoPlayer } from 'expo-video'
 import * as WebBrowser from 'expo-web-browser'
 import { useTranslation } from 'react-i18next'
-import { clock, resourceKind, resumeAt, watchTick, type LessonOutline, type WatchMark } from '@shared'
+import { clock, resourceKind, resumeAt, savedPosition, watchTick, type LessonOutline, type WatchMark } from '@shared'
 import { reportWatchTime, useLessonPlayUrl, useLessonProgress, useMyNote, useSaveNote } from '@/lib/api/learning'
 import { errorText } from '@/lib/errors'
 import { Watermark } from './protected'
 import { Button, Notice } from './ui'
+import { Failed } from './states'
 import { useTheme } from '@/theme'
 
 /* ── Video ──────────────────────────────────────────────────────
@@ -27,7 +28,7 @@ export function LessonVideo({ lesson }: { lesson: LessonOutline }) {
   /* Wait for the saved position too, so the first frame is already the
      right one instead of jumping a second after it starts. */
   if (!play.data || saved.isLoading) return <VideoBox><ActivityIndicator color="#fff" /></VideoBox>
-  return <Player lessonId={lesson.id} url={play.data.url} savedSecs={saved.data?.watchTimeSecs ?? 0} />
+  return <Player lessonId={lesson.id} url={play.data.url} savedSecs={savedPosition(saved.data)} />
 }
 
 function Player({ lessonId, url, savedSecs }: { lessonId: string; url: string; savedSecs: number }) {
@@ -50,14 +51,14 @@ function Player({ lessonId, url, savedSecs }: { lessonId: string; url: string; s
   useEventListener(player, 'timeUpdate', ({ currentTime }) => {
     const { report, state } = watchTick(watch.current, currentTime)
     watch.current = state
-    if (report) reportWatchTime(lessonId, report)
+    if (report) reportWatchTime(lessonId, report, currentTime)
   })
 
   /* Leaving the lesson reports the seconds played since the last report,
      which the website loses (up to 14 s every time). */
   useEffect(() => () => {
     const { mark, last } = watch.current
-    if (last - mark >= 1) reportWatchTime(lessonId, last - mark)
+    if (last - mark >= 1) reportWatchTime(lessonId, last - mark, last)
   }, [lessonId])
 
   /* The resume hint fades after a few seconds. */
@@ -145,6 +146,17 @@ export function NoteCard({ lessonId }: { lessonId: string }) {
   const stored = note.data?.body ?? ''
   const text = draft ?? stored
   const dirty = draft !== null && draft !== stored
+
+  /* The saved note could not be read: an empty, editable box here would let
+     a save overwrite it. Offer a retry instead. */
+  if (note.error && !note.data) {
+    return (
+      <View style={{ backgroundColor: colors.bgSurface, borderColor: colors.border, borderWidth: 1, borderRadius: radius.lg, padding: 14, gap: 4 }}>
+        <Text style={{ fontFamily: fonts.semibold, fontSize: 15, color: colors.textPrimary }}>{t('notes.title')}</Text>
+        <Failed error={note.error} onRetry={() => void note.refetch()} />
+      </View>
+    )
+  }
 
   return (
     <View style={{ backgroundColor: colors.bgSurface, borderColor: colors.border, borderWidth: 1, borderRadius: radius.lg, padding: 14, gap: 10 }}>

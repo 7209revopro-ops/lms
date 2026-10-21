@@ -63,7 +63,21 @@ export interface CourseProgress {
   blockedLessons: string[]
 }
 
-export interface LessonProgress { watchTimeSecs: number; isCompleted: boolean; completedAt: string | null }
+export interface LessonProgress {
+  /** TOTAL seconds watched (rewatching counts again) — progress, not a position. */
+  watchTimeSecs: number
+  /** Where playback last was; null on rows from before positions were stored. */
+  lastPositionSecs?: number | null
+  isCompleted: boolean
+  completedAt: string | null
+}
+
+/** Where to resume from: the stored playback position, else (older rows) the
+ *  total watched — the only number there was. */
+export function savedPosition(p: Pick<LessonProgress, 'watchTimeSecs' | 'lastPositionSecs'> | undefined): number {
+  if (!p) return 0
+  return p.lastPositionSecs ?? p.watchTimeSecs
+}
 export interface PlayUrl { url: string; expiresIn: number }
 export interface LessonNote { id: string; body: string; updatedAt: string }
 

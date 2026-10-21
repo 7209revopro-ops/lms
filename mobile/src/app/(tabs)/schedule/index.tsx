@@ -1,9 +1,9 @@
 import { FlatList, Pressable, RefreshControl, Text, View } from 'react-native'
 import { router } from 'expo-router'
-import Ionicons from '@expo/vector-icons/Ionicons'
 import { useTranslation } from 'react-i18next'
 import { useCatalog } from '@/lib/catalog'
 import { Empty, Failed, Loading } from '@/components/states'
+import { Glyph } from '@/components/ui'
 import { useTheme } from '@/theme'
 
 /* Every course the student has sessions in, still ahead. */
@@ -31,10 +31,10 @@ export default function ScheduleCourses() {
           })}>
           <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
             <Text style={{ flex: 1, fontFamily: fonts.bold, fontSize: 16, color: colors.textPrimary }}>{c.title}</Text>
-            <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
+            <Glyph name="chevron-forward" size={18} color={colors.textMuted} />
           </View>
           <Text style={{ fontFamily: fonts.body, fontSize: 13, color: colors.textSecondary }}>
-            {t('schedule.courseMeta', { modules: c.modules.length, sessions: c.sessionCount })}
+            {`${t('schedule.modules', { count: c.modules.length })} · ${t('schedule.sessionsAhead', { count: c.sessionCount })}`}
           </Text>
           {c.instructors.length > 0 && (
             <Text style={{ fontFamily: fonts.body, fontSize: 13, color: colors.textMuted }}>

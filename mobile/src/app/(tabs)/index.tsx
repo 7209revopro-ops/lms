@@ -77,7 +77,7 @@ export default function Home() {
         {continuing.length > 0 && <SectionHeader title={t('learning.continue')} action={{ label: t('learning.title'), onPress: () => router.push('/learning') }} />}
         {continuing.map(e => (
           <Pressable key={e.id} accessibilityRole="button"
-            onPress={() => router.push({ pathname: '/learning/[slug]', params: { slug: e.course!.slug } })}
+            onPress={() => router.push({ pathname: '/learning/[slug]', params: { slug: e.course!.slug } }, { withAnchor: true })}
             style={({ pressed }) => ({
               backgroundColor: colors.bgSurface, borderColor: colors.border, borderWidth: 1,
               borderRadius: radius.lg, padding: 14, gap: 8, opacity: pressed ? 0.85 : 1,

@@ -139,7 +139,7 @@ export default function Register() {
   const strengthLabels = t('register.strength', { returnObjects: true }) as string[]
   const password = (
     <View style={{ gap: 6 }}>
-      <Field label={t('register.password')} value={f.password} onChangeText={v => set('password', v)} secureTextEntry
+      <Field label={t('register.password')} invalid={!!err('password')} value={f.password} onChangeText={v => set('password', v)} secureTextEntry
         autoComplete="new-password" textContentType="newPassword" autoCapitalize="none" />
       {!!f.password && (
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
@@ -151,7 +151,8 @@ export default function Register() {
     </View>
   )
   const terms = (
-    <Checkbox checked={f.terms} onChange={v => set('terms', v)} error={err('terms')}>
+    <Checkbox checked={f.terms} onChange={v => set('terms', v)} error={err('terms')}
+      label={`${t('register.terms')}${mode === 'full' ? t('register.termsFull') : ''}`}>
       <Text style={{ fontFamily: fonts.body, fontSize: 14, lineHeight: 20, color: colors.textSecondary }}>
         {t('register.terms')}{mode === 'full' ? t('register.termsFull') : ''}
       </Text>
@@ -164,13 +165,13 @@ export default function Register() {
   const center = <Select label={t('register.center')} value={f.organizationSlug} options={CENTERS} onChange={v => set('organizationSlug', v as RegisterForm['organizationSlug'])} error={err('organizationSlug')} />
   const name = (
     <View style={{ gap: 6 }}>
-      <Field label={t('register.name')} value={f.name} onChangeText={v => set('name', v)} maxLength={120} autoComplete="name" textContentType="name" />
+      <Field label={t('register.name')} invalid={!!err('name')} value={f.name} onChangeText={v => set('name', v)} maxLength={120} autoComplete="name" textContentType="name" />
       <FieldError text={err('name')} />
     </View>
   )
   const email = (
     <View style={{ gap: 6 }}>
-      <Field label={t('register.email')} value={f.email} onChangeText={v => set('email', v)} keyboardType="email-address" autoCapitalize="none" autoComplete="email" textContentType="emailAddress" />
+      <Field label={t('register.email')} invalid={!!err('email')} value={f.email} onChangeText={v => set('email', v)} keyboardType="email-address" autoCapitalize="none" autoComplete="email" textContentType="emailAddress" />
       <FieldError text={err('email')} />
     </View>
   )
@@ -209,20 +210,20 @@ export default function Register() {
           <DateField label={t('register.dob')} value={f.dateOfBirth} onChange={v => set('dateOfBirth', v)} error={err('dateOfBirth')}
             max={new Date(new Date().getFullYear() - 10, new Date().getMonth(), new Date().getDate())} />
           <View style={{ gap: 6 }}>
-            <Field label={t('register.nationality')} placeholder={t('register.nationalityHint')} value={f.nationality} maxLength={80}
+            <Field label={t('register.nationality')} invalid={!!err('nationality')} placeholder={t('register.nationalityHint')} value={f.nationality} maxLength={80}
               onChangeText={v => set('nationality', v.replace(/[^a-zA-Z\s-]/g, ''))} />
             <FieldError text={err('nationality')} />
           </View>
           <Select label={t('register.homeCountry')} value={f.homeCountry} options={COUNTRY_OPTIONS} onChange={v => set('homeCountry', v)} error={err('homeCountry')} />
           <View style={{ gap: 6 }}>
-            <Field label={t('register.occupation')} value={f.occupation} onChangeText={v => set('occupation', v)} maxLength={120} />
+            <Field label={t('register.occupation')} invalid={!!err('occupation')} value={f.occupation} onChangeText={v => set('occupation', v)} maxLength={120} />
             <FieldError text={err('occupation')} />
           </View>
           <Select label={t('register.idType')} value={f.idType} options={ID_TYPES.map(x => ({ value: x.value, label: x.label }))}
             onChange={v => { set('idType', v as IdType); set('idNumber', '') }} error={err('idType')} />
           {idMeta && (
             <View style={{ gap: 6 }}>
-              <Field label={t('register.idNumber', { type: idMeta.label })} value={f.idNumber}
+              <Field label={t('register.idNumber', { type: idMeta.label })} invalid={!!err('idNumber')} value={f.idNumber}
                 keyboardType={f.idType === 'Emirates ID' || f.idType === 'Aadhaar Card' ? 'number-pad' : 'default'}
                 autoCapitalize={f.idType === 'Passport' ? 'characters' : 'none'}
                 onChangeText={v => set('idNumber', formatIdNumber(f.idType, v))} />
@@ -234,11 +235,11 @@ export default function Register() {
         {mode === 'full' && step === 1 && <>
           <Select label={t('register.attendance')} value={f.countryAttendance} options={COUNTRY_OPTIONS} onChange={v => set('countryAttendance', v)} error={err('countryAttendance')} />
           <View style={{ gap: 6 }}>
-            <Field label={t('register.villa')} value={f.villa} onChangeText={v => set('villa', v)} maxLength={120} autoComplete="street-address" />
+            <Field label={t('register.villa')} invalid={!!err('villa')} value={f.villa} onChangeText={v => set('villa', v)} maxLength={120} autoComplete="street-address" />
             <FieldError text={err('villa')} />
           </View>
           <View style={{ gap: 6 }}>
-            <Field label={t('register.city')} value={f.city} onChangeText={v => set('city', v)} maxLength={80} />
+            <Field label={t('register.city')} invalid={!!err('city')} value={f.city} onChangeText={v => set('city', v)} maxLength={80} />
             <FieldError text={err('city')} />
           </View>
           <Select label={t('register.addressCountry')} value={f.addressCountry} options={COUNTRY_OPTIONS} onChange={v => set('addressCountry', v)} error={err('addressCountry')} />
@@ -278,7 +279,7 @@ export default function Register() {
           <Select label={t('register.payment')} value={f.paymentMethod} options={opts(PAYMENT_METHODS)} onChange={v => set('paymentMethod', v)} error={err('paymentMethod')} />
           {password}
           <View style={{ gap: 6 }}>
-            <Field label={t('register.confirmPassword')} value={f.confirmPassword} onChangeText={v => set('confirmPassword', v)} secureTextEntry autoCapitalize="none" />
+            <Field label={t('register.confirmPassword')} invalid={!!err('confirmPassword')} value={f.confirmPassword} onChangeText={v => set('confirmPassword', v)} secureTextEntry autoCapitalize="none" />
             <FieldError text={err('confirmPassword')} />
           </View>
           {terms}

@@ -1,14 +1,14 @@
 import { useMemo, useState } from 'react'
 import { Alert, ScrollView, Text, View } from 'react-native'
 import { Stack, router, useLocalSearchParams } from 'expo-router'
-import { effCourseTitle, effSectionTitle, getSlotStatus, isInteractiveRoom } from '@shared'
+import { displayStatus, effCourseTitle, effSectionTitle, getSlotStatus, isInteractiveRoom } from '@shared'
 import { bookingMapOf, useLiveClasses, useMyBookings, useWatchAccess } from '@/lib/api/classes'
 import { enterRoom } from '@/lib/join'
 import { useTranslation } from 'react-i18next'
 import { useNow } from '@/hooks/useNow'
 import { CancelSeat, ClassAction, StatusPill, fmtWhen } from '@/components/classes'
 import { Button, Body } from '@/components/ui'
-import { Empty, Loading } from '@/components/states'
+import { Empty, Failed, Loading } from '@/components/states'
 import { useTheme } from '@/theme'
 
 /* One class: what it is, and the way in for its kind —
@@ -32,6 +32,9 @@ export default function ClassDetail() {
   const [entering, setEntering] = useState(false)
 
   if (classes.isLoading) return <Loading />
+  /* A failed load is not "this class is gone" — say so, with a retry (the
+     class-schedule silent-error lesson). */
+  if (!lc && classes.error) return <><Stack.Screen options={{ title: '' }} /><Failed error={classes.error} onRetry={() => void classes.refetch()} /></>
   if (!lc) return <><Stack.Screen options={{ title: '' }} /><Empty title={t('classes.gone')} /></>
 
   /* Same-slot rule: another seat held in this class's weekly group. */
@@ -53,7 +56,7 @@ export default function ClassDetail() {
       <ScrollView contentContainerStyle={{ padding: 20, gap: 16 }}>
         <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
           <Text style={{ fontFamily: fonts.semibold, fontSize: 14, color: colors.primary }}>{fmtWhen(lc.scheduledStart)}</Text>
-          <StatusPill status={status} />
+          <StatusPill status={displayStatus(status, lc, now)} />
         </View>
         <Text accessibilityRole="header" style={{ fontFamily: fonts.display, fontSize: 24, color: colors.textPrimary }}>{lc.title}</Text>
 

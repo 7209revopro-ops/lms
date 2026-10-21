@@ -42,22 +42,34 @@ function refusal(err: unknown, fallback: string): JoinOutcome {
 }
 
 export async function joinMeet(liveClassId: string): Promise<JoinOutcome> {
+  let url: string
   try {
-    const { data } = await http.post<ApiSuccess<JoinClassResult>>(`/live-classes/${liveClassId}/join`)
-    await Linking.openURL(data.data.url)
-    return { ok: true }
+    url = (await http.post<ApiSuccess<JoinClassResult>>(`/live-classes/${liveClassId}/join`)).data.data.url
   } catch (err) {
     return refusal(err, i18n.t('join.linkFailed'))
+  }
+  /* The join is recorded; only the phone could not open the link (no app or
+     browser takes it) — not "could not reach the server". */
+  try {
+    await Linking.openURL(url)
+    return { ok: true }
+  } catch {
+    return { ok: false, message: i18n.t('join.linkFailed') }
   }
 }
 
 export async function enterRoom(liveClassId: string): Promise<JoinOutcome> {
+  let url: string | undefined
   try {
-    const { data } = await http.post<ApiSuccess<HandoffResult>>(`/live-classes/${liveClassId}/handoff`, {})
-    if (!data.data.url) return { ok: false, message: i18n.t('join.noPlatform') }
-    await WebBrowser.openBrowserAsync(data.data.url, { showTitle: true, enableBarCollapsing: true })
-    return { ok: true }
+    url = (await http.post<ApiSuccess<HandoffResult>>(`/live-classes/${liveClassId}/handoff`, {})).data.data.url
   } catch (err) {
     return refusal(err, i18n.t('join.roomFailed'))
+  }
+  if (!url) return { ok: false, message: i18n.t('join.noPlatform') }
+  try {
+    await WebBrowser.openBrowserAsync(url, { showTitle: true, enableBarCollapsing: true })
+    return { ok: true }
+  } catch {
+    return { ok: false, message: i18n.t('join.roomFailed') }
   }
 }

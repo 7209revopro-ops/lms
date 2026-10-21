@@ -39,3 +39,22 @@ describe('module route params', () => {
     expect(moduleIdOf(moduleParam('6ac0abc'))).toBe('6ac0abc')
   })
 })
+
+describe('the badge before the start (device QA 2026-10-21)', () => {
+  const { displayStatus } = jest.requireActual('@shared') as typeof import('@shared')
+  const start = Date.parse('2026-10-21T08:00:00Z')
+  const lc = { status: 'scheduled' as const, scheduledStart: new Date(start).toISOString() }
+  it('within the 15-min lead, before the start: "Starting soon", not "Live now"', () => {
+    expect(displayStatus('live', lc, start - 60_000)).toBe('startingSoon')
+  })
+  it('from the start second: live', () => expect(displayStatus('live', lc, start)).toBe('live'))
+  it('a stream that really started early (startedAt set): live', () => {
+    expect(displayStatus('live', { ...lc, startedAt: new Date(start - 120_000).toISOString() }, start - 60_000)).toBe('live')
+  })
+  it('the server clock-derived live status before the start (no startedAt) is still Starting soon', () => {
+    expect(displayStatus('live', { scheduledStart: lc.scheduledStart }, start - 60_000)).toBe('startingSoon')
+  })
+  it('every other status passes through untouched', () => {
+    expect(displayStatus('booked', lc, start - 60_000)).toBe('booked')
+  })
+})

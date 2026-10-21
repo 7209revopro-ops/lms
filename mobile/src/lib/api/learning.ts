@@ -81,8 +81,8 @@ export function useMarkComplete(slug: string) {
 }
 
 /** Fire-and-forget: a lost report must never interrupt the video. */
-export function reportWatchTime(lessonId: string, secs: number): void {
-  if (secs > 0) void apiPost(`/lessons/${lessonId}/watch-time`, { secs }).catch(() => {})
+export function reportWatchTime(lessonId: string, secs: number, position?: number): void {
+  if (secs > 0) void apiPost(`/lessons/${lessonId}/watch-time`, { secs, position: position !== undefined ? Math.floor(position) : undefined }).catch(() => {})
 }
 
 /* ── Notes (one private note per lesson) ── */

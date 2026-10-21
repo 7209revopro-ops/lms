@@ -83,3 +83,55 @@ describe('session refresh', () => {
     expect(call).not.toHaveBeenCalled()
   })
 })
+
+/* Device QA round, 2026-10-21 — sign-in / sign-out must win over a refresh
+   that is still in flight. */
+describe('session generations', () => {
+  const deferred = () => {
+    let resolve!: (t: SessionTokens) => void, reject!: (e: unknown) => void
+    const promise = new Promise<SessionTokens>((res, rej) => { resolve = res; reject = rej })
+    return { promise, resolve, reject }
+  }
+
+  it('signing out during a refresh: the refresh answer is discarded, not written back', async () => {
+    const store = memoryStore(pair(1))
+    const d = deferred()
+    const orphans: SessionTokens[] = []
+    const s = createSession(store, () => d.promise, () => {}, o => orphans.push(o))
+    await s.load()
+    const pending = s.refresh()
+    await s.clear()                 // the student signs out
+    d.resolve(pair(2))              // ...then the refresh answers
+    expect(await pending).toEqual({ ok: false, sessionLost: false })
+    expect(store.value).toBeNull()  // NOT resurrected
+    expect(s.accessToken()).toBeNull()
+    expect(orphans).toEqual([pair(2)])   // handed over to be logged out
+  })
+
+  it('signing in during a refresh: the newer session is kept', async () => {
+    const store = memoryStore(pair(1))
+    const d = deferred()
+    const s = createSession(store, () => d.promise, () => {})
+    await s.load()
+    const pending = s.refresh()
+    await s.set(pair(9))            // e.g. a join link signed in
+    d.resolve(pair(2))
+    await pending
+    expect(store.value).toEqual(pair(9))
+    expect(s.accessToken()).toBe('a9')
+  })
+
+  it('a 401 for the OLD token after a new sign-in does not end the new session', async () => {
+    const store = memoryStore(pair(1))
+    const d = deferred()
+    const lost = jest.fn()
+    const s = createSession(store, () => d.promise, lost)
+    await s.load()
+    const pending = s.refresh()
+    await s.set(pair(9))
+    d.reject(refused(401))
+    expect(await pending).toEqual({ ok: false, sessionLost: false })
+    expect(store.value).toEqual(pair(9))
+    expect(lost).not.toHaveBeenCalled()
+  })
+})

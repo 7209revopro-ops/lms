@@ -17,6 +17,13 @@ import type { SessionTokens } from '@shared'
    is gone (expired, revoked, reused) — sign out. No answer, a timeout, a 5xx
    or a 429 says nothing about the session: keep the tokens and let the next
    request try again.
+
+   SIGN-IN AND SIGN-OUT WIN OVER A REFRESH STILL IN FLIGHT. Each set()/clear()
+   starts a new generation. A refresh that began in an older one throws its
+   answer away instead of writing it back — it would otherwise resurrect a
+   session the student just signed out of, or overwrite a newer one — and the
+   orphaned pair is handed to onDiscard (to be logged out on the server). A
+   401 for an old generation's token likewise never clears the newer session.
 ───────────────────────────────────────────────────────────── */
 
 export interface TokenStore {
@@ -32,21 +39,33 @@ export type RefreshOutcome =
   | { ok: true;  tokens: SessionTokens }
   | { ok: false; sessionLost: boolean }
 
-export function createSession(store: TokenStore, refreshCall: RefreshCall, onSessionLost: () => void) {
+export function createSession(
+  store: TokenStore,
+  refreshCall: RefreshCall,
+  onSessionLost: () => void,
+  onDiscard: (orphan: SessionTokens) => void = () => {},
+) {
   let current: SessionTokens | null = null
   let inFlight: Promise<RefreshOutcome> | null = null
+  let generation = 0
 
   const statusOf = (err: unknown) => (err as { response?: { status?: number } })?.response?.status
 
   async function doRefresh(): Promise<RefreshOutcome> {
+    const started = generation
     const tokens = current ?? await store.read()
     if (!tokens) return { ok: false, sessionLost: true }
     try {
       const next = await refreshCall(tokens.refreshToken)
+      if (generation !== started) {
+        onDiscard(next)
+        return { ok: false, sessionLost: false }
+      }
       await store.write(next)
       current = next
       return { ok: true, tokens: next }
     } catch (err) {
+      if (generation !== started) return { ok: false, sessionLost: false }
       if (statusOf(err) === 401) {
         current = null
         await store.clear()
@@ -63,10 +82,12 @@ export function createSession(store: TokenStore, refreshCall: RefreshCall, onSes
       return current
     },
     async set(t: SessionTokens): Promise<void> {
+      generation++
       current = t
       await store.write(t)
     },
     async clear(): Promise<void> {
+      generation++
       current = null
       await store.clear()
     },

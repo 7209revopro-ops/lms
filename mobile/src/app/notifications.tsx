@@ -27,7 +27,9 @@ export default function Notifications() {
   const open = (n: AppNotification) => {
     if (!n.readAt) markRead.mutate(n.id)
     const path = n.link ? appPathFor(n.link) : null
-    if (path) router.push(path as never)
+    /* withAnchor: a course or a conversation opens with its tab's list under
+       it, not as that tab's only screen. */
+    if (path) router.push(path as never, { withAnchor: true })
   }
 
   return (

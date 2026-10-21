@@ -4,6 +4,7 @@ import Ionicons from '@expo/vector-icons/Ionicons'
 import { useTranslation } from 'react-i18next'
 import { moduleParam, useCatalog } from '@/lib/catalog'
 import { Empty, Failed, Loading } from '@/components/states'
+import { Glyph } from '@/components/ui'
 import { useTheme } from '@/theme'
 
 /* A course's modules, in course order; "General sessions" last. */
@@ -40,10 +41,10 @@ export default function CourseModules() {
             </View>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
               <Text style={{ flex: 1, fontFamily: fonts.bold, fontSize: 16, color: colors.textPrimary }}>{m.title}</Text>
-              <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
+              <Glyph name="chevron-forward" size={18} color={colors.textMuted} />
             </View>
             <Text style={{ fontFamily: fonts.body, fontSize: 13, color: colors.textSecondary }}>
-              {t('schedule.moduleMeta', { slots: m.groups.length, sessions: m.sessionCount })}
+              {`${t('schedule.slots', { count: m.groups.length })} · ${t('schedule.sessionCount', { count: m.sessionCount })}`}
               {m.languages.length ? ` · ${m.languages.join(', ')}` : ''}
             </Text>
             {m.blocked && (

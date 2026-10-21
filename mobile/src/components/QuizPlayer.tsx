@@ -8,7 +8,7 @@ import {
 } from '@shared'
 import { useQuiz, useQuizSummary, useSubmitQuiz } from '@/lib/api/learning'
 import { errorText } from '@/lib/errors'
-import { Button, Notice } from './ui'
+import { Button, Glyph, Notice } from './ui'
 import { Empty, Failed, Loading } from './states'
 import { useTheme } from '@/theme'
 
@@ -35,17 +35,27 @@ export function QuizPlayer({ lessonId, onNext }: { lessonId: string; onNext?: ()
     setAnswers(answersRef.current)
   }
 
-  const { mutateAsync, isPending } = submit
+  /* One submission per attempt. A ref, not isPending: the timer and an open
+     "Submit with N unanswered?" alert can both fire, and a callback captured
+     before the first send would still see isPending false — a second attempt
+     recorded, one of the five gone. Cleared only by a deliberate retry, or by a
+     failed send (so the student can try again). */
+  const sent = useRef(false)
+  const { mutateAsync } = submit
   const send = useCallback(async () => {
-    if (!quiz.data || isPending) return
+    if (!quiz.data || sent.current) return
+    sent.current = true
     try {
       const res = await mutateAsync(quizAnswers(quiz.data, answersRef.current))
       setResult(res)
       setPhase('result')
-    } catch { /* shown from submit.error */ }
-  }, [quiz.data, isPending, mutateAsync])
+    } catch {
+      sent.current = false   /* shown from submit.error; the student may retry */
+    }
+  }, [quiz.data, mutateAsync])
 
   const start = () => {
+    sent.current = false
     answersRef.current = {}
     setAnswers({})
     setResult(null)
@@ -203,7 +213,7 @@ function Question({ q, n, value, onChange }: { q: QuizQuestion; n: number; value
                   flexDirection: 'row', alignItems: 'center', gap: 10, padding: 12, borderRadius: radius.md, borderWidth: 1.5,
                   borderColor: on ? colors.primary : colors.border, backgroundColor: on ? colors.primaryLight : 'transparent',
                 }}>
-                <Ionicons name={on ? 'radio-button-on' : 'radio-button-off'} size={20} color={on ? colors.primary : colors.textMuted} />
+                <Glyph name={on ? 'radio-button-on' : 'radio-button-off'} size={20} color={on ? colors.primary : colors.textMuted} />
                 <Text style={{ flex: 1, fontFamily: fonts.body, fontSize: 15, color: colors.textPrimary }}>{c.label}</Text>
               </Pressable>
             )

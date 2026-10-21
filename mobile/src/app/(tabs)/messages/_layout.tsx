@@ -2,6 +2,9 @@ import { Stack } from 'expo-router/stack'
 import { useTranslation } from 'react-i18next'
 import { useTheme } from '@/theme'
 
+/* A link straight into this tab (a course, a conversation) keeps its list under it. */
+export const unstable_settings = { anchor: 'index' }
+
 export default function MessagesLayout() {
   const { t } = useTranslation()
   const { colors, fonts } = useTheme()

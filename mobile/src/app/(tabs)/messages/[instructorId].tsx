@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { ActivityIndicator, FlatList, KeyboardAvoidingView, Platform, Pressable, Text, TextInput, View } from 'react-native'
+import { ActivityIndicator, FlatList, KeyboardAvoidingView, Pressable, Text, TextInput, View } from 'react-native'
 import { Stack, useLocalSearchParams } from 'expo-router'
 import { useHeaderHeight } from 'expo-router/react-navigation'
 import Ionicons from '@expo/vector-icons/Ionicons'
@@ -51,7 +51,7 @@ export default function Thread() {
   return (
     <>
       <Stack.Screen options={{ title: name ?? '' }} />
-      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined} keyboardVerticalOffset={headerHeight}>
+      <KeyboardAvoidingView style={{ flex: 1 }} behavior="padding" keyboardVerticalOffset={headerHeight}>
         {thread.loading ? <Loading />
           : thread.loadError && thread.messages.length === 0 ? <Failed error={thread.loadError} onRetry={() => void thread.retryOpen()} />
           : (

@@ -23,6 +23,11 @@ import { useTheme } from '@/theme'
 
 void SplashScreen.preventAutoHideAsync()
 
+/* A link that opens the app straight on a class, the bookings or the
+   notifications (a Join button, a push) still has the tabs under it, so Back
+   leads home instead of out of the app. */
+export const unstable_settings = { anchor: '(tabs)' }
+
 /* Crash reporting only when a DSN is configured, and never from a dev build. */
 if (env.sentryDsn) {
   Sentry.init({ dsn: env.sentryDsn, environment: env.appEnv, release: appVersion, enabled: env.appEnv !== 'development' })
@@ -71,7 +76,7 @@ function PushBridge({ signedIn }: { signedIn: boolean }) {
     const id = response.notification.request.identifier
     if (handled.current === id) return
     handled.current = id
-    router.push(screenForNotification(response) as never)
+    router.push(screenForNotification(response) as never, { withAnchor: true })
     void Notifications.clearLastNotificationResponseAsync()
   }, [signedIn, response])
 

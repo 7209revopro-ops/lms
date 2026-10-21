@@ -4,13 +4,13 @@ import { router } from 'expo-router'
 import Ionicons from '@expo/vector-icons/Ionicons'
 import { useTranslation } from 'react-i18next'
 import {
-  effCourseTitle, effSectionTitle, getJoinPhase, getSlotStatus, seatsLeft, bookingCutoffLabel,
-  type LiveClass, type MyBooking, type SlotStatus,
+  effCourseTitle, effSectionTitle, displayStatus, getJoinPhase, getSlotStatus, seatsLeft, bookingCutoffLabel,
+  type LiveClass, type MyBooking, type DisplayStatus, type SlotStatus,
 } from '@shared'
 import { useBookClass, useCancelBooking } from '@/lib/api/classes'
 import { joinMeet } from '@/lib/join'
 import { errorText } from '@/lib/errors'
-import { Button } from './ui'
+import { Button, Glyph } from './ui'
 import { useTheme, type Colors } from '@/theme'
 
 /* ─────────────────────────────────────────────────────────────
@@ -28,9 +28,10 @@ export const fmtShort = (iso: string) => new Date(iso).toDateString() === new Da
   ? fmtTime(iso)
   : new Date(iso).toLocaleDateString('en-US', { day: 'numeric', month: 'short' })
 
-function tone(s: SlotStatus, c: Colors): string {
+function tone(s: DisplayStatus, c: Colors): string {
   switch (s) {
     case 'live': return c.danger
+    case 'startingSoon': return c.warning
     case 'booked': return c.success
     case 'bookable': return c.primary
     case 'attended': return c.primary
@@ -39,7 +40,7 @@ function tone(s: SlotStatus, c: Colors): string {
   }
 }
 
-export function StatusPill({ status }: { status: SlotStatus }) {
+export function StatusPill({ status }: { status: DisplayStatus }) {
   const { t } = useTranslation()
   const { colors, fonts } = useTheme()
   const color = tone(status, colors)
@@ -54,7 +55,7 @@ function Meta({ icon, text }: { icon: keyof typeof Ionicons.glyphMap; text: stri
   const { colors, fonts } = useTheme()
   return (
     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-      <Ionicons name={icon} size={14} color={colors.textMuted} />
+      <Glyph name={icon} size={14} color={colors.textMuted} />
       <Text style={{ fontFamily: fonts.body, fontSize: 13, color: colors.textSecondary, flexShrink: 1 }}>{text}</Text>
     </View>
   )
@@ -70,17 +71,18 @@ export function ClassCard({ lc, booking, hasOther, heldTwin, now, onPress }: {
   const { t } = useTranslation()
   const { colors, fonts, radius } = useTheme()
   const status = getSlotStatus(lc, booking, hasOther)
+  const shown = displayStatus(status, lc, now)
   const inPerson = lc.isOnline === false
   const module = effSectionTitle(lc)
   return (
     <Pressable onPress={onPress} accessibilityRole="button" disabled={!onPress}
       style={({ pressed }) => ({
-        backgroundColor: colors.bgSurface, borderColor: status === 'live' ? colors.danger : colors.border,
+        backgroundColor: colors.bgSurface, borderColor: shown === 'live' ? colors.danger : colors.border,
         borderWidth: 1, borderRadius: radius.lg, padding: 16, gap: 10, opacity: pressed ? 0.85 : 1,
       })}>
       <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
         <Text style={{ fontFamily: fonts.semibold, fontSize: 13, color: colors.primary }}>{fmtWhen(lc.scheduledStart)}</Text>
-        <StatusPill status={status} />
+        <StatusPill status={shown} />
       </View>
       <Text style={{ fontFamily: fonts.bold, fontSize: 16, color: colors.textPrimary }}>{lc.title}</Text>
       <View style={{ gap: 4 }}>
