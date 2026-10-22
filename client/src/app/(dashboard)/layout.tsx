@@ -13,6 +13,7 @@ import { VerifyEmailBanner } from '@/components/auth/VerifyEmailBanner'
 import { EnrollmentStatusBanner } from '@/components/auth/EnrollmentStatusBanner'
 import { InstallPopup } from '@/components/pwa/InstallPopup'
 import { ChatAlerts } from '@/components/chat/ChatAlerts'
+import { PushPrompt } from '@/components/pwa/PushPrompt'
 import { AnnouncementPopup } from '@/components/announcements/AnnouncementPopup'
 import { Toaster } from '@/components/ui/Toaster'
 import { RootPortalHistoryBridge } from '@/components/RootPortalHistoryBridge'
@@ -58,6 +59,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       <RightSidebarToggle />
       <InstallPopup />
       <ChatAlerts />
+      <PushPrompt />
       <AnnouncementPopup />
       <Toaster />
     </div>

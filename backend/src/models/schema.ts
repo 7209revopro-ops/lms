@@ -1108,6 +1108,38 @@ NotificationSchema.index({ userId: 1, readAt: 1 })
 
 export const NotificationModel = mongoose.model<INotification>('Notification', NotificationSchema)
 
+/* ── Push subscriptions (2026-10-21) ─────────────────────────
+   One per browser / installed app a user turned notifications on in: the Web
+   Push endpoint and its keys. Every bell notification is also pushed to them
+   (services/push.service.ts), so it reaches the phone with the app closed.
+   A subscription the push service says is gone (404/410) is deleted. */
+export interface IPushSubscription extends Document {
+  userId:     Types.ObjectId
+  app:        'client' | 'admin'
+  endpoint:   string
+  keys:       { p256dh: string; auth: string }
+  userAgent?: string
+  lastOkAt?:  Date
+  failures:   number
+  createdAt:  Date
+  updatedAt:  Date
+}
+const PushSubscriptionSchema = new Schema<IPushSubscription>(
+  {
+    userId:    { type: Schema.Types.ObjectId, ref: 'User', required: true, index: true },
+    app:       { type: String, enum: ['client', 'admin'], default: 'client' },
+    endpoint:  { type: String, required: true, maxlength: 1000 },
+    keys:      { p256dh: { type: String, required: true, maxlength: 200 }, auth: { type: String, required: true, maxlength: 100 } },
+    userAgent: { type: String, maxlength: 300 },
+    lastOkAt:  { type: Date },
+    failures:  { type: Number, default: 0 },
+  },
+  baseSchemaOptions,
+)
+/* One row per endpoint: a device re-subscribing (or another account signing in on it) replaces it. */
+PushSubscriptionSchema.index({ endpoint: 1 }, { unique: true })
+export const PushSubscriptionModel = mongoose.model<IPushSubscription>('PushSubscription', PushSubscriptionSchema)
+
 /* ─────────────────────────────────────────────────────
    FAVORITE — user saves a course for later
 ───────────────────────────────────────────────────── */
@@ -3312,6 +3344,8 @@ export interface IClassBooking extends Document {
   reminderDayOfSent:      boolean
   reminderPreSessionSent: boolean   // 30-min reminder (no link)
   reminder5MinSent:       boolean   // 5-min reminder (with link)
+  reminder1MinSent?:      boolean   // 1-min "join now" (bell + push, 2026-10-21)
+  todaysNoticeSent?:      boolean   // in the morning "your classes today" (bell + push, 2026-10-21)
   todaysWhatsAppSent?:    boolean   // in the morning "today's classes" WhatsApp
   reminderAtTimeSent:     boolean   // at-time reminder (with link)
   createdAt:   Date
@@ -3336,6 +3370,8 @@ const ClassBookingSchema = new Schema<IClassBooking>(
     reminderDayOfSent:      { type: Boolean, default: false },
     reminderPreSessionSent: { type: Boolean, default: false },
     reminder5MinSent:       { type: Boolean, default: false },
+    reminder1MinSent:       { type: Boolean },
+    todaysNoticeSent:       { type: Boolean },
     todaysWhatsAppSent:     { type: Boolean, default: false },
     reminderAtTimeSent:     { type: Boolean, default: false },
   },

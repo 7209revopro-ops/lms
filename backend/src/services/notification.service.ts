@@ -19,13 +19,19 @@ export class NotificationService {
      wrap this in try/catch so a notification failure never breaks the
      main flow. */
   async create(userId: string, payload: { kind: NotificationKind; title: string; body?: string; link?: string }) {
-    return this.repo.createOne({
+    const doc = await this.repo.createOne({
       userId,
       kind:  payload.kind,
       title: payload.title.slice(0, 255),
       body:  payload.body?.slice(0, 1000),
       link:  payload.link?.slice(0, 1024),
     })
+    /* …and to the user's phone / desktop, if they turned notifications on (2026-10-21). Fire-and-forget:
+       the bell is the record; a push that fails or is not set up changes nothing here. */
+    void import('@/services/push.service.ts')
+      .then(m => m.pushToUser(String(userId), { title: payload.title, body: payload.body, link: payload.link }))
+      .catch(() => {})
+    return doc
   }
 
   async list(userId: string, params: { page: number; perPage: number; unreadOnly?: boolean }) {

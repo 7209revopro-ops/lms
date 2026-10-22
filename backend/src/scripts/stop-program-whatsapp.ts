@@ -60,7 +60,7 @@ if (!APPLY) { console.log('\nDry run — nothing stopped. Re-run with --apply.')
 const w = await M.WhatsAppOutboxModel.updateMany(waiting, { $set: { status: 'failed', lastError: `stopped: programme "${p.title}" — not sent` } })
 const b = await M.ClassBookingModel.updateMany(bookingsQ, { $set: {
   reminderDayBeforeSent: true, reminderDayOfSent: true, reminderPreSessionSent: true, reminder5MinSent: true,
-  reminderAtTimeSent: true, todaysWhatsAppSent: true } })
+  reminderAtTimeSent: true, todaysWhatsAppSent: true, reminder1MinSent: true, todaysNoticeSent: true } })
 const r = await M.LiveClassModel.updateMany({ programId: p._id }, { $set: { reviewRequestSent: true } })
 console.log(`\nStopped: ${w.modifiedCount} waiting WhatsApps; ${b.modifiedCount} bookings marked reminded; ${r.modifiedCount} classes: no review request.`)
 await done(0)

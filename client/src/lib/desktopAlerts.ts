@@ -31,6 +31,8 @@ export async function showDesktopAlert(title: string, body: string, url: string)
   const opts: NotificationOptions = { body, icon: '/icon-192.png', badge: '/icon-192.png', tag: url, data: { url } }
   try {
     const reg = 'serviceWorker' in navigator ? await navigator.serviceWorker.getRegistration() : undefined
+    /* This device gets push (lib/push.ts): the LMS already sends this one — showing it here too would be twice. */
+    if (reg && 'pushManager' in reg && await reg.pushManager.getSubscription().catch(() => null)) return
     if (reg) { await reg.showNotification(title, opts); return }
     const n = new Notification(title, opts)
     n.onclick = () => { window.focus(); window.location.assign(url); n.close() }

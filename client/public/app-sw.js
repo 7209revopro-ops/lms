@@ -39,3 +39,21 @@ self.addEventListener("notificationclick", (event) => {
     }),
   );
 });
+
+/* A push from the LMS (services/push.service.ts, 2026-10-21): every bell
+   notification — class reminders, new classes, messages — shown by the phone
+   or desktop even when the app is closed. Tapping it is handled above. */
+self.addEventListener("push", (event) => {
+  let d = {};
+  try { d = event.data ? event.data.json() : {}; } catch { d = { body: event.data ? event.data.text() : "" }; }
+  event.waitUntil(
+    self.registration.showNotification(d.title || "Delta Institutions", {
+      body: d.body || "",
+      icon: "/icon-192.png",
+      badge: "/icon-192.png",
+      tag: d.tag || undefined,
+      renotify: Boolean(d.tag),
+      data: { url: d.url || "/" },
+    }),
+  );
+});

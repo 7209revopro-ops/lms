@@ -237,6 +237,8 @@ async function dispatch(
      (normalizeWhatsAppNumber returns null → skipped, logged, never thrown),
      so failure here never triggers the "email failed" system notification. */
   whatsappFn?:  () => Promise<void>,
+  /* inApp: false — the day-of reminder's bell is the morning "your classes today" summary instead (2026-10-21). */
+  opts:         { inApp?: boolean } = {},
 ): Promise<void> {
   const dateLabel = fmtFull(sessionStart, academySlug)
   const timeLabel = fmtTime(sessionStart, academySlug)
@@ -264,8 +266,8 @@ async function dispatch(
     'at-time':     `Live now: ${sessionTitle}`,
   }[kind]
 
-  /* 1. In-app notification — always fires */
-  await notifSvc.create(userId, {
+  /* 1. In-app notification (and its push) — unless a summary carries it */
+  if (opts.inApp !== false) await notifSvc.create(userId, {
     kind:  'class-reminder',
     title: notifTitle,
     body:  notifBody,
@@ -364,6 +366,7 @@ export async function runDayOfReminders(): Promise<void> {
       .lean({ virtuals: true }) as unknown as BookingWithRefs[]
 
     const due = dueBetween(bookings, start, end)
+    const today = new Map<string, { slug: string | null | undefined; classes: Array<{ title: string; at: Date }> }>()
 
     for (const b of due) {
       const userId  = b.userId.id ?? b.userId._id?.toString()
@@ -382,13 +385,27 @@ export async function runDayOfReminders(): Promise<void> {
           fmtFull(classAt, slug),
           joinUrl,
         ),
-        undefined, slug,
+        undefined, slug, undefined, { inApp: false },
       )
 
       await ClassBookingModel.findByIdAndUpdate(b._id, { reminderDayOfSent: true })
+      const row = today.get(userId) ?? { slug, classes: [] as Array<{ title: string; at: Date }> }
+      row.classes.push({ title: b.liveClassId.title, at: classAt })
+      today.set(userId, row)
     }
 
-    if (due.length) logger.info(`[Reminders] Day-of: dispatched ${due.length} reminders`)
+    /* "Your classes today" — ONE bell (and push) per student instead of one per class (2026-10-21). */
+    for (const [userId, row] of today) {
+      const list = row.classes.sort((a, b) => a.at.getTime() - b.at.getTime())
+      await notifSvc.create(userId, {
+        kind:  'class-reminder',
+        title: list.length === 1 ? `Today: ${list[0]!.title} at ${fmtTime(list[0]!.at, row.slug)}` : `Your ${list.length} classes today`,
+        body:  list.map(c => `${fmtTime(c.at, row.slug)} · ${c.title}`).join('\n'),
+        link:  SCHEDULE_LINK,
+      }).catch(err => logger.error({ err, userId }, '[Reminders] today summary failed'))
+    }
+
+    if (due.length) logger.info(`[Reminders] Day-of: dispatched ${due.length} reminders, ${today.size} "today" summaries`)
   } catch (err) {
     logger.error({ err }, '[Reminders] day-of job error')
   }
@@ -587,6 +604,41 @@ export async function runFiveMinReminders(): Promise<void> {
     if (due.length) logger.info(`[Reminders] 5-min: dispatched ${due.length} reminders`)
   } catch (err) {
     logger.error({ err }, '[Reminders] 5-min job error')
+  }
+}
+
+/* ── 1-minute "join now" (2026-10-21) ──────────────────── */
+/* A bell + push to every booked student a minute before the class — the phone
+   notification that gets them in on time. Every class, programmes included
+   (it costs nothing; no email, no WhatsApp). Runs every minute; the classes
+   starting within the next two minutes are taken, each booking once. */
+export async function runOneMinReminders(now = new Date()): Promise<number> {
+  try {
+    const { ClassBookingModel, LiveClassModel } = await import('@/models/schema.ts')
+    const classes = await LiveClassModel.find({
+      status: { $in: ['scheduled', 'live'] },
+      scheduledStart: { $gt: now, $lte: new Date(now.getTime() + 2 * 60_000) },
+    }).select('_id title isOnline').lean<Array<{ _id: unknown; title: string; isOnline?: boolean }>>()
+    let sent = 0
+    for (const c of classes) {
+      const rows = await ClassBookingModel.find({ liveClassId: c._id, status: 'booked', reminder1MinSent: { $ne: true } })
+        .select('_id userId').lean<Array<{ _id: unknown; userId: unknown }>>()
+      for (const b of rows) {
+        /* Claim first, so two overlapping ticks never send it twice. */
+        const claimed = await ClassBookingModel.updateOne({ _id: b._id, reminder1MinSent: { $ne: true } }, { $set: { reminder1MinSent: true } })
+        if (!claimed.modifiedCount) continue
+        await notifSvc.create(String(b.userId), c.isOnline === false
+          ? { kind: 'class-reminder', title: `Starting in 1 min: ${c.title}`, body: 'Your class is about to begin — please take your seat.', link: SCHEDULE_LINK }
+          : { kind: 'class-reminder', title: `Starting in 1 min: ${c.title}`, body: 'Tap to join now.', link: `/live-classes/${String(c._id)}/watch` },
+        ).catch(err => logger.error({ err }, '[Reminders] 1-min reminder failed'))
+        sent++
+      }
+    }
+    if (sent) logger.info(`[Reminders] 1-min: ${sent} reminders`)
+    return sent
+  } catch (err) {
+    logger.error({ err }, '[Reminders] 1-min job error')
+    return 0
   }
 }
 
@@ -1373,6 +1425,8 @@ export function startReminderJobs(): void {
 
   // Every 5 min — at-time reminder WITH link (0–5 min after start)
   cron.schedule('*/5 * * * *', exclusive('at-time', runAtTimeReminders))
+  // Every minute: a bell + push one minute before each class (2026-10-21).
+  cron.schedule('* * * * *', exclusive('one-min', () => runOneMinReminders().then(() => undefined)))
 
   // Every 5 min — instructor 15-min reminder with Google Meet link (13–17 min window)
   cron.schedule('*/5 * * * *', exclusive('instructor-15min', runInstructor15MinReminders))
