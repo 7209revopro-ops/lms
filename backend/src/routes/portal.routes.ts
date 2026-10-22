@@ -292,6 +292,21 @@ router.get('/student-emails/:id', wrap(async (req, res) => {
   sendSuccess(res, await studentEmailForPortal(req.params['id'], req.query.email), 'Student email')
 }))
 
+/* Instructor reviews (2026-10-22): the students' ratings after each class — the leaderboard of every academy, with each
+   instructor's address so the portal can show a chief only their own team's, and one instructor's reviews. Read only. */
+router.get('/instructor-reviews', wrap(async (_req, res) => {
+  const { InstructorReviewService } = await import('@/services/instructorReview.service.ts')
+  sendSuccess(res, await new InstructorReviewService().leaderboard(undefined, undefined), 'Instructor reviews')
+}))
+
+router.get('/instructor-reviews/:id', wrap(async (req, res) => {
+  const { InstructorReviewService } = await import('@/services/instructorReview.service.ts')
+  const page = Math.max(1, Math.floor(Number(req.query.page) || 1))
+  const perPage = Math.min(100, Math.max(1, Math.floor(Number(req.query.per_page) || 50)))
+  const { docs, totalCount } = await new InstructorReviewService().listForInstructor(String(req.params['id'] ?? ''), undefined, undefined, page, perPage)
+  sendSuccess(res, { reviews: docs, total: totalCount, page, perPage }, 'Reviews')
+}))
+
 router.get('/exams', wrap(async (req, res) => {
   const { listExamsForPortal } = await import('@/services/portalExams.service.ts')
   sendSuccess(res, await listExamsForPortal(req.query.academy), 'Exams')

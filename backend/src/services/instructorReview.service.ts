@@ -124,7 +124,7 @@ export class InstructorReviewService {
      no academy selected in the switcher passes orgId=undefined and sees
      every academy; one academy selected narrows exactly like an org admin. */
   async leaderboard(orgId: string | undefined, scope: string | undefined): Promise<Array<{
-    instructorId: string; name: string; avatarUrl?: string
+    instructorId: string; name: string; email?: string; avatarUrl?: string
     avgRating: number; totalReviews: number
     ratingCounts: Record<1 | 2 | 3 | 4 | 5, number>
     lowRatingCount: number
@@ -162,6 +162,8 @@ export class InstructorReviewService {
       return {
         instructorId:   String(r._id),
         name:           r.instructor?.name ?? 'Unknown',
+        // The portal matches instructors to its own people by address (2026-10-22: its Instructor Reviews page).
+        email:          r.instructor?.email,
         avatarUrl:      r.instructor?.avatarUrl,
         avgRating:      Math.round((r.avgRating as number) * 10) / 10,
         totalReviews:   r.totalReviews,
