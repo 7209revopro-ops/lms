@@ -302,3 +302,33 @@ export interface ExamResult {
 
 /** "4:05" from milliseconds left. */
 export const countdown = (ms: number): string => clockLabel(Math.ceil(Math.max(0, ms) / 1000))
+
+/* ── Journey (GET /live-classes/journey, the website's Class Schedule since 2026-10-21) ── */
+
+export type LevelState = 'completed' | 'current' | 'next' | 'locked'
+export interface JourneyModule { id: string; title: string; number: number; locked: boolean }
+export interface JourneyLevel {
+  courseId: string; title: string; slug?: string; thumbnailUrl?: string; description?: string
+  level: number; state: LevelState; progressPercent: number
+  modules: JourneyModule[]; modulesOpen: number; modulesTotal: number
+  /** Why modules are locked: the fee (finance) or the academy. */
+  lockReason?: 'payment' | 'academy'
+  classesAttended: number
+}
+export interface Journey {
+  programmes: { program: string; label: string; levels: JourneyLevel[] }[]
+  /** The advisor's name only. */
+  advisor: { name?: string } | null
+}
+
+/** A level the student can open now (its classes and lessons), vs one to unlock. */
+export const levelHeld = (l: Pick<JourneyLevel, 'state'>) => l.state === 'completed' || l.state === 'current'
+
+/** The support request the website's "Ask my advisor to unlock it" sends. */
+export function unlockRequest(l: Pick<JourneyLevel, 'title' | 'lockReason'>, programme: string) {
+  return {
+    subject: `Unlock ${l.title}`.slice(0, 200),
+    category: 'course' as const,
+    message: `Hi, I would like to unlock "${l.title}" (${programme})${l.lockReason === 'payment' ? ' — please let me know about the fee' : ''}. Thank you.`,
+  }
+}

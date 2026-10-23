@@ -16,6 +16,7 @@ export default function ScheduleLayout() {
       contentStyle: { backgroundColor: colors.bgPage },
     }}>
       <Stack.Screen name="index" options={{ title: t('schedule.title') }} />
+      <Stack.Screen name="journey" options={{ title: t('journey.title') }} />
       <Stack.Screen name="[courseId]/index" options={{ title: t('schedule.modules') }} />
       <Stack.Screen name="[courseId]/[moduleId]" options={{ title: t('schedule.sessions') }} />
     </Stack>

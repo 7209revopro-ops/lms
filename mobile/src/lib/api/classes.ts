@@ -16,11 +16,13 @@ export const keys = {
   bookings: ['bookings', 'me'] as const,
 }
 
-/** Every session available to this student (GET /live-classes). */
-export function useLiveClasses() {
+/** Every session available to this student (GET /live-classes). `mine`:
+ *  only classes of courses the student holds (and guest-cohort classes) —
+ *  what the website's Class Schedule shows since 2026-10-21. */
+export function useLiveClasses(mine = false) {
   return useQuery({
-    queryKey: keys.classes,
-    queryFn:  async () => (await apiGet<unknown[]>('/live-classes')).map(normalizeLiveClass),
+    queryKey: mine ? [...keys.classes, 'mine'] : keys.classes,
+    queryFn:  async () => (await apiGet<unknown[]>('/live-classes', mine ? { mine: 1 } : undefined)).map(normalizeLiveClass),
     staleTime: 15_000,
     refetchInterval: 60_000,
   })

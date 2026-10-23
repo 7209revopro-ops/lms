@@ -20,6 +20,9 @@ config.resolver.nodeModulesPaths = [path.resolve(projectRoot, 'node_modules')]
 const escape = p => p.replace(/[/\\]/g, '[/\\\\]').replace(/\./g, '\\.')
 const nativeBuild = ['android/app/build', 'android/build', 'android/.gradle', 'android/app/.cxx', 'ios/build', 'ios/Pods']
   .map(p => new RegExp(`^${escape(path.resolve(projectRoot, p))}[/\\\\].*`))
+/* Gradle also builds each native package in place, under
+   node_modules/<pkg>/android/{build,.cxx} — thousands more files Metro never needs. */
+nativeBuild.push(/[/\\]node_modules[/\\].*[/\\]android[/\\](build|\.cxx|\.gradle)[/\\].*/)
 const existing = config.resolver.blockList
 config.resolver.blockList = [...(Array.isArray(existing) ? existing : existing ? [existing] : []), ...nativeBuild]
 

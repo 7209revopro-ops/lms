@@ -69,6 +69,8 @@ export interface RegisterForm {
   email: string
   password: string
   confirmPassword: string
+  /** The 6-digit code from POST /auth/register/code — verifies the email instead of a password. */
+  emailCode: string
   organizationSlug: CenterSlug | ''
   homeCountry: string
   terms: boolean
@@ -98,7 +100,7 @@ export interface RegisterForm {
 }
 
 export const EMPTY_FORM: RegisterForm = {
-  name: '', email: '', password: '', confirmPassword: '', organizationSlug: '', homeCountry: '', terms: false,
+  name: '', email: '', password: '', confirmPassword: '', emailCode: '', organizationSlug: '', homeCountry: '', terms: false,
   phone: '', emergencyContact: '', gender: '', dateOfBirth: '', nationality: '', occupation: '',
   idType: '', idNumber: '', countryAttendance: '', villa: '', city: '', addressCountry: '',
   experienceLevel: '', preferredStartDate: '', hearAboutUs: '', referralName: '', programs: [], paymentMethod: '',
@@ -168,9 +170,15 @@ function common(f: RegisterForm, full: boolean): Errors {
   return e
 }
 
-function account(f: RegisterForm, full: boolean): Errors {
+function account(f: RegisterForm, full: boolean, byCode = false): Errors {
   const e: Errors = {}
   if (!f.organizationSlug) e.organizationSlug = 'centerRequired'
+  /* Sign-up by emailed code (the website since 2026-10-22): no password at all. */
+  if (byCode) {
+    if (!/^\d{6}$/.test(f.emailCode.trim())) e.emailCode = 'emailCodeRequired'
+    if (!f.terms) e.terms = 'termsRequired'
+    return e
+  }
   if (!f.password) e.password = 'passwordRequired'
   else if (f.password.length < 8) e.password = 'passwordLength'
   else if (!/[A-Z]/.test(f.password)) e.password = 'passwordUpper'
@@ -185,7 +193,7 @@ export function validateExpress(f: RegisterForm): Errors {
 }
 
 /** One step of the full application. `phoneOk` is the caller's phone check. */
-export function validateStep(step: number, f: RegisterForm, phoneOk: (v: string) => boolean, today = new Date()): Errors {
+export function validateStep(step: number, f: RegisterForm, phoneOk: (v: string) => boolean, today = new Date(), byCode = false): Errors {
   const e: Errors = {}
   if (step === 0) {
     Object.assign(e, common(f, true))
@@ -229,7 +237,7 @@ export function validateStep(step: number, f: RegisterForm, phoneOk: (v: string)
     if (!f.hearAboutUs) e.hearAboutUs = 'hearRequired'
     if (f.programs.length === 0) e.programs = 'programsRequired'
   }
-  if (step === 3) Object.assign(e, account(f, true))
+  if (step === 3) Object.assign(e, account(f, true, byCode))
   if (step === 3 && !f.paymentMethod) e.paymentMethod = 'paymentRequired'
   return e
 }
@@ -249,7 +257,10 @@ export function expressBody(f: RegisterForm) {
 
 export function fullBody(f: RegisterForm, docs: { passportUrl: string; idDocUrl: string; photoUrl: string }) {
   return {
-    name: f.name.trim(), email: f.email.trim().toLowerCase(), password: f.password,
+    name: f.name.trim(), email: f.email.trim().toLowerCase(),
+    /* The emailed code when there is one (no password — the website since
+       2026-10-22); otherwise the password, still accepted. */
+    ...(f.emailCode.trim() ? { emailCode: f.emailCode.trim() } : { password: f.password }),
     /* Explicit: the website leaves this out and lets the server infer it. */
     signupType: 'full' as const,
     organizationSlug: f.organizationSlug || undefined,

@@ -5,10 +5,11 @@ import * as WebBrowser from 'expo-web-browser'
 import { useTranslation } from 'react-i18next'
 import {
   CENTERS, EXPERIENCE, EMPTY_FORM, GENDERS, HEAR_ABOUT, ID_TYPES, PAYMENT_METHODS, PROGRAM_GROUPS, REFERRAL, STEPS,
-  expressBody, formatIdNumber, fullBody, isoDate, passwordStrength, problemOf, refusedFields, validateExpress, validateStep,
+  formatIdNumber, fullBody, isoDate, problemOf, refusedFields, validateStep,
   type Errors, type IdType, type RegisterForm,
 } from '@shared'
 import { useAuth } from '@/lib/auth'
+import { apiPost } from '@/lib/http'
 import { handleSignInError } from '@/lib/authErrors'
 import { env } from '@/lib/env'
 import { forgetUpload, phoneOk, uploadSignupDoc, type PreparedFile } from '@/lib/register'
@@ -17,13 +18,12 @@ import { COUNTRY_OPTIONS, Checkbox, DateField, FieldError, FileField, PhoneField
 import { useTheme } from '@/theme'
 
 /* ─────────────────────────────────────────────────────────────
-   Create an account — the website's two ways, with its rules and its body
-   (shared/src/register.ts):
-     Express  name · email · learning centre · country · password · terms
-     Full     Personal → Address & documents → Program → Account, with the
-              passport / ID / photo uploaded first (POST /uploads/signup-doc)
-   Either way the student is signed in as "pending" — browse only until an
-   admin approves the application, exactly as on the website.
+   Create an account — the website's full registration (Express is hidden
+   there since 2026-10-22): Personal → Address & documents → Program →
+   Account. The passport / ID / photo go up first (POST /uploads/signup-doc);
+   the email is proven with a 6-digit code (POST /auth/register/code) instead
+   of a password, and the account is signed in straight away as "pending" —
+   browse only until an admin approves it, exactly as on the website.
 ───────────────────────────────────────────────────────────── */
 
 type Files = { photo: PreparedFile | null; passport: PreparedFile | null; idDoc: PreparedFile | null }
@@ -33,7 +33,10 @@ export default function Register() {
   const { t } = useTranslation()
   const { colors, fonts } = useTheme()
   const { register } = useAuth()
-  const [mode, setMode] = useState<'express' | 'full'>('express')
+  /* Full registration only — the website hid Express on 2026-10-22. */
+  const mode = 'full' as 'express' | 'full'
+  const [codeSent, setCodeSent] = useState<string | null>(null)
+  const [sending, setSending] = useState(false)
   const [step, setStep] = useState(0)
   const [f, setF] = useState<RegisterForm>(EMPTY_FORM)
   const [files, setFiles] = useState<Files>({ photo: null, passport: null, idDoc: null })
@@ -58,7 +61,11 @@ export default function Register() {
 
   const fail = (e: unknown) => {
     const p = problemOf(e)
-    if (p.kind === 'refused' && p.code === 'EMAIL_TAKEN') {
+    if (p.kind === 'refused' && (p.code === 'INVALID_CODE' || p.code === 'CODE_REQUIRED')) {
+      setStep(STEPS.length - 1)
+      setErrors(x => ({ ...x, emailCode: 'emailCodeWrong' }))
+      setBanner({ text: p.message })
+    } else if (p.kind === 'refused' && p.code === 'EMAIL_TAKEN') {
       setBanner({ text: t('register.emailTaken'), signIn: true })
     } else if (p.kind === 'refused' && p.code === 'VALIDATION_ERROR') {
       const bad = refusedFields((e as { response?: { data?: { error?: { details?: unknown } } } }).response?.data?.error?.details)
@@ -80,28 +87,33 @@ export default function Register() {
     if (outcome === 'verify') setVerifyEmail(f.email.trim())
   }
 
-  const submitExpress = async () => {
-    setBanner(null)
-    const e = validateExpress(f)
-    setErrors(e)
-    if (Object.keys(e).length) { top(); return }
-    setBusy(t('register.creating'))
-    try { done(await register(expressBody(f))) } catch (x) { fail(x) } finally { setBusy(null) }
-  }
-
   const next = () => {
-    const e = validateStep(step, f, phoneOk)
+    const e = validateStep(step, f, phoneOk, new Date(), true)
     setErrors(e)
     if (Object.keys(e).length) { top(); return }
     setStep(s => s + 1)
     top()
   }
 
+  /* Step 4 verifies the email with a code instead of a password (the
+     website since 2026-10-22). Same answer whether or not the address has an account. */
+  const sendCode = async () => {
+    setBanner(null); setSending(true)
+    try {
+      await apiPost('/auth/register/code', { email: f.email.trim().toLowerCase() })
+      setCodeSent(f.email.trim())
+    } catch (x) {
+      fail(x)
+    } finally {
+      setSending(false)
+    }
+  }
+
   const submitFull = async () => {
     setBanner(null)
     /* Every step again — something may have changed since it was passed. */
     for (let s = 0; s < STEPS.length; s++) {
-      const e = validateStep(s, f, phoneOk)
+      const e = validateStep(s, f, phoneOk, new Date(), true)
       if (Object.keys(e).length) { setErrors(e); setStep(s); top(); return }
     }
     try {
@@ -135,21 +147,6 @@ export default function Register() {
     )
   }
 
-  const strength = passwordStrength(f.password)
-  const strengthLabels = t('register.strength', { returnObjects: true }) as string[]
-  const password = (
-    <View style={{ gap: 6 }}>
-      <Field label={t('register.password')} invalid={!!err('password')} value={f.password} onChangeText={v => set('password', v)} secureTextEntry
-        autoComplete="new-password" textContentType="newPassword" autoCapitalize="none" />
-      {!!f.password && (
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-          {[1, 2, 3, 4].map(i => <View key={i} style={{ flex: 1, height: 4, borderRadius: 2, backgroundColor: i <= strength ? (strength >= 3 ? colors.success : colors.warning) : colors.bgMuted }} />)}
-          <Text style={{ fontFamily: fonts.medium, fontSize: 12, color: colors.textMuted, width: 52 }}>{strengthLabels[strength]}</Text>
-        </View>
-      )}
-      <FieldError text={err('password')} />
-    </View>
-  )
   const terms = (
     <Checkbox checked={f.terms} onChange={v => set('terms', v)} error={err('terms')}
       label={`${t('register.terms')}${mode === 'full' ? t('register.termsFull') : ''}`}>
@@ -182,10 +179,6 @@ export default function Register() {
     <Screen scroll={false}>
       <ScrollView ref={scroll} contentContainerStyle={{ gap: 16 }} keyboardShouldPersistTaps="handled">
         <Title>{mode === 'express' ? t('register.expressTitle') : t('register.full')}</Title>
-        <View style={{ flexDirection: 'row', gap: 8 }}>
-          <Chip label={t('register.express')} active={mode === 'express'} onPress={() => { setMode('express'); setErrors({}); setBanner(null) }} />
-          <Chip label={t('register.full')} active={mode === 'full'} onPress={() => { setMode('full'); setStep(0); setErrors({}); setBanner(null) }} />
-        </View>
         <Body muted>{mode === 'express' ? t('register.expressSub') : t('register.stepOf', { n: step + 1, label: t(`register.steps.${STEPS[step]}`) })}</Body>
         {banner && (
           <View style={{ gap: 8 }}>
@@ -194,12 +187,6 @@ export default function Register() {
           </View>
         )}
 
-        {mode === 'express' && <>
-          {name}{email}{center}
-          <Select label={t('register.countryRes')} value={f.homeCountry} options={COUNTRY_OPTIONS} onChange={v => set('homeCountry', v)} error={err('homeCountry')} />
-          {password}{terms}
-          <Button title={busy ?? t('register.create')} loading={!!busy} onPress={() => void submitExpress()} />
-        </>}
 
         {mode === 'full' && step === 0 && <>
           <FileField label={t('register.photo')} hint={t('register.photoHint')} kind="avatar" value={files.photo} onChange={setFile('photo', 'hasPhoto')} error={err('hasPhoto')} />
@@ -277,11 +264,9 @@ export default function Register() {
         {mode === 'full' && step === 3 && <>
           {center}
           <Select label={t('register.payment')} value={f.paymentMethod} options={opts(PAYMENT_METHODS)} onChange={v => set('paymentMethod', v)} error={err('paymentMethod')} />
-          {password}
-          <View style={{ gap: 6 }}>
-            <Field label={t('register.confirmPassword')} invalid={!!err('confirmPassword')} value={f.confirmPassword} onChangeText={v => set('confirmPassword', v)} secureTextEntry autoCapitalize="none" />
-            <FieldError text={err('confirmPassword')} />
-          </View>
+          <VerifyEmail email={f.email.trim()} sentTo={codeSent} sending={sending} code={f.emailCode}
+            onCode={v => set('emailCode', v.replace(/\D/g, '').slice(0, 6))} error={err('emailCode')}
+            onSend={() => void sendCode()} />
           {terms}
         </>}
 
@@ -302,5 +287,31 @@ export default function Register() {
         </Pressable>
       </ScrollView>
     </Screen>
+  )
+}
+
+/** Step 4: prove the email with a 6-digit code (no password). */
+function VerifyEmail({ email, sentTo, sending, code, onCode, onSend, error }: {
+  email: string; sentTo: string | null; sending: boolean; code: string
+  onCode: (v: string) => void; onSend: () => void; error?: string
+}) {
+  const { t } = useTranslation()
+  const { colors, fonts, radius } = useTheme()
+  /* A code sent to another address (the email was edited since) does not count. */
+  const sent = !!sentTo && sentTo.toLowerCase() === email.toLowerCase()
+  return (
+    <View style={{ gap: 10, padding: 14, borderRadius: radius.lg, borderWidth: 1, borderColor: error ? colors.danger : colors.border, backgroundColor: colors.bgSurface }}>
+      <Text accessibilityRole="header" style={{ fontFamily: fonts.semibold, fontSize: 15, color: colors.textPrimary }}>{t('register.verifyEmailTitle')}</Text>
+      <Text style={{ fontFamily: fonts.body, fontSize: 13, lineHeight: 19, color: colors.textSecondary }}>
+        {sent ? t('register.codeSentTo', { email }) : t('register.verifyEmailBody', { email })}
+      </Text>
+      {sent && (
+        <Field label={t('auth.code')} invalid={!!error} value={code} onChangeText={onCode} keyboardType="number-pad"
+          textContentType="oneTimeCode" autoComplete="one-time-code" maxLength={6} />
+      )}
+      <FieldError text={error} />
+      <Button variant={sent ? 'ghost' : 'primary'} title={sent ? t('register.resendCode') : t('register.sendCode')} loading={sending} onPress={onSend} />
+      <Text style={{ fontFamily: fonts.medium, fontSize: 12, color: colors.textMuted }}>{t('register.noPassword')}</Text>
+    </View>
   )
 }

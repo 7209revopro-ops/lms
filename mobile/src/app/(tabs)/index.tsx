@@ -3,13 +3,13 @@ import { Pressable, RefreshControl, ScrollView, Text, View } from 'react-native'
 import { router } from 'expo-router'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { useTranslation } from 'react-i18next'
-import { bucketOf, needsFullRegistration, type Announcement } from '@shared'
+import { appPathFor, bucketOf, needsFullRegistration, type Announcement } from '@shared'
 import { useAuth } from '@/lib/auth'
 import { useMyClasses } from '@/lib/myClasses'
 import { useLiveClasses } from '@/lib/api/classes'
 import { useMyEnrollments } from '@/lib/api/learning'
-import { useNotificationUnread } from '@/lib/api/notifications'
-import { useAnnouncements, usePendingRatings, useStreak } from '@/lib/api/engage'
+import { useMarkRead, useNotificationUnread } from '@/lib/api/notifications'
+import { useAnnouncements, useMissed, usePendingRatings, useStreak, type MissedItem } from '@/lib/api/engage'
 import { resendVerification } from '@/lib/api/account'
 import { errorText } from '@/lib/errors'
 import { bucketOfDayGreeting } from '@/lib/greeting'
@@ -71,6 +71,8 @@ export default function Home() {
             <Glyph name="chevron-forward" size={18} color={colors.primary} />
           </Card>
         )}
+
+        <Missed />
 
         {news.map(a => (
           <AnnouncementCard key={a.id} a={a} onDismiss={() => { dismissedAnnouncements.add(a.id); rerender(n => n + 1) }} />
@@ -243,5 +245,46 @@ function VerifyBanner({ email, onHide }: { email: string; onHide: () => void }) 
         <View style={{ flex: 1 }}><Button variant="ghost" title={t('verify.later')} onPress={onHide} /></View>
       </View>
     </Card>
+  )
+}
+
+const MISSED_ICON: Record<string, React.ComponentProps<typeof Glyph>['name']> = {
+  'live-class-scheduled': 'calendar', 'class-reminder': 'alarm', 'chat-message': 'chatbubble',
+}
+
+/** "What you missed" — the website's once-a-day sheet, as a quiet section:
+ *  the newest unread notices, new classes first; tapping one opens it. */
+function Missed() {
+  const { t } = useTranslation()
+  const { colors, fonts } = useTheme()
+  const missed = useMissed()
+  const markRead = useMarkRead()
+  const items = (missed.data ?? []).slice(0, 3)
+  if (!items.length) return null
+  const open = (m: MissedItem) => {
+    markRead.mutate(m.id, { onSettled: () => void missed.refetch() })
+    const path = m.link ? appPathFor(m.link) : null
+    router.push((path ?? '/notifications') as never, { withAnchor: true })
+  }
+  return (
+    <View style={{ gap: 8 }}>
+      <SectionHeader title={t('missed.title')} action={{ label: t('missed.seeAll'), onPress: () => router.push('/notifications') }} />
+      <Card padded={false}>
+        {items.map((m, i) => (
+          <Pressable key={m.id} onPress={() => open(m)} accessibilityRole="button" accessibilityLabel={m.body ? `${m.title}. ${m.body}` : m.title}
+            style={({ pressed }) => ({ flexDirection: 'row', alignItems: 'center', gap: 12, padding: 14,
+              backgroundColor: pressed ? colors.bgMuted : 'transparent', borderTopWidth: i ? 1 : 0, borderTopColor: colors.border })}>
+            <View style={{ width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.primaryLight }}>
+              <Glyph name={MISSED_ICON[m.kind] ?? 'notifications'} size={18} color={colors.primary} />
+            </View>
+            <View style={{ flex: 1, gap: 2 }}>
+              <Text numberOfLines={1} style={{ fontFamily: fonts.semibold, fontSize: 14, color: colors.textPrimary }}>{m.title}</Text>
+              {!!m.body && <Text numberOfLines={1} style={{ fontFamily: fonts.body, fontSize: 12, color: colors.textMuted }}>{m.body}</Text>}
+            </View>
+            <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: colors.primary }} />
+          </Pressable>
+        ))}
+      </Card>
+    </View>
   )
 }

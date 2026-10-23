@@ -2,7 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   aiHistory, normalizeActivity, normalizeAnnouncement, normalizeBookmark, normalizeComment, normalizeFeedback,
   normalizeHomework, normalizeThread,
-  type Achievements, type AiTurn, type ExamInfo, type ExamResult, type ExamStart, type PendingRating, type Streak,
+  type Achievements, type AiTurn, type ExamInfo, type ExamResult, type ExamStart, type Journey, type PendingRating, type Streak,
 } from '@shared'
 import { apiGet, apiPost, http } from '../http'
 
@@ -206,3 +206,48 @@ export const useExamResult = (examId: string | undefined, enabled: boolean) => u
 
 /** The certificate PDF's API path (fetched with the student's token). */
 export const certificatePath = (enrollmentId: string) => `/certificates/${enrollmentId}`
+
+/* ── Journey, new-class badge, what you missed (the website since 2026-10-21) ── */
+
+export const journeyKeys = {
+  journey: ['engage', 'journey'] as const,
+  newClasses: ['engage', 'new-classes'] as const,
+  missed: ['engage', 'missed'] as const,
+}
+
+export const useJourney = (enabled = true) => useQuery({
+  queryKey: journeyKeys.journey,
+  queryFn:  () => apiGet<Journey>('/live-classes/journey'),
+  enabled,
+  staleTime: 60_000,
+})
+
+/** Unread "new class scheduled" notices — the Schedule tab's badge. */
+export const useNewClassCount = (enabled = true) => useQuery({
+  queryKey: journeyKeys.newClasses,
+  queryFn:  async () => (await apiGet<{ unreadCount: number }>('/notifications/unread-count', { kind: 'live-class-scheduled' })).unreadCount,
+  enabled,
+  staleTime: 30_000,
+  refetchInterval: 120_000,
+})
+
+/** Opening the Schedule reads them (the website does the same). */
+export async function markNewClassesSeen(): Promise<void> {
+  await apiPost('/notifications/read-all?kind=live-class-scheduled')
+}
+
+export interface MissedItem { id: string; kind: string; title: string; body?: string; link?: string; createdAt: string }
+/** Unread notifications, newest classes first — "What you missed". */
+export const useMissed = (enabled = true) => useQuery({
+  queryKey: journeyKeys.missed,
+  queryFn:  async () => {
+    const page = await apiGet<{ items?: unknown[] }>('/notifications', { unread: 'true', per_page: 20 })
+    const items = (page.items ?? []).map(r => {
+      const x = r as Record<string, unknown>
+      return { id: String(x['id'] ?? x['_id']), kind: String(x['kind'] ?? ''), title: String(x['title'] ?? ''), body: (x['body'] as string) || undefined, link: (x['link'] as string) || undefined, createdAt: String(x['createdAt'] ?? '') }
+    })
+    return items.sort((a, b) => Number(b.kind === 'live-class-scheduled') - Number(a.kind === 'live-class-scheduled'))
+  },
+  enabled,
+  staleTime: 60_000,
+})

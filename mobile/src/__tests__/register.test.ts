@@ -22,9 +22,15 @@ const base: RegisterForm = {
 }
 
 describe('parity with the website form', () => {
-  const site = readFileSync(`${__dirname}/../../../client/src/components/auth/RegisterForm.tsx`, 'utf8')
+  const client = `${__dirname}/../../../client/src`
+  const site = readFileSync(`${client}/components/auth/RegisterForm.tsx`, 'utf8')
+  /* The website moved its country list into lib/countries.ts (2026-10-18,
+     shared with /explore); before that it lived in the form itself. */
+  const countriesSrc = (() => {
+    try { return readFileSync(`${client}/lib/countries.ts`, 'utf8') } catch { return site }
+  })()
   it('the country list is the website\'s, name for name and dial for dial', () => {
-    const theirs = [...site.matchAll(/\{ name: '([^']+)',\s*dial: '([^']+)'/g)].map(m => `${m[1]}|${m[2]}`)
+    const theirs = [...countriesSrc.matchAll(/\{ name: '([^']+)',\s*dial: '([^']+)'/g)].map(m => `${m[1]}|${m[2]}`)
     expect(theirs.length).toBe(158)
     expect(COUNTRIES.map(c => `${c.name}|${c.dial}`)).toEqual(theirs)
   })
@@ -109,5 +115,23 @@ describe('helpers', () => {
       { field: 'unknownThing', message: 'z' },
     ])).toEqual([{ label: 'Phone / WhatsApp', step: 0, message: 'y' }, { label: 'Payment Method', step: 3, message: 'x' }])
     expect(refusedFields('nope')).toEqual([])
+  })
+})
+
+describe('sign-up by emailed code (the website since 2026-10-22)', () => {
+  const ready = { ...base, organizationSlug: 'dubai', paymentMethod: 'Card', terms: true } as RegisterForm
+  it('a 6-digit code passes step 4 with no password at all', () => {
+    expect(validateStep(3, { ...ready, password: '', confirmPassword: '', emailCode: '123456' }, phoneOk, new Date(), true)).toEqual({})
+  })
+  it.each([['', 'empty'], ['12345', 'short'], ['12a456', 'letters'], ['dddddd', 'the letter d']])('%s (%s) is refused', code => {
+    expect(validateStep(3, { ...ready, emailCode: code }, phoneOk, new Date(), true).emailCode).toBe('emailCodeRequired')
+  })
+  it('the body carries the code and never a password', () => {
+    const b = fullBody({ ...ready, password: 'Secret123', emailCode: ' 654321 ' }, { passportUrl: 'p', idDocUrl: 'i', photoUrl: 'ph' })
+    expect(b).not.toHaveProperty('password')
+    expect((b as { emailCode?: string }).emailCode).toBe('654321')
+  })
+  it('without a code the password path is unchanged', () => {
+    expect(fullBody({ ...ready, password: 'Secret123', emailCode: '' }, { passportUrl: 'p', idDocUrl: 'i', photoUrl: 'ph' })).toHaveProperty('password', 'Secret123')
   })
 })

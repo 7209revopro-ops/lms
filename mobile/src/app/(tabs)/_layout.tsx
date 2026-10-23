@@ -2,6 +2,7 @@ import { Tabs } from 'expo-router/js-tabs'
 import Ionicons from '@expo/vector-icons/Ionicons'
 import { useTranslation } from 'react-i18next'
 import { useChatUnread } from '@/lib/api/chat'
+import { useNewClassCount } from '@/lib/api/engage'
 import { useTheme } from '@/theme'
 
 type IconName = keyof typeof Ionicons.glyphMap
@@ -19,6 +20,9 @@ export default function TabsLayout() {
   const { colors, fonts } = useTheme()
   /* Unread mentor replies on the Messages tab. */
   const unread = useChatUnread(true).data ?? 0
+  /* New classes scheduled on your courses — read when the Schedule opens. */
+  const fresh = useNewClassCount().data ?? 0
+  const badge = (name: string) => (name === 'messages' ? unread : name === 'schedule' ? fresh : 0)
   return (
     <Tabs screenOptions={{
       headerShown: false,
@@ -31,8 +35,8 @@ export default function TabsLayout() {
         <Tabs.Screen key={tab.name} name={tab.name} options={{
           title: t(`tabs.${tab.label}`),
           /* Spelled out: left to Android, the icon's glyph is read too. */
-          tabBarAccessibilityLabel: `${t(`tabs.${tab.label}`)}${tab.name === 'messages' && unread > 0 ? `, ${unread} unread` : ''}`,
-          tabBarBadge: tab.name === 'messages' && unread > 0 ? (unread > 99 ? '99+' : unread) : undefined,
+          tabBarAccessibilityLabel: `${t(`tabs.${tab.label}`)}${badge(tab.name) > 0 ? `, ${badge(tab.name)} new` : ''}`,
+          tabBarBadge: badge(tab.name) > 0 ? (badge(tab.name) > 99 ? '99+' : badge(tab.name)) : undefined,
           tabBarIcon: ({ color, size }) => <Ionicons name={tab.icon} color={String(color ?? colors.textMuted)} size={size} />,
         }} />
       ))}

@@ -10,7 +10,8 @@ export const moduleParam = (id: string) => (id === GENERAL_MODULE_ID ? GENERAL_P
 export const moduleIdOf = (param: string) => (param === GENERAL_PARAM ? GENERAL_MODULE_ID : param)
 
 export function useCatalog() {
-  const classes = useLiveClasses()
+  /* Your own courses only, as the website's Class Schedule. */
+  const classes = useLiveClasses(true)
   const bookings = useMyBookings()
   const bookingMap = useMemo(() => bookingMapOf(bookings.data), [bookings.data])
   const catalog: CourseNode[] = useMemo(
