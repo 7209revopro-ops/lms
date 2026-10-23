@@ -19,8 +19,10 @@ type Day = {
   bookings: number; bookingsCancelled: number; attended: number; missed: number
   meetings: number; meetingsCancelled: number
   reviews: number; ratingSum: number; lowRatings: number
+  /** How many of each star, 1 … 5 (2026-10-23: the breakdown). */
+  r1: number; r2: number; r3: number; r4: number; r5: number
 }
-const blank = (): Day => ({ classes: 0, held: 0, classesCancelled: 0, bookings: 0, bookingsCancelled: 0, attended: 0, missed: 0, meetings: 0, meetingsCancelled: 0, reviews: 0, ratingSum: 0, lowRatings: 0 })
+const blank = (): Day => ({ classes: 0, held: 0, classesCancelled: 0, bookings: 0, bookingsCancelled: 0, attended: 0, missed: 0, meetings: 0, meetingsCancelled: 0, reviews: 0, ratingSum: 0, lowRatings: 0, r1: 0, r2: 0, r3: 0, r4: 0, r5: 0 })
 const dayOf = (d: Date) => new Date(d.getTime() + 4 * 3600_000).toISOString().slice(0, 10)
 
 export async function mentorReportForPortal(q: { from?: unknown; to?: unknown; emails?: unknown }) {
@@ -92,12 +94,14 @@ export async function mentorReportForPortal(q: { from?: unknown; to?: unknown; e
     const d = cell(r.instructorId, r.createdAt)
     d.reviews++; d.ratingSum += Number(r.rating) || 0
     if (Number(r.rating) <= 2) d.lowRatings++
+    const star = Math.max(1, Math.min(5, Math.round(Number(r.rating) || 0))) as 1 | 2 | 3 | 4 | 5
+    d[`r${star}`]++
   }
 
   const people = named ?? await UserModel.find({ _id: { $in: [...table.keys()].filter(id => mongoose.isValidObjectId(id)).map(id => new mongoose.Types.ObjectId(id)) } }, { name: 1, email: 1 }).lean() as any[]
   const finish = (d: Day) => {
-    const { ratingSum, ...rest } = d
-    return { ...rest, avgRating: d.reviews ? Math.round((ratingSum / d.reviews) * 10) / 10 : null }
+    const { ratingSum, r1, r2, r3, r4, r5, ...rest } = d
+    return { ...rest, avgRating: d.reviews ? Math.round((ratingSum / d.reviews) * 10) / 10 : null, ratingCounts: { 1: r1, 2: r2, 3: r3, 4: r4, 5: r5 } }
   }
   return {
     from: q.from, to: q.to, timezone: 'Asia/Dubai',

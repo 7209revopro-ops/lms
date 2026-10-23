@@ -326,7 +326,10 @@ router.get('/instructor-reviews/:id', wrap(async (req, res) => {
   const { InstructorReviewService } = await import('@/services/instructorReview.service.ts')
   const page = Math.max(1, Math.floor(Number(req.query.page) || 1))
   const perPage = Math.min(100, Math.max(1, Math.floor(Number(req.query.per_page) || 50)))
-  const { docs, totalCount } = await new InstructorReviewService().listForInstructor(String(req.params['id'] ?? ''), undefined, undefined, page, perPage)
+  // ?from=&to= — days (Dubai), to included (2026-10-23, the Mentor Report): only the reviews left in them.
+  const dayStart = (v: unknown, add = 0) => typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v) ? new Date(new Date(`${v}T00:00:00+04:00`).getTime() + add) : undefined
+  const range = { from: dayStart(req.query.from), to: dayStart(req.query.to, 86_400_000) }
+  const { docs, totalCount } = await new InstructorReviewService().listForInstructor(String(req.params['id'] ?? ''), undefined, undefined, page, perPage, range)
   sendSuccess(res, { reviews: docs, total: totalCount, page, perPage }, 'Reviews')
 }))
 
