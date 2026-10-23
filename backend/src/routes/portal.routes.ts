@@ -307,6 +307,14 @@ router.get('/instructor-reviews/:id', wrap(async (req, res) => {
   sendSuccess(res, { reviews: docs, total: totalCount, page, perPage }, 'Reviews')
 }))
 
+/* The mentors' report (2026-10-23, portalMentorReport.service.ts): per instructor and day — classes held and
+   cancelled, bookings and their cancellations / attendance, 1:1 meetings, reviews. ?from=&to= (days, Dubai), and
+   &emails= to name the instructors (a chief's team). Read only. */
+router.get('/mentor-report', wrap(async (req, res) => {
+  const { mentorReportForPortal } = await import('@/services/portalMentorReport.service.ts')
+  sendSuccess(res, await mentorReportForPortal(req.query), 'Mentor report')
+}))
+
 router.get('/exams', wrap(async (req, res) => {
   const { listExamsForPortal } = await import('@/services/portalExams.service.ts')
   sendSuccess(res, await listExamsForPortal(req.query.academy), 'Exams')
