@@ -506,7 +506,7 @@ export function RightSidebarToggle() {
          which means a tap aimed at "Start" could open the panel instead.
          Nothing in the content column is right-to-left, so the opposite
          corner is free. */
-      className="fixed bottom-6 left-4 z-20 flex h-11 w-11 items-center justify-center rounded-full transition-shadow hover:shadow-xl lg:bottom-auto lg:left-auto lg:right-4 lg:top-[calc(var(--app-header-h)+12px)] lg:h-10 lg:w-10"
+      className="fixed bottom-[calc(86px+env(safe-area-inset-bottom))] left-4 z-20 flex h-11 w-11 items-center justify-center rounded-full transition-shadow hover:shadow-xl lg:bottom-auto lg:left-auto lg:right-4 lg:top-[calc(var(--app-header-h)+12px)] lg:h-10 lg:w-10"
       style={{ background: 'var(--color-bg-surface)', border: '1px solid var(--color-border)', boxShadow: '0 4px 14px rgba(0,0,0,0.10)' }}>
       <Zap size={15} style={{ color: 'var(--color-primary)' }} />
     </motion.button>

@@ -16,6 +16,11 @@
    portal said so. Matched by the LMS user id the portal holds, else by email.
    Students only: a staff account is never written from here. A student whose
    CS and team are as they were is left alone.
+
+   And whether Tetra Commission onboarded them (2026-10-13) — `onboarded`, with
+   `onboardedAt` — for the Students table's Onboarded column and the Requests
+   page. A portal from before that sends neither, and what was said before is
+   kept rather than forgotten.
 ───────────────────────────────────────────────────── */
 import { Types } from 'mongoose'
 import { UserModel } from '@/models/schema.ts'
@@ -33,6 +38,9 @@ interface Told {
   team:      string
   code:      string
   open:      boolean
+  /** Absent from a portal from before 2026-10-13: leave what is stored. */
+  onboarded?:   boolean
+  onboardedAt?: Date | null
 }
 
 export interface StudentCsResult {
@@ -60,6 +68,9 @@ export async function studentCsFromPortal(input: { students: unknown }): Promise
       team:  clip(raw?.team, 120),
       code:  clip(raw?.code, 40),
       open:  raw?.open === true,
+      ...(typeof raw?.onboarded === 'boolean'
+        ? { onboarded: raw.onboarded, onboardedAt: raw.onboarded && typeof raw?.onboardedAt === 'string' && !Number.isNaN(Date.parse(raw.onboardedAt)) ? new Date(raw.onboardedAt) : null }
+        : {}),
     })
   }
   if (!told.length) return { updated: 0, unchanged: 0, notFound: [] }
@@ -69,7 +80,7 @@ export async function studentCsFromPortal(input: { students: unknown }): Promise
   const docs = await UserModel.find({
     role: 'student',
     $or: [...(ids.length ? [{ _id: { $in: ids } }] : []), ...(emails.length ? [{ email: { $in: emails } }] : [])],
-  }).select('_id email tetraCs').lean() as unknown as { _id: Types.ObjectId; email: string; tetraCs?: { name?: string; team?: string; code?: string; open?: boolean } }[]
+  }).select('_id email tetraCs').lean() as unknown as { _id: Types.ObjectId; email: string; tetraCs?: { name?: string; team?: string; code?: string; open?: boolean; onboarded?: boolean; onboardedAt?: Date | null } }[]
   const byId = new Map(docs.map(d => [String(d._id), d]))
   const byEmail = new Map(docs.map(d => [d.email, d]))
 
@@ -84,14 +95,22 @@ export async function studentCsFromPortal(input: { students: unknown }): Promise
     if (seen.has(key)) continue               // the same student twice in one call: the first stands
     seen.add(key)
     const was = doc.tetraCs
-    if (was && (was.name ?? '') === t.name && (was.team ?? '') === t.team && (was.code ?? '') === t.code && !!was.open === t.open) {
+    // Onboarding as told, else as it was (a portal that doesn't say).
+    const onboarded = t.onboarded ?? was?.onboarded
+    const onboardedAt = t.onboarded !== undefined ? t.onboardedAt ?? null : was?.onboardedAt ?? null
+    const sameDay = (a?: Date | null, b?: Date | null) => (a ? new Date(a).getTime() : 0) === (b ? new Date(b).getTime() : 0)
+    if (was && (was.name ?? '') === t.name && (was.team ?? '') === t.team && (was.code ?? '') === t.code && !!was.open === t.open
+      && was.onboarded === onboarded && sameDay(was.onboardedAt, onboardedAt)) {
       result.unchanged++
       continue
     }
     ops.push({
       updateOne: {
         filter: { _id: doc._id, role: 'student' },
-        update: { $set: { tetraCs: { name: t.name, team: t.team, code: t.code, open: t.open, at } } },
+        update: { $set: { tetraCs: {
+          name: t.name, team: t.team, code: t.code, open: t.open, at,
+          ...(onboarded !== undefined ? { onboarded, onboardedAt } : {}),
+        } } },
       },
     })
     result.updated++

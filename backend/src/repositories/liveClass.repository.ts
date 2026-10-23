@@ -215,7 +215,9 @@ export class LiveClassRepository extends BaseRepository<ILiveClass> {
       andFilter(query, servedClassFilter(filter.organizationId))
     }
     if (filter.instructorId && Types.ObjectId.isValid(filter.instructorId)) {
-      query['instructorId'] = new Types.ObjectId(filter.instructorId)
+      /* Theirs to teach, or one they co-mentor (a Program's). */
+      const me = new Types.ObjectId(filter.instructorId)
+      andFilter(query, { $or: [{ instructorId: me }, { coInstructorIds: me }] })
     }
 
     if (filter.status && filter.status !== 'all') {

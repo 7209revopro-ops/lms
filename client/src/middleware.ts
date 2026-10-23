@@ -12,8 +12,10 @@ const GUEST_ONLY = ['/login', '/register']
    client cookie yet, and bouncing them to /login would discard the code. */
 /* `/terms`, `/privacy` — the store listings and the app link to them.
    `/.well-known` — Apple and Google fetch the app-link files there with no
-   session, and must get them, not a redirect to /login (lib/appLinks.ts). */
-const PUBLIC = ['/forgot-password', '/reset-password', '/verify-email', '/imp/enter', '/continue', '/j', '/s', '/.well-known', '/terms', '/privacy']
+   session, and must get them, not a redirect to /login (lib/appLinks.ts).
+   `/p/<code>` — a programme's shareable link (2026-10-17): its form is for
+   people with no LMS account. `/explore` — the public course catalogue. */
+const PUBLIC = ['/forgot-password', '/reset-password', '/verify-email', '/imp/enter', '/continue', '/j', '/s', '/p', '/explore', '/.well-known', '/terms', '/privacy']
 
 /* A live client-portal impersonation rides its own cookie, so a super admin
    arriving with only that one is authenticated as far as routing is concerned.

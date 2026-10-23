@@ -7,6 +7,7 @@ import { NoDepartmentNotice } from '@/components/layout/NoDepartmentNotice'
 import { DeleteModal } from '@/components/courses/DeleteModal'
 import { Toaster } from '@/components/ui/Toaster'
 import { ChatNotifier } from '@/components/chat/ChatNotifier'
+import { InstallPopup } from '@/components/pwa/InstallPopup'
 import { AdminGuard } from '@/components/auth/AdminGuard'
 import { RootPortalHistoryBridge } from '@/components/RootPortalHistoryBridge'
 
@@ -48,6 +49,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
         <DeleteModal />
         <Toaster />
+        <InstallPopup />
       </div>
     </AdminGuard>
   )

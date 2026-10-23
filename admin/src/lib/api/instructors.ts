@@ -20,6 +20,8 @@ export interface CreateInstructorDto {
   categories?: ('4x-trading' | 'digital-marketing' | 'ai' | 'jura')[]
   avatarUrl?:  string
   courses?:    CourseEnrollmentDto[]
+  /** WhatsApp number (students: also their application's phone). */
+  phone?:      string
   /* Which academy the account belongs to. Only a super admin may set it — for
      everyone else the server uses their own and refuses a different one. A
      super admin working from "All Orgs" has no implicit academy, so without

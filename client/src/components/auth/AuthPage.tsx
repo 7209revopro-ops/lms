@@ -41,8 +41,14 @@ export function AuthPage({ initialMode, lockFull = false }: AuthPageProps) {
        Express tab this link exists to hide is back. Nothing else is carried:
        `?from`, `?method=email` and `?session=expired` were always dropped
        on a hop, and LoginForm / middleware read them from the live URL, so
-       carrying them would change what a hop does for everyone else. */
-    window.history.replaceState(null, '', (next === 'login' ? '/login' : '/register') + (lockFull ? '?flow=full' : ''))
+       carrying them would change what a hop does for everyone else.
+       Except `?from` (2026-10-18): a buyer sent here from /explore's Buy now must land back on that
+       course's checkout whichever tab they finish on; it changes nothing for anyone who arrived without it. */
+    const q = new URLSearchParams()
+    if (lockFull) q.set('flow', 'full')
+    const from = new URLSearchParams(window.location.search).get('from')
+    if (from) q.set('from', from)
+    window.history.replaceState(null, '', (next === 'login' ? '/login' : '/register') + (q.toString() ? `?${q}` : ''))
   }
 
   return (

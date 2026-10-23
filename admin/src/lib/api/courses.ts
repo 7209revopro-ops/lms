@@ -59,9 +59,10 @@ export function useCourse(id: string) {
 /* Map the form's "level: ''" to "level: undefined" so the optional enum
    on the backend accepts it. */
 function normalizeFormData(data: Partial<CourseFormValues>) {
-  const { level, categoryId, program, tags, ...rest } = data
+  const { level, categoryId, program, tags, programOrder, ...rest } = data
   return {
     ...rest,
+    ...(programOrder !== undefined ? { programOrder: programOrder === '' ? null : Number(programOrder) } : {}),
     ...(level    !== undefined && level    !== '' ? { level }    : {}),
     ...(categoryId !== undefined && categoryId !== '' ? { categoryId } : {}),
     ...(program  !== undefined && program  !== '' ? { program }  : {}),

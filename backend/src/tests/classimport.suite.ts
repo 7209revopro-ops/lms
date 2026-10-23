@@ -259,7 +259,10 @@ let jobId = ''
   check('G7 room recorded on Offline + Online', classes.every(c => c.room === 'Room 1' && c.location === 'Dubai Campus'))
   check('G8 instructor is Haffis', classes.every(c => String(c.instructorId) === String(haffis._id)))
   await sleep(600)   // the per-class student notification would be fire-and-forget
-  check('G9 no per-class student notifications', (await NotificationModel.countDocuments({ userId: student._id })) === 0,
+  /* One in-app notice per course for the whole import (the student app's
+     new-class badge counts it) — never one per class. */
+  check('G9 one student notice per course, not per class', (await NotificationModel.countDocuments({ userId: student._id, kind: 'live-class-scheduled' })) === 1
+    && (await NotificationModel.countDocuments({ userId: student._id })) === 1,
     String(await NotificationModel.countDocuments({ userId: student._id })))
   const mails = await EmailOutboxModel.find({ createdAt: { $gte: new Date(Date.now() - 60_000) } }).lean()
   const toHaffis = mails.filter(m => m.to === haffis.email)

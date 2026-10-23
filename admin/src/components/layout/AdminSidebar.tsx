@@ -8,7 +8,7 @@ import {
   LayoutDashboard, BookOpen, Users, GraduationCap,
   Tag, Star, Settings, ChevronLeft, ChevronRight, LogOut, X,
   ShoppingBag, Ticket, Map, ClipboardList, Video, CalendarDays, Repeat, BarChart3, ShieldCheck, UserCog, LifeBuoy,
-  ClipboardCheck, Film, MonitorSmartphone, FileCheck2, Megaphone, Mail, UserX, Award, MessageCircle, MessagesSquare, ListChecks,
+  ClipboardCheck, Film, MonitorSmartphone, FileCheck2, Megaphone, Mail, UserX, Award, MessageCircle, MessagesSquare, Send, ListChecks, DoorOpen,
 } from 'lucide-react'
 import { useStaffUnread } from '@/lib/api/chat'
 import { useUIStore } from '@/store/ui.store'
@@ -28,6 +28,7 @@ const adminNavItems = [
   { label: 'Learning Paths', href: '/learning-paths',   icon: Map },
   { label: 'Live Classes',   href: '/live-classes',     icon: Video },
   { label: 'Mentor Calendar', href: '/mentor-calendar', icon: CalendarDays },
+  { label: 'Pods', href: '/pods', icon: DoorOpen },
   { label: 'Programs', href: '/programs', icon: Repeat },
   { label: 'Class Verification', href: '/class-verification', icon: ListChecks },
   { label: 'Instructor Attendance', href: '/instructor-attendance', icon: UserX },
@@ -81,6 +82,8 @@ const instructorNavItems = [
   { label: 'Bookings',      href: '/bookings',           icon: CalendarDays },
   { label: 'Availability',  href: '/availability',       icon: CalendarDays },
   { label: 'Mentor Calendar', href: '/mentor-calendar',   icon: CalendarDays },
+  /* The HRMS meeting pods online classes are given, and who has each (2026-10-18). */
+  { label: 'Pods',            href: '/pods',              icon: DoorOpen },
   { label: 'Programs',        href: '/programs',          icon: Repeat },
   { label: 'Assignments',   href: '/assignments',        icon: ClipboardCheck },
   { label: 'Exams',         href: '/exams',              icon: FileCheck2 },
@@ -97,6 +100,20 @@ const instructorNavItems = [
    instructor who tapped it got a page of bcrypt/JWT/rate-limit rows with a
    403 in the middle of it. */
 const settingsItem = { label: 'Settings', href: '/settings', icon: Settings }
+
+/* Which Roles & Permissions resource each page is (2026-10-17). With a custom role, a page whose resource it may
+   neither Read nor List is hidden — the backend refuses its data anyway. Pages not listed always show. */
+const PAGE_RESOURCE: Record<string, string> = {
+  '/users': 'users', '/students': 'users', '/instructors': 'users', '/viewers': 'users', '/express-members': 'users',
+  '/courses': 'courses', '/live-classes': 'live-classes', '/bookings': 'bookings', '/orders': 'orders',
+  '/categories': 'categories', '/coupons': 'coupons', '/reviews': 'reviews', '/reports': 'reports', '/roles': 'roles',
+  '/support': 'support', '/announcements': 'announcements',
+  '/enrollment-requests': 'enrollment-requests', '/devices': 'devices', '/programs': 'programs',
+  '/mentor-calendar': 'mentor-calendar', '/class-verification': 'class-verification',
+  '/instructor-attendance': 'instructor-attendance', '/instructor-reviews': 'instructor-reviews',
+  '/recordings': 'recordings', '/assignments': 'assignments', '/exams': 'exams', '/send-message': 'send-message',
+  '/audit-logs': 'audit-logs', '/settings': 'settings',
+}
 
 interface SidebarContentProps {
   collapsed: boolean
@@ -128,15 +145,26 @@ function SidebarContent({ collapsed, onClose }: SidebarContentProps) {
   // platform-wide (span every organization, no org to scope by) — only
   // super_admin sees either, same reasoning as the backend route guard
   // (requireSuperAdmin, not requireAdmin) on GET /email-logs.
-  const navItems  = user?.role === 'super_admin'
-    ? [...withClassroom,
+  /* Send message — admin and super admin only, as the route allows. */
+  const sendItem = { label: 'Send Message', href: '/send-message', icon: Send }
+  const canView = (href: string) => {
+    const perms = user?.permissions
+    const resource = PAGE_RESOURCE[href]
+    if (!perms || !resource || user?.role === 'super_admin') return true
+    const row = perms.find(p => p.resource === resource)
+    return !!row && (row.read || row.list)
+  }
+  const allNavItems = user?.role === 'super_admin'
+    ? [...withClassroom, sendItem,
         { label: 'Roles',      href: '/roles',       icon: ShieldCheck },
         { label: 'Email Logs', href: '/email-logs',  icon: Mail },
+        { label: 'WhatsApp Logs', href: '/whatsapp-logs', icon: MessageCircle },
         { label: 'Chats',      href: '/chats',       icon: MessagesSquare },
       ]
-    : withClassroom
+    : user?.role === 'admin' ? [...withClassroom, sendItem] : withClassroom
+  const navItems = allNavItems.filter(i => canView(i.href))
   const roleLabel = isInstructor ? 'Instructor' : isManager ? 'Manager' : 'Admin'
-  const bottomItems = isInstructor ? [] : [settingsItem]
+  const bottomItems = (isInstructor ? [] : [settingsItem]).filter(i => canView(i.href))
 
   const isActive = (href: string) =>
     href === '/' ? pathname === '/' : pathname.startsWith(href)

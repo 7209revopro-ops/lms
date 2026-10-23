@@ -20,6 +20,8 @@
 import { logger } from '@/utils/logger.ts'
 import { env } from '@/config/env.ts'
 import { normalizeWhatsAppNumber } from '@/utils/normalizeWhatsAppNumber.ts'
+import { whatsappTemplateOn } from '@/utils/featureFlags.ts'
+const BOOTED_AT = Date.now()
 import { writeFile, mkdir } from 'fs/promises'
 import { join } from 'path'
 
@@ -191,8 +193,15 @@ export function whatsappBackoffFor(attempts: number): number {
 /** Attempt one already-persisted row. Exported so the drain job reuses it. */
 export async function deliverWhatsAppOutboxRow(row: {
   id: string; to: string; templateName: string; languageCode: string; params: string[]; buttonParam?: string; attempts: number
+  createdAt?: Date
 }): Promise<'sent' | 'retry' | 'failed'> {
   const { WhatsAppOutboxModel } = await import('@/models/schema.ts')
+  /* Queued before this process started (so before the switch it runs under) and its template is off: closed, never
+     sent. A row made since already passed the check in sendTemplate, with its use. */
+  if (row.createdAt && row.createdAt.getTime() < BOOTED_AT && !whatsappTemplateOn(row.templateName)) {
+    await WhatsAppOutboxModel.updateOne({ _id: row.id }, { $set: { status: 'failed', lastError: 'Template switched off (WHATSAPP_TEMPLATES_ON)' } })
+    return 'failed'
+  }
   try {
     const { waMessageId } = await rawSender.send({
       to: row.to, templateName: row.templateName, languageCode: row.languageCode,
@@ -235,6 +244,8 @@ function sanitiseParam(value: string): string {
 interface SendOptions {
   category?:    WhatsAppTemplateCategory
   buttonParam?: string
+  /* What it is for, when a template is let out for one use only (featureFlags "name@use"). */
+  use?:         string
 }
 
 async function sendTemplate(
@@ -244,6 +255,11 @@ async function sendTemplate(
   opts: SendOptions = {},
   languageCode = 'en_US',
 ): Promise<void> {
+  /* Switched off (utils/featureFlags.ts whatsappTemplateOn): not stored, not sent — the email and in-app go as usual. */
+  if (!whatsappTemplateOn(templateName, opts.use)) {
+    logger.debug({ templateName }, 'WhatsApp send skipped — template switched off')
+    return
+  }
   const normalized = normalizeWhatsAppNumber(to)
   if (!normalized) {
     logger.debug({ to, templateName }, 'WhatsApp send skipped — no usable phone number')
@@ -264,6 +280,14 @@ async function sendTemplate(
     id: String(row._id), to: normalized, templateName, languageCode,
     params: clean, buttonParam: cleanButtonParam, attempts: 0,
   })
+}
+
+/* Any template, as an admin chose it on the Send message page
+   (services/broadcast.service.ts) — the caller has already filled the values. */
+export async function sendTemplateMessage(
+  to: string | null | undefined, templateName: string, params: string[], buttonParam?: string, use?: string,
+): Promise<void> {
+  await sendTemplate(to, templateName, params, { category: 'utility', ...(buttonParam ? { buttonParam } : {}), ...(use ? { use } : {}) })
 }
 
 /* ── Typed helpers, one per trigger event ─────────────── */
@@ -434,6 +458,19 @@ export async function sendClassRescheduledWhatsApp(
 ): Promise<void> {
   if (!signinCode) return
   await sendTemplate(to, 'class_rescheduled_v1', [studentName || 'there', sessionTitle, wasLabel, nowLabel],
+    { category: 'utility', buttonParam: signinCode })
+}
+
+/* class_update_v1 — a change to a class in the student's course that they
+   have NOT booked (cancelled, moved, new mentor): "there's an update about
+   your class {{2}} on {{3}}: {{4}}". Button: their sign-in link to the Class
+   Schedule. No send without a code. */
+export async function sendClassUpdateWhatsApp(
+  to: string | null | undefined, studentName: string, sessionTitle: string,
+  whenLabel: string, message: string, signinCode: string,
+): Promise<void> {
+  if (!signinCode) return
+  await sendTemplate(to, 'class_update_v1', [studentName || 'there', sessionTitle, whenLabel, message],
     { category: 'utility', buttonParam: signinCode })
 }
 

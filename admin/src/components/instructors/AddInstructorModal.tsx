@@ -100,7 +100,8 @@ export function AddInstructorModal({ open, onClose }: AddInstructorModalProps) {
 
   const { register, handleSubmit, reset, watch, setValue, formState: { errors } } = useForm<Values>({
     resolver: zodResolver(schema),
-    defaultValues: { role: 'instructor' },
+    /* Mentors serve both academies by default; untick to keep one to this academy. */
+    defaultValues: { role: 'instructor', sharedAcrossOrgs: true },
   })
 
   /* A department's sub_admin creates instructors for its own department only
@@ -150,7 +151,10 @@ export function AddInstructorModal({ open, onClose }: AddInstructorModalProps) {
       category: values.category,
       avatarUrl,
       ...(values.meetEmail ? { meetEmail: values.meetEmail.toLowerCase() } : {}),
-      ...(values.sharedAcrossOrgs ? { sharedAcrossOrgs: true } : {}),
+      /* Only from an admin or super admin — the box is hidden from a
+         sub-admin, whose request the API would refuse with it. */
+      ...(values.sharedAcrossOrgs && values.role === 'instructor' && (me?.role === 'admin' || me?.role === 'super_admin')
+        ? { sharedAcrossOrgs: true } : {}),
       ...(isSuper && orgId ? { organizationId: orgId } : {}),
     })
     setSuccess(true)
@@ -331,7 +335,7 @@ export function AddInstructorModal({ open, onClose }: AddInstructorModalProps) {
 
                              setValue, not a DOM write: React Hook Form does not
                              see `input.value = x` (CLAUDE.md). */
-                          if (r !== 'instructor') setValue('sharedAcrossOrgs', false)
+                          setValue('sharedAcrossOrgs', r === 'instructor')
                         }}
                         className="flex flex-1 items-center justify-center gap-2 rounded-lg py-2 text-xs font-semibold transition-all"
                         style={roleVal === r

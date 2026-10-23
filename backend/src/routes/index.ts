@@ -8,6 +8,8 @@ import enrollmentRoutes    from './enrollments.routes.ts'
 import lessonRoutes        from './lessons.routes.ts'
 import reviewRoutes        from './reviews.routes.ts'
 import adminRoutes         from './admin.routes.ts'
+import programPublicRoutes from '@/routes/programPublic.routes.ts'
+import guestCheckoutRoutes from '@/routes/guestCheckout.routes.ts'
 import liveClassRoutes     from './liveClasses.routes.ts'
 import notificationRoutes  from './notifications.routes.ts'
 import announcementRoutes  from './announcements.routes.ts'
@@ -30,6 +32,7 @@ import learningPathRoutes  from './learningpaths.routes.ts'
 import aiRoutes            from './ai.routes.ts'
 import auditLogRoutes      from './auditlog.routes.ts'
 import emailOutboxRoutes   from './emailoutbox.routes.ts'
+import whatsappOutboxRoutes from './whatsappoutbox.routes.ts'
 import uploadRoutes        from './upload.routes.ts'
 import bookingRoutes       from './bookings.routes.ts'
 import feedbackRoutes      from './feedback.routes.ts'
@@ -91,6 +94,8 @@ router.use('/enrollments', enrollmentRoutes)
 router.use('/lessons',     lessonRoutes)
 router.use('/reviews',     reviewRoutes)
 router.use('/admin',         adminRoutes)
+router.use('/public/checkout', guestCheckoutRoutes)    // buying a course on /explore with no account
+router.use('/public/programs', programPublicRoutes)   // a programme's shareable link (no sign-in)
 router.use('/live-classes',  liveClassRoutes)
 router.use('/notifications', notificationRoutes)
 router.use('/announcements', announcementRoutes)
@@ -119,6 +124,7 @@ router.use('/ai',              aiRoutes)
 /* 8.11 Audit log */
 router.use('/audit-logs',      auditLogRoutes)
 router.use('/email-logs',      emailOutboxRoutes)
+router.use('/whatsapp-logs',   whatsappOutboxRoutes)
 /* Media uploads (image / video) */
 router.use('/uploads',         uploadRoutes)
 /* Class bookings (Phase 3) */

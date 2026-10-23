@@ -157,7 +157,9 @@ router.post('/class-attendance', wrap(async (req, res) => {
 router.get('/mentors', wrap(async (req, res) => {
   const from = typeof req.query.from === 'string' ? req.query.from : undefined
   const to = typeof req.query.to === 'string' ? req.query.to : undefined
-  sendSuccess(res, await listMentorsForPortal({ remoteOrgId: orgOf(req), from, to }), 'Mentors')
+  // ?allAcademies=1 — both academies' mentors (the portal's Mentor Calendar, 2026-10-15).
+  const allAcademies = req.query.allAcademies === '1' || req.query.allAcademies === 'true'
+  sendSuccess(res, await listMentorsForPortal({ remoteOrgId: orgOf(req), from, to, allAcademies }), 'Mentors')
 }))
 
 /**
@@ -274,6 +276,65 @@ router.patch('/programs/:id', wrap(async (req, res) => {
 router.post('/programs/:id/stop', wrap(async (req, res) => {
   const { stopProgram } = await import('@/services/program.service.ts')
   sendSuccess(res, await stopProgram(String(req.params['id'] ?? ''), await portalProgramActor(req)), 'Program stopped')
+}))
+
+/* Exams (2026-10-10, portalExams.service.ts): an academy's published exams, and one student's — with their state and
+   a sign-in link straight into each. Read only (a student's list mints their usual 24-hour sign-in links). */
+/* A student's emails (2026-10-17, portalStudentEmails.service.ts): the email queue's rows for their address — the
+   list without bodies, and one email's body. Read only. */
+router.get('/student-emails', wrap(async (req, res) => {
+  const { studentEmailsForPortal } = await import('@/services/portalStudentEmails.service.ts')
+  sendSuccess(res, await studentEmailsForPortal(req.query.email, req.query.limit), 'Student emails')
+}))
+
+router.get('/student-emails/:id', wrap(async (req, res) => {
+  const { studentEmailForPortal } = await import('@/services/portalStudentEmails.service.ts')
+  sendSuccess(res, await studentEmailForPortal(req.params['id'], req.query.email), 'Student email')
+}))
+
+/* Instructor reviews (2026-10-22): the students' ratings after each class — the leaderboard of every academy, with each
+   instructor's address so the portal can show a chief only their own team's, and one instructor's reviews. Read only. */
+router.get('/instructor-reviews', wrap(async (_req, res) => {
+  const { InstructorReviewService } = await import('@/services/instructorReview.service.ts')
+  sendSuccess(res, await new InstructorReviewService().leaderboard(undefined, undefined), 'Instructor reviews')
+}))
+
+router.get('/instructor-reviews/:id', wrap(async (req, res) => {
+  const { InstructorReviewService } = await import('@/services/instructorReview.service.ts')
+  const page = Math.max(1, Math.floor(Number(req.query.page) || 1))
+  const perPage = Math.min(100, Math.max(1, Math.floor(Number(req.query.per_page) || 50)))
+  const { docs, totalCount } = await new InstructorReviewService().listForInstructor(String(req.params['id'] ?? ''), undefined, undefined, page, perPage)
+  sendSuccess(res, { reviews: docs, total: totalCount, page, perPage }, 'Reviews')
+}))
+
+/* The mentors' report (2026-10-23, portalMentorReport.service.ts): per instructor and day — classes held and
+   cancelled, bookings and their cancellations / attendance, 1:1 meetings, reviews. ?from=&to= (days, Dubai), and
+   &emails= to name the instructors (a chief's team). Read only. */
+router.get('/mentor-report', wrap(async (req, res) => {
+  const { mentorReportForPortal } = await import('@/services/portalMentorReport.service.ts')
+  sendSuccess(res, await mentorReportForPortal(req.query), 'Mentor report')
+}))
+
+router.get('/exams', wrap(async (req, res) => {
+  const { listExamsForPortal } = await import('@/services/portalExams.service.ts')
+  sendSuccess(res, await listExamsForPortal(req.query.academy), 'Exams')
+}))
+
+router.get('/exams/student', wrap(async (req, res) => {
+  const { studentExamsForPortal } = await import('@/services/portalExams.service.ts')
+  sendSuccess(res, await studentExamsForPortal(req.query.email), 'Student exams')
+}))
+
+/* Pending (2026-10-11, portalPending.service.ts): what the admin sidebar's badges count — Requests, Support,
+   mentors' Messages — and whom each waits on, for the Root portal's Pending page. Read only. The Root portal's
+   alone: it names every staff account and its backlog, which the sales CRM has no use for. */
+router.get('/pending', wrap(async (req, res) => {
+  if (req.caller !== 'portal') {
+    sendError(res, 'FORBIDDEN', 'Only the Root portal reads what is pending', 403)
+    return
+  }
+  const { pendingForPortal } = await import('@/services/portalPending.service.ts')
+  sendSuccess(res, await pendingForPortal(), 'Pending')
 }))
 
 export default router

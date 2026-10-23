@@ -252,11 +252,12 @@ function normalizeLiveClass(c: any): LiveClass {
 }
 
 /* GET /live-classes — all sessions available to the student */
-export function useAllLiveClasses(status: string = 'all') {
+/* `mine` — only classes of courses the student holds (the Class Schedule). */
+export function useAllLiveClasses(status: string = 'all', opts: { mine?: boolean } = {}) {
   return useQuery({
-    queryKey:        ['live-classes', 'all', status],
+    queryKey:        ['live-classes', 'all', status, opts.mine ? 'mine' : 'every'],
     queryFn:         async () => {
-      const list = await apiGet<any[]>('/live-classes', status !== 'all' ? { status } : {})
+      const list = await apiGet<any[]>('/live-classes', { ...(status !== 'all' ? { status } : {}), ...(opts.mine ? { mine: '1' } : {}) })
       return list.map(normalizeLiveClass) as LiveClass[]
     },
     staleTime:       15_000,

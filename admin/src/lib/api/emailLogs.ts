@@ -1,5 +1,5 @@
 'use client'
-import { useQuery } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from '@/lib/axios'
 import type { PaginationMeta } from '@/types/index'
 
@@ -17,12 +17,18 @@ export interface EmailLog {
   sentVia?:      string
   sentAt?:       string
   createdAt:     string
+  /** 20 = sign-in code / verify / forgot password, 10 = other urgent (welcome, registration); sent first. */
+  priority?:     number
 }
 
 interface EmailLogFilter {
   page?:   number
   status?: EmailLogStatus | ''
   to?:     string
+  /* Recipient or subject, partial. */
+  q?:      string
+  from?:   string
+  until?:  string
 }
 
 export const emailLogKeys = {
@@ -30,13 +36,16 @@ export const emailLogKeys = {
 }
 
 export function useEmailLogs(filter: EmailLogFilter = {}) {
-  const { page = 1, status, to } = filter
+  const { page = 1, status, to, q, from, until } = filter
   return useQuery({
     queryKey: emailLogKeys.list(filter),
     queryFn: async () => {
       const params: Record<string, unknown> = { page, per_page: 25 }
       if (status) params['status'] = status
       if (to)     params['to']     = to
+      if (q)      params['q']      = q
+      if (from)   params['from']   = from
+      if (until)  params['until']  = until
       const res = await api.get<{ success: true; data: EmailLog[]; meta: PaginationMeta }>(
         '/email-logs', { params },
       )
@@ -60,4 +69,22 @@ export function useEmailLogs(filter: EmailLogFilter = {}) {
 export async function fetchEmailLogHtml(id: string): Promise<string> {
   const res = await api.get<{ success: true; data: { html: string } }>(`/email-logs/${id}/html`)
   return res.data.data.html
+}
+
+/** Sent / failed / pending — today and the last 7 days. */
+export function useEmailLogSummary() {
+  return useQuery({
+    queryKey: ['admin', 'email-logs', 'summary'],
+    queryFn: async () => (await api.get<{ success: true; data: import('@/components/logs/LogSummary').LogSummaryData }>('/email-logs/summary')).data.data,
+    staleTime: 30_000, retry: false,
+  })
+}
+
+/** Send this email now — past the queue (POST /email-logs/:id/send-now). */
+export function useSendEmailNow() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async (id: string) => (await api.post<{ success: true; data: { status: string } }>(`/email-logs/${id}/send-now`)).data.data,
+    onSettled: () => qc.invalidateQueries({ queryKey: ['admin', 'email-logs'] }),
+  })
 }

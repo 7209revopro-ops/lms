@@ -211,6 +211,9 @@ export interface IUser extends Document {
     open?:  boolean
     /** When the commission portal last said so. */
     at?:    Date
+    /** Onboarded in Tetra Commission (their welcome went), and when; unset until it says. */
+    onboarded?:   boolean
+    onboardedAt?: Date | null
   }
   /* Meta */
   lastLoginAt?:  Date
@@ -353,6 +356,10 @@ const UserSchema = new Schema<IUser>(
       code: { type: String },
       open: { type: Boolean },
       at:   { type: Date },
+      /* Whether Tetra Commission onboarded them, and when (2026-10-13) —
+         unset until a portal that says so has. */
+      onboarded:   { type: Boolean },
+      onboardedAt: { type: Date },
     },
   },
   baseSchemaOptions,
@@ -401,6 +408,9 @@ export const PERMISSION_RESOURCES = [
   'users', 'courses', 'live-classes', 'bookings',
   'orders', 'categories', 'coupons', 'reviews', 'reports', 'roles', 'support',
   'announcements',
+  /* Admin pages added 2026-10-17 — each guarded by requirePagePermission on the routes only that page uses. */
+  'enrollment-requests', 'devices', 'programs', 'mentor-calendar', 'class-verification', 'instructor-attendance',
+  'instructor-reviews', 'recordings', 'assignments', 'exams', 'send-message', 'audit-logs', 'settings',
 ] as const
 export type PermissionResource = typeof PERMISSION_RESOURCES[number]
 
@@ -592,6 +602,29 @@ const AuthTokenSchema = new Schema<IAuthToken>(
 )
 
 AuthTokenSchema.index({ userId: 1, purpose: 1 })
+
+/* ── Sign-up email codes (2026-10-23) ─────────────────────────
+   The 6-digit code a new student enters on the sign-up form to prove the
+   address is theirs — sign-up has no password any more. Keyed by EMAIL (there
+   may be no account yet), stored hashed, 10 minutes, 5 tries, one use; a new
+   code replaces the old. With an account already on the address, a verified
+   code updates that account instead of refusing "email taken". */
+export interface ISignupCode extends Document {
+  email: string; codeHash: string; expiresAt: Date; attempts: number; usedAt?: Date; createdAt: Date
+}
+const SignupCodeSchema = new Schema<ISignupCode>(
+  {
+    email:     { type: String, required: true, lowercase: true, trim: true, maxlength: 200 },
+    codeHash:  { type: String, required: true },
+    expiresAt: { type: Date, required: true },
+    attempts:  { type: Number, default: 0 },
+    usedAt:    { type: Date },
+  },
+  baseSchemaOptions,
+)
+SignupCodeSchema.index({ email: 1, createdAt: -1 })
+SignupCodeSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 24 * 3600 })
+export const SignupCodeModel = mongoose.model<ISignupCode>('SignupCode', SignupCodeSchema)
 AuthTokenSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 })
 
 export const AuthTokenModel = mongoose.model<IAuthToken>('AuthToken', AuthTokenSchema)
@@ -655,6 +688,9 @@ export interface ICourse extends Document {
      (organizationId) still owns and edits it; the other academy sees it in
      the catalogue, the admin lists and the enrol pickers. */
   sharedAcademies?: boolean
+  /* Its level in its programme's journey (student Class Schedule): 1, 2, 3 …
+     Courses without one come after, by title. */
+  programOrder?: number
   organizationId?: Types.ObjectId
   /* Denormalized stats */
   enrolledCount:  number
@@ -685,6 +721,7 @@ const CourseSchema = new Schema<ICourse>(
     instructorId:   { type: Schema.Types.ObjectId, ref: 'User', required: true },
     categoryId:     { type: Schema.Types.ObjectId, ref: 'Category' },
     sharedAcademies: { type: Boolean, default: false, index: true },
+    programOrder:    { type: Number, min: 0, max: 999 },
     organizationId: { type: Schema.Types.ObjectId, ref: 'Organization' },
     enrolledCount:  { type: Number, default: 0 },
     ratingAvg:     { type: Number, default: 0 },
@@ -833,7 +870,8 @@ export interface EnrollmentFeeSummary {
   feeMinor:      number
   paidMinor:     number
   balanceMinor:  number
-  /* currency: the bonus's own — USD from the sales CRMs since 2026-10-09; absent, the fee's. */
+  /* currency: the bonus's own — USD from the sales CRMs since 2026-10-09; absent on a sales CRM's
+     enrolment (salesCrm), USD too (the user, 2026-10-12); absent otherwise, the fee's. */
   bonus?:        { given: boolean; amountMinor: number; currency?: string } | null
   receipt?:      { url: string; name?: string; mimeType?: string } | null
   recordedAt:    Date
@@ -1109,6 +1147,38 @@ NotificationSchema.index({ userId: 1, readAt: 1 })
 
 export const NotificationModel = mongoose.model<INotification>('Notification', NotificationSchema)
 
+/* ── Push subscriptions (2026-10-21) ─────────────────────────
+   One per browser / installed app a user turned notifications on in: the Web
+   Push endpoint and its keys. Every bell notification is also pushed to them
+   (services/push.service.ts), so it reaches the phone with the app closed.
+   A subscription the push service says is gone (404/410) is deleted. */
+export interface IPushSubscription extends Document {
+  userId:     Types.ObjectId
+  app:        'client' | 'admin'
+  endpoint:   string
+  keys:       { p256dh: string; auth: string }
+  userAgent?: string
+  lastOkAt?:  Date
+  failures:   number
+  createdAt:  Date
+  updatedAt:  Date
+}
+const PushSubscriptionSchema = new Schema<IPushSubscription>(
+  {
+    userId:    { type: Schema.Types.ObjectId, ref: 'User', required: true, index: true },
+    app:       { type: String, enum: ['client', 'admin'], default: 'client' },
+    endpoint:  { type: String, required: true, maxlength: 1000 },
+    keys:      { p256dh: { type: String, required: true, maxlength: 200 }, auth: { type: String, required: true, maxlength: 100 } },
+    userAgent: { type: String, maxlength: 300 },
+    lastOkAt:  { type: Date },
+    failures:  { type: Number, default: 0 },
+  },
+  baseSchemaOptions,
+)
+/* One row per endpoint: a device re-subscribing (or another account signing in on it) replaces it. */
+PushSubscriptionSchema.index({ endpoint: 1 }, { unique: true })
+export const PushSubscriptionModel = mongoose.model<IPushSubscription>('PushSubscription', PushSubscriptionSchema)
+
 /* ─────────────────────────────────────────────────────
    PUSH TOKEN — an installed copy of the student app that may receive push
    notifications (plan.md §13.4 B3). One row per Expo push token: the token
@@ -1195,6 +1265,8 @@ export interface ILiveClass extends Document {
   id:             string
   courseId:       Types.ObjectId
   instructorId:   Types.ObjectId
+  /** Co-mentors (a Program's): Meet co-hosts, see the class and get the mentor's 10-minute WhatsApp. The main mentor stays instructorId. */
+  coInstructorIds?: Types.ObjectId[]
   title:          string
   description?:   string
   scheduledStart: Date
@@ -1283,6 +1355,21 @@ export interface ILiveClass extends Document {
   isOnline:          boolean          // false = physical classroom session
   location?:         string           // venue / address (offline only)
   room?:             string           // classroom / room number (offline only)
+  /* The HRMS meeting room ("pod") held for this online class (2026-10-18, services/classPod.service.ts):
+     booked — `roomName` is it; no_room — every pod taken at that time; error — the HRMS could not be reached
+     (tried again). `for` is the stretch it was held for ("start|end"), so a moved class is re-held. */
+  pod?: {
+    state:      'booked' | 'no_room' | 'error'
+    roomId?:    string
+    roomName?:  string
+    bookingId?: string
+    for?:       string
+    note?:      string
+    at?:        Date
+    /* The stretch the "no pod free" notice went out for — once per stretch, not every minute. */
+    alertedFor?: string
+    auto?: boolean
+  }
 
   /* Reschedule tracking */
   rescheduledReason?: string          // admin-provided reason when class is rescheduled
@@ -1399,6 +1486,9 @@ const LiveClassSchema = new Schema<ILiveClass>(
   {
     courseId:       { type: Schema.Types.ObjectId, ref: 'Course', required: true },
     instructorId:   { type: Schema.Types.ObjectId, ref: 'User',   required: true },
+    /* Co-mentors — set on a Program's classes. Read-only on the class: the main
+       mentor (instructorId) runs it, takes attendance and is reviewed. */
+    coInstructorIds: { type: [{ type: Schema.Types.ObjectId, ref: 'User' }], default: undefined, index: true },
     title:          { type: String, required: true, trim: true, maxlength: 255 },
     description:    { type: String, maxlength: 2000 },
     scheduledStart: { type: Date,   required: true },
@@ -1450,12 +1540,28 @@ const LiveClassSchema = new Schema<ILiveClass>(
     endSource:         { type: String, enum: ['meet'] },
     // Module link
     sectionId:         { type: Schema.Types.ObjectId, ref: 'Section' },
-    sessionCapacity:   { type: Number, default: 30, min: 1, max: 500 },
+    /* 100000, not 500: a Program seats all its students (thousands); the class forms keep their own 500 (admin.routes.ts). */
+    sessionCapacity:   { type: Number, default: 30, min: 1, max: 100000 },
     bookedCount:       { type: Number, default: 0, min: 0 },
     language:          { type: String, default: 'English' },
     isOnline:          { type: Boolean, default: true },
     location:          { type: String, maxlength: 500 },
     room:              { type: String, maxlength: 100 },
+    pod: {
+      type: new Schema({
+        state:      { type: String, enum: ['booked', 'no_room', 'error'], required: true },
+        roomId:     { type: String },
+        roomName:   { type: String, maxlength: 80 },
+        bookingId:  { type: String },
+        for:        { type: String },
+        note:       { type: String, maxlength: 300 },
+        at:         { type: Date },
+        alertedFor: { type: String },
+        /* An offline class's room the LMS picked itself (none was picked on the class), 2026-10-19. */
+        auto:       { type: Boolean },
+      }, { _id: false }),
+      default: undefined,
+    },
     rescheduledReason:           { type: String, maxlength: 2000 },
     reminderInstructor15MinSent: { type: Boolean, default: false },
     mentorWhatsApp10MinSent:     { type: Boolean, default: false },
@@ -2145,6 +2251,8 @@ export interface IOrder extends Document {
   abzerPaymentId?:          string
   tamaraCheckoutId?:        string
   tamaraOrderId?:           string
+  /** Guest checkout (/explore): when the buyer's access email went — once per order. */
+  guestAccessSentAt?:       Date
   tamaraPaymentId?:         string
   /**
    * Where this order came from, when it came from outside.
@@ -2186,6 +2294,7 @@ const OrderSchema = new Schema<IOrder>(
     abzerPaymentId:          { type: String },
     tamaraCheckoutId:        { type: String },
     tamaraOrderId:           { type: String },
+    guestAccessSentAt:       { type: Date },
     tamaraPaymentId:         { type: String },
     externalRef: {
       source: { type: String },
@@ -2627,7 +2736,7 @@ export type AuditAction =
   | 'course.create'   | 'course.update'   | 'course.delete'
   | 'course.publish'  | 'course.archive'
   | 'user.create'     | 'user.ban'        | 'user.unban'      | 'user.roleChange'
-  | 'user.delete'     | 'user.impersonate' | 'user.reset2fa'
+  | 'user.delete'     | 'user.impersonate' | 'user.reset2fa' | 'user.setPassword'
   | 'user.impersonate.revoke'
   | 'user.impersonate.client'
   | 'user.impersonate.write'
@@ -2649,6 +2758,7 @@ export type AuditAction =
   | 'settings.device-limit'
   | 'settings.finance-check'
   | 'class.verify'
+  | 'message.send'
 
 export interface IAuditLog extends Document {
   id:         string
@@ -2721,6 +2831,10 @@ export interface IEmailOutbox extends Document {
   lastError?:    string
   sentVia?:      string        // which mailbox accepted it
   sentAt?:       Date
+  /** 10 = urgent (password reset, sign-in code, verify, welcome): sent before any other mail. */
+  priority?:     number
+  /** A reminder is worthless after this — closed, not sent. */
+  expiresAt?:    Date
   createdAt:     Date
   updatedAt:     Date
 }
@@ -2737,12 +2851,17 @@ const EmailOutboxSchema = new Schema<IEmailOutbox>(
     lastError:     { type: String, maxlength: 500 },
     sentVia:       { type: String },
     sentAt:        { type: Date },
+    /* Urgent first (2026-10-17): a sign-in code or password reset must never wait behind thousands of class
+       notices when the mailboxes are out of their daily allowance. */
+    priority:      { type: Number, default: 0 },
+    expiresAt:     { type: Date },
   },
   baseSchemaOptions,
 )
 
-/* The drain query: oldest due work first. */
+/* The drain query: urgent first, then oldest due work. */
 EmailOutboxSchema.index({ status: 1, nextAttemptAt: 1 })
+EmailOutboxSchema.index({ status: 1, priority: -1, nextAttemptAt: 1 })
 
 /* Delivered mail is kept 30 days as a send log, then swept. Pending and failed
    rows are NEVER auto-removed — losing them is the failure this exists to
@@ -2907,6 +3026,10 @@ export interface ICriticalMail extends Document {
   newStart?:          Date
   oldInstructorName?: string
   newInstructorName?: string
+  /* Who the notice is for: a student BOOKED on the class, or one ENROLLED in
+     its course who has not booked it. The wording differs ("your booking"
+     makes no sense to the second), and so does the send-time audience check. */
+  audience?:          'booked' | 'enrolled'
   queuedAt:           Date
   dueAt:              Date
   sentAt?:            Date | null
@@ -2936,6 +3059,7 @@ const CriticalMailSchema = new Schema<ICriticalMail>(
     newStart:          { type: Date },
     oldInstructorName: { type: String, maxlength: 200 },
     newInstructorName: { type: String, maxlength: 200 },
+    audience:          { type: String, enum: ['booked', 'enrolled'], default: 'booked' },
     queuedAt:          { type: Date, default: () => new Date() },
     /* Set once, from the FIRST edit, and never pushed back by a merge — a
        rolling window would let a stream of corrections delay a cancellation
@@ -3058,6 +3182,14 @@ export interface IProgram extends Document {
   description?:    string
   organizationId?: Types.ObjectId
   instructorId:    Types.ObjectId
+  coInstructorIds?: Types.ObjectId[]
+  meetingMode?:    'auto' | 'link' | 'app'
+  meetingUrl?:     string
+  language?:       string
+  /** Its picture — also its hidden course's, which the student app shows on the class cards (2026-10-15). */
+  thumbnailUrl?:   string
+  /** The programme's shareable join link: {CLIENT_URL}/p/{joinCode}. */
+  joinCode?:       string
   courseId:        Types.ObjectId
   repeat:          'weekly' | 'monthly'
   weekdays:        number[]          // weekly: 0 = Sunday … 6 = Saturday
@@ -3085,6 +3217,14 @@ const ProgramSchema = new Schema<IProgram>(
     description:    { type: String, maxlength: 2000 },
     organizationId: { type: Schema.Types.ObjectId, ref: 'Organization', index: true },
     instructorId:   { type: Schema.Types.ObjectId, ref: 'User', required: true },
+    coInstructorIds: [{ type: Schema.Types.ObjectId, ref: 'User' }],
+    /* How its classes meet: a Meet room made per class, the admin's own Meet link, or the in-app stream. */
+    meetingMode:    { type: String, enum: ['auto', 'link', 'app'], default: 'auto' },
+    meetingUrl:     { type: String, maxlength: 2048 },
+    language:       { type: String, default: 'English', maxlength: 40 },
+    thumbnailUrl:   { type: String, maxlength: 2048 },
+    /* The shareable link (2026-10-17): {CLIENT_URL}/p/{joinCode} — a form for people without an LMS account. */
+    joinCode:       { type: String, unique: true, sparse: true },
     courseId:       { type: Schema.Types.ObjectId, ref: 'Course', required: true },
     repeat:         { type: String, enum: ['weekly', 'monthly'], required: true },
     weekdays:       { type: [Number], default: [] },
@@ -3108,6 +3248,35 @@ const ProgramSchema = new Schema<IProgram>(
 ProgramSchema.index({ studentIds: 1 })
 
 export const ProgramModel = mongoose.model<IProgram>('Program', ProgramSchema)
+
+/* ─────────────────────────────────────────────────────
+   PROGRAM GUEST — someone without an LMS account who opened a programme's
+   link (/p/{joinCode}) and filled in its form (2026-10-17): kept for the
+   programme's makers, never an account. One per programme and email.
+───────────────────────────────────────────────────── */
+export interface IProgramGuest extends Document {
+  programId:   Types.ObjectId
+  name:        string
+  email:       string
+  phone:       string
+  joins:       number
+  lastJoinAt?: Date
+  createdAt:   Date
+  updatedAt:   Date
+}
+const ProgramGuestSchema = new Schema<IProgramGuest>(
+  {
+    programId:  { type: Schema.Types.ObjectId, ref: 'Program', required: true },
+    name:       { type: String, required: true, trim: true, maxlength: 120 },
+    email:      { type: String, required: true, trim: true, lowercase: true, maxlength: 200 },
+    phone:      { type: String, required: true, trim: true, maxlength: 30 },
+    joins:      { type: Number, default: 0 },
+    lastJoinAt: { type: Date },
+  },
+  baseSchemaOptions,
+)
+ProgramGuestSchema.index({ programId: 1, email: 1 }, { unique: true })
+export const ProgramGuestModel = mongoose.model<IProgramGuest>('ProgramGuest', ProgramGuestSchema)
 
 /* ─────────────────────────────────────────────────────
    MENTOR MEETING — time booked with a mentor that is not a class
@@ -3258,6 +3427,8 @@ export interface IClassBooking extends Document {
   reminderDayOfSent:      boolean
   reminderPreSessionSent: boolean   // 30-min reminder (no link)
   reminder5MinSent:       boolean   // 5-min reminder (with link)
+  reminder1MinSent?:      boolean   // 1-min "join now" (bell + push, 2026-10-21)
+  todaysNoticeSent?:      boolean   // in the morning "your classes today" (bell + push, 2026-10-21)
   todaysWhatsAppSent?:    boolean   // in the morning "today's classes" WhatsApp
   reminderAtTimeSent:     boolean   // at-time reminder (with link)
   createdAt:   Date
@@ -3282,6 +3453,8 @@ const ClassBookingSchema = new Schema<IClassBooking>(
     reminderDayOfSent:      { type: Boolean, default: false },
     reminderPreSessionSent: { type: Boolean, default: false },
     reminder5MinSent:       { type: Boolean, default: false },
+    reminder1MinSent:       { type: Boolean },
+    todaysNoticeSent:       { type: Boolean },
     todaysWhatsAppSent:     { type: Boolean, default: false },
     reminderAtTimeSent:     { type: Boolean, default: false },
   },
@@ -3478,6 +3651,13 @@ export interface IChatConversation extends Document {
   instructorUnread:     number
   studentLastReadAt?:   Date
   instructorLastReadAt?: Date
+  /* When this side's current unread run began, and whether its "you have a
+     message" email is still owed — sent by jobs/chatEmail.job.ts once the run
+     is CHAT_EMAIL_DELAY_MINS old and still unread; reading clears it. */
+  studentUnreadSince?:    Date
+  instructorUnreadSince?: Date
+  studentEmailDue?:       boolean
+  instructorEmailDue?:    boolean
   createdAt:            Date
   updatedAt:            Date
 }
@@ -3494,9 +3674,16 @@ const ChatConversationSchema = new Schema<IChatConversation>(
     instructorUnread:     { type: Number, default: 0, min: 0 },
     studentLastReadAt:    { type: Date },
     instructorLastReadAt: { type: Date },
+    studentUnreadSince:    { type: Date },
+    instructorUnreadSince: { type: Date },
+    studentEmailDue:       { type: Boolean },
+    instructorEmailDue:    { type: Boolean },
   },
   baseSchemaOptions,
 )
+/* The chat-email job's two sweeps. Sparse: only conversations owing a mail carry the flag. */
+ChatConversationSchema.index({ instructorEmailDue: 1, instructorUnreadSince: 1 }, { sparse: true })
+ChatConversationSchema.index({ studentEmailDue: 1, studentUnreadSince: 1 }, { sparse: true })
 /* One conversation per pair — the first send's upsert relies on it. */
 ChatConversationSchema.index({ studentId: 1, instructorId: 1 }, { unique: true })
 ChatConversationSchema.index({ instructorId: 1, lastMessageAt: -1 })

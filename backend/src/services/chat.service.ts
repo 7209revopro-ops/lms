@@ -187,10 +187,19 @@ export async function sendAsStudent(studentId: Id, input: { instructorId?: unkno
 
   const { message, duplicate } = await insertMessage(conv, student._id, 'student', body, clientMsgId)
   if (!duplicate) {
-    await ChatConversationModel.updateOne({ _id: conv._id }, {
+    const before = await ChatConversationModel.findOneAndUpdate({ _id: conv._id }, {
       $set: { lastMessageAt: message.createdAt, lastMessagePreview: preview(body), lastSenderRole: 'student' },
       $inc: { instructorUnread: 1 },
-    })
+    }, { new: false }).lean() as any
+    /* The mentor's side of the same rule as the student's: one bell
+       notification per unread run, and the run's email owed from now. */
+    if (before && !before.instructorUnread) {
+      await startUnreadRun(conv._id, 'instructor', message.createdAt)
+      void notifSvc.create(String(instructor._id), {
+        kind: 'chat-message', title: `New message from ${student.name ?? 'a student'}`,
+        body: preview(body), link: `/messages?c=${String(conv._id)}`,
+      }).catch(err => logger.warn({ err, convId: String(conv._id) }, 'chat notification failed'))
+    }
   }
   return { conversationId: String(conv._id), message: toMessage(message) }
 }
@@ -236,7 +245,8 @@ export async function replyAsInstructor(instructorId: Id, convId: unknown, input
     }, { new: false }).lean() as any
     /* One bell notification per unread run, not per message — a burst of
        five replies is one "new messages" ping until the student reads it. */
-    if (before && before.studentUnread === 0) {
+    if (before && !before.studentUnread) {
+      await startUnreadRun(conv._id, 'student', message.createdAt)
       const me = await UserModel.findById(instructorId).select('name').lean() as any
       void notifSvc.create(String(conv.studentId), {
         kind: 'chat-message', title: `New message from ${me?.name ?? 'your instructor'}`,
@@ -249,12 +259,28 @@ export async function replyAsInstructor(instructorId: Id, convId: unknown, input
 
 /* ── Read state ──────────────────────────────────────── */
 
+/* The first unread message of a run: from now the reader owes nothing, but
+   the conversation owes them an email if it is still unread after
+   CHAT_EMAIL_DELAY_MINS (jobs/chatEmail.job.ts). Reading cancels it. */
+async function startUnreadRun(convId: unknown, reader: 'student' | 'instructor', at: Date) {
+  const { ChatConversationModel } = await import('@/models/schema.ts')
+  await ChatConversationModel.updateOne({ _id: convId }, reader === 'student'
+    ? { $set: { studentUnreadSince: at, studentEmailDue: true } }
+    : { $set: { instructorUnreadSince: at, instructorEmailDue: true } })
+}
+
 export async function markRead(conv: any, role: 'student' | 'instructor') {
   const { ChatConversationModel } = await import('@/models/schema.ts')
   const now = new Date()
   await ChatConversationModel.updateOne({ _id: conv._id }, role === 'student'
-    ? { $set: { studentUnread: 0, studentLastReadAt: now } }
-    : { $set: { instructorUnread: 0, instructorLastReadAt: now } })
+    ? { $set: { studentUnread: 0, studentLastReadAt: now }, $unset: { studentUnreadSince: 1, studentEmailDue: 1 } }
+    : { $set: { instructorUnread: 0, instructorLastReadAt: now }, $unset: { instructorUnreadSince: 1, instructorEmailDue: 1 } })
+  /* The bell's "new message" for this chat is read too — it was about these messages. */
+  const { NotificationModel } = await import('@/models/schema.ts')
+  await NotificationModel.updateMany({
+    userId: role === 'student' ? conv.studentId : conv.instructorId, kind: 'chat-message',
+    link: `/messages?c=${String(conv._id)}`, readAt: { $exists: false },
+  }, { $set: { readAt: now } }).catch(err => logger.warn({ err }, 'chat notification read failed'))
   return { readAt: now }
 }
 

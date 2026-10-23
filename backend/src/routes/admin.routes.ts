@@ -1,4 +1,5 @@
 import { Router } from 'express'
+import { recheckTetraCs, recheckTetraCsLater, TetraCsUnavailableError } from '@/services/tetraCsRecheck.service.ts'
 import { resolveClassEntitlement } from '@/services/classEntitlement.service.ts'
 /* Type-only, and aliased: every handler below binds its own `Types` value
    via `await import('mongoose')`, which would shadow the namespace. */
@@ -8,7 +9,7 @@ import { AdminController } from '@/controllers/admin.controller.ts'
 import { AuthController } from '@/controllers/auth.controller.ts'
 import { LiveClassController } from '@/controllers/liveClass.controller.ts'
 import { RolesController } from '@/controllers/roles.controller.ts'
-import { authenticateAdmin, requireRole, requireAdmin, requireAnyAdmin, requireInstructor, requireCourseAuthor, injectCategoryScope, requirePermission } from '@/middleware/auth.middleware.ts'
+import { authenticateAdmin, requireRole, requireAdmin, requireAnyAdmin, requireInstructor, requireCourseAuthor, injectCategoryScope, requirePermission, requirePagePermission } from '@/middleware/auth.middleware.ts'
 import { issueClassHandoff } from '@/controllers/classHandoff.controller.ts'
 import { validate } from '@/middleware/validate.middleware.ts'
 import { env } from '@/config/env.ts'
@@ -112,6 +113,27 @@ router.get ('/auth/me',      authenticateAdmin, authCtrl.me)
    try to mutate courses they don't own. */
 router.use(authenticateAdmin, requireRole('super_admin', 'admin', 'sub_admin', 'support', 'instructor'), injectCategoryScope)
 
+/* ─── Custom-role page permissions (2026-10-17) ─────────
+   The admin pages that never had a per-route requirePermission, each guarded
+   once in front of the routes ONLY that page uses (GET reads; POST creates;
+   PATCH/PUT updates; DELETE deletes — requirePagePermission). Inert for super
+   admins and anyone without a custom role. Shared routes (course lists, users,
+   a class's details) are left to their own guards. */
+router.use('/enrollment-requests',     requirePagePermission('enrollment-requests'))
+router.use('/settings/finance-check',  requirePagePermission('enrollment-requests'))
+router.use('/devices',                 requirePagePermission('devices'))
+router.use('/settings/device-limit',   requirePagePermission('devices'))
+router.use('/programs',                requirePagePermission('programs'))
+/* The mentor list itself (GET /mentor-calendar) also feeds the Programs form: either page's Read lets it through. */
+router.use('/mentor-calendar', (req: Request, res: Response, next: NextFunction) =>
+  (req.path === '/' || req.path === '' ? requirePagePermission('mentor-calendar', 'programs') : requirePagePermission('mentor-calendar'))(req, res, next))
+router.use('/class-verification',      requirePagePermission('class-verification'))
+router.use('/live-classes/no-shows',   requirePagePermission('instructor-attendance'))
+router.use('/recordings',              requirePagePermission('recordings'))
+router.use('/exams',                   requirePagePermission('exams'))
+router.use('/courses/:courseId/exam',  requirePagePermission('exams'))
+router.use('/messages',                requirePagePermission('send-message'))
+
 /* ─── Own email-notification preferences ───────────────
    Self-service for every admin-side role: the router.use above already proves
    an admin-portal session and a staff role, and a user may only ever change
@@ -156,6 +178,8 @@ const courseCreateSchema = z.object({
   organizationId: z.string().optional(),
   /* Serve both academies. Super admins only — dropped for anyone else. */
   sharedAcademies: z.boolean().optional(),
+  /* Level in its programme's journey; null clears it. */
+  programOrder:   z.coerce.number().int().min(0).max(999).nullable().optional(),
 })
 
 const courseUpdateSchema = courseCreateSchema.partial().extend({
@@ -172,6 +196,32 @@ const categoryCreateSchema = z.object({
 
 const categoryUpdateSchema = categoryCreateSchema.partial()
 
+/* After a student is created or edited here, ask the commission portal who
+   looks after them — in the background, once the save has answered. The id is
+   the route's (an edit) or the one the save answers with (a create). */
+function recheckCsAfter(idOf?: (r: Request) => string) {
+  return (req: Request, res: Response, next: NextFunction) => {
+    // sendSuccess answers with res.send and a JSON string (utils/response.ts).
+    const send = res.send.bind(res)
+    let done = false
+    res.send = ((body?: unknown) => {
+      if (!done && res.statusCode < 300) {
+        done = true
+        let id = idOf ? idOf(req) : ''
+        if (!id) {
+          try {
+            const parsed = (typeof body === 'string' ? JSON.parse(body) : body) as { success?: boolean; data?: { _id?: unknown; id?: unknown } }
+            if (parsed?.success !== false) id = String(parsed?.data?._id ?? parsed?.data?.id ?? '')
+          } catch { /* not JSON: nothing to ask about */ }
+        }
+        recheckTetraCsLater(id)
+      }
+      return send(body)
+    }) as typeof res.send
+    next()
+  }
+}
+
 const usersQuerySchema = z.object({
   page:              z.coerce.number().int().min(1).default(1),
   per_page:          z.coerce.number().int().min(1).max(500).default(20),
@@ -181,6 +231,10 @@ const usersQuerySchema = z.object({
   status:            z.enum(['active', 'inactive']).optional(),
   exclude_students:  z.coerce.boolean().optional(),
   enrollmentStatus:  z.enum(['pending', 'approved', 'rejected', 'cancelled']).optional(),
+  /* Only students with no phone number, on their account or their application. */
+  no_phone:          z.enum(['true', 'false']).optional(),
+  /* Onboarded in Tetra Commission: yes, no (there but not yet), none (not there). */
+  onboarded:         z.enum(['yes', 'no', 'none']).optional(),
 })
 
 /* The rate the CHECKOUT actually uses, handed out so the admin panel shows
@@ -373,7 +427,7 @@ router.get  ('/users', requirePermission('users','list'),
     next()
   },
   ctrl.listUsers)
-router.post ('/users', requirePermission('users','create'),          validate(userCreateSchema), audit('user.create', 'User'),
+router.post ('/users', requirePermission('users','create'),          validate(userCreateSchema), audit('user.create', 'User'), recheckCsAfter(),
   async (req, res, next) => {
     const role       = req.user!.role
     const targetRole = (req.body as { role?: string }).role ?? 'instructor'
@@ -607,9 +661,54 @@ router.patch ('/users/:id', requirePermission('users','update'),
   },
   validate(userUpdateSchema),
   audit('user.roleChange', 'User', r => String(r.params['id'] ?? '')),
+  recheckCsAfter(r => String(r.params['id'] ?? '')),
   ctrl.updateUser,
 )
+
+/* Recheck the commission portal — the Students table's "…" menu: asks Tetra
+   Commission now who looks after this student, and keeps the answer
+   (services/tetraCsRecheck.service.ts). Anyone who may edit the student. */
+router.post('/users/:id/recheck-cs', requirePermission('users','update'), requireSameOrgUser('id'),
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const answer = await recheckTetraCs(String(req.params['id'] ?? ''))
+      sendSuccess(res, answer)
+    } catch (err) {
+      if (err instanceof TetraCsUnavailableError) {
+        res.status(err.message === 'Not a student' ? 400 : 503).json({ success: false, error: { code: 'COMMISSION_UNAVAILABLE', message: err.message } })
+        return
+      }
+      next(err)
+    }
+  })
 router.delete('/users/:id', requirePermission('users','delete'),           requireAdmin, requireSameOrgUser('id'), audit('user.delete', 'User', r => String(r.params['id'] ?? '')), ctrl.deleteUser)
+
+/* POST /admin/users/:id/set-password — set a STUDENT's password (2026-10-17). Admins and super admins for any
+   student of their academy; a sub_admin only for students of its own programme (mayAccessStudent, as for devices).
+   Every session is ended and the student is emailed the new password. Audited (never the password itself). */
+const setPasswordSchema = z.object({
+  password: z.string().min(8, 'At least 8 characters').max(128, 'At most 128 characters'),
+})
+router.post('/users/:id/set-password', requireRole('super_admin', 'admin', 'sub_admin'), requireSameOrgUser('id'),
+  validate(setPasswordSchema),
+  audit('user.setPassword', 'User', r => String(r.params['id'] ?? '')),
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const id = String(req.params['id'] ?? '')
+      if (isDepartmentScoped(req)) {
+        const { UserModel } = await import('@/models/schema.ts')
+        const target = await UserModel.findById(id)
+          .select('category categories enrollmentStatus enrollmentApplication.programs').lean<Parameters<typeof mayAccessStudent>[1]>()
+        if (!(await mayAccessStudent(req, target))) {
+          res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Student not found' } })
+          return
+        }
+      }
+      const { UserService } = await import('@/services/user.service.ts')
+      const r = await new UserService().adminSetStudentPassword(id, String((req.body as { password: string }).password))
+      sendSuccess(res, { email: r.email }, 'Password set — the student is signed out everywhere and has been emailed the new password.')
+    } catch (err) { next(err) }
+  })
 
 /* POST /admin/users/:id/reset-2fa — clear a user's second factor.
    For the lost-device case. Nothing else in the codebase could write
@@ -893,7 +992,12 @@ const enrollmentRequestQuerySchema = z.object({
   category: z.enum(['4x-trading', 'digital-marketing', 'ai', 'jura']).optional(),
   page:     z.coerce.number().min(1).default(1),
   per_page: z.coerce.number().min(1).max(100).default(20),
+  /* Where the student's enrolment stands in finance (2026-10-13): none raised,
+     waiting for approval, sent back, approved. */
+  finance:  z.enum(['none', 'pending', 'returned', 'approved']).optional(),
 })
+
+const salesStatusSchema = z.object({ ids: z.array(z.string()).min(1).max(100) })
 
 const approveEnrollmentSchema = z.object({
   categories: z.array(z.enum(['4x-trading', 'digital-marketing', 'ai', 'jura'])).optional(),
@@ -907,6 +1011,13 @@ router.get ('/enrollment-requests',
   requireAnyAdmin,
   validate(enrollmentRequestQuerySchema, 'query'),
   ctrl.listEnrollmentRequests,
+)
+/* Which sales CRM has each of these students as a lead, and their enrolment in
+   finance (2026-10-13) — a page of Enrollment Requests at a time. Read-only. */
+router.post('/enrollment-requests/sales-status',
+  requireAnyAdmin,
+  validate(salesStatusSchema),
+  ctrl.enrollmentRequestsSalesStatus,
 )
 /* ─── The finance check's switch ─────────────────────────────────
    Whether approving by hand asks finance first. Off by default. Read by any
@@ -1908,10 +2019,25 @@ router.get('/programs', requireInstructor, async (req: Request, res: Response, n
   } catch (err) { next(err) }
 })
 
-/* Students to pick from — by name or email, this academy's only. */
+/* The commission teams and CS of this academy, with their student counts — the program form's pickers. */
+router.get('/programs/audiences', requireInstructor, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { programAudiences } = await import('@/services/program.service.ts')
+    sendSuccess(res, await programAudiences(await mentorCalendarOrg(req)))
+  } catch (err) { next(err) }
+})
+
+/* Students to pick from — by name or email; or a whole commission team (?team=), one CS (?cs=, ?team= too
+   when two teams share a CS name), or everyone (?all=1). This academy's only. */
 router.get('/programs/students', requireInstructor, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { UserModel } = await import('@/models/schema.ts')
+    const team = String(req.query['team'] ?? '').trim(), cs = String(req.query['cs'] ?? '').trim()
+    if (team || cs || req.query['all'] === '1') {
+      const { programAudienceStudents } = await import('@/services/program.service.ts')
+      sendSuccess(res, await programAudienceStudents(await mentorCalendarOrg(req), { team: team || undefined, cs: cs || undefined, all: req.query['all'] === '1' }))
+      return
+    }
     const q = String(req.query['q'] ?? '').trim()
     if (q.length < 2) { sendSuccess(res, []); return }
     const rx = new RegExp(q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i')
@@ -1936,6 +2062,14 @@ router.get('/programs/:id', requireInstructor, async (req: Request, res: Respons
   } catch (err) { next(err) }
 })
 
+/* Who filled in the programme link's form (people without an LMS account). */
+router.get('/programs/:id/guests', requireInstructor, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { listProgramGuests } = await import('@/services/program.service.ts')
+    sendSuccess(res, await listProgramGuests(String(req.params['id'] ?? ''), await programActor(req)))
+  } catch (err) { next(err) }
+})
+
 router.post('/programs/:id/students', requireInstructor, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { changeStudents } = await import('@/services/program.service.ts')
@@ -1957,6 +2091,37 @@ router.post('/programs/:id/stop', requireInstructor, async (req: Request, res: R
   } catch (err) { next(err) }
 })
 
+/* The HRMS meeting pods online classes are given (2026-10-18, services/classPod.service.ts) and who has each
+   over a stretch — staff meetings too — for the mentors' Pods page. At most 31 days at a time. */
+router.get('/pods', requireInstructor, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { podsView } = await import('@/services/classPod.service.ts')
+    const q = req.query as Record<string, string | undefined>
+    const at = (v?: string) => { const d = v ? new Date(v) : null; return d && !Number.isNaN(d.getTime()) ? d : null }
+    const from = at(q['from']) ?? new Date(new Date().setHours(0, 0, 0, 0))
+    const to = at(q['to']) ?? new Date(from.getTime() + 864e5)
+    if (!(to > from) || to.getTime() - from.getTime() > 31 * 864e5) {
+      res.status(400).json({ success: false, message: 'from and to: to after from, at most 31 days' }); return
+    }
+    sendSuccess(res, await podsView(from, to, String(req.user?.id ?? '')))
+  } catch (err) { next(err) }
+})
+
+/* Which offline class rooms are free for a class's time — the room picker in the offline class modals (2026-10-19). */
+router.get('/pods/rooms', requireInstructor, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { roomAvailability } = await import('@/services/classPod.service.ts')
+    const q = req.query as Record<string, string | undefined>
+    const start = q['start'] ? new Date(q['start']) : null
+    const mins = Number(q['durationMins'] ?? 0)
+    if (!start || Number.isNaN(start.getTime()) || !(mins > 0) || mins > 24 * 60) {
+      res.status(400).json({ success: false, message: 'start and durationMins (1–1440) are required' }); return
+    }
+    const classId = q['classId'] && /^[a-f0-9]{24}$/i.test(q['classId']) ? q['classId'] : undefined
+    sendSuccess(res, await roomAvailability(start, new Date(start.getTime() + mins * 60_000), classId))
+  } catch (err) { next(err) }
+})
+
 router.get('/live-classes/academy-schedule', requireInstructor, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { LiveClassModel } = await import('@/models/schema.ts')
@@ -1973,12 +2138,14 @@ router.get('/live-classes/academy-schedule', requireInstructor, async (req: Requ
       status: { $ne: 'cancelled' },
       scheduledStart: { $gte: from, $lt: to },
     })
-      .select('title scheduledStart durationMins status type isOnline location room language instructorId courseId sectionId bookedCount sessionCapacity organizationId')
+      .select('title scheduledStart durationMins status type isOnline location room language instructorId courseId sectionId bookedCount sessionCapacity organizationId pod')
       .populate('instructorId', 'name').populate('courseId', 'title').populate('sectionId', 'title')
       .sort({ scheduledStart: 1 }).limit(3000).lean() as any[]
     sendSuccess(res, rows.map(c => ({
       id: String(c._id), title: c.title, scheduledStart: c.scheduledStart, durationMins: c.durationMins,
       status: c.status, type: c.type, isOnline: c.isOnline !== false, location: c.location ?? undefined, room: c.room ?? undefined,
+      /* Its HRMS meeting pod (2026-10-18) — every mentor's, as the timetable's "All mentors" view shows them. */
+      pod: c.pod?.state ? { state: c.pod.state, roomName: c.pod.roomName } : undefined,
       language: c.language ?? 'English',
       instructorId: c.instructorId ? String(c.instructorId._id) : '', instructor: c.instructorId ? { id: String(c.instructorId._id), name: c.instructorId.name } : undefined,
       courseId: c.courseId ? String(c.courseId._id) : '', course: c.courseId ? { id: String(c.courseId._id), title: c.courseId.title } : undefined,
@@ -2708,6 +2875,50 @@ router.get('/coupons/validate', async (req: Request, res: Response, next: NextFu
    the same rank cross-academy class sharing and instructor lending already
    draw the line at. Which academy a row belongs to is resolved below,
    because a schema/service call cannot see the caller's role. */
+/* ── Send message: a WhatsApp template and/or an email to a course's students
+   or a live session's booked students (services/broadcast.service.ts).
+   Admin and super admin only; below super admin, their own academy's
+   students. Preview first, then send — the send is audited. */
+const broadcastSchema = z.object({
+  audience:       z.enum(['course', 'session']),
+  courseId:       z.string().optional(),
+  liveClassId:    z.string().optional(),
+  organizationId: z.string().optional(),
+  sectionId:      z.string().optional(),
+  whatsapp:       z.object({ template: z.string().max(80), values: z.array(z.string().max(1000)).max(10) }).optional(),
+  email:          z.object({ subject: z.string().max(200), body: z.string().max(10000) }).optional(),
+})
+const broadcastCaller = (req: Request) => ({ id: req.user!.id, role: req.user!.role, organizationId: req.user!.organizationId ?? null })
+const broadcastFail = (err: unknown, res: Response, next: NextFunction) => {
+  const e = err as { name?: string; code?: string; statusCode?: number; message?: string }
+  if (e && e.constructor?.name === 'BroadcastError') {
+    res.status(e.statusCode ?? 400).json({ success: false, error: { code: e.code, message: e.message } }); return
+  }
+  next(err)
+}
+router.get('/messages/templates', requireRole('super_admin', 'admin'), async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { BroadcastService } = await import('@/services/broadcast.service.ts')
+    const audience = req.query['audience'] === 'session' ? 'session' : 'course'
+    sendSuccess(res, new BroadcastService().templatesFor(audience))
+  } catch (err) { next(err) }
+})
+router.post('/messages/preview', requireRole('super_admin', 'admin'), validate(broadcastSchema), async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { BroadcastService } = await import('@/services/broadcast.service.ts')
+    sendSuccess(res, await new BroadcastService().preview(req.body, broadcastCaller(req)))
+  } catch (err) { broadcastFail(err, res, next) }
+})
+router.post('/messages/send', requireRole('super_admin', 'admin'), validate(broadcastSchema),
+  audit('message.send', 'Message', r => String((r.body as any)?.liveClassId ?? (r.body as any)?.courseId ?? ''),
+    r => ({ audience: (r.body as any)?.audience, template: (r.body as any)?.whatsapp?.template ?? null, email: !!(r.body as any)?.email, subject: (r.body as any)?.email?.subject ?? null })),
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const { BroadcastService } = await import('@/services/broadcast.service.ts')
+      sendSuccess(res, await new BroadcastService().send(req.body, broadcastCaller(req)), 'Sending')
+    } catch (err) { broadcastFail(err, res, next) }
+  })
+
 const announcementCreateSchema = z.object({
   title:           z.string().min(3).max(150).trim(),
   description:     z.string().min(1).max(3000).trim(),

@@ -9,6 +9,8 @@ import {
   Building2,
 } from 'lucide-react'
 import { api } from '@/lib/axios'
+import { COUNTRIES, type Country } from '@/lib/countries'
+import { returnTo } from '@/lib/safeRedirect'
 import { cn } from '@/lib/utils'
 import { TermsModal } from './TermsModal'
 import Spinner from '@/components/ui/Spinner'
@@ -82,168 +84,6 @@ const MONTHS_SHORT = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct
 const WEEK_DAYS    = ['Su','Mo','Tu','We','Th','Fr','Sa']
 
 /* ── Country data ───────────────────────────────────── */
-interface Country { name: string; dial: string; flag: string }
-
-const COUNTRIES: Country[] = [
-  { name: 'Afghanistan',           dial: '+93',   flag: '🇦🇫' },
-  { name: 'Albania',               dial: '+355',  flag: '🇦🇱' },
-  { name: 'Algeria',               dial: '+213',  flag: '🇩🇿' },
-  { name: 'Angola',                dial: '+244',  flag: '🇦🇴' },
-  { name: 'Argentina',             dial: '+54',   flag: '🇦🇷' },
-  { name: 'Armenia',               dial: '+374',  flag: '🇦🇲' },
-  { name: 'Australia',             dial: '+61',   flag: '🇦🇺' },
-  { name: 'Austria',               dial: '+43',   flag: '🇦🇹' },
-  { name: 'Azerbaijan',            dial: '+994',  flag: '🇦🇿' },
-  { name: 'Bahrain',               dial: '+973',  flag: '🇧🇭' },
-  { name: 'Bangladesh',            dial: '+880',  flag: '🇧🇩' },
-  { name: 'Belarus',               dial: '+375',  flag: '🇧🇾' },
-  { name: 'Belgium',               dial: '+32',   flag: '🇧🇪' },
-  { name: 'Benin',                 dial: '+229',  flag: '🇧🇯' },
-  { name: 'Bolivia',               dial: '+591',  flag: '🇧🇴' },
-  { name: 'Bosnia and Herzegovina',dial: '+387',  flag: '🇧🇦' },
-  { name: 'Botswana',              dial: '+267',  flag: '🇧🇼' },
-  { name: 'Brazil',                dial: '+55',   flag: '🇧🇷' },
-  { name: 'Brunei',                dial: '+673',  flag: '🇧🇳' },
-  { name: 'Bulgaria',              dial: '+359',  flag: '🇧🇬' },
-  { name: 'Burkina Faso',          dial: '+226',  flag: '🇧🇫' },
-  { name: 'Burundi',               dial: '+257',  flag: '🇧🇮' },
-  { name: 'Cambodia',              dial: '+855',  flag: '🇰🇭' },
-  { name: 'Cameroon',              dial: '+237',  flag: '🇨🇲' },
-  { name: 'Canada',                dial: '+1',    flag: '🇨🇦' },
-  { name: 'Chad',                  dial: '+235',  flag: '🇹🇩' },
-  { name: 'Chile',                 dial: '+56',   flag: '🇨🇱' },
-  { name: 'China',                 dial: '+86',   flag: '🇨🇳' },
-  { name: 'Colombia',              dial: '+57',   flag: '🇨🇴' },
-  { name: 'Congo (Brazzaville)',   dial: '+242',  flag: '🇨🇬' },
-  { name: 'Congo (DRC)',           dial: '+243',  flag: '🇨🇩' },
-  { name: 'Costa Rica',            dial: '+506',  flag: '🇨🇷' },
-  { name: 'Croatia',               dial: '+385',  flag: '🇭🇷' },
-  { name: 'Cuba',                  dial: '+53',   flag: '🇨🇺' },
-  { name: 'Cyprus',                dial: '+357',  flag: '🇨🇾' },
-  { name: 'Czech Republic',        dial: '+420',  flag: '🇨🇿' },
-  { name: 'Denmark',               dial: '+45',   flag: '🇩🇰' },
-  { name: 'Djibouti',              dial: '+253',  flag: '🇩🇯' },
-  { name: 'Dominican Republic',    dial: '+1809', flag: '🇩🇴' },
-  { name: 'Ecuador',               dial: '+593',  flag: '🇪🇨' },
-  { name: 'Egypt',                 dial: '+20',   flag: '🇪🇬' },
-  { name: 'El Salvador',           dial: '+503',  flag: '🇸🇻' },
-  { name: 'Eritrea',               dial: '+291',  flag: '🇪🇷' },
-  { name: 'Estonia',               dial: '+372',  flag: '🇪🇪' },
-  { name: 'Ethiopia',              dial: '+251',  flag: '🇪🇹' },
-  { name: 'Fiji',                  dial: '+679',  flag: '🇫🇯' },
-  { name: 'Finland',               dial: '+358',  flag: '🇫🇮' },
-  { name: 'France',                dial: '+33',   flag: '🇫🇷' },
-  { name: 'Gabon',                 dial: '+241',  flag: '🇬🇦' },
-  { name: 'Gambia',                dial: '+220',  flag: '🇬🇲' },
-  { name: 'Georgia',               dial: '+995',  flag: '🇬🇪' },
-  { name: 'Germany',               dial: '+49',   flag: '🇩🇪' },
-  { name: 'Ghana',                 dial: '+233',  flag: '🇬🇭' },
-  { name: 'Greece',                dial: '+30',   flag: '🇬🇷' },
-  { name: 'Guatemala',             dial: '+502',  flag: '🇬🇹' },
-  { name: 'Guinea',                dial: '+224',  flag: '🇬🇳' },
-  { name: 'Guyana',                dial: '+592',  flag: '🇬🇾' },
-  { name: 'Haiti',                 dial: '+509',  flag: '🇭🇹' },
-  { name: 'Honduras',              dial: '+504',  flag: '🇭🇳' },
-  { name: 'Hungary',               dial: '+36',   flag: '🇭🇺' },
-  { name: 'Iceland',               dial: '+354',  flag: '🇮🇸' },
-  { name: 'India',                 dial: '+91',   flag: '🇮🇳' },
-  { name: 'Indonesia',             dial: '+62',   flag: '🇮🇩' },
-  { name: 'Iran',                  dial: '+98',   flag: '🇮🇷' },
-  { name: 'Iraq',                  dial: '+964',  flag: '🇮🇶' },
-  { name: 'Ireland',               dial: '+353',  flag: '🇮🇪' },
-  { name: 'Israel',                dial: '+972',  flag: '🇮🇱' },
-  { name: 'Italy',                 dial: '+39',   flag: '🇮🇹' },
-  { name: 'Ivory Coast',           dial: '+225',  flag: '🇨🇮' },
-  { name: 'Jamaica',               dial: '+1876', flag: '🇯🇲' },
-  { name: 'Japan',                 dial: '+81',   flag: '🇯🇵' },
-  { name: 'Jordan',                dial: '+962',  flag: '🇯🇴' },
-  { name: 'Kazakhstan',            dial: '+7',    flag: '🇰🇿' },
-  { name: 'Kenya',                 dial: '+254',  flag: '🇰🇪' },
-  { name: 'Kosovo',                dial: '+383',  flag: '🇽🇰' },
-  { name: 'Kuwait',                dial: '+965',  flag: '🇰🇼' },
-  { name: 'Kyrgyzstan',            dial: '+996',  flag: '🇰🇬' },
-  { name: 'Laos',                  dial: '+856',  flag: '🇱🇦' },
-  { name: 'Latvia',                dial: '+371',  flag: '🇱🇻' },
-  { name: 'Lebanon',               dial: '+961',  flag: '🇱🇧' },
-  { name: 'Liberia',               dial: '+231',  flag: '🇱🇷' },
-  { name: 'Libya',                 dial: '+218',  flag: '🇱🇾' },
-  { name: 'Lithuania',             dial: '+370',  flag: '🇱🇹' },
-  { name: 'Luxembourg',            dial: '+352',  flag: '🇱🇺' },
-  { name: 'Madagascar',            dial: '+261',  flag: '🇲🇬' },
-  { name: 'Malawi',                dial: '+265',  flag: '🇲🇼' },
-  { name: 'Malaysia',              dial: '+60',   flag: '🇲🇾' },
-  { name: 'Maldives',              dial: '+960',  flag: '🇲🇻' },
-  { name: 'Mali',                  dial: '+223',  flag: '🇲🇱' },
-  { name: 'Malta',                 dial: '+356',  flag: '🇲🇹' },
-  { name: 'Mauritania',            dial: '+222',  flag: '🇲🇷' },
-  { name: 'Mauritius',             dial: '+230',  flag: '🇲🇺' },
-  { name: 'Mexico',                dial: '+52',   flag: '🇲🇽' },
-  { name: 'Moldova',               dial: '+373',  flag: '🇲🇩' },
-  { name: 'Mongolia',              dial: '+976',  flag: '🇲🇳' },
-  { name: 'Montenegro',            dial: '+382',  flag: '🇲🇪' },
-  { name: 'Morocco',               dial: '+212',  flag: '🇲🇦' },
-  { name: 'Mozambique',            dial: '+258',  flag: '🇲🇿' },
-  { name: 'Myanmar',               dial: '+95',   flag: '🇲🇲' },
-  { name: 'Namibia',               dial: '+264',  flag: '🇳🇦' },
-  { name: 'Nepal',                 dial: '+977',  flag: '🇳🇵' },
-  { name: 'Netherlands',           dial: '+31',   flag: '🇳🇱' },
-  { name: 'New Zealand',           dial: '+64',   flag: '🇳🇿' },
-  { name: 'Nicaragua',             dial: '+505',  flag: '🇳🇮' },
-  { name: 'Niger',                 dial: '+227',  flag: '🇳🇪' },
-  { name: 'Nigeria',               dial: '+234',  flag: '🇳🇬' },
-  { name: 'North Macedonia',       dial: '+389',  flag: '🇲🇰' },
-  { name: 'Norway',                dial: '+47',   flag: '🇳🇴' },
-  { name: 'Oman',                  dial: '+968',  flag: '🇴🇲' },
-  { name: 'Pakistan',              dial: '+92',   flag: '🇵🇰' },
-  { name: 'Palestine',             dial: '+970',  flag: '🇵🇸' },
-  { name: 'Panama',                dial: '+507',  flag: '🇵🇦' },
-  { name: 'Paraguay',              dial: '+595',  flag: '🇵🇾' },
-  { name: 'Peru',                  dial: '+51',   flag: '🇵🇪' },
-  { name: 'Philippines',           dial: '+63',   flag: '🇵🇭' },
-  { name: 'Poland',                dial: '+48',   flag: '🇵🇱' },
-  { name: 'Portugal',              dial: '+351',  flag: '🇵🇹' },
-  { name: 'Qatar',                 dial: '+974',  flag: '🇶🇦' },
-  { name: 'Romania',               dial: '+40',   flag: '🇷🇴' },
-  { name: 'Russia',                dial: '+7',    flag: '🇷🇺' },
-  { name: 'Rwanda',                dial: '+250',  flag: '🇷🇼' },
-  { name: 'Saudi Arabia',          dial: '+966',  flag: '🇸🇦' },
-  { name: 'Senegal',               dial: '+221',  flag: '🇸🇳' },
-  { name: 'Serbia',                dial: '+381',  flag: '🇷🇸' },
-  { name: 'Sierra Leone',          dial: '+232',  flag: '🇸🇱' },
-  { name: 'Singapore',             dial: '+65',   flag: '🇸🇬' },
-  { name: 'Slovakia',              dial: '+421',  flag: '🇸🇰' },
-  { name: 'Slovenia',              dial: '+386',  flag: '🇸🇮' },
-  { name: 'Somalia',               dial: '+252',  flag: '🇸🇴' },
-  { name: 'South Africa',          dial: '+27',   flag: '🇿🇦' },
-  { name: 'South Korea',           dial: '+82',   flag: '🇰🇷' },
-  { name: 'South Sudan',           dial: '+211',  flag: '🇸🇸' },
-  { name: 'Spain',                 dial: '+34',   flag: '🇪🇸' },
-  { name: 'Sri Lanka',             dial: '+94',   flag: '🇱🇰' },
-  { name: 'Sudan',                 dial: '+249',  flag: '🇸🇩' },
-  { name: 'Sweden',                dial: '+46',   flag: '🇸🇪' },
-  { name: 'Switzerland',           dial: '+41',   flag: '🇨🇭' },
-  { name: 'Syria',                 dial: '+963',  flag: '🇸🇾' },
-  { name: 'Taiwan',                dial: '+886',  flag: '🇹🇼' },
-  { name: 'Tajikistan',            dial: '+992',  flag: '🇹🇯' },
-  { name: 'Tanzania',              dial: '+255',  flag: '🇹🇿' },
-  { name: 'Thailand',              dial: '+66',   flag: '🇹🇭' },
-  { name: 'Togo',                  dial: '+228',  flag: '🇹🇬' },
-  { name: 'Tunisia',               dial: '+216',  flag: '🇹🇳' },
-  { name: 'Turkey',                dial: '+90',   flag: '🇹🇷' },
-  { name: 'Turkmenistan',          dial: '+993',  flag: '🇹🇲' },
-  { name: 'Uganda',                dial: '+256',  flag: '🇺🇬' },
-  { name: 'Ukraine',               dial: '+380',  flag: '🇺🇦' },
-  { name: 'United Arab Emirates',  dial: '+971',  flag: '🇦🇪' },
-  { name: 'United Kingdom',        dial: '+44',   flag: '🇬🇧' },
-  { name: 'United States',         dial: '+1',    flag: '🇺🇸' },
-  { name: 'Uruguay',               dial: '+598',  flag: '🇺🇾' },
-  { name: 'Uzbekistan',            dial: '+998',  flag: '🇺🇿' },
-  { name: 'Venezuela',             dial: '+58',   flag: '🇻🇪' },
-  { name: 'Vietnam',               dial: '+84',   flag: '🇻🇳' },
-  { name: 'Yemen',                 dial: '+967',  flag: '🇾🇪' },
-  { name: 'Zambia',                dial: '+260',  flag: '🇿🇲' },
-  { name: 'Zimbabwe',              dial: '+263',  flag: '🇿🇼' },
-]
 
 /* ── Helpers (unchanged) ────────────────────────────── */
 function getStrength(pw: string) {
@@ -334,7 +174,7 @@ const REGISTER_FIELD_META: Record<string, { label: string; step: number }> = {
   programs:           { label: 'Programs & Courses',        step: 2 },
   organizationSlug:   { label: 'Preferred Learning Center', step: 3 },
   paymentMethod:      { label: 'Payment Method',            step: 3 },
-  password:           { label: 'Password',                  step: 3 },
+  emailCode:          { label: 'Email verification code',   step: 3 },
 }
 
 /* Stored signup documents, keyed by the File the user picked (M-05). A
@@ -1046,8 +886,11 @@ export function RegisterForm({ onSwitch, lockFull = false }: { onSwitch: () => v
   /* The code behind apiErr. EMAIL_TAKEN is the one whose remedy is not on
      this form at all — it is the Sign in screen — so the banner offers it. */
   const [apiErrCode,    setApiErrCode]    = useState<string | null>(null)
-  const [showPw,        setShowPw]        = useState(false)
-  const [showCpw,       setShowCpw]       = useState(false)
+  /* Email verification instead of a password (2026-10-23). */
+  const [emailCode,   setEmailCode]   = useState('')
+  const [codeSentTo,  setCodeSentTo]  = useState('')
+  const [codeSending, setCodeSending] = useState(false)
+  const [codeNote,    setCodeNote]    = useState('')
   const [avatarFile,    setAvatarFile]    = useState<File | null>(null)
   const [avatarPreview, setAvatarPreview] = useState<string | null>(null)
   const [avatarError,   setAvatarError]   = useState<string | null>(null)
@@ -1222,11 +1065,8 @@ export function RegisterForm({ onSwitch, lockFull = false }: { onSwitch: () => v
     if (s === 3) {
       if (!data.organizationSlug) errs.organizationSlug = 'Please select your preferred learning center'
       if (!data.paymentMethod) errs.paymentMethod = 'Please select payment method'
-      if (!data.password)      errs.password      = 'Password is required'
-      else if (data.password.length < 8)          errs.password = 'At least 8 characters required'
-      else if (!/[A-Z]/.test(data.password))      errs.password = 'Must include an uppercase letter'
-      else if (!/[0-9]/.test(data.password))      errs.password = 'Must include a number'
-      if (data.password !== data.confirmPassword) errs.confirmPassword = 'Passwords do not match'
+      /* No password (2026-10-23): the emailed code proves the address instead. */
+      if (!/^\d{6}$/.test(emailCode.trim())) errs.password = codeSentTo ? 'Enter the 6-digit code from your email' : 'Verify your email — tap "Send code"'
       if (!data.termsAccepted) errs.termsAccepted = 'You must accept the terms to continue'
     }
 
@@ -1313,7 +1153,7 @@ export function RegisterForm({ onSwitch, lockFull = false }: { onSwitch: () => v
       const reg = await api.post('/auth/register', {
         name:             data.name.trim(),
         email:            data.email.trim().toLowerCase(),
-        password:         data.password,
+        emailCode:        emailCode.trim(),
         organizationSlug: data.organizationSlug,
         enrollmentApplication: {
           passportUrl, idDocUrl, photoUrl,
@@ -1333,11 +1173,13 @@ export function RegisterForm({ onSwitch, lockFull = false }: { onSwitch: () => v
          needs one — the documents were stored above and travelled in with the
          register payload, so both branches below are complete accounts. */
       if (reg.data?.data?.verificationRequired) {
-        window.location.href = '/login?verify=sent'
+        /* Keep where they were going (an /explore course's checkout) for after they sign in. */
+        { const from = new URLSearchParams(window.location.search).get('from')
+          window.location.href = `/login?verify=sent${from ? `&from=${encodeURIComponent(from)}` : ''}` }
         return
       }
 
-      window.location.href = '/my-learning'
+      window.location.href = returnTo()
     } catch (err: unknown) {
       const response = (err as { response?: { status?: number; data?: { error?: { message?: string; code?: string; details?: unknown } } } })?.response
       const resp = response?.data?.error
@@ -1432,11 +1274,13 @@ export function RegisterForm({ onSwitch, lockFull = false }: { onSwitch: () => v
       })
       /* Verification-first mode returns no session (M-05) — the same answer a taken address gets. Send the user to sign-in with a note rather than to a page that would bounce them straight back. */
       if (reg.data?.data?.verificationRequired) {
-        window.location.href = '/login?verify=sent'
+        /* Keep where they were going (an /explore course's checkout) for after they sign in. */
+        { const from = new URLSearchParams(window.location.search).get('from')
+          window.location.href = `/login?verify=sent${from ? `&from=${encodeURIComponent(from)}` : ''}` }
         return
       }
 
-      window.location.href = '/my-learning'
+      window.location.href = returnTo()
     } catch (err: unknown) {
       const response = (err as { response?: { status?: number; data?: { error?: { message?: string; code?: string } } } })?.response
       const resp = response?.data?.error
@@ -1455,7 +1299,18 @@ export function RegisterForm({ onSwitch, lockFull = false }: { onSwitch: () => v
     }
   }
 
-  const strength = getStrength(data.password)
+  const sendEmailCode = async () => {
+    const email = data.email.trim().toLowerCase()
+    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) { setCodeNote('Enter a valid email address first (step 1).'); return }
+    setCodeSending(true); setCodeNote('')
+    try {
+      await api.post('/auth/register/code', { email })
+      setCodeSentTo(email); setEmailCode('')
+      setCodeNote('Code sent — check your inbox (and spam folder).')
+    } catch (err: any) {
+      setCodeNote(err?.response?.data?.error?.message ?? 'We could not send the code. Please try again in a minute.')
+    } finally { setCodeSending(false) }
+  }
 
   /* ── Step content ───────────────────────────────────── */
   function renderStep() {
@@ -1830,53 +1685,29 @@ export function RegisterForm({ onSwitch, lockFull = false }: { onSwitch: () => v
           />
         </Field>
 
-        <Field label="Password *" error={errors.password}>
-          <div className="relative">
-            <Lock size={14} className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-[var(--color-text-muted)]" />
-            <input
-              type={showPw ? 'text' : 'password'} value={data.password}
-              placeholder="Min. 8 chars, uppercase + number"
-              autoComplete="new-password" enterKeyHint="next"
-              onChange={e => set('password', e.target.value)}
-              className={cn(errors.password ? inputErr : inputBase, 'pl-9 pr-10')}
-            />
-            <button type="button" onClick={() => setShowPw(x => !x)}
-              aria-label={showPw ? 'Hide password' : 'Show password'}
-              /* The glyph is 15px; the tappable button is 44px so a thumb
-                 doesn't need to land on the icon exactly, same fix already
-                 applied to the login forms this session. */
-              className="absolute right-0.5 top-1/2 flex h-11 w-11 -translate-y-1/2 items-center justify-center text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)] transition-colors">
-              {showPw ? <EyeOff size={15} /> : <Eye size={15} />}
-            </button>
-          </div>
-          {data.password && (
-            <div className="flex items-center gap-2 pt-0.5">
-              <div className="flex flex-1 gap-1">
-                {[1,2,3,4].map(i => (
-                  <div key={i} className="h-1.5 flex-1 rounded-full transition-all duration-300"
-                    style={{ background: i <= strength.score ? strength.color: 'var(--color-border)' }} />
-                ))}
-              </div>
-              <span className="text-[10px] font-bold" style={{ color: strength.color }}>{strength.label}</span>
+        {/* Verify the email (2026-10-23) — sign-up has no password: a 6-digit code proves the address. With an
+            account already on it, the verified code updates that account instead of "email already exists". */}
+        <Field label="Verify your email *" error={errors.password}>
+          <div className="space-y-2.5 rounded-xl border border-[var(--color-border)] bg-[var(--color-bg-muted)] p-3.5">
+            <p className="text-xs leading-relaxed text-[var(--color-text-secondary)]">
+              {codeSentTo === data.email.trim().toLowerCase()
+                ? <>We sent a 6-digit code to <strong className="text-[var(--color-text-primary)]">{codeSentTo}</strong>. It expires in 10 minutes.</>
+                : <>We&apos;ll email a 6-digit code to <strong className="text-[var(--color-text-primary)]">{data.email.trim() || 'your email'}</strong> to confirm it&apos;s yours. No password needed — you&apos;ll always sign in with a code.</>}
+            </p>
+            <div className="flex gap-2">
+              <input
+                value={emailCode} inputMode="numeric" autoComplete="one-time-code" maxLength={6}
+                placeholder="6-digit code"
+                onChange={e => { setEmailCode(e.target.value.replace(/\D/g, '').slice(0, 6)); setErrors(p => ({ ...p, password: undefined })) }}
+                className={cn(errors.password ? inputErr : inputBase, 'min-w-0 flex-1 text-center font-mono text-base tracking-[0.3em]')}
+              />
+              <button type="button" onClick={() => void sendEmailCode()} disabled={codeSending || !data.email.trim()}
+                className="shrink-0 rounded-xl px-4 text-sm font-semibold text-white transition-opacity disabled:opacity-50"
+                style={{ background: 'var(--color-primary)' }}>
+                {codeSending ? 'Sending…' : codeSentTo === data.email.trim().toLowerCase() ? 'Resend' : 'Send code'}
+              </button>
             </div>
-          )}
-        </Field>
-
-        <Field label="Confirm Password *" error={errors.confirmPassword}>
-          <div className="relative">
-            <Lock size={14} className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-[var(--color-text-muted)]" />
-            <input
-              type={showCpw ? 'text' : 'password'} value={data.confirmPassword}
-              placeholder="Repeat your password"
-              autoComplete="new-password" enterKeyHint="done"
-              onChange={e => set('confirmPassword', e.target.value)}
-              className={cn(errors.confirmPassword ? inputErr : inputBase, 'pl-9 pr-10')}
-            />
-            <button type="button" onClick={() => setShowCpw(x => !x)}
-              aria-label={showCpw ? 'Hide password' : 'Show password'}
-              className="absolute right-0.5 top-1/2 flex h-11 w-11 -translate-y-1/2 items-center justify-center text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)] transition-colors">
-              {showCpw ? <EyeOff size={15} /> : <Eye size={15} />}
-            </button>
+            {codeNote && <p className="text-xs text-[var(--color-text-muted)]">{codeNote}</p>}
           </div>
         </Field>
 

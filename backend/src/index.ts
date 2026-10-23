@@ -7,11 +7,13 @@ import { logger } from '@/utils/logger.ts'
 import { startReminderJobs } from '@/jobs/reminders.job.ts'
 import { startDigestJob } from '@/jobs/digest.job.ts'
 import { startCriticalMailJob } from '@/jobs/criticalmail.job.ts'
+import { startChatEmailJob } from '@/jobs/chatEmail.job.ts'
 import { startInstructorScheduleJob } from '@/jobs/instructorSchedule.job.ts'
 import { ClassImportService } from '@/services/classImport.service.ts'
 import { startEmailOutboxJob } from '@/jobs/emailOutbox.job.ts'
 import { startWhatsAppOutboxJob } from '@/jobs/whatsappOutbox.job.ts'
 import { startCommissionStudentsJob } from '@/jobs/commissionStudents.job.ts'
+import { startClassPodsJob } from '@/jobs/classPods.job.ts'
 import { TabbyService } from '@/services/tabby.service.ts'
 import { TamaraService } from '@/services/tamara.service.ts'
 import { seedDefaultRoles } from '@/utils/seedRoles.ts'
@@ -313,9 +315,11 @@ async function bootstrap() {
     startWhatsAppOutboxJob()
     startDigestJob()
     startCriticalMailJob()
+    startChatEmailJob()
     startInstructorScheduleJob()
     startCommissionStudentsJob()
-    logger.info('⏰  Scheduler started (reminders, critical mail, digests, instructor schedule, email outbox, whatsapp outbox, Tetra Commission students)')
+    startClassPodsJob()
+    logger.info('⏰  Scheduler started (reminders, critical mail, chat emails, digests, instructor schedule, email outbox, whatsapp outbox, Tetra Commission students)')
   } else {
     /* WARN, not info. If this is true of every process the platform quietly
        sends no reminders and no class-change notices at all, and nothing else

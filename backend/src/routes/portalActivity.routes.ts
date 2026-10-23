@@ -112,8 +112,8 @@ router.post('/enrolments', checkedCaller, wrap(async (req, res) => {
  * newest first, a page at a time.
  */
 router.post('/enrolment-requests', checkedCaller, wrap(async (req, res) => {
-  const { status, emails, page, perPage } = (req.body ?? {}) as Record<string, unknown>
-  sendSuccess(res, await enrolmentRequestsForPortal({ status, emails, page, perPage }), 'Requests')
+  const { status, emails, page, perPage, from, to, academy, program, q } = (req.body ?? {}) as Record<string, unknown>
+  sendSuccess(res, await enrolmentRequestsForPortal({ status, emails, page, perPage, from, to, academy, program, q }), 'Requests')
 }))
 
 /** One request, with the whole application — that student's ({ email }), else "not found". */

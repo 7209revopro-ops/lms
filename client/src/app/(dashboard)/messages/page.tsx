@@ -4,7 +4,7 @@ import { Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState } from 
 import { useRouter, useSearchParams } from 'next/navigation'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
-  MessageCircle, Search, ArrowLeft, Send, Check, CheckCheck, Clock, AlertCircle, Lock, GraduationCap,
+  MessageCircle, Search, ArrowLeft, Send, Check, CheckCheck, Clock, AlertCircle, Lock, GraduationCap, Bell,
 } from 'lucide-react'
 import {
   useChatInstructors, useChatConversations, useChatThread,
@@ -13,6 +13,8 @@ import {
 import { AvatarImg } from '@/components/ui/AvatarImg'
 import { useCurrentUser } from '@/lib/api/user'
 import Spinner from '@/components/ui/Spinner'
+import { useUIStore } from '@/store/ui.store'
+import { useDesktopAlerts } from '@/lib/desktopAlerts'
 
 const PROGRAM: Record<string, string> = {
   '4x-trading': 'Forex', 'digital-marketing': 'Digital Marketing', 'ai': 'AI', 'jura': 'Jura',
@@ -158,7 +160,7 @@ function Thread({ row, onBack, locked }: { row: Row; onBack: () => void; locked:
   let lastDay = ''
 
   return (
-    <div className="flex h-full flex-col">
+    <div className="flex h-full w-full min-w-0 flex-col">
       <div className="flex items-center gap-3 px-3 py-2.5" style={{ borderBottom: '1px solid var(--color-border)' }}>
         <button onClick={onBack} className="rounded-lg p-1.5 md:hidden" aria-label="Back to chats"
           style={{ color: 'var(--color-text-secondary)' }}><ArrowLeft size={18} /></button>
@@ -279,6 +281,8 @@ function MessagesInner() {
         : 'Messaging instructors needs an approved enrolment.')
     : null
   const [selected, setSelected] = useState<string | null>(params.get('i'))
+  const { rightPanelOpen } = useUIStore()
+  const alerts = useDesktopAlerts()
 
   const rows: Row[] = useMemo(() => {
     const list: Row[] = (instructors ?? []).map((i: ChatInstructor) => ({
@@ -314,17 +318,27 @@ function MessagesInner() {
   }
 
   return (
-    <div className="mx-auto max-w-6xl">
-      <div className="mb-4">
-        <h1 className="text-2xl font-bold" style={{ color: 'var(--color-text-primary)', fontFamily: 'Bricolage Grotesque, sans-serif' }}>Messages</h1>
-        <p className="mt-1 text-sm" style={{ color: 'var(--color-text-muted)' }}>Chat with the instructors of your programme.</p>
+    <div className="chat-page flex flex-col gap-3"
+      style={{ '--chat-right': rightPanelOpen ? '344px' : '2rem' } as React.CSSProperties}>
+      <div className="flex shrink-0 items-center justify-between gap-3">
+        <div className="min-w-0">
+          <h1 className="text-xl font-bold sm:text-2xl" style={{ color: 'var(--color-text-primary)', fontFamily: 'Bricolage Grotesque, sans-serif' }}>Messages</h1>
+          <p className="hidden text-sm sm:block" style={{ color: 'var(--color-text-muted)' }}>Chat with the instructors of your programme.</p>
+        </div>
+        {alerts.canAsk && (
+          <button onClick={() => void alerts.ask()}
+            className="inline-flex shrink-0 items-center gap-1.5 rounded-xl px-3 py-2 text-xs font-semibold"
+            style={{ background: 'rgba(0,87,184,0.1)', color: '#0057b8' }}>
+            <Bell size={13} />Turn on message alerts
+          </button>
+        )}
       </div>
-      <div className="grid h-[calc(100dvh-14rem)] min-h-[460px] overflow-hidden rounded-2xl md:grid-cols-[320px_1fr]"
+      <div className="grid min-h-0 flex-1 overflow-hidden rounded-2xl md:grid-cols-[320px_1fr] lg:grid-cols-[360px_1fr]"
         style={{ background: 'var(--color-bg-surface)', border: '1px solid var(--color-border)' }}>
         <div className={`${active ? 'hidden md:block' : 'block'} h-full min-h-0 md:border-r`} style={{ borderColor: 'var(--color-border)' }}>
           <ChatList rows={rows} selected={selected} onSelect={pick} loading={isLoading} />
         </div>
-        <div className={`${active ? 'block' : 'hidden md:flex'} h-full min-h-0`}>
+        <div className={`${active ? 'chat-thread-full flex' : 'hidden md:flex'} h-full min-h-0 min-w-0`}>
           {active ? (
             <Thread key={active.instructorId} row={active} locked={locked} onBack={() => { setSelected(null); router.replace('/messages', { scroll: false }) }} />
           ) : (

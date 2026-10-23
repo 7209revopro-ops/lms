@@ -30,7 +30,16 @@ export interface EmailMessage {
   subject: string
   html:    string
   text?:   string
+  /** Urgent mail (password reset, sign-in code, verify, welcome) goes before any other. */
+  urgent?:    boolean
+  /** Within urgent mail: 20 = most important (sign-in code, verify email, forgot password), 10 = the rest. */
+  priority?:  number
+  /** A reminder is worthless after this: closed, never sent. */
+  expiresAt?: Date
 }
+
+/* How long a time-sensitive reminder is worth sending. */
+const inHours = (h: number) => new Date(Date.now() + h * 3600_000)
 
 export interface EmailSender {
   send(msg: EmailMessage): Promise<void>
@@ -158,9 +167,14 @@ export interface PooledTransport {
   transporter:   Transporter
   from:          string
   cooldownUntil: number
+  /* Kept for urgent mail only (2026-10-17): the backup mailbox, so a password reset or sign-in code always has a
+     mailbox with allowance left, however much class mail went out that day. SMTP_BACKUP_URGENT_ONLY=off shares it. */
+  urgentOnly?:   boolean
 }
 
-const COOLDOWN_MS = Number(process.env['SMTP_QUOTA_COOLDOWN_MIN'] ?? 60) * 60_000
+/* 15, not 60 (2026-10-17): Gmail's allowance comes back gradually over a rolling 24 hours, so a full mailbox is
+   re-tried sooner — the queue holds bulk mail back while urgent mail waits, so the re-try is spent on urgent mail. */
+const COOLDOWN_MS = Number(process.env['SMTP_QUOTA_COOLDOWN_MIN'] ?? 15) * 60_000
 
 export class PooledEmailSender implements EmailSender {
   constructor(private readonly transports: PooledTransport[]) {}
@@ -175,15 +189,18 @@ export class PooledEmailSender implements EmailSender {
 
   async send(msg: EmailMessage): Promise<void> {
     const now = Date.now()
-    const available = this.transports.filter(t => t.cooldownUntil <= now)
+    /* Urgent mail may use every mailbox, main first then the backup; other mail never the one kept for urgent. */
+    const available = this.transports.filter(t => t.cooldownUntil <= now && (!t.urgentOnly || msg.urgent))
 
     /* Every mailbox is parked. Throwing keeps the outbox row pending so the
        drain replays it once a cooldown lapses — the message is late, not lost. */
     if (available.length === 0) {
-      throw new Error('All email transports are in quota cooldown')
+      throw new Error(msg.urgent ? 'All email transports are in quota cooldown'
+        : 'All email transports are in quota cooldown (the backup is kept for urgent mail)')
     }
 
     let lastErr: unknown
+    let allQuota = true
     for (const t of available) {
       try {
         const info = await t.transporter.sendMail({
@@ -207,8 +224,14 @@ export class PooledEmailSender implements EmailSender {
           )
           continue
         }
+        allQuota = false
         logger.warn({ via: t.name, err }, 'transient send failure — trying next transport')
       }
+    }
+    /* Every mailbox it could use ran out just now: a wait, like any other cooldown — not a failed try. */
+    if (allQuota) {
+      throw new Error(msg.urgent ? 'All email transports are in quota cooldown'
+        : 'All email transports are in quota cooldown (the backup is kept for urgent mail)')
     }
     throw lastErr instanceof Error ? lastErr : new Error('All email transports failed')
   }
@@ -300,12 +323,17 @@ function buildSender(): EmailSender {
     buildTransport(PRIMARY_KEYS, 'primary'),
     buildTransport(BACKUP_KEYS, 'backup'),
   ].filter((t): t is PooledTransport => t !== null)
+  /* With both mailboxes, the backup is for urgent mail only — unless SMTP_BACKUP_URGENT_ONLY=off. One mailbox serves all. */
+  if (transports.length > 1 && !/^(off|false|0|no)$/i.test(process.env['SMTP_BACKUP_URGENT_ONLY'] ?? '')) {
+    const backup = transports.find(t => t.name === 'backup')
+    if (backup) backup.urgentOnly = true
+  }
 
   if (transports.length > 0) {
     const pool = new PooledEmailSender(transports)
     emailPool = pool
     logger.info(
-      { mailboxes: transports.map(t => t.name + ' <' + t.from + '>') },
+      { mailboxes: transports.map(t => t.name + ' <' + t.from + '>' + (t.urgentOnly ? ' (urgent mail only)' : '')) },
       'Email backend: SMTP pool of ' + transports.length + ' mailbox(es), failover on quota',
     )
     return pool
@@ -333,6 +361,7 @@ const rawSender = buildSender()
    anyone who would rather have the old behaviour back.
 ─────────────────────────────────────────────────────── */
 const OUTBOX_ENABLED = process.env['EMAIL_OUTBOX'] !== 'off'
+const URGENT_ONLY = /^(on|true|1|yes)$/i.test(process.env['EMAIL_URGENT_ONLY'] ?? '')
 
 /* 1m, 5m, 15m, 1h, 4h, 12h, then daily — a quota block clears in hours, not
    seconds, so the tail is deliberately long rather than a tight retry spin. */
@@ -347,19 +376,24 @@ export function backoffFor(attempts: number): number {
 /** Attempt one already-persisted row. Exported so the drain job reuses it. */
 export async function deliverOutboxRow(row: {
   id: string; to: string; subject: string; html: string; text?: string; attempts: number
+  /** Urgent mail is retried every 2 minutes while the mailboxes are cooling, not on the long backoff. */
+  urgent?: boolean
 }): Promise<'sent' | 'retry' | 'failed'> {
   const { EmailOutboxModel } = await import('@/models/schema.ts')
   try {
-    await rawSender.send({ to: row.to, subject: row.subject, html: row.html, text: row.text })
+    await rawSender.send({ to: row.to, subject: row.subject, html: row.html, text: row.text, ...(row.urgent ? { urgent: true } : {}) })
     await EmailOutboxModel.updateOne({ _id: row.id }, {
       $set: { status: 'sent', sentAt: new Date() }, $unset: { lastError: 1 },
     })
     return 'sent'
   } catch (err) {
-    const attempts   = row.attempts + 1
+    const message    = String((err as Error)?.message ?? err).slice(0, 500)
+    /* Every mailbox out of its daily allowance is a wait, not a failed try of this message: it does not use up
+       an attempt, or an urgent email retried every 2 minutes would be dropped before the allowance came back. */
+    const cooling    = /quota cooldown/i.test(message)
+    const attempts   = cooling ? row.attempts : row.attempts + 1
     const permanent  = err instanceof PermanentEmailError
     const exhausted  = attempts >= MAX_EMAIL_ATTEMPTS
-    const message    = String((err as Error)?.message ?? err).slice(0, 500)
 
     if (permanent || exhausted) {
       await EmailOutboxModel.updateOne({ _id: row.id }, {
@@ -370,10 +404,16 @@ export async function deliverOutboxRow(row: {
     }
 
     await EmailOutboxModel.updateOne({ _id: row.id }, {
-      $set: { attempts, lastError: message, nextAttemptAt: new Date(Date.now() + backoffFor(attempts)) },
+      $set: { attempts, lastError: message, nextAttemptAt: new Date(Date.now() + (row.urgent && cooling ? 2 * 60_000 : backoffFor(Math.max(1, attempts)))) },
     })
     return 'retry'
   }
+}
+
+/** Is any urgent email (password reset, sign-in code, verify, welcome) still waiting to go? */
+export async function urgentWaiting(): Promise<boolean> {
+  const { EmailOutboxModel } = await import('@/models/schema.ts')
+  return !!(await EmailOutboxModel.exists({ status: 'pending', priority: { $gt: 0 } }))
 }
 
 /* Subjects embed caller-supplied record fields (class titles, course names).
@@ -384,22 +424,36 @@ const sender: EmailSender = {
     const clean = { ...msg, subject: sanitiseSubject(msg.subject) }
 
     if (!OUTBOX_ENABLED) {
+      if (URGENT_ONLY && !msg.urgent) return
       await rawSender.send(clean)
       return
     }
 
     const { EmailOutboxModel } = await import('@/models/schema.ts')
+    /* EMAIL_URGENT_ONLY=on (2026-10-17, while the Gmail mailboxes are out of allowance): only urgent mail —
+       password reset, sign-in code, verify, registration, welcome — is sent. Anything else is logged as not sent,
+       never queued, so it can't pile up and come out later. */
+    if (URGENT_ONLY && !msg.urgent) {
+      await EmailOutboxModel.create({ to: clean.to, subject: clean.subject, html: clean.html, text: clean.text,
+        status: 'failed', lastError: 'not sent: urgent-only mode (EMAIL_URGENT_ONLY)' })
+      return
+    }
     /* Persist FIRST. If the process dies between here and the send, the drain
        picks it up; if we sent first, the record of it would not exist. */
     const row = await EmailOutboxModel.create({
       to: clean.to, subject: clean.subject, html: clean.html, text: clean.text,
+      ...(msg.urgent ? { priority: msg.priority ?? 10 } : {}), ...(msg.expiresAt ? { expiresAt: msg.expiresAt } : {}),
     })
+
+    /* Urgent mail first, always: while any urgent email waits, other mail is not tried now — it would take the
+       allowance a mailbox has just got back. It stays queued; the drain sends it once the urgent mail is out. */
+    if (!msg.urgent && await urgentWaiting()) return
 
     /* Try immediately so normal mail is not delayed by the drain interval.
        A failure is already recorded, so it is safe to swallow here. */
     await deliverOutboxRow({
       id: String(row._id), to: clean.to, subject: clean.subject,
-      html: clean.html, text: clean.text, attempts: 0,
+      html: clean.html, text: clean.text, attempts: 0, ...(msg.urgent ? { urgent: true } : {}),
     })
   },
 }
@@ -459,7 +513,7 @@ export async function sendPasswordReset(to: string, name: string, resetUrl: stri
     <p style="font-size:12px;color:#6B7280">Or paste this URL into your browser:<br><span style="color:#0057b8">${escapeHtml(resetUrl)}</span></p>
     <p style="font-size:12px;color:#9CA3AF">If you didn't request this, ignore this email and your password will stay the same.</p>
   `)
-  await sender.send({
+  await sender.send({ urgent: true, priority: 20, expiresAt: inHours(1.5), 
     to,
     subject,
     html,
@@ -493,6 +547,93 @@ export async function sendCourseInvite(to: string, name: string, link: string, c
 
 /* Passwordless sign-in code (email → OTP login). Mirrors the reset email's
    shell so it reads as the same sender. The code expires in 10 minutes. */
+/* An admin set this student's password (POST /admin/users/:id/set-password) — the new password, as the user chose
+   to send it. Urgent: never behind class notices. */
+export async function sendPasswordSetByAdmin(to: string, name: string, password: string): Promise<void> {
+  const subject = 'Your new Delta password'
+  const loginUrl = `${process.env['CLIENT_URL'] ?? 'http://localhost:3000'}/login`
+  const html = wrap(subject, `
+    <h2 style="margin:0 0 16px;font-size:20px;font-weight:700;color:#0D0F1A">Your password has been set</h2>
+    <p>Hi ${escapeHtml(name)},</p>
+    <p>An administrator has set a new password for your Delta account.</p>
+    <p style="margin:20px 0;padding:14px 18px;background:#F4F5F8;border-radius:12px;font-size:16px">
+      Email: <strong>${escapeHtml(to)}</strong><br>Password: <strong style="font-family:monospace">${escapeHtml(password)}</strong>
+    </p>
+    <p style="margin:24px 0">
+      <a href="${escapeHtml(loginUrl)}" style="display:inline-block;background:linear-gradient(135deg,#0057b8,#2F6BFF);color:#fff;font-weight:600;padding:12px 24px;border-radius:12px;text-decoration:none">Sign in</a>
+    </p>
+    <p style="font-size:12px;color:#6B7280">You have been signed out of every device. You can change this password any time from your profile. If you did not ask for this, contact support.</p>
+  `)
+  await sender.send({ urgent: true, to, subject, html,
+    text: `Hi ${name},\n\nAn administrator has set a new password for your Delta account.\n\nEmail: ${to}\nPassword: ${password}\n\nSign in: ${loginUrl}\n\nYou have been signed out of every device. If you did not ask for this, contact support.` })
+}
+
+/* A course bought on the public /explore page (guest checkout, 2026-10-18). A new account: the course is
+   open, a sign-in link, and a link to set a password (7 days). An account that already existed: the course
+   was added — sign in to open it (the buyer was not signed in, so the owner's inbox is the key). Urgent:
+   it is the buyer's only way back in, so it never waits behind bulk mail. */
+export async function sendGuestPurchaseAccess(to: string, name: string, courseTitle: string, opts: {
+  signInUrl: string; newAccount: boolean
+}): Promise<void> {
+  const subject = `You're enrolled: ${courseTitle}`
+  const btn = (href: string, label: string) =>
+    `<a href="${escapeHtml(sanitiseUrl(href))}" style="display:inline-block;background:linear-gradient(135deg,#0057b8,#2F6BFF);color:#fff;font-weight:600;padding:12px 24px;border-radius:12px;text-decoration:none">${label}</a>`
+  const html = wrap(subject, `
+    <h2 style="margin:0 0 16px;font-size:20px;font-weight:700;color:#0D0F1A">Payment received — you're in 🎓</h2>
+    <p>Hi ${escapeHtml(name)},</p>
+    <p>Thank you for your purchase. <strong>${escapeHtml(courseTitle)}</strong> is now open in your Delta student account.</p>
+    <p style="margin:24px 0">${btn(opts.signInUrl, 'Open my course')}</p>
+    ${opts.newAccount ? `
+    <p>We created your Delta account with this email address. There is no password: whenever you sign in, enter this email and we'll send you a one-time code.</p>` : `
+    <p>It has been added to your existing account — the button above signs you in.</p>`}
+    <p style="font-size:12px;color:#6B7280">The "Open my course" button works once and for 24 hours. After that, sign in at the student portal with this email — we'll email you a code.</p>
+  `)
+  await sender.send({ urgent: true, priority: 10, to, subject, html,
+    text: `Hi ${name},\n\nThank you for your purchase. ${courseTitle} is now open in your Delta student account.\n\nOpen my course: ${opts.signInUrl}\n${opts.newAccount ? '\nTo sign in later, enter this email on the student portal and we will send you a code.\n' : '\nIt has been added to your existing account.\n'}` })
+}
+
+/* A chat message still unread CHAT_EMAIL_DELAY_MINS after it arrived
+   (jobs/chatEmail.job.ts) — to a student from their mentor, or to a mentor
+   from a student. One per unread run, never one per message. Normal priority:
+   it waits behind sign-in codes and resets, and EMAIL_URGENT_ONLY drops it. */
+export async function sendChatMessageEmail(to: string, opts: {
+  name: string; from: string; preview: string; unread: number; url: string; toMentor: boolean
+}): Promise<void> {
+  const more    = opts.unread > 1 ? ` (${opts.unread} unread)` : ''
+  const subject = `New message from ${opts.from}${more}`
+  const html = wrap(subject, `
+    <h2 style="margin:0 0 16px;font-size:20px;font-weight:700;color:#0D0F1A">You have a new message</h2>
+    <p>Hi ${escapeHtml(opts.name)},</p>
+    <p><strong>${escapeHtml(opts.from)}</strong> ${opts.toMentor ? 'sent you a message' : 'replied to you'} on Delta${opts.unread > 1 ? ` — ${opts.unread} messages are waiting` : ''}:</p>
+    <p style="margin:16px 0;padding:14px 18px;background:#F4F5F8;border-radius:12px;font-size:15px;color:#1F2937">${escapeHtml(opts.preview)}</p>
+    <p style="margin:24px 0">
+      <a href="${escapeHtml(opts.url)}" style="display:inline-block;background:linear-gradient(135deg,#0057b8,#2F6BFF);color:#fff;font-weight:600;padding:12px 24px;border-radius:12px;text-decoration:none">${opts.toMentor ? 'Reply' : 'Open the chat'}</a>
+    </p>
+    <p style="font-size:12px;color:#6B7280">You get this email when a message has waited ${CHAT_EMAIL_DELAY_LABEL} unread. Open the chat to read it.</p>
+  `)
+  await sender.send({ to, subject, html, expiresAt: inHours(24),
+    text: `Hi ${opts.name},\n\n${opts.from} ${opts.toMentor ? 'sent you a message' : 'replied to you'} on Delta${more}:\n\n"${opts.preview}"\n\nOpen the chat: ${opts.url}` })
+}
+const CHAT_EMAIL_DELAY_LABEL = (() => {
+  const n = Number(process.env['CHAT_EMAIL_DELAY_MINS'])
+  const m = Number.isFinite(n) && n >= 0 ? Math.floor(n) : 10
+  return m === 1 ? '1 minute' : `${m} minutes`
+})()
+
+/* The sign-up form's email check (2026-10-23): a 6-digit code to prove the address. Urgent — the
+   student is waiting on it with the form open. */
+export async function sendSignupCode(to: string, code: string): Promise<void> {
+  const subject = `${code} is your Delta verification code`
+  const html = wrap(subject, `
+    <h2 style="margin:0 0 16px;font-size:20px;font-weight:700;color:#0D0F1A">Verify your email</h2>
+    <p>Enter this code on the Delta sign-up form to confirm this is your email address. It expires in 10 minutes.</p>
+    <p style="margin:24px 0;font-size:34px;font-weight:700;letter-spacing:0.18em;color:#0057b8">${escapeHtml(code)}</p>
+    <p style="font-size:12px;color:#9CA3AF">Didn't try to sign up? You can ignore this email.</p>
+  `)
+  await sender.send({ urgent: true, priority: 20, expiresAt: inHours(1), to, subject, html,
+    text: `Your Delta verification code is ${code}. It expires in 10 minutes. If you didn't try to sign up, ignore this email.` })
+}
+
 export async function sendLoginCode(to: string, name: string, code: string): Promise<void> {
   const subject = `${code} is your Delta sign-in code`
   const html = wrap(subject, `
@@ -502,7 +643,7 @@ export async function sendLoginCode(to: string, name: string, code: string): Pro
     <p style="margin:24px 0;font-size:34px;font-weight:700;letter-spacing:0.18em;color:#0057b8">${escapeHtml(code)}</p>
     <p style="font-size:12px;color:#9CA3AF">Didn't try to sign in? You can ignore this email — nobody can get in without the code.</p>
   `)
-  await sender.send({
+  await sender.send({ urgent: true, priority: 20, expiresAt: inHours(1.5), 
     to,
     subject,
     html,
@@ -581,7 +722,7 @@ export async function sendRegistrationAttempt(to: string, name: string, signInUr
     </p>
     <p style="font-size:12px;color:#9CA3AF">If it wasn't you, no action is needed — your account is untouched and no one gained access to it.</p>
   `)
-  await sender.send({
+  await sender.send({ urgent: true, 
     to,
     subject,
     html,
@@ -602,12 +743,26 @@ export async function sendVerifyEmail(to: string, name: string, verifyUrl: strin
     <p style="font-size:12px;color:#6B7280">Or paste this URL into your browser:<br><span style="color:#0057b8">${escapeHtml(verifyUrl)}</span></p>
     <p style="font-size:12px;color:#9CA3AF">The link expires in 24 hours.</p>
   `)
-  await sender.send({
+  await sender.send({ urgent: true, priority: 20, 
     to,
     subject,
     html,
     text: `Verify your Delta email: ${verifyUrl}\nThis link expires in 24 hours.`,
   })
+}
+
+/* A message an admin wrote on the Send message page (broadcast.service.ts):
+   plain text, shown as paragraphs in the usual layout, with an optional
+   button. Already personalised by the caller. */
+export async function sendAdminMessageEmail(to: string, subject: string, bodyText: string, button?: { label: string; url: string }): Promise<void> {
+  const clean = sanitiseSubject(subject)
+  const paras = bodyText.split(/\n{2,}/).map(p => `<p>${escapeHtml(p).replace(/\n/g, '<br>')}</p>`).join('')
+  const html = wrap(clean, `
+    <h2 style="margin:0 0 16px;font-size:20px;font-weight:700;color:#0D0F1A">${escapeHtml(clean)}</h2>
+    ${paras}
+    ${button ? `<p style="margin:24px 0"><a href="${escapeHtml(sanitiseUrl(button.url))}" style="display:inline-block;background:linear-gradient(135deg,#0057b8,#2F6BFF);color:#fff;font-weight:600;padding:12px 24px;border-radius:12px;text-decoration:none">${escapeHtml(button.label)}</a></p>` : ''}
+  `)
+  await sender.send({ to, subject: clean, html, text: `${bodyText}${button ? `\n\n${button.label}: ${button.url}` : ''}` })
 }
 
 /* ── Changing the address on an account ──────────────────────────────────
@@ -694,6 +849,94 @@ export async function sendLiveClassScheduled(
   })
 }
 
+/* ── A mentor's way into a class, in their emails (the user, 2026-10-18) ──────────────────────────────────
+   "Instead of the direct meeting link, show a Join now button that tracks their attendance — and the Meet link
+   too, below it." Join now opens /live-classes/<id>/join on the admin site, which records the mentor as joined
+   (what the no-show checks read) and then opens the room; the Meet link itself is shown under it. With the HRMS
+   meeting pod held for the class (services/classPod.service.ts), or that none is free. */
+export interface MentorClassPlace {
+  classId:   string
+  /** The room's own link (Google Meet), shown under Join now. */
+  meetLink?: string
+  pod?:      { state?: string; roomName?: string } | null
+}
+
+const adminBase = () => (process.env['ADMIN_URL'] ?? 'http://localhost:3001').replace(/\/+$/, '')
+/** The tracked door into a class: records the mentor as joined, then opens its room. */
+export const mentorJoinUrl = (classId: string) => `${adminBase()}/live-classes/${classId}/join`
+
+/** "Pod 6", or why there is none — undefined for a class with no pod to have. */
+export function podLine(pod?: MentorClassPlace['pod']): string | undefined {
+  if (!pod?.state) return undefined
+  if (pod.state === 'booked') return pod.roomName || 'Booked'
+  if (pod.state === 'no_room') return 'None free yet — you will be emailed when one is'
+  return 'Being booked — check the Pods page'
+}
+
+function podRowHtml(pod?: MentorClassPlace['pod']): string {
+  const line = podLine(pod)
+  if (!line) return ''
+  const booked = pod?.state === 'booked'
+  return `<tr><td style="padding:6px 0"><strong>Pod:</strong> <span style="${booked ? 'font-weight:700;color:#047857' : 'color:#B45309'}">${escapeHtml(line)}</span></td></tr>`
+}
+
+function mentorJoinHtml(place: MentorClassPlace, opts: { label?: string; color?: string; note?: string } = {}): string {
+  const join = mentorJoinUrl(place.classId)
+  const meet = place.meetLink ? sanitiseUrl(place.meetLink) : ''
+  return `
+    <p style="margin:24px 0 8px">
+      <a href="${escapeHtml(join)}" style="display:inline-block;background:${opts.color ?? 'linear-gradient(135deg,#0057b8,#2F6BFF)'};color:#fff;font-weight:700;padding:14px 28px;border-radius:12px;text-decoration:none;font-size:15px">
+        ${escapeHtml(opts.label ?? 'Join now →')}
+      </a>
+    </p>
+    <p style="margin:0 0 4px;font-size:12px;color:#6B7280">${escapeHtml(opts.note ?? 'Join now records your attendance and opens the class.')}</p>
+    ${meet ? `<p style="margin:12px 0 0;font-size:13px;color:#374151">Your joining link: <a href="${escapeHtml(meet)}" style="color:#0057b8;word-break:break-all">${escapeHtml(meet)}</a></p>` : ''}`
+}
+
+function mentorJoinText(place: MentorClassPlace): string {
+  const pod = podLine(place.pod)
+  return [
+    pod ? `Pod: ${pod}` : '',
+    `Join now (records your attendance): ${mentorJoinUrl(place.classId)}`,
+    place.meetLink ? `Your joining link: ${place.meetLink}` : '',
+  ].filter(Boolean).join('\n')
+}
+
+/** A class's pod was given, moved or lost after it was scheduled (classPod.service.ts) — its mentor is emailed. */
+export async function sendMentorPodChanged(
+  to: string,
+  name: string,
+  liveTitle: string,
+  startsAt: Date,
+  place: MentorClassPlace,
+  change: 'assigned' | 'changed' | 'lost',
+  academySlug?: string | null,
+): Promise<void> {
+  const pod = place.pod?.roomName
+  const subject = change === 'lost'
+    ? `No pod for your class now: ${liveTitle}`
+    : `Your pod for ${liveTitle}: ${pod}`
+  const when = academyClock(startsAt, academySlug).full
+  const lead = change === 'assigned'
+    ? `A meeting pod is now booked for your class: <strong>${escapeHtml(pod ?? '')}</strong>.`
+    : change === 'changed'
+      ? `Your class has moved to another meeting pod: <strong>${escapeHtml(pod ?? '')}</strong>.`
+      : 'Every meeting pod is booked at your class\'s time now, so it has none. You will be emailed if one becomes free.'
+  const html = wrap(subject, `
+    <h2 style="margin:0 0 16px;font-size:20px;font-weight:700;color:#0D0F1A">${change === 'lost' ? 'No pod for your class' : 'Your meeting pod'}</h2>
+    <p>Hi ${escapeHtml(name)},</p>
+    <p>${lead}</p>
+    <table cellpadding="0" cellspacing="0" style="margin:18px 0;background:#F4F5F8;border-radius:12px;padding:16px;width:100%">
+      <tr><td style="padding:6px 0"><strong>Session:</strong> ${escapeHtml(liveTitle)}</td></tr>
+      <tr><td style="padding:6px 0"><strong>When:</strong> ${escapeHtml(when)}</td></tr>
+      ${podRowHtml(place.pod)}
+    </table>
+    ${mentorJoinHtml(place, { note: 'Join now works from 15 minutes before the class, and records your attendance.' })}
+  `)
+  const text = `Hi ${name},\n\n${lead.replace(/<[^>]+>/g, '')}\n\n"${liveTitle}" — ${when}\n${mentorJoinText(place)}`
+  await sender.send({ to, subject, html, text })
+}
+
 export async function sendInstructorClassScheduled(
   to: string,
   name: string,
@@ -704,6 +947,8 @@ export async function sendInstructorClassScheduled(
   /* The academy whose wall clock this reader thinks in. Absent falls back to
      Dubai, which is what every one of these printed before — unlabelled. */
   academySlug?: string | null,
+  /* The class, for Join now, and its pod (2026-10-18). Absent: the old email, the Meet link only. */
+  place?: MentorClassPlace,
 ): Promise<void> {
   const subject = `You've been scheduled: ${liveTitle}`
   const when = academyClock(startsAt, academySlug).full
@@ -714,20 +959,22 @@ export async function sendInstructorClassScheduled(
     <table cellpadding="0" cellspacing="0" style="margin:18px 0;background:#F4F5F8;border-radius:12px;padding:16px;width:100%">
       <tr><td style="padding:6px 0"><strong>Session:</strong> ${escapeHtml(liveTitle)}</td></tr>
       <tr><td style="padding:6px 0"><strong>When:</strong> ${escapeHtml(when)}</td></tr>
-      <tr><td style="padding:6px 0"><strong>Meet link:</strong> <a href="${escapeHtml(sanitiseUrl(meetLink))}" style="color:#0057b8">${escapeHtml(sanitiseUrl(meetLink))}</a></td></tr>
+      ${place ? podRowHtml(place.pod) : `<tr><td style="padding:6px 0"><strong>Meet link:</strong> <a href="${escapeHtml(sanitiseUrl(meetLink))}" style="color:#0057b8">${escapeHtml(sanitiseUrl(meetLink))}</a></td></tr>`}
     </table>
-    <p style="margin:24px 0">
+    ${place
+      ? mentorJoinHtml({ ...place, meetLink }, { note: 'Join now works from 15 minutes before the class, and records your attendance.' })
+      : `<p style="margin:24px 0">
       <a href="${escapeHtml(sanitiseUrl(meetLink))}" style="display:inline-block;background:linear-gradient(135deg,#0057b8,#2F6BFF);color:#fff;font-weight:600;padding:12px 24px;border-radius:12px;text-decoration:none">
         Open Google Meet
       </a>
-    </p>
+    </p>`}
     <p style="font-size:12px;color:#9CA3AF">You will receive another reminder 15 minutes before the class starts.</p>
   `)
   await sender.send({
     to,
     subject,
     html,
-    text: `You've been scheduled to teach "${liveTitle}" (${courseTitle}) on ${when}.\nGoogle Meet: ${meetLink}`,
+    text: `You've been scheduled to teach "${liveTitle}" (${courseTitle}) on ${when}.\n${place ? mentorJoinText({ ...place, meetLink }) : `Google Meet: ${meetLink}`}`,
   })
 }
 
@@ -745,6 +992,7 @@ export async function sendInstructorBackupLink(
   /* The address made co-host of a generated Meet, when there is one. */
   cohost?:      string,
   academySlug?: string | null,
+  place?:       MentorClassPlace,
 ): Promise<void> {
   const subject = `New link for your class: ${liveTitle}`
   const when = academyClock(startsAt, academySlug).full
@@ -754,12 +1002,12 @@ export async function sendInstructorBackupLink(
     <h2 style="margin:0 0 16px;font-size:20px;font-weight:700;color:#0D0F1A">Your class has a new link</h2>
     <p>Hi ${escapeHtml(name)},</p>
     <p><strong>${escapeHtml(liveTitle)}</strong> (${escapeHtml(when)}) now runs in a new room. Use this link to join — the old one no longer applies.</p>
-    <p style="margin:24px 0">
+    ${place ? `<table cellpadding="0" cellspacing="0" style="margin:12px 0">${podRowHtml(place.pod)}</table>${mentorJoinHtml({ ...place, meetLink: safe })}` : `<p style="margin:24px 0">
       <a href="${escapeHtml(safe)}" style="display:inline-block;background:linear-gradient(135deg,#0057b8,#2F6BFF);color:#fff;font-weight:600;padding:12px 24px;border-radius:12px;text-decoration:none">
         ${isMeet ? 'Open Google Meet' : 'Open the class link'}
       </a>
     </p>
-    <p style="font-size:13px;color:#374151;word-break:break-all">${escapeHtml(safe)}</p>
+    <p style="font-size:13px;color:#374151;word-break:break-all">${escapeHtml(safe)}</p>`}
     ${cohost ? `<p style="font-size:13px;color:#374151">You are co-host — join with <strong>${escapeHtml(cohost)}</strong> so Google gives you the host controls.</p>` : ''}
     <p style="font-size:12px;color:#9CA3AF">Students who press Join in the LMS now go to this link.</p>
   `)
@@ -767,7 +1015,7 @@ export async function sendInstructorBackupLink(
     to,
     subject,
     html,
-    text: `"${liveTitle}" (${when}) now runs at a new link: ${safe}${cohost ? `\nYou are co-host — join with ${cohost}.` : ''}\nStudents who press Join in the LMS now go to this link.`,
+    text: `"${liveTitle}" (${when}) now runs at a new link: ${safe}${place ? `\n${mentorJoinText({ ...place, meetLink: safe })}` : ''}${cohost ? `\nYou are co-host — join with ${cohost}.` : ''}\nStudents who press Join in the LMS now go to this link.`,
   })
 }
 
@@ -778,25 +1026,26 @@ export async function sendInstructor15MinReminder(
   startsAt: Date,
   meetLink: string,
   academySlug?: string | null,
+  place?: MentorClassPlace,
 ): Promise<void> {
   const subject = `⏰ Starting in 15 min: ${liveTitle}`
   const when = academyTime(startsAt, academySlug)
   const html = wrap(subject, `
     <h2 style="margin:0 0 16px;font-size:20px;font-weight:700;color:#0D0F1A">Your class starts in 15 minutes</h2>
     <p>Hi ${escapeHtml(name)},</p>
-    <p><strong>${escapeHtml(liveTitle)}</strong> starts at <strong>${escapeHtml(when)}</strong>. Open your Google Meet link now so you're ready when students join.</p>
-    <p style="margin:24px 0">
+    <p><strong>${escapeHtml(liveTitle)}</strong> starts at <strong>${escapeHtml(when)}</strong>. Join now so you're ready when students join.</p>
+    ${place ? `<table cellpadding="0" cellspacing="0" style="margin:12px 0">${podRowHtml(place.pod)}</table>${mentorJoinHtml({ ...place, meetLink })}` : `<p style="margin:24px 0">
       <a href="${escapeHtml(sanitiseUrl(meetLink))}" style="display:inline-block;background:linear-gradient(135deg,#0057b8,#2F6BFF);color:#fff;font-weight:600;padding:14px 28px;border-radius:12px;text-decoration:none;font-size:15px">
         Join Google Meet now →
       </a>
     </p>
-    <p style="font-size:12px;color:#6B7280">Link: <a href="${escapeHtml(sanitiseUrl(meetLink))}" style="color:#0057b8">${escapeHtml(sanitiseUrl(meetLink))}</a></p>
+    <p style="font-size:12px;color:#6B7280">Link: <a href="${escapeHtml(sanitiseUrl(meetLink))}" style="color:#0057b8">${escapeHtml(sanitiseUrl(meetLink))}</a></p>`}
   `)
-  await sender.send({
+  await sender.send({ expiresAt: inHours(2), 
     to,
     subject,
     html,
-    text: `Your class "${liveTitle}" starts at ${when} — join now: ${meetLink}`,
+    text: `Your class "${liveTitle}" starts at ${when}.\n${place ? mentorJoinText({ ...place, meetLink }) : `Join now: ${meetLink}`}`,
   })
 }
 
@@ -816,21 +1065,23 @@ export async function sendMentorJoinReminder(
   name: string,
   liveTitle: string,
   joinUrl: string,
+  /* An external class (2026-10-18): Join now goes through the LMS (records attendance), its Meet link under it. */
+  place?: MentorClassPlace,
 ): Promise<void> {
   const subject = `⏰ Your class "${liveTitle}" has started — join now`
   const html = wrap(subject, `
     <h2 style="margin:0 0 16px;font-size:20px;font-weight:700;color:#0D0F1A">Your class has started</h2>
     <p>Hi ${escapeHtml(name)},</p>
     <p><strong>${escapeHtml(liveTitle)}</strong> was scheduled to start now, and we haven't seen you join yet. Students may already be waiting.</p>
-    <p style="margin:24px 0">
+    ${place ? `<table cellpadding="0" cellspacing="0" style="margin:12px 0">${podRowHtml(place.pod)}</table>${mentorJoinHtml(place, { color: 'linear-gradient(135deg,#EF4444,#DC2626)' })}` : `<p style="margin:24px 0">
       <a href="${escapeHtml(sanitiseUrl(joinUrl))}" style="display:inline-block;background:linear-gradient(135deg,#EF4444,#DC2626);color:#fff;font-weight:700;padding:14px 28px;border-radius:12px;text-decoration:none;font-size:15px">
         Join now →
       </a>
-    </p>
+    </p>`}
   `)
-  await sender.send({
+  await sender.send({ expiresAt: inHours(2), 
     to, subject, html,
-    text: `Hi ${name},\n\n"${liveTitle}" was scheduled to start now, and we haven't seen you join yet. Students may already be waiting.\n\nJoin now: ${joinUrl}`,
+    text: `Hi ${name},\n\n"${liveTitle}" was scheduled to start now, and we haven't seen you join yet. Students may already be waiting.\n\n${place ? mentorJoinText(place) : `Join now: ${joinUrl}`}`,
   })
 }
 
@@ -888,7 +1139,7 @@ export async function sendMentorNoShowAlert(
     <p><strong>${escapeHtml(mentorName)}</strong> has not joined <strong>${escapeHtml(liveTitle)}</strong>, scheduled for <strong>${escapeHtml(when)}</strong> — it has now been more than 5 minutes since the scheduled start.</p>
     <p style="color:#6B7280;font-size:13px">This is an automated alert. The mentor has already been reminded once and may still join late — check the Instructor Attendance page in the admin panel for the current status.</p>
   `)
-  await sender.send({
+  await sender.send({ expiresAt: inHours(2), 
     to, subject, html,
     text: `Hi ${recipientName},\n\n${mentorName} has not joined "${liveTitle}", scheduled for ${when} — it has now been more than 5 minutes since the scheduled start.\n\nThis is an automated alert. Check the Instructor Attendance page in the admin panel for the current status.`,
   })
@@ -913,7 +1164,7 @@ export async function sendMentorNoShowSelfAlert(
     <p><strong>${escapeHtml(liveTitle)}</strong> was scheduled for <strong>${escapeHtml(when)}</strong>, and it has now been more than 5 minutes since the scheduled start without you joining.</p>
     <p style="color:#6B7280;font-size:13px">Your organization admin and program coordinators have also been notified. Please join now if you can, or contact your admin if something is preventing you.</p>
   `)
-  await sender.send({
+  await sender.send({ expiresAt: inHours(2), 
     to, subject, html,
     text: `Hi ${name},\n\n"${liveTitle}" was scheduled for ${when}, and it has now been more than 5 minutes since the scheduled start without you joining.\n\nYour organization admin and program coordinators have also been notified. Please join now if you can, or contact your admin if something is preventing you.`,
   })
@@ -993,6 +1244,10 @@ export interface ScheduleMailItem {
   /** Where to join an online item (Meet link, or the LMS studio). */
   joinUrl?:      string
   joinLabel?:    string
+  /** A class's tracked Join now (records attendance, then opens the room) — shown first, joinUrl under it (2026-10-18). */
+  trackedJoinUrl?: string
+  /** The class's HRMS meeting pod line ("Pod 6", or none free yet). */
+  pod?:          string
   /** In-person only. */
   location?:     string
   room?:         string
@@ -1067,7 +1322,10 @@ export function renderInstructorDailySchedule(
     const sub = [it.subtitle, kindLabel].filter(Boolean).map(s => escapeHtml(String(s))).join(' · ')
 
     let where: string
-    if (it.online) {
+    if (it.online && it.trackedJoinUrl) {
+      where = `🎥 Online — <a href="${escapeHtml(sanitiseUrl(it.trackedJoinUrl))}" style="display:inline-block;background:#0057b8;color:#fff;font-weight:700;padding:6px 14px;border-radius:8px;text-decoration:none">Join now</a>`
+        + (it.joinUrl ? `<br><span style="font-size:12px;color:#6B7280">Your joining link: <a href="${escapeHtml(sanitiseUrl(it.joinUrl))}" style="color:#0057b8;word-break:break-all">${escapeHtml(sanitiseUrl(it.joinUrl))}</a></span>` : '')
+    } else if (it.online) {
       where = it.joinUrl
         ? `🎥 Online — <a href="${escapeHtml(sanitiseUrl(it.joinUrl))}" style="color:#0057b8;font-weight:600">${escapeHtml(it.joinLabel ?? 'Join link')}</a>`
         : '🎥 Online — link not set yet'
@@ -1086,6 +1344,7 @@ export function renderInstructorDailySchedule(
           <p style="margin:0;font-size:13px;font-weight:700;color:#0057b8">${escapeHtml(range)}</p>
           <p style="margin:4px 0 0;font-size:15px;font-weight:700;color:#0D0F1A">${escapeHtml(it.title)}</p>
           <p style="margin:2px 0 0;font-size:13px;color:#6B7280">${sub}</p>
+          ${it.pod ? `<p style="margin:8px 0 0;font-size:13px;color:#374151"><strong>Pod:</strong> ${escapeHtml(it.pod)}</p>` : ''}
           <p style="margin:8px 0 0;font-size:13px;color:#374151">${where}</p>
           ${extra ? `<p style="margin:4px 0 0;font-size:12px;color:#6B7280">${extra}</p>` : ''}
         </td></tr>
@@ -1104,7 +1363,7 @@ export function renderInstructorDailySchedule(
     '',
     ...items.map((it) => {
       const where = it.online
-        ? `Online${it.joinUrl ? ` — ${it.joinUrl}` : ''}`
+        ? `Online${it.trackedJoinUrl ? ` — Join now: ${it.trackedJoinUrl}` : ''}${it.joinUrl ? `${it.trackedJoinUrl ? '\n  Your joining link: ' : ' — '}${it.joinUrl}` : ''}${it.pod ? `\n  Pod: ${it.pod}` : ''}`
         : `In person${it.location || it.room ? ` — ${[it.location, it.room ? `Room ${it.room}` : ''].filter(Boolean).join(', ')}` : ''}`
       return `• ${scheduleRange(it.start, it.durationMins, academySlug)} — ${it.title}${it.subtitle ? ` (${it.subtitle})` : ''}\n  ${where}`
     }),
@@ -1239,7 +1498,7 @@ export async function sendSessionLinkReminder(
       </a>
     </p>
   `)
-  await sender.send({ to, subject, html, text: `${sessionTitle} is tomorrow at ${date}. Join: ${joinUrl}` })
+  await sender.send({ expiresAt: inHours(18),  to, subject, html, text: `${sessionTitle} is tomorrow at ${date}. Join: ${joinUrl}` })
 }
 
 /* This mail used to ASSERT the day — subject "Today: …", body "is happening
@@ -1268,7 +1527,7 @@ export async function sendDayOfReminder(
       </a>
     </p>
   `)
-  await sender.send({ to, subject, html, text: `${sessionTitle} is scheduled for ${when}. Join: ${joinUrl}` })
+  await sender.send({ expiresAt: inHours(12),  to, subject, html, text: `${sessionTitle} is scheduled for ${when}. Join: ${joinUrl}` })
 }
 
 /**
@@ -1293,7 +1552,7 @@ export async function sendPreSessionReminder(
       </a>
     </p>
   `)
-  await sender.send({ to, subject, html, text: `${sessionTitle} starts in ${minutesLeft} minutes. The join link will be sent 5 minutes before the session.` })
+  await sender.send({ expiresAt: inHours(2),  to, subject, html, text: `${sessionTitle} starts in ${minutesLeft} minutes. The join link will be sent 5 minutes before the session.` })
 }
 
 /** 5-min reminder — WITH join link */
@@ -1330,7 +1589,7 @@ export async function sendFiveMinReminder(
     <p style="margin:0 0 4px;color:#374151">See you in class!</p>
     <p style="margin:0;color:#374151"><strong>Delta Academy</strong></p>
   `)
-  await sender.send({ to, subject, html, text: `Dear ${name},\n\nThis is a reminder that your class will begin in 5 minutes.\n\nDate: ${dateStr}\nTime: ${timeStr}\n\nJoin the session here: ${joinUrl}\n\nPlease join a few minutes early to ensure a smooth start.\n\nSee you in class!\nDelta Academy` })
+  await sender.send({ expiresAt: inHours(2),  to, subject, html, text: `Dear ${name},\n\nThis is a reminder that your class will begin in 5 minutes.\n\nDate: ${dateStr}\nTime: ${timeStr}\n\nJoin the session here: ${joinUrl}\n\nPlease join a few minutes early to ensure a smooth start.\n\nSee you in class!\nDelta Academy` })
 }
 
 /** At-time reminder — WITH join link, sent when class has just started */
@@ -1354,7 +1613,7 @@ export async function sendClassStartingReminder(
     <p style="margin:0 0 24px;color:#374151">We look forward to your participation.</p>
     <p style="margin:0;color:#374151"><strong>Delta Academy</strong></p>
   `)
-  await sender.send({ to, subject, html, text: `Dear ${name},\n\nYour scheduled class has now started.\n\nIf you have not already joined, please use your session link to enter the class: ${joinUrl}\n\nWe look forward to your participation.\n\nDelta Academy` })
+  await sender.send({ expiresAt: inHours(2),  to, subject, html, text: `Dear ${name},\n\nYour scheduled class has now started.\n\nIf you have not already joined, please use your session link to enter the class: ${joinUrl}\n\nWe look forward to your participation.\n\nDelta Academy` })
 }
 
 export async function sendRescheduledNotification(
@@ -1656,6 +1915,61 @@ export async function sendCancelledNotification(
   await sender.send({ to, subject, html, text: `Dear ${name},\n\nWe regret to inform you that your scheduled class on ${dateStr} at ${timeStr} has been cancelled.\n\nWe apologize for the inconvenience. A replacement session will be scheduled, and you will be notified once it is available.\n\nThank you for your understanding.\n\nDelta Academy` })
 }
 
+/* A program (services/program.service.ts) was made with this student on it:
+   what it is, when it meets (already in the reader's academy clock), and that
+   they are booked on every class. */
+export async function sendProgramAdded(
+  to: string, name: string, programTitle: string, schedule: string, mentorName: string, description: string,
+): Promise<void> {
+  const subject = `You've been added to ${programTitle}`
+  const scheduleUrl = `${process.env['CLIENT_URL'] ?? 'http://localhost:3000'}/class-bookings`
+  const html = wrap(subject, `
+    <h2 style="margin:0 0 16px;font-size:20px;font-weight:700;color:#0D0F1A">${escapeHtml(subject)}</h2>
+    <p style="margin:0 0 16px;color:#374151">Dear <strong>${escapeHtml(name)}</strong>,</p>
+    <p style="margin:0 0 16px;color:#374151">A program has been set up for you: <strong>${escapeHtml(programTitle)}</strong>${mentorName ? `, with <strong>${escapeHtml(mentorName)}</strong>` : ''}.</p>
+    ${description ? `<p style="margin:0 0 16px;color:#374151">${escapeHtml(description)}</p>` : ''}
+    <p style="margin:0 0 24px;color:#374151">${escapeHtml(schedule).replace(/https:\/\/meet\.google\.com\/[a-z]{3}-[a-z]{4}-[a-z]{3}/gi, u => `<a href="${u}" style="color:#0057B8;font-weight:700">${u}</a>`)}</p>
+    <p style="margin:0 0 24px"><a href="${escapeHtml(scheduleUrl)}" style="display:inline-block;background:#0057B8;color:#fff;text-decoration:none;font-weight:700;padding:12px 22px;border-radius:10px">Open Class Schedule</a></p>
+    <p style="margin:0;color:#374151"><strong>Delta Academy</strong></p>
+  `)
+  await sender.send({ to, subject, html, text: `Dear ${name},\n\nA program has been set up for you: ${programTitle}${mentorName ? `, with ${mentorName}` : ''}.\n\n${description ? description + '\n\n' : ''}${schedule}\n\nOpen your Class Schedule: ${scheduleUrl}\n\nDelta Academy` })
+}
+
+/* A change to a class in the student's course that they have NOT booked —
+   cancelled, moved, or a new mentor. The booked-student mails above all say
+   "your class" / "your booking"; this one says what changed and points at the
+   Class Schedule. Times in the reader's academy clock, always labelled. */
+export async function sendClassChangeToEnrolled(
+  to: string,
+  name: string,
+  sessionTitle: string,
+  change: { kind: 'cancelled' | 'rescheduled' | 'instructor'; oldStart: Date | string; newStart: Date | string; newInstructorName?: string },
+  academySlug?: string | null,
+): Promise<void> {
+  const was = academyClock(new Date(change.oldStart), academySlug)
+  const now = academyClock(new Date(change.newStart), academySlug)
+  const lines =
+    change.kind === 'cancelled'
+      ? [`The class <strong>${escapeHtml(sessionTitle)}</strong> on <strong>${was.date} at ${was.time}</strong> has been cancelled.`]
+      : change.kind === 'rescheduled'
+        ? [`The class <strong>${escapeHtml(sessionTitle)}</strong> has moved.`,
+           `Was: <strong>${was.date} at ${was.time}</strong><br/>Now: <strong>${now.date} at ${now.time}</strong>`]
+        : [`The class <strong>${escapeHtml(sessionTitle)}</strong> on <strong>${now.date} at ${now.time}</strong> will now be taught by <strong>${escapeHtml(change.newInstructorName ?? 'another mentor')}</strong>.`]
+  const subject = change.kind === 'cancelled' ? `Class cancelled — ${sessionTitle}`
+    : change.kind === 'rescheduled' ? `Class time changed — ${sessionTitle}` : `Mentor changed — ${sessionTitle}`
+  const scheduleUrl = `${process.env['CLIENT_URL'] ?? 'http://localhost:3000'}/class-bookings`
+  const html = wrap(subject, `
+    <h2 style="margin:0 0 16px;font-size:20px;font-weight:700;color:#0D0F1A">${escapeHtml(subject)}</h2>
+    <p style="margin:0 0 16px;color:#374151">Dear <strong>${escapeHtml(name)}</strong>,</p>
+    ${lines.map(l => `<p style="margin:0 0 16px;color:#374151">${l}</p>`).join('')}
+    <p style="margin:0 0 24px;color:#374151">This is a class in your course. Open your Class Schedule to see every session and book the one that suits you.</p>
+    <p style="margin:0 0 24px"><a href="${escapeHtml(scheduleUrl)}" style="display:inline-block;background:#0057B8;color:#fff;text-decoration:none;font-weight:700;padding:12px 22px;border-radius:10px">Open Class Schedule</a></p>
+    <p style="margin:0;color:#374151"><strong>Delta Academy</strong></p>
+  `)
+  const plain = lines.map(l => l.replace(/<br\/>/g, '\n').replace(/<[^>]+>/g, '')).join('\n\n')
+  await sender.send({ to, subject, html, text: `Dear ${name},\n\n${plain}\n\nThis is a class in your course. Open your Class Schedule to see every session and book the one that suits you: ${scheduleUrl}\n\nDelta Academy` })
+}
+
 /* THE ONE CLASS MAIL THAT NEVER SAID WHICH CLOCK IT MEANT. Its caller formatted
    the time itself, in the process timezone, with no zone tag, and handed the
    finished string across — the exact boundary academyClock.ts bans. A guest
@@ -1783,7 +2097,7 @@ export async function sendImportedStudentWelcome(
   `, `You're receiving this email because you are enrolled as a student at Delta International.
               If you think this was sent in error, please contact our support team.`)
   const text = `Dear ${name},\n\nWelcome to the ${prog} program at Delta International! Your student portal account has already been created and approved. Set your password to activate it (link valid 7 days):\n${setPasswordUrl}\n\nThen sign in at ${loginUrl} with this email address.\nIf the link expires, use "Forgot password?" on the login page.\n\nAdmin Team — ${prog}\nDelta International`
-  await sender.send({ to, subject, html, text })
+  await sender.send({ urgent: true,  to, subject, html, text })
 }
 
 export async function sendEnrollmentCancelled(

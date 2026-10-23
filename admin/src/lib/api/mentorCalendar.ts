@@ -28,6 +28,8 @@ export interface ClassInfoEvent { at: string; kind: string; who: string; rating?
 export interface MentorClassInfo {
   id: string; title: string; courseTitle: string; instructorName: string; startsAt: string; durationMins: number; status: string
   booked: number; capacity: number; timezone: string; students?: ClassInfoStudent[]; timeline?: ClassInfoEvent[]
+  /** Its HRMS meeting pod (2026-10-18); absent from an older server. */
+  pod?: { state: 'booked' | 'no_room' | 'error'; roomName?: string } | null
 }
 export function useMentorClass(id: string | null) {
   return useQuery({

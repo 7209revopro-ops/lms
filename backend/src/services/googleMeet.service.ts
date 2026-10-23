@@ -379,6 +379,9 @@ type MeetSpaceChange = {
   cohost?:    string | null
   schedule?:  { title: string; startISO: string; durationMins: number }
   cancelled?: boolean
+  /* The calendar entry's location — the class's HRMS meeting pod (2026-10-18); "" clears it. Changed quietly:
+     the mentor is emailed about a pod change by the LMS itself. */
+  location?:  string
 }
 
 export async function syncMeetSpace(space: MeetSpaceRecord, change: MeetSpaceChange): Promise<{ cohost?: string; calendarEventId?: string }> {
@@ -427,8 +430,10 @@ async function syncMeetSpaceWith(auth: ServiceAccountAuth, space: MeetSpaceRecor
           body.end     = { dateTime: new Date(start.getTime() + change.schedule.durationMins * 60_000).toISOString() }
         }
         if (invitee !== undefined) body.attendees = invitee ? [{ email: invitee }] : []
+        if (change.location !== undefined) body.location = change.location
         if (Object.keys(body).length > 0) {
-          await calendar.events.patch({ calendarId: space.host, eventId: calendarEventId, sendUpdates: 'all', requestBody: body })
+          const onlyWhere = Object.keys(body).length === 1 && 'location' in body
+          await calendar.events.patch({ calendarId: space.host, eventId: calendarEventId, sendUpdates: onlyWhere ? 'none' : 'all', requestBody: body })
         }
       }
     } catch (err) {

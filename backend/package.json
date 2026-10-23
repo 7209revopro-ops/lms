@@ -21,6 +21,8 @@
     "test:commissionstudents": "bun --no-env-file src/tests/commissionstudents.suite.ts",
     "test:portalactivity": "bun --no-env-file src/tests/portalactivity.suite.ts",
     "test:tetracs": "bun --no-env-file src/tests/tetracs.suite.ts",
+    "test:tetracsrecheck": "bun --no-env-file src/tests/tetracsrecheck.suite.ts",
+    "test:pending": "bun --no-env-file src/tests/pending.suite.ts",
     "test:portalenrolmentrequests": "bun --no-env-file src/tests/portalenrolmentrequests.suite.ts",
     "test:portalstudentview": "bun --no-env-file src/tests/portalstudentview.suite.ts",
     "test:portalcourseaccess": "bun --no-env-file src/tests/portalcourseaccess.suite.ts",
@@ -170,6 +172,7 @@
     "razorpay": "^2.9.6",
     "read-excel-file": "^9.3.10",
     "stripe": "^22.1.1",
+    "web-push": "3.6.7",
     "zod": "^3.23.8"
   },
   "devDependencies": {
@@ -180,6 +183,7 @@
     "@types/multer": "^2.1.0",
     "@types/node-cron": "^3.0.11",
     "@types/nodemailer": "^7.0.12",
+    "@types/web-push": "3.6.4",
     "typescript": "^5.7.3"
   },
   "overrides": {

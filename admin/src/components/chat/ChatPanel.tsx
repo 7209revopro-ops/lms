@@ -229,7 +229,10 @@ export function ChatPanel({ list, mode, emptyText, search, onSearch }: {
   }
 
   return (
-    <div className="grid h-[calc(100dvh-13rem)] min-h-[460px] overflow-hidden rounded-2xl md:grid-cols-[340px_1fr]"
+    /* Fills whatever height the page gives it (the pages size it to the
+       screen). On a phone an open conversation leaves the page entirely and
+       takes the whole screen, like WhatsApp — back arrow to the list. */
+    <div className="grid h-full min-h-[420px] overflow-hidden rounded-2xl md:grid-cols-[340px_1fr] lg:grid-cols-[360px_1fr]"
       style={{ background: 'rgba(255,255,255,0.025)', border: line }}>
       <div className={`${active ? 'hidden md:flex' : 'flex'} min-h-0 flex-col md:border-r`} style={{ borderColor: 'rgba(255,255,255,0.07)' }}>
         <div className="p-3" style={{ borderBottom: line }}>
@@ -285,7 +288,9 @@ export function ChatPanel({ list, mode, emptyText, search, onSearch }: {
           )}
         </div>
       </div>
-      <div className={`${active ? 'flex' : 'hidden md:flex'} min-h-0 min-w-0`}>
+      <div className={`${active
+          ? 'fixed inset-0 z-[70] flex bg-[#080A12] pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)] md:static md:z-auto md:bg-transparent md:p-0'
+          : 'hidden md:flex'} min-h-0 min-w-0`}>
         {active ? (
           <Thread key={active.id} conv={active} mode={mode} onBack={() => pick(null)} />
         ) : (

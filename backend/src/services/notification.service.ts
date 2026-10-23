@@ -1,6 +1,6 @@
 import { NotificationRepository } from '@/repositories/notification.repository.ts'
 import type { NotificationKind } from '@/models/schema.ts'
-import { pushToUser } from './push.service.ts'
+import { pushToUser as pushToApp } from './expoPush.service.ts'
 
 export class NotificationError extends Error {
   constructor(
@@ -27,10 +27,15 @@ export class NotificationService {
       body:  payload.body?.slice(0, 1000),
       link:  payload.link?.slice(0, 1024),
     })
-    /* The same notification on the student's phone (plan.md §13.4 B3).
-       Not awaited: pushToUser never throws, and the action that raised this
-       notification must not wait on Expo. */
-    void pushToUser(userId, { title: payload.title, body: payload.body, link: payload.link, kind: payload.kind })
+    /* The same notice on every device the student allowed: the phone app
+       (Expo push, plan.md §13.4 B3) and browsers (Web Push, 2026-10-21).
+       Fire-and-forget: neither ever throws, and the action that raised this
+       notification never waits on them — the bell is the record. */
+    void pushToApp(userId, { title: payload.title, body: payload.body, link: payload.link, kind: payload.kind })
+    void import('@/services/push.service.ts')
+      .then(m => m.pushToUser(String(userId), { title: payload.title, body: payload.body, link: payload.link }))
+      .catch(() => {})
+
     return doc
   }
 
@@ -38,8 +43,8 @@ export class NotificationService {
     return this.repo.listForUser(userId, params)
   }
 
-  async unreadCount(userId: string) {
-    return this.repo.unreadCount(userId)
+  async unreadCount(userId: string, kind?: string) {
+    return this.repo.unreadCount(userId, kind)
   }
 
   async markRead(userId: string, id: string) {
@@ -51,7 +56,7 @@ export class NotificationService {
     return n
   }
 
-  async markAllRead(userId: string): Promise<{ updated: number }> {
-    return { updated: await this.repo.markAllRead(userId) }
+  async markAllRead(userId: string, kind?: string): Promise<{ updated: number }> {
+    return { updated: await this.repo.markAllRead(userId, kind) }
   }
 }

@@ -13,6 +13,7 @@
      bun src/scripts/whatsapp-test-templates.ts --send --only mentor_class_in_10_min
      bun src/scripts/whatsapp-test-templates.ts --send --only new_class_scheduled_v1,todays_classes_v1
      bun src/scripts/whatsapp-test-templates.ts --send --only class_cancelled_v1,class_rescheduled_v1,class_mentor_changed_v1,class_link_changed_v1
+     bun src/scripts/whatsapp-test-templates.ts --send --only course_update_v1,class_update_v1
      bun src/scripts/whatsapp-test-templates.ts --send --class <liveClassId>   (join buttons open that class)
 
    Needs WHATSAPP_API_KEY and WHATSAPP_PHONE_NUMBER_ID — run it where WhatsApp
@@ -50,6 +51,8 @@ const TEMPLATES: { name: string; params: string[]; buttonParam?: string; isNew?:
   { name: 'class_rescheduled_v1',         params: ['Test Student', CLASS, 'Tue, 13 Oct, 05:00 PM GST', 'Wed, 14 Oct, 07:00 PM GST'], buttonParam: 'TESTCODE0000000000000000', isNew: true },
   { name: 'class_mentor_changed_v1',      params: ['Test Student', CLASS, 'Tue, 13 Oct, 05:00 PM GST', 'Test Mentor'], buttonParam: 'TESTCODE0000000000000000', isNew: true },
   { name: 'class_link_changed_v1',        params: ['Test Student', CLASS, 'Fri, 9 Oct', '05:00 PM GST'], buttonParam: 'TESTCODE0000000000000000', isNew: true },
+  { name: 'course_update_v1',             params: ['Test Student', 'MARKET BREAK-OUT TRADING PROGRAM', 'New notes for Module 4 are up.'], buttonParam: 'TESTCODE0000000000000000', isNew: true },
+  { name: 'class_update_v1',              params: ['Test Student', CLASS, 'Tue, 13 Oct, 05:00 PM GST', 'Please bring your trading journal.'], buttonParam: 'TESTCODE0000000000000000', isNew: true },
   { name: 'todays_classes_v1',            params: ['Test Student', `10:00 AM ${CLASS} · 02:00 PM IM 3 (GST)`], buttonParam: 'TESTCODE0000000000000000', isNew: true },
 ]
 

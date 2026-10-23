@@ -14,6 +14,14 @@ export type LiveClassType   = 'external' | 'internal'
    The backend has emitted these on every live-class DTO since phase 2. They
    were simply not declared here, so the data arrived over the wire and
    TypeScript made it invisible to every consumer. */
+/** An online class's HRMS meeting pod: booked (roomName is it), no_room (every pod taken then), error (the HRMS
+    could not be reached — tried again). */
+export interface ClassPod {
+  state:     'booked' | 'no_room' | 'error'
+  roomName?: string
+  note?:     string
+}
+
 export interface GuestCohort {
   organizationId:    string
   organizationSlug?: string
@@ -102,6 +110,8 @@ export interface LiveClass {
   isOnline?:          boolean
   location?:          string
   room?:              string
+  /** The HRMS meeting pod held for an online class (2026-10-18): which, or why none. */
+  pod?:               ClassPod
   rescheduledReason?: string
 
   /* Weekly-repeat grouping tag — shared by every class generated from

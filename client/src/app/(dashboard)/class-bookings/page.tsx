@@ -12,6 +12,9 @@ import {
 import Link from 'next/link'
 import { useToast } from '@/store/ui.store'
 import { useAllLiveClasses, type LiveClass } from '@/lib/api/liveClasses'
+import { JourneyBar } from '@/components/class-schedule/JourneyBar'
+import { showModuleLocked } from '@/lib/api/journey'
+import { useClearNewClasses, useNewClassesCount } from '@/lib/api/notifications'
 import { useMyBookings, useCreateBooking, useCancelBooking, type MyBooking } from '@/lib/api/bookings'
 import { useCurrentUser } from '@/lib/api/user'
 import { APP_TIMEZONE } from '@/lib/timezone'
@@ -36,7 +39,11 @@ import { Hierarchy, allGroupsIn } from './Hierarchy'
 import { CLASS_LANGUAGES } from '@/lib/languages'
 
 /* ── Google Fonts ──────────────────────────────────────────── */
-const FONT_CSS = `@import url('https://fonts.googleapis.com/css2?family=Syne:wght@600;700;800&family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;1,9..40,400&display=swap');.syne{font-family:'Syne',sans-serif}.dm{font-family:'DM Sans',sans-serif}`
+/* One family for the whole schedule: DM Sans. The display style (.syne —
+   times, titles, numbers, journey levels) used to be Syne, a very wide
+   extra-bold face that crowded a phone screen; it is now DM Sans bold,
+   slightly tightened, so headings and body read as one type. */
+const FONT_CSS = `@import url('https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;0,9..40,800;1,9..40,400&display=swap');.syne{font-family:'DM Sans',sans-serif;letter-spacing:-0.015em}.dm{font-family:'DM Sans',sans-serif}`
 // eslint-disable-next-line react/no-danger
 const FontLoader = () => <style dangerouslySetInnerHTML={{ __html: FONT_CSS }} />
 
@@ -1237,7 +1244,13 @@ export default function ClassBookingsPage() {
   const panelRef = useRef<HTMLDivElement>(null)
   const toast    = useToast()
 
-  const {data:allClasses=[],isLoading:loadCls,isError:errCls,refetch:refetchCls} = useAllLiveClasses()
+  /* Only the classes of courses this student holds — the courses they do not
+     are levels of the journey bar above, each with its own way to unlock. */
+  const {data:allClasses=[],isLoading:loadCls,isError:errCls,refetch:refetchCls} = useAllLiveClasses('all',{mine:true})
+  /* Opening the Schedule is seeing the new classes: clear their badge. */
+  const {data:newClasses=0}=useNewClassesCount()
+  const clearNew=useClearNewClasses()
+  useEffect(()=>{ if(newClasses>0&&!clearNew.isPending) clearNew.mutate() },[newClasses])  // eslint-disable-line react-hooks/exhaustive-deps
   const {data:bkData,         isLoading:loadBk, isError:errBk, refetch:refetchBk}  = useMyBookings({per_page:100})
   const myBookings: MyBooking[] = bkData?.docs ?? []
 
@@ -1505,6 +1518,18 @@ export default function ClassBookingsPage() {
      two views agreeing about any given class. */
   const catalog = useMemo(()=>buildCatalog(allClasses,bookingMap),[allClasses,bookingMap])
 
+  /* One course with classes: open its modules straight away instead of a
+     list of one. Once per visit — tapping back to "Courses" then shows the
+     list rather than bouncing them back in. */
+  const autoEntered=useRef(false)
+  useEffect(()=>{
+    if(autoEntered.current||loadCls||view!=='courses'||hCourse) return
+    if(catalog.length===1&&catalog[0]?.id){
+      autoEntered.current=true
+      setHCourse(catalog[0].id); setHModule(null); syncUrl('courses',catalog[0].id,null,'replace')
+    }
+  },[catalog,loadCls,view,hCourse])  // eslint-disable-line react-hooks/exhaustive-deps
+
   /* A group the modal is open on can come from either view, and the two index
      it differently: the flat list nests groups under a date, the hierarchy
      under a module. Resolved against the flat list first, then the catalogue,
@@ -1536,7 +1561,10 @@ export default function ClassBookingsPage() {
       else if(code==='SESSION_FULL')    toast.error('Slot is full.')
       else if(code==='ALREADY_BOOKED')  toast.info('Already booked.')
       else if(code==='NOT_ENROLLED')    toast.error('Enroll in this course to book.')
-      else if(code==='MODULE_BLOCKED')   toast.error('This class belongs to a module you don\'t have access to. Contact your admin.')
+      else if(code==='MODULE_BLOCKED'){
+        const lc:any=allClasses.find(c=>c.id===id)
+        showModuleLocked({courseId:lc?.course?.id??lc?.courseId, courseTitle:lc?.course?.title, moduleTitle:lc?.sectionId?.title})
+      }
       else if(code==='PENDING_APPROVAL') toast.error('Complete your registration first to book classes.')
       else if(code==='ACCESS_REJECTED')  toast.error('Your access request was not approved. Contact support to appeal.')
       else toast.error(e?.response?.data?.error?.message??'Could not book.')
@@ -1654,6 +1682,10 @@ export default function ClassBookingsPage() {
             )}
           </div>
         </motion.div>
+
+        {/* ─── YOUR JOURNEY ─────────────────────────────────────── */}
+        {/* Courses view only — the Sessions list is a plain timetable. */}
+        {view==='courses'&&<JourneyBar onPickCourse={id=>navigate(id,null)}/>}
 
         {/* ─── STATS ────────────────────────────────────────────── */}
         {!isTree&&!isLoading&&filterDelivery!=='offline'&&(

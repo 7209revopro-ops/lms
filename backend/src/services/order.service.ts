@@ -131,6 +131,25 @@ export class OrderService {
      deliberately absent (EU/EUR market). Sanctioned markets in this set are
      the gateway's call to decline — membership here only selects the
      checkout currency and button set. */
+  /* Where a hosted gateway sends the buyer back. A student buying from the app → /payment-return (signed
+     in). A visitor buying on the public /explore page (guest checkout, 2026-10-18) → /explore/checkout/return,
+     a public page; the order is tied to them by an httpOnly checkout cookie, never by the URL. */
+  static returnUrls(gateway: 'tabby' | 'tamara' | 'abzer', orderId: string, guest = false) {
+    const base = `${env.CLIENT_URL}${guest ? '/explore/checkout/return' : '/payment-return'}?gateway=${gateway}`
+    return {
+      successUrl: `${base}&orderId=${orderId}`,
+      /* Tabby QA: a cancelled or failed payment returns to checkout — the order id lets the page do that. */
+      cancelUrl:  `${base}&status=cancelled&orderId=${orderId}`,
+      failureUrl: `${base}&status=failed&orderId=${orderId}`,
+    }
+  }
+
+  /** The buyer's phone: on the account, else from their application (guest checkout and express sign-up keep it there). */
+  static phoneOf(user: unknown): string {
+    const u = user as { phone?: string; enrollmentApplication?: { phone?: string } } | null
+    return String(u?.phone || u?.enrollmentApplication?.phone || '').trim()
+  }
+
   static readonly MIDDLE_EAST_COUNTRIES: ReadonlySet<string> = new Set([
     'Bahrain', 'Egypt', 'Iran', 'Iraq', 'Israel', 'Jordan', 'Kuwait',
     'Lebanon', 'Oman', 'Palestine', 'Qatar', 'Saudi Arabia', 'Syria',
@@ -522,11 +541,12 @@ export class OrderService {
        priceAED override, and QA checks "Checkout total matches amount displayed
        on Tabby Checkout". */
     const priceAED = aedPriceFor(course as any)
-    const user     = await UserModel.findById(userId).select('email phone').exec()
+    const user     = await UserModel.findById(userId).select('email phone enrollmentApplication.phone').exec()
     const score    = await this.tabbySvc.checkEligibility({
       amountAED:  priceAED,
       buyerEmail: user?.email ?? '',
-      buyerPhone: (user as any)?.phone,
+      /* Tabby needs both email and phone to score — the application phone when the account has none. */
+      buyerPhone: OrderService.phoneOf(user),
     })
     return { ...score, amount: priceAED, currency: env.TABBY_CURRENCY }
   }
@@ -584,7 +604,8 @@ export class OrderService {
     courseId:    string,
     _slug:       string,
     couponCode?: string,
-  ): Promise<{ checkoutUrl: string; checkoutId: string }> {
+    opts:        { guest?: boolean } = {},
+  ): Promise<{ checkoutUrl: string; checkoutId: string; orderId: string }> {
     if (!env.TABBY_SECRET_KEY || !env.TABBY_MERCHANT_CODE) {
       throw new OrderError('TABBY_NOT_CONFIGURED', 'Tabby is not configured on this server.', 503)
     }
@@ -640,9 +661,7 @@ export class OrderService {
 
       const user = await UserModel.findById(userId)
         .select('name email phone createdAt emailVerified enrollmentApplication').exec()
-      const successUrl = `${env.CLIENT_URL}/payment-return?gateway=tabby&orderId=${order.id}`
-      const cancelUrl  = `${env.CLIENT_URL}/payment-return?gateway=tabby&status=cancelled`
-      const failureUrl = `${env.CLIENT_URL}/payment-return?gateway=tabby&status=failed&orderId=${order.id}`
+      const { successUrl, cancelUrl, failureUrl } = OrderService.returnUrls('tabby', order.id, opts.guest)
 
       const app = (user as any)?.enrollmentApplication ?? {}
       /* Sent only when the student actually has an address on file — Tabby's
@@ -667,12 +686,14 @@ export class OrderService {
         courseUrl:   `${env.CLIENT_URL}/courses/${encodeURIComponent(course.slug)}`,
         buyerEmail:  user?.email ?? '',
         buyerName:   user?.name  ?? '',
-        buyerPhone:  (user as any)?.phone ?? app.phone ?? '',
+        buyerPhone:  OrderService.phoneOf(user),
         ...(app.dateOfBirth && { buyerDob: String(app.dateOfBirth).slice(0, 10) }),
         /* The student's real signup date, not `now` — see tabby.service.ts. */
         registeredSince: (user as any)?.createdAt ?? new Date(),
         isEmailVerified: Boolean((user as any)?.emailVerified),
-        isPhoneVerified: Boolean((user as any)?.phone || app.phone),
+        /* Nothing here verifies a phone number (no OTP), so it is never claimed as verified (Tabby QA). */
+        isPhoneVerified: false,
+        ...(discountFils && { discountAED: discountFils / 100 }),
         ...(shippingAddress && { shippingAddress }),
         orderHistory,
         successUrl,
@@ -682,7 +703,7 @@ export class OrderService {
 
       await patchTabbyCheckoutId(order.id, result.checkoutId, result.paymentId)
 
-      return { checkoutUrl: result.checkoutUrl, checkoutId: result.checkoutId }
+      return { checkoutUrl: result.checkoutUrl, checkoutId: result.checkoutId, orderId: order.id }
     })
   }
 
@@ -941,9 +962,10 @@ export class OrderService {
   async createAbzerOrder(
     userId:      string,
     courseId:    string,
-    slug:        string,
+    _slug:       string,
     couponCode?: string,
-  ): Promise<{ checkoutUrl: string; abzerOrderId: string }> {
+    opts:        { guest?: boolean } = {},
+  ): Promise<{ checkoutUrl: string; abzerOrderId: string; orderId: string }> {
     if (!env.ABZER_ACCESS_KEY || !env.ABZER_SECRET_KEY) {
       throw new OrderError('ABZER_NOT_CONFIGURED', 'Abzer is not configured on this server.', 503)
     }
@@ -993,10 +1015,7 @@ export class OrderService {
         ...(discountFils && { discountAmount: discountFils }),
       })
 
-      const user = await UserModel.findById(userId).select('name email').exec()
-      const successUrl = `${env.CLIENT_URL}/courses/${slug}?checkout=success`
-      const cancelUrl  = `${env.CLIENT_URL}/courses/${slug}?checkout=cancel`
-      const failureUrl = `${env.CLIENT_URL}/courses/${slug}?checkout=cancel`
+      const user = await UserModel.findById(userId).select('name email phone enrollmentApplication.phone').exec()
 
       const result = await this.abzerSvc.createOrder({
         amountAED:   finalFils / 100,
@@ -1004,18 +1023,23 @@ export class OrderService {
         courseTitle: course.title,
         buyerEmail:  user?.email ?? '',
         buyerName:   user?.name  ?? '',
-        buyerPhone:  (user as any)?.phone ?? '',
+        buyerPhone:  OrderService.phoneOf(user),
+        /* A guest buying on /explore comes back to the public return page; a student to /payment-return. */
+        ...(opts.guest && { returnUrl: OrderService.returnUrls('abzer', order.id, true).successUrl }),
       })
 
       await patchAbzerOrderId(order.id, result.abzerRequestId)
 
-      return { checkoutUrl: result.checkoutUrl, abzerOrderId: result.abzerRequestId }
+      return { checkoutUrl: result.checkoutUrl, abzerOrderId: result.abzerRequestId, orderId: order.id }
     })
   }
 
   /* ─── Abzer webhook fulfillment (idempotent) ─────────── */
   /* orderId = the invoiceNumber from the webhook payload, which Abzer sets to our referenceNumber */
-  async fulfillAbzerFromWebhook(orderId: string, receiptId: string): Promise<void> {
+  async fulfillAbzerFromWebhook(
+    orderId: string, receiptId: string,
+    paid?: { amount?: unknown; currency?: unknown },
+  ): Promise<void> {
     const order = await this.orderRepo.findById(orderId)
     if (!order) {
       logger.warn({ orderId }, 'Abzer webhook: no matching order')
@@ -1023,6 +1047,19 @@ export class OrderService {
     }
     if (order.status === 'paid') {
       logger.info({ orderId: order.id }, 'Abzer webhook: already fulfilled')
+      return
+    }
+    if ((order as { gateway?: string }).gateway !== 'abzer') {
+      logger.error({ orderId: order.id, gateway: (order as { gateway?: string }).gateway }, 'Abzer webhook: order is not an Abzer order — NOT fulfilled')
+      return
+    }
+    /* What was actually paid must be what the order asked for (2026-10-18). The webhook's only
+       authentication is a shared header, so it fulfilled whatever it was told — a partial or forged
+       receipt enrolled the student all the same. A receipt that does not match is refused and logged
+       loudly; the order stays pending for someone to look at. */
+    const mismatch = OrderService.abzerReceiptMismatch(order as { amount: number; currency?: string }, paid)
+    if (mismatch) {
+      logger.error({ orderId: order.id, receiptId, ...mismatch }, 'Abzer webhook: receipt does not match the order — NOT fulfilled')
       return
     }
 
@@ -1037,6 +1074,25 @@ export class OrderService {
     await this._autoApproveViaPayment(order.userId.toString(), order.courseId.toString())
     void this._sendPostPaymentNotifications(order.userId.toString(), order.courseId.toString(), order.id)
     logger.info({ orderId, receiptId }, 'Abzer: order fulfilled via webhook')
+  }
+
+  /** Why an Abzer receipt does not settle this order (amount in fils, currency), or null when it does. */
+  static abzerReceiptMismatch(
+    order: { amount: number; currency?: string },
+    paid?: { amount?: unknown; currency?: unknown },
+  ): { expected: string; received: string } | null {
+    const expectedCur = String(order.currency ?? env.ABZER_CURRENCY).toUpperCase()
+    const expected = `${(order.amount / 100).toFixed(2)} ${expectedCur}`
+    /* "1,234.50" as well as 1234.5 — a thousands separator is not a mismatch. */
+    const amount = Number(String(paid?.amount ?? '').replace(/,/g, '').trim())
+    if (!paid || paid.amount === undefined || paid.amount === null || paid.amount === '' || !Number.isFinite(amount)) {
+      return { expected, received: 'no amount on the receipt' }
+    }
+    const currency = paid.currency ? String(paid.currency).toUpperCase() : expectedCur
+    const received = `${amount.toFixed(2)} ${currency}`
+    /* Fils, rounded: 1,234.50 must equal 123450 — never a float compare. */
+    if (Math.round(amount * 100) !== order.amount || currency !== expectedCur) return { expected, received }
+    return null
   }
 
   /* ─── Abzer return-URL verify + fulfill (called by client after BillxPro redirect) ── */
@@ -1109,7 +1165,8 @@ export class OrderService {
     courseId:    string,
     slug:        string,
     couponCode?: string,
-  ): Promise<{ checkoutUrl: string; tamaraCheckoutId: string }> {
+    opts:        { guest?: boolean } = {},
+  ): Promise<{ checkoutUrl: string; tamaraCheckoutId: string; orderId: string }> {
     if (!env.TAMARA_API_KEY) {
       throw new OrderError('TAMARA_NOT_CONFIGURED', 'Tamara is not configured on this server.', 503)
     }
@@ -1160,10 +1217,11 @@ export class OrderService {
         ...(discountFils && { discountAmount: discountFils }),
       })
 
-      const user       = await UserModel.findById(userId).select('name email').exec()
-      const successUrl = `${env.CLIENT_URL}/payment-return?gateway=tamara&orderId=${order.id}`
-      const cancelUrl  = `${env.CLIENT_URL}/payment-return?gateway=tamara&status=cancelled`
-      const failureUrl = `${env.CLIENT_URL}/payment-return?gateway=tamara&status=failed&orderId=${order.id}`
+      /* phone and createdAt were never selected, so consumer.phone_number (required) went empty. */
+      const user       = await UserModel.findById(userId).select('name email phone createdAt enrollmentApplication').exec()
+      const { successUrl, cancelUrl, failureUrl } = OrderService.returnUrls('tamara', order.id, opts.guest)
+      const risk       = await this._tamaraRiskAssessment(userId, (user as { createdAt?: Date } | null)?.createdAt)
+      const app        = (user as { enrollmentApplication?: { city?: string; villa?: string; addressCountry?: string } } | null)?.enrollmentApplication ?? {}
 
       const result = await this.tamaraSvc.createCheckout({
         amountAED:   finalFils / 100,
@@ -1172,7 +1230,10 @@ export class OrderService {
         courseId:    course.id,
         buyerEmail:  user?.email ?? '',
         buyerName:   user?.name  ?? '',
-        buyerPhone:  (user as any)?.phone ?? '',
+        buyerPhone:  OrderService.phoneOf(user),
+        ...(app.city && { city: String(app.city) }),
+        ...((app.villa || app.addressCountry) && { addressLine: String(app.villa || app.addressCountry) }),
+        riskAssessment: risk,
         successUrl,
         cancelUrl,
         failureUrl,
@@ -1180,8 +1241,24 @@ export class OrderService {
 
       await patchTamaraIds(order.id, result.checkoutId, result.tamaraOrderId)
 
-      return { checkoutUrl: result.checkoutUrl, tamaraCheckoutId: result.checkoutId }
+      return { checkoutUrl: result.checkoutUrl, tamaraCheckoutId: result.checkoutId, orderId: order.id }
     })
+  }
+
+  /* Tamara's risk_assessment (required by its checkout schema and its go-live checklist): who the customer
+     is to us — since when, and what they have paid for before. From their own settled orders. */
+  private async _tamaraRiskAssessment(userId: string, createdAt?: Date) {
+    const paid = (await this.orderRepo.listForUser(userId))
+      .filter(o => o.status === 'paid')
+      .map(o => new Date((o as { paidAt?: Date }).paidAt ?? (o as { createdAt?: Date }).createdAt ?? Date.now()))
+      .sort((a, b) => a.getTime() - b.getTime())
+    const day = (d: Date) => d.toISOString().slice(0, 10)
+    return {
+      is_premium_customer:   false,
+      account_creation_date: day(createdAt ?? new Date()),
+      total_order_count:     paid.length,
+      ...(paid.length && { date_first_paid: day(paid[0]!), date_last_paid: day(paid[paid.length - 1]!) }),
+    }
   }
 
   /* ─── Tamara fulfilment ──────────────────────────────────────────────────

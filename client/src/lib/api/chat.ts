@@ -52,11 +52,16 @@ export function useChatInstructors() {
   })
 }
 
-export function useChatConversations() {
+/* `background` keeps polling in a hidden tab — only for ChatAlerts, once the
+   student has turned message alerts on (that is when an alert is the only
+   way they would know). */
+export function useChatConversations(opts: { background?: boolean; enabled?: boolean } = {}) {
   return useQuery({
     queryKey: chatKeys.conversations,
     queryFn:  () => apiGet<ChatConversation[]>('/chat/conversations'),
-    refetchInterval: LIST_POLL, refetchIntervalInBackground: false, staleTime: 5_000,
+    refetchInterval: LIST_POLL, refetchIntervalInBackground: !!opts.background, staleTime: 5_000,
+    enabled: opts.enabled ?? true,
+    retry: (n, err: any) => !(err?.response?.status >= 400 && err?.response?.status < 500) && n < 1,
   })
 }
 

@@ -87,6 +87,10 @@ api.interceptors.response.use(
     if (path === '/login' || path === '/register' || path.startsWith('/imp/')) {
       return Promise.reject(err)
     }
+    /* `/p/<code>` — a programme's public link, and `/explore` — the public course list (2026-10-18): a
+       signed-out visitor is normal there, never "session expired". A signed-in one whose short access
+       token lapsed is still renewed (below) — only the sign-in redirect is skipped. */
+    const publicPage = path.startsWith('/p/') || path === '/explore' || path.startsWith('/explore/')
 
     original._retry = true
 
@@ -114,7 +118,7 @@ api.interceptors.response.use(
       // Only a definitive auth rejection (401) means the session is really
       // gone. Rate limiting (429), timeouts, or network hiccups are
       // transient — don't force-logout an active user over those.
-      if (refreshErr?.response?.status === 401) {
+      if (refreshErr?.response?.status === 401 && !publicPage) {
         /* session=expired tells the middleware this cookie is known-dead, so
            /login shows the form instead of bouncing to /my-learning. Without
            it a cookie that outlives its session makes those two redirects

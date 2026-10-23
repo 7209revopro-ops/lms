@@ -439,6 +439,40 @@ export function requirePermission(resource: string, action: PermissionAction) {
 }
 
 /* ─────────────────────────────────────────────────────
+   requirePagePermission(...resources) — one admin page's routes, by method
+   ─────────────────────────────────────────────────────
+   For the pages whose routes were never given a per-route requirePermission
+   (2026-10-17): placed once in front of the routes ONLY that page uses. The
+   action comes from the method — GET reads (Read or List), POST creates,
+   PATCH/PUT updates, DELETE deletes. More than one resource: any of them
+   (GET /admin/mentor-calendar feeds both Mentor Calendar and Programs). Same
+   rules as requirePermission: super_admin, no custom role, or
+   PERMISSIONS_MODE=off pass; report logs instead of refusing.
+───────────────────────────────────────────────────── */
+export function requirePagePermission(...resources: string[]) {
+  return async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    try {
+      if (!req.user) { sendError(res, 'UNAUTHORIZED', 'Authentication required', 401); return }
+      if (permissionsMode() === 'off' || req.user.role === 'super_admin' || !req.user.customRoleId) { next(); return }
+      const m = req.method.toUpperCase()
+      const actions: PermissionAction[] = m === 'GET' || m === 'HEAD' ? ['read', 'list']
+        : m === 'POST' ? ['create'] : m === 'DELETE' ? ['delete'] : ['update']
+      const { RoleModel } = await import('@/models/schema.ts')
+      const role = await RoleModel.findById(req.user.customRoleId).select('name permissions').lean()
+      if (!role) { sendError(res, 'ROLE_NOT_FOUND', 'Your assigned role no longer exists. Contact an administrator.', 403); return }
+      const perms = ((role as { permissions?: Array<Record<string, unknown>> }).permissions ?? [])
+      const allowed = perms.some(p => resources.includes(String(p['resource'])) && actions.some(a => p[a] === true))
+      if (allowed) { next(); return }
+      if (permissionsMode() === 'report') {
+        logger.warn({ userId: req.user.id, role: (role as { name?: string }).name, resources, actions }, 'PERMISSIONS_MODE=report — this request WOULD be denied under enforcement')
+        next(); return
+      }
+      sendError(res, 'PERMISSION_DENIED', `Your role does not permit this on ${resources.join(' / ')}.`, 403)
+    } catch (err) { next(err) }
+  }
+}
+
+/* ─────────────────────────────────────────────────────
    requireRole(...roles)
    ─────────────────────────────────────────────────────
    Authorization guard — must come AFTER authenticate.

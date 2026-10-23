@@ -198,6 +198,8 @@ export interface TabbyCreateCheckoutOptions {
   registeredSince:  Date
   isEmailVerified?: boolean
   isPhoneVerified?: boolean
+  /** A coupon's discount, AED (2026-10-18) — shown on the order rather than hidden in a lower unit price. */
+  discountAED?:     number
   shippingAddress?: TabbyShippingAddress
   orderHistory?:    TabbyOrderHistoryEntry[]
   lang?:            TabbyLang
@@ -430,6 +432,9 @@ export class TabbyService {
     }
 
     const amountStr  = opts.amountAED.toFixed(2)
+    /* amount = item price − discount: the item carries the full price, the order the coupon's discount. */
+    const discount   = Math.max(0, opts.discountAED ?? 0)
+    const unitStr    = (opts.amountAED + discount).toFixed(2)
     const lang       = opts.lang ?? 'en'
     const webhookUrl = `${env.BACKEND_PUBLIC_URL}/api/v1/webhooks/tabby`
 
@@ -443,7 +448,7 @@ export class TabbyService {
     const item: TabbyItem = {
       title:           tabbyField(opts.courseTitle),
       quantity:        1,
-      unit_price:      amountStr,
+      unit_price:      unitStr,
       discount_amount: '0.00',
       reference_id:    opts.courseId,
       category:        'Digital Services',
@@ -473,7 +478,7 @@ export class TabbyService {
           updated_at:      new Date().toISOString(),
           tax_amount:      '0.00',
           shipping_amount: '0.00',
-          discount_amount: '0.00',
+          discount_amount: discount.toFixed(2),
           items:           [item],
         },
         ...(opts.orderHistory?.length && { order_history: opts.orderHistory }),

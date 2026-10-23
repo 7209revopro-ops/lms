@@ -44,6 +44,12 @@ let running = false
 async function expireStale(now: Date): Promise<number> {
   if (MAX_AGE_HOURS <= 0) return 0
   const cutoff = new Date(now.getTime() - MAX_AGE_HOURS * 3600 * 1000)
+  /* A reminder past its use (expiresAt — "starts in 5 minutes" two hours on) is closed, never sent. */
+  const lapsed = await EmailOutboxModel.updateMany(
+    { status: 'pending', expiresAt: { $lt: now } },
+    { $set: { status: 'failed', lastError: 'expired: its class is over, not sent' } },
+  )
+  if (lapsed.modifiedCount > 0) logger.info({ expired: lapsed.modifiedCount }, 'email outbox: dropped reminders whose class is over')
   const r = await EmailOutboxModel.updateMany(
     { status: 'pending', createdAt: { $lt: cutoff } },
     { $set: { status: 'failed', lastError: `expired: queued more than ${MAX_AGE_HOURS}h ago, not sent` } },
@@ -62,18 +68,22 @@ export async function drainOutboxOnce(): Promise<{ sent: number; retry: number; 
   /* Before selecting work, drop anything too old to be worth sending. */
   await expireStale(now)
 
+  /* While urgent mail waits, only urgent mail is sent — bulk would spend the allowance a mailbox just got back. */
+  const { urgentWaiting } = await import('@/services/email.service.ts')
+  const onlyUrgent = await urgentWaiting()
   const due = await EmailOutboxModel
-    .find({ status: 'pending', nextAttemptAt: { $lte: now } })
-    .sort({ nextAttemptAt: 1 })
+    .find({ status: 'pending', nextAttemptAt: { $lte: now }, ...(onlyUrgent ? { priority: { $gt: 0 } } : {}) })
+    /* Urgent first (sign-in codes, password resets): never behind a backlog of class notices. */
+    .sort({ priority: -1, nextAttemptAt: 1 })
     .limit(BATCH)
     .lean()
 
   for (const row of due as unknown as {
-    _id: unknown; to: string; subject: string; html: string; text?: string; attempts: number
+    _id: unknown; to: string; subject: string; html: string; text?: string; attempts: number; priority?: number
   }[]) {
     const outcome = await deliverOutboxRow({
       id: String(row._id), to: row.to, subject: row.subject,
-      html: row.html, text: row.text, attempts: row.attempts ?? 0,
+      html: row.html, text: row.text, attempts: row.attempts ?? 0, ...((row.priority ?? 0) > 0 ? { urgent: true } : {}),
     })
     tally[outcome === 'sent' ? 'sent' : outcome === 'failed' ? 'failed' : 'retry']++
   }

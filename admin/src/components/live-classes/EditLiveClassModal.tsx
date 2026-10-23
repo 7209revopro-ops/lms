@@ -22,6 +22,7 @@ import type { GuestCohortInput } from '@/lib/api/liveClasses'
 import { useCurrentUser } from '@/lib/api/user'
 import { CLASS_LANGUAGES, withFlagAndNative } from '@/lib/languages'
 import { useBackdropClose } from '@/hooks/useBackdropClose'
+import { ClassRoomPicker } from './ClassRoomPicker'
 
 /* ── Helpers ──────────────────────────────────────────────
    No bare alias for isoToDatetimeLocal any more, on purpose. It and
@@ -203,7 +204,8 @@ export function EditLiveClassModal({ live, onClose, onSuccess }: Props) {
           meetingUrl:       isOnline && type === 'external' && meetingUrl.trim() !== originalMeetingUrl.trim()
                               ? meetingUrl.trim() || undefined : undefined,
           location:         !isOnline ? location.trim() || undefined : undefined,
-          room:             !isOnline ? room.trim() || undefined : undefined,
+          // "" = any free room: the LMS picks one (2026-10-19), so an emptied room is sent, not dropped.
+          room:             !isOnline ? room.trim() : undefined,
           rescheduleReason: timeChanged ? rescheduleReason.trim() : undefined,
           recordingUrl:     recordingUrl.trim() || undefined,
           status,
@@ -580,18 +582,9 @@ export function EditLiveClassModal({ live, onClose, onSuccess }: Props) {
                   <Building2 size={10} />
                   Classroom / Room
                 </label>
-                <div className="relative">
-                  <Building2 size={13} className="absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none"
-                    style={{ color: 'rgba(255,255,255,0.30)' }} />
-                  <input
-                    value={room}
-                    onChange={e => setRoom(e.target.value)}
-                    maxLength={100}
-                    placeholder="e.g. Room 204 / Lab 3 / Auditorium"
-                    className={`${base} pl-9`}
-                    style={iStyle}
-                  />
-                </div>
+                <ClassRoomPicker value={room} onChange={setRoom}
+                  startISO={start ? datetimeLocalToISO(start, classZone) : null} durationMins={durationMins}
+                  classId={live.id} inputClassName={base} inputStyle={iStyle} />
               </div>
             </div>
           )}

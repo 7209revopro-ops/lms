@@ -48,6 +48,7 @@ import {
   sendRescheduledNotification,
   sendDelayNotification,
   sendInstructorChangedNotification,
+  sendClassChangeToEnrolled,
 } from '@/services/email.service.ts'
 import { queueDigestItem } from '@/jobs/digest.job.ts'
 
@@ -87,6 +88,10 @@ export interface CriticalMailRow {
   newStart?:          Date | string
   oldInstructorName?: string
   newInstructorName?: string
+  /* 'booked' (the default) — they hold a seat on the class. 'enrolled' — in
+     the course but not booked on it: different wording, and no "still booked?"
+     check at send time. */
+  audience?:          'booked' | 'enrolled'
 }
 
 let running = false
@@ -175,6 +180,7 @@ export async function parkCriticalMail(row: CriticalMailRow, now = new Date()): 
     ...(row.newStart          ? { newStart:          new Date(row.newStart) }       : {}),
     ...(row.oldInstructorName ? { oldInstructorName: row.oldInstructorName }        : {}),
     ...(row.newInstructorName ? { newInstructorName: row.newInstructorName }        : {}),
+    audience: row.audience ?? 'booked',
     queuedAt: now,
     dueAt,
   })
@@ -203,6 +209,8 @@ export type CriticalSenders = {
   rescheduled:  (to: string, name: string, title: string, from: Date, to_: Date, slug?: string | null) => Promise<void>
   delayed:      (to: string, name: string, title: string, when: Date, slug?: string | null) => Promise<void>
   instructor:   (to: string, name: string, title: string, oldN: string, newN: string, when: Date, slug?: string | null) => Promise<void>
+  /* Optional so the suites' sender doubles stay valid; the real one is used when absent. */
+  enrolled?:    typeof sendClassChangeToEnrolled
 }
 
 const REAL_SENDERS: CriticalSenders = {
@@ -374,7 +382,7 @@ export async function flushCriticalMail(opts: {
     /* Withdrew inside the buffer. Superseded rather than sent: the notice is
        already in their bell from the moment of the edit, so nothing is lost
        by not mailing somebody who has left the session. */
-    if (!activePairs.has(`${String(row.liveClassId)}|${userId}`)) {
+    if (row.audience !== 'enrolled' && !activePairs.has(`${String(row.liveClassId)}|${userId}`)) {
       await CriticalMailModel.updateOne({ _id: row._id }, { $set: { supersededAt: now } })
       tally.dropped++
       continue
@@ -392,6 +400,10 @@ export async function flushCriticalMail(opts: {
            count is how many OTHERS already went out. */
         _id: { $ne: row._id },
         foldedToDigest: { $ne: true },
+        /* A booked student's own class notices are never crowded out by
+           notices about classes they did not book: those do not count against
+           a booked row's cap (they still count against each other's). */
+        ...(row.audience !== 'enrolled' ? { audience: { $ne: 'enrolled' } } : {}),
         $or: [
           { sentAt: { $gte: since } },
           { sentAt: null, claimedAt: { $gte: since } },
@@ -477,6 +489,7 @@ function isSameDay(a: Date | string, b: Date | string): boolean {
    surface in the whole product that stated a time with no way to tell whose
    clock it was. */
 function bodyFor(row: any, academySlug?: string | null): string {
+  if (row.audience === 'enrolled') return enrolledMessage(row, academySlug)
   switch (row.kind) {
     case 'cancelled':
       return 'The session you booked has been cancelled.'
@@ -487,9 +500,22 @@ function bodyFor(row: any, academySlug?: string | null): string {
   }
 }
 
+/* What changed, in one line, for a student enrolled in the course who has not
+   booked this class — the digest body and the WhatsApp message. */
+function enrolledMessage(row: any, academySlug?: string | null): string {
+  if (row.kind === 'cancelled') return 'This class has been cancelled. Book another session from your Class Schedule.'
+  if (row.kind === 'rescheduled') return `It has moved to ${academyClock(row.newStart ?? Date.now(), academySlug).full}.`
+  return `It will now be taught by ${row.newInstructorName ?? 'another mentor'}.`
+}
+
 async function sendOne(row: any, senders: CriticalSenders, academySlug?: string | null): Promise<void> {
   const oldStart = row.oldStart ? new Date(row.oldStart) : new Date()
   const newStart = row.newStart ? new Date(row.newStart) : new Date()
+
+  if (row.audience === 'enrolled') {
+    return (senders.enrolled ?? sendClassChangeToEnrolled)(row.email, row.name ?? '', row.title,
+      { kind: row.kind, oldStart, newStart, newInstructorName: row.newInstructorName }, academySlug)
+  }
 
   if (row.kind === 'cancelled') {
     return senders.cancelled(row.email, row.name ?? '', row.title, oldStart, academySlug)
@@ -521,6 +547,11 @@ async function sendWhatsAppFor(row: any, phone: string, academySlug?: string | n
   const newStart = row.newStart ? new Date(row.newStart) : new Date()
   const full = (d: Date) => `${shortDay(d, academySlug)}, ${academyClock(d, academySlug).time}`
   const userId = String(row.userId), name = row.name ?? '', title = String(row.title)
+  if (row.audience === 'enrolled') {
+    const code = await mintSigninCode(userId, '/class-bookings')
+    const when = full(row.kind === 'rescheduled' ? oldStart : newStart)
+    return wa.sendClassUpdateWhatsApp(phone, name, title, when, enrolledMessage(row, academySlug), code)
+  }
   if (row.kind === 'cancelled') {
     const code = await mintSigninCode(userId, '/class-bookings')
     return wa.sendClassCancelledWhatsApp(phone, name, title, shortDay(oldStart, academySlug), academyClock(oldStart, academySlug).time, code)

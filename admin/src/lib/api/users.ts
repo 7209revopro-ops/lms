@@ -117,6 +117,10 @@ export const userKeys = {
 
 export function useUsers(role: AdminUserRole | undefined, params: {
   page?: number; per_page?: number; search?: string; category?: string; status?: 'active' | 'inactive'; exclude_students?: boolean; enrollmentStatus?: 'pending' | 'approved' | 'rejected' | 'cancelled'
+  /** Only students with no phone number, on the account or the application. */
+  no_phone?: 'true'
+  /** Onboarded in Tetra Commission: yes, no (there, not yet), none (not there). */
+  onboarded?: 'yes' | 'no' | 'none'
 } = {}) {
   return useQuery({
     queryKey: userKeys.list(role ?? 'all', params),
@@ -280,6 +284,26 @@ export function useDeleteUser() {
       qc.invalidateQueries({ queryKey: ['admin', 'users'] })
       qc.invalidateQueries({ queryKey: ['admin', 'stats'] })
     },
+  })
+}
+
+/* ─── Recheck the commission portal: who looks after this student, asked now ─── */
+export interface TetraCsRecheck { found: boolean; cs: string; team: string; code: string; open: boolean }
+export function useRecheckCs() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async (id: string) =>
+      (await api.post<{ success: true; data: TetraCsRecheck }>(`/admin/users/${id}/recheck-cs`)).data.data,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['admin', 'users'] }),
+  })
+}
+
+/* ─── Set a student's password (admin, super admin, or the student's sub-admin) ───
+   Ends every session they have and emails them the new password. */
+export function useSetStudentPassword() {
+  return useMutation({
+    mutationFn: async (v: { id: string; password: string }) =>
+      (await api.post<{ success: true; data: { email: string } }>(`/admin/users/${v.id}/set-password`, { password: v.password })).data.data,
   })
 }
 

@@ -20,7 +20,7 @@ export class UserService {
   private readonly repo         = new UserRepository()
   private readonly refreshRepo  = new RefreshTokenRepository()
 
-  async listByRole(role: UserRole | undefined, params: { page: number; perPage: number; search?: string; category?: string; status?: 'active' | 'inactive'; excludeStudents?: boolean; enrollmentStatus?: 'pending' | 'approved' | 'rejected' | 'cancelled'; organizationId?: string }) {
+  async listByRole(role: UserRole | undefined, params: { page: number; perPage: number; search?: string; category?: string; status?: 'active' | 'inactive'; excludeStudents?: boolean; enrollmentStatus?: 'pending' | 'approved' | 'rejected' | 'cancelled'; noPhone?: boolean; onboarded?: 'yes' | 'no' | 'none'; organizationId?: string }) {
     return this.repo.listByRole(role, params)
   }
 
@@ -42,6 +42,23 @@ export class UserService {
     const deleted = await this.repo.hardDelete(id)
     if (!deleted) throw new UserError('USER_NOT_FOUND', 'User not found.', 404)
     await this.refreshRepo.revokeAllForUser(id, 'security')
+  }
+
+  /* A student's password, set by an admin (2026-10-17). Stored hashed like any other; every session the student
+     has is ended, so the old password stops working at once; the new one is emailed to them (urgent mail). */
+  async adminSetStudentPassword(id: string, password: string): Promise<{ email: string }> {
+    const { UserModel } = await import('@/models/schema.ts')
+    const user = await UserModel.findById(id).select('role email name').lean<{ role?: string; email?: string; name?: string }>()
+    if (!user) throw new UserError('USER_NOT_FOUND', 'User not found.', 404)
+    if (user.role !== 'student') throw new UserError('NOT_A_STUDENT', 'Only a student\'s password can be set here.', 400)
+    const passwordHash = await hashPassword(password)
+    await UserModel.updateOne({ _id: id }, { $set: { passwordHash } })
+    await this.refreshRepo.revokeAllForUser(id, 'security')
+    if (user.email) {
+      const { sendPasswordSetByAdmin } = await import('@/services/email.service.ts')
+      void sendPasswordSetByAdmin(user.email, user.name ?? '', password).catch(() => {})
+    }
+    return { email: user.email ?? '' }
   }
 
   /* Admin-only updates: role change, deactivate/activate, force-verify.
@@ -136,6 +153,13 @@ export class UserService {
 
     const updated = await this.repo.updateById(id, update)
     if (!updated) throw new UserError('USER_NOT_FOUND', 'User not found.', 404)
+    if (dto.phone !== undefined && updated.role === 'student') await this.#mirrorStudentPhone(id, dto.phone)
+    /* '' means clear. The update above maps it to undefined, which a $set
+       skips — so the number used to stay. Removed explicitly instead. */
+    if (dto.phone !== undefined && !dto.phone.trim()) {
+      const { UserModel } = await import('@/models/schema.ts')
+      await UserModel.updateOne({ _id: id }, { $unset: { phone: '' } })
+    }
 
     /* On deactivation, force the user to log out everywhere. */
     if (dto.isActive === false) {
@@ -227,6 +251,18 @@ export class UserService {
       await this.repo.updateById(user.id, patch)
       Object.assign(user, patch)
     }
+    if (dto.phone && dto.role === 'student') await this.#mirrorStudentPhone(user.id, dto.phone)
     return user
+  }
+
+  /* A student's WhatsApp number is read from enrollmentApplication.phone by
+     every student message (reminders, new class, today's classes …), not from
+     the account's `phone`. An admin setting the number writes both, so the
+     next message goes to it; '' clears both. */
+  async #mirrorStudentPhone(userId: string, phone: string): Promise<void> {
+    const { UserModel } = await import('@/models/schema.ts')
+    const value = phone.trim()
+    await UserModel.updateOne({ _id: userId },
+      value ? { $set: { 'enrollmentApplication.phone': value } } : { $unset: { 'enrollmentApplication.phone': '' } })
   }
 }

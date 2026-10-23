@@ -64,6 +64,20 @@ const DEFAULT_ROLES = [
       reports:        { read: true, list: true },
       roles:          { read: true, list: true, list_basic: true },
       support:        { read: true, update: true, list: true, list_basic: true },
+      /* The pages added 2026-10-17 — what an academy admin can reach today. */
+      'enrollment-requests':   { create: true, read: true, update: true, delete: true, list: true, list_basic: true },
+      devices:                 { read: true, update: true, list: true, list_basic: true },
+      programs:                { create: true, read: true, update: true, delete: true, list: true, list_basic: true },
+      'mentor-calendar':       { create: true, read: true, update: true, delete: true, list: true, list_basic: true },
+      'class-verification':    { create: true, read: true, update: true, list: true, list_basic: true },
+      'instructor-attendance': { read: true, list: true, list_basic: true },
+      'instructor-reviews':    { read: true, list: true, list_basic: true },
+      recordings:              { create: true, read: true, list: true, list_basic: true },
+      assignments:             { read: true, update: true, list: true, list_basic: true },
+      exams:                   { create: true, read: true, update: true, delete: true, list: true, list_basic: true },
+      'send-message':          { create: true, read: true, list: true, list_basic: true },
+      'audit-logs':            { read: true, list: true },
+      settings:                { read: true, update: true, list: true },
     }),
   },
   {
@@ -77,6 +91,12 @@ const DEFAULT_ROLES = [
       bookings:       { read: true, list: true },
       categories:     { read: true, list: true, list_basic: true },
       reviews:        { read: true, list: true },
+      programs:              { create: true, read: true, update: true, list: true, list_basic: true },
+      'mentor-calendar':     { create: true, read: true, update: true, list: true, list_basic: true },
+      'class-verification':  { create: true, read: true, update: true, list: true, list_basic: true },
+      assignments:           { read: true, update: true, list: true, list_basic: true },
+      exams:                 { create: true, read: true, update: true, delete: true, list: true, list_basic: true },
+      settings:              { read: true, update: true, list: true },
     }),
   },
 ]
@@ -89,6 +109,22 @@ export async function seedDefaultRoles(): Promise<void> {
     if (!exists) {
       await RoleModel.create(def)
       logger.info(`[roles] Created system role: "${def.name}"`)
+      continue
     }
+    /* A resource added since the role was made (the pages of 2026-10-17): its default row is added. A row already
+       there is never changed — an admin may have edited it. */
+    const have = new Set(((exists as { permissions?: Array<{ resource: string }> }).permissions ?? []).map(p => p.resource))
+    const missing = def.permissions.filter(p => !have.has(p.resource))
+    if (missing.length) {
+      await RoleModel.updateOne({ _id: exists._id }, { $push: { permissions: { $each: missing } } })
+      logger.info(`[roles] "${def.name}": added ${missing.map(m => m.resource).join(', ')}`)
+    }
+  }
+  /* Custom roles get the new resources too — all off, so nothing is widened; an admin ticks what they want. */
+  const custom = await RoleModel.find({ isSystem: { $ne: true } }).select('permissions').lean()
+  for (const r of custom as Array<{ _id: unknown; permissions?: Array<{ resource: string }> }>) {
+    const have = new Set((r.permissions ?? []).map(p => p.resource))
+    const missing = build({}).filter(p => !have.has(p.resource))
+    if (missing.length) await RoleModel.updateOne({ _id: r._id }, { $push: { permissions: { $each: missing } } })
   }
 }

@@ -135,7 +135,9 @@ export interface RefreshTokenPayload {
 export interface RegisterDto {
   name:              string
   email:             string
-  password:          string
+  /** Sign-up in the student app sends emailCode instead (2026-10-23); a password is still accepted from other callers. */
+  password?:         string
+  emailCode?:        string
   signupType?:       'express' | 'full'
   organizationSlug?: OrgSlug
   enrollmentApplication?: {

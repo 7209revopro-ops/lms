@@ -23,6 +23,16 @@ function withDisplayPrices(dto: CourseDTO): CourseDTO {
   }
 }
 
+/* ?academy=dubai|bangalore — the public /explore page's academy switch (2026-10-18): a visitor
+   with no account sees that academy's own courses and the shared ones, as its students do. A
+   signed-in user always gets their own academy; anything else is ignored (every academy). */
+async function academyFromQuery(raw: unknown): Promise<string | undefined> {
+  if (raw !== 'dubai' && raw !== 'bangalore') return undefined
+  const { OrganizationModel } = await import('@/models/schema.ts')
+  const org = await OrganizationModel.findOne({ slug: raw }).select('_id').lean<{ _id: unknown }>()
+  return org ? String(org._id) : undefined
+}
+
 export class CourseController {
   private readonly service      = new CourseService()
   private readonly aiNotes      = new AINotesService()
@@ -49,7 +59,7 @@ export class CourseController {
         priceMax:     toNum(q['price_max']),
         sort:           q['sort'],
         program:        (q['program'] as '4x-trading' | 'digital-marketing' | 'ai' | 'jura' | undefined) || undefined,
-        organizationId: req.user?.organizationId,
+        organizationId: req.user?.organizationId ?? await academyFromQuery(q['academy']),
       })
 
       /* For list view, fetch lesson counts in bulk so cards can show "N lessons" */

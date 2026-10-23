@@ -454,6 +454,32 @@ export async function removeGuestCohort(
 
 /* The three fields a booking is stamped with, from a reservation. Kept here so
    the four booking paths cannot disagree about the shape. */
+/* ─────────────────────────────────────────────────────
+   Many seats at once — a Program's classes
+   ─────────────────────────────────────────────────────
+   A program books every one of its students onto every class: hundreds or
+   thousands of seats on a class made a moment ago. One reserveSeat per student
+   is one round-trip each — minutes for a big program. On a class with NO
+   allocation (no academy floors: every Program class) the room grows to fit
+   and the counter moves by n in one write. `n` may be negative to give back
+   seats a bulk insert could not use. An allocated class is refused (false):
+   its seats go one by one through reserveSeat, which knows the pools.
+───────────────────────────────────────────────────── */
+export async function reserveFlatSeats(liveClassId: string, n: number): Promise<boolean> {
+  if (!n) return true
+  const { LiveClassModel } = await import('@/models/schema.ts')
+  const count = { $ifNull: ['$bookedCount', 0] }
+  const r = await LiveClassModel.updateOne(
+    { _id: new Types.ObjectId(liveClassId), hostSeatsLeft: { $not: { $type: 'number' } } },
+    [{ $set: {
+      bookedCount:     { $max: [0, { $add: [count, n] }] },
+      /* Room for them all, and ten to spare — never shrunk here. */
+      sessionCapacity: { $max: ['$sessionCapacity', { $add: [count, n, 10] }] },
+    } }],
+  )
+  return r.matchedCount > 0
+}
+
 export function seatStampFrom(
   reserved: ReservedSeat,
   door:     { organizationId?: string | null; courseId?: string | null; sectionId?: string | null } | undefined,

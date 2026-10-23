@@ -29,7 +29,7 @@ interface RazorpayInstance {
   on:    (event: string, handler: (response: any) => void) => void
 }
 
-function loadRazorpayScript(): Promise<void> {
+export function loadRazorpayScript(): Promise<void> {
   return new Promise((resolve, reject) => {
     if (typeof window !== 'undefined' && window.Razorpay) { resolve(); return }
     const s = document.createElement('script')
@@ -216,6 +216,8 @@ export function isTabbyCheckoutUrl(raw: string): boolean {
 export function useTabbyCheckout(opts: UseTabbyCheckoutOptions = {}) {
   return useMutation({
     mutationFn: async ({ courseId, slug, couponCode }: { courseId: string; slug: string; couponCode?: string }) => {
+      /* The return page's "back to checkout" goes to this course (Tabby QA: return the customer to checkout). */
+      try { sessionStorage.setItem('checkout-course', slug) } catch { /* private mode */ }
       const result = await apiPost<TabbyCreateOrderResult>(
         '/checkout/tabby/create-order',
         { courseId, slug, couponCode },
@@ -252,6 +254,8 @@ interface UseAbzerCheckoutOptions {
 export function useAbzerCheckout(opts: UseAbzerCheckoutOptions = {}) {
   return useMutation({
     mutationFn: async ({ courseId, slug, couponCode }: { courseId: string; slug: string; couponCode?: string }) => {
+      /* The return page's "back to checkout" goes to this course (Tabby QA: return the customer to checkout). */
+      try { sessionStorage.setItem('checkout-course', slug) } catch { /* private mode */ }
       const result = await apiPost<AbzerCreateOrderResult>(
         '/checkout/abzer/create-order',
         { courseId, slug, couponCode },
@@ -294,6 +298,8 @@ export function isTamaraCheckoutUrl(raw: string): boolean {
 export function useTamaraCheckout(opts: UseTamaraCheckoutOptions = {}) {
   return useMutation({
     mutationFn: async ({ courseId, slug, couponCode }: { courseId: string; slug: string; couponCode?: string }) => {
+      /* The return page's "back to checkout" goes to this course (Tabby QA: return the customer to checkout). */
+      try { sessionStorage.setItem('checkout-course', slug) } catch { /* private mode */ }
       const result = await apiPost<TamaraCreateOrderResult>(
         '/checkout/tamara/create-order',
         { courseId, slug, couponCode },

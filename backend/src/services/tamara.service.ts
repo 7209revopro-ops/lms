@@ -162,6 +162,11 @@ export interface TamaraCreateCheckoutOptions {
   addressLine?: string
   instalments?: number
   lang?:       'en' | 'ar'
+  /** risk_assessment — required by Tamara's checkout schema and go-live checklist (2026-10-18). */
+  riskAssessment?: {
+    is_premium_customer: boolean; account_creation_date: string; total_order_count: number
+    date_first_paid?: string; date_last_paid?: string
+  }
   successUrl:  string
   cancelUrl:   string
   failureUrl:  string
@@ -382,6 +387,8 @@ export class TamaraService {
         ...(opts.buyerEmail && { email: opts.buyerEmail }),
       } satisfies TamaraConsumer,
       shipping_address: address,
+      ...(opts.riskAssessment && { risk_assessment: opts.riskAssessment }),
+      platform:  'Delta LMS (web)',
       /* Both objects are required even at zero. */
       shipping_amount: money(0),
       tax_amount:      money(0),

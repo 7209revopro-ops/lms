@@ -70,7 +70,7 @@ import Spinner from '@/components/ui/Spinner'
    is `--color-primary` (#0057b8), which is the SAME blue in dark mode and
    nearly invisible against #0B0D14. Inside this page the ring uses
    `--color-primary-on-surface`, which is the token that actually lifts. */
-const PAGE_CSS = `@import url('https://fonts.googleapis.com/css2?family=Syne:wght@600;700;800&family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;1,9..40,400&display=swap');.syne{font-family:'Syne',sans-serif}.dm{font-family:'DM Sans',sans-serif}.bk-focus:focus-visible{outline:2px solid var(--color-primary-on-surface)!important;outline-offset:2px;border-radius:8px}.bk-row{transition:background-color .15s ease}.bk-row:hover{background:var(--color-bg-inset)}@media (prefers-reduced-motion:reduce){.bk-row{transition:none}}`
+const PAGE_CSS = `@import url('https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;0,9..40,800;1,9..40,400&display=swap');.syne{font-family:'DM Sans',sans-serif;letter-spacing:-0.015em}.dm{font-family:'DM Sans',sans-serif}.bk-focus:focus-visible{outline:2px solid var(--color-primary-on-surface)!important;outline-offset:2px;border-radius:8px}.bk-row{transition:background-color .15s ease}.bk-row:hover{background:var(--color-bg-inset)}@media (prefers-reduced-motion:reduce){.bk-row{transition:none}}`
 // eslint-disable-next-line react/no-danger
 const PageStyle = () => <style dangerouslySetInnerHTML={{ __html: PAGE_CSS }} />
 

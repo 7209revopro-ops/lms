@@ -47,6 +47,8 @@ export interface CurrentAdmin {
   emailPrefs?:     EmailPrefs
   createdAt:       string
   updatedAt:       string
+  /** A custom role's page permissions (absent without one — the base role decides). The sidebar hides pages it can't read. */
+  permissions?:    { resource: string; read: boolean; list: boolean; create: boolean; update: boolean; delete: boolean }[]
 }
 
 export const userKeys = {
@@ -62,8 +64,8 @@ export function useCurrentUser(enabled = true) {
   return useQuery({
     queryKey: userKeys.me,
     queryFn:  async () => {
-      const data = await apiGet<{ user: CurrentAdmin }>('/admin/auth/me')
-      return data.user
+      const data = await apiGet<{ user: CurrentAdmin; permissions?: CurrentAdmin['permissions'] }>('/admin/auth/me')
+      return data.permissions ? { ...data.user, permissions: data.permissions } : data.user
     },
     enabled,
     retry: false,

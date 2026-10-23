@@ -5,7 +5,7 @@ import { hashPassword, comparePassword } from '@/utils/hash.ts'
 import { generateTokenPair, verifyRefreshToken, toSeconds, type TokenAudience } from '@/utils/jwt.ts'
 import { refreshTtl } from '@/utils/refreshTtl.ts'
 import { logger } from '@/utils/logger.ts'
-import { sendPasswordReset, sendVerifyEmail, sendRegistrationAttempt, sendLoginCode, sendAccountDeleteCode, sendCourseInvite, sendDeviceApprovalRequest } from '@/services/email.service.ts'
+import { sendPasswordReset, sendVerifyEmail, sendRegistrationAttempt, sendLoginCode, sendSignupCode, sendAccountDeleteCode, sendCourseInvite, sendDeviceApprovalRequest } from '@/services/email.service.ts'
 import { wantsStaffEmail, isStaffEmailCategory, type EmailPrefs } from '@/utils/emailPrefs.ts'
 import { TotpService } from '@/services/totp.service.ts'
 import { resolveDeviceForLogin, isDeviceApproved, type DeviceOutcome } from '@/services/device.service.ts'
@@ -157,6 +157,9 @@ export class AuthService {
     meta?: SessionMeta,
     audience: TokenAudience = 'client',
   ): Promise<{ user: SafeUser; tokens: TokenPair } | VerificationPending> {
+    /* The student app's sign-up (2026-10-23): no password — an emailed code proves the address. */
+    if (dto.emailCode) return this.#registerWithCode(dto, meta, audience)
+    if (!dto.password) throw new AuthError('CODE_REQUIRED', 'Verify your email with the code we sent you.', 400)
     /* 1. Hash FIRST, then check the email — deliberately in this order (M-05).
        Reversed, the taken-email path short-circuits before bcrypt and answers
        in ~6ms where a fresh email takes ~260ms. That 250ms gap is a clean
@@ -255,6 +258,93 @@ export class AuthService {
     const tokens = await this.#issueLoginTokens(user.id, user.email, user.role, meta, audience)
 
     logger.info({ userId: user.id }, 'User registered')
+    return { user: toSafeUser(user), tokens }
+  }
+
+  /* ── Sign-up with an email code (2026-10-23) ─────────
+       requestSignupCode: a 6-digit code to ANY address — account or not, the answer is the same, so it
+       cannot be used to find accounts. Rate-limited by route; a new code replaces the last.
+       #registerWithCode: the code proves the address. No account → one is made (no password, email
+       verified) and signed in. A STUDENT account already on it → its details are replaced with what was
+       just entered and they are signed in — a rejected / cancelled application goes back to pending for
+       the admins; an approved one stays approved. Staff and disabled accounts are refused. */
+  async requestSignupCode(email: string): Promise<{ devCode?: string }> {
+    const { SignupCodeModel } = await import('@/models/schema.ts')
+    const addr = email.toLowerCase().trim()
+    const code = String(randomInt(0, 1_000_000)).padStart(6, '0')
+    await SignupCodeModel.updateMany({ email: addr, usedAt: { $exists: false } }, { $set: { usedAt: new Date() } })
+    await SignupCodeModel.create({ email: addr, codeHash: this.#hashToken(`signup:${addr}:${code}`), expiresAt: new Date(Date.now() + 10 * 60_000) })
+    await sendSignupCode(addr, code)
+    logger.info('sign-up code sent')
+    const echo = process.env.NODE_ENV !== 'production' && process.env.OTP_DEV_ECHO === '1'
+    return echo ? { devCode: code } : {}
+  }
+
+  async #claimSignupCode(email: string, code: string): Promise<boolean> {
+    const { SignupCodeModel } = await import('@/models/schema.ts')
+    const addr = email.toLowerCase().trim()
+    const row = await SignupCodeModel.findOne({ email: addr, usedAt: { $exists: false }, expiresAt: { $gt: new Date() } }).sort({ createdAt: -1 })
+    if (!row) return false
+    if (row.attempts >= 5) return false
+    if (row.codeHash !== this.#hashToken(`signup:${addr}:${code.trim()}`)) {
+      await SignupCodeModel.updateOne({ _id: row._id }, { $inc: { attempts: 1 } })
+      return false
+    }
+    /* One use: only the request that flips usedAt wins. */
+    const claimed = await SignupCodeModel.updateOne({ _id: row._id, usedAt: { $exists: false } }, { $set: { usedAt: new Date() } })
+    return claimed.modifiedCount === 1
+  }
+
+  async #registerWithCode(dto: RegisterDto, meta?: SessionMeta, audience: TokenAudience = 'client') {
+    if (!(await this.#claimSignupCode(dto.email, dto.emailCode!))) {
+      throw new AuthError('INVALID_CODE', 'That code is invalid or has expired. Request a new one.', 400)
+    }
+    const { UserModel, OrganizationModel } = await import('@/models/schema.ts')
+    const email = dto.email.toLowerCase().trim()
+    const app = dto.enrollmentApplication ?? {}
+    const photoUrl = app.photoUrl?.trim()
+    const existing = await UserModel.findOne({ email }).select('role isActive enrollmentStatus').lean() as { _id: unknown; role: string; isActive?: boolean; enrollmentStatus?: string } | null
+
+    if (existing) {
+      if (existing.role !== 'student') throw new AuthError('EMAIL_NOT_STUDENT', 'This email belongs to a staff account — please use another email.', 409)
+      if (existing.isActive === false) throw new AuthError('ACCOUNT_DISABLED', 'This account is disabled. Please contact Delta support.', 403)
+      /* What was entered replaces what was there, field by field; anything left blank is kept. */
+      const set: Record<string, unknown> = { name: dto.name.trim(), isVerified: true, signupType: 'full' }
+      for (const [k, v] of Object.entries(app)) if (v !== undefined && v !== null && v !== '') set[`enrollmentApplication.${k}`] = v
+      if (photoUrl) set['avatarUrl'] = photoUrl
+      const reopened = existing.enrollmentStatus === 'rejected' || existing.enrollmentStatus === 'cancelled'
+      if (reopened) set['enrollmentStatus'] = 'pending'
+      await UserModel.updateOne({ _id: existing._id }, {
+        $set: set,
+        ...(reopened ? { $unset: { rejectionReason: '', enrollmentCancellationReason: '' } } : {}),
+      })
+      const user = await this.userRepo.findById(String(existing._id))
+      if (!user) throw new AuthError('NOT_FOUND', 'Account not found', 404)
+      if (reopened) void this.#notifyAllAdmins(user.name, user.email).catch(err => logger.warn({ err }, 'admin notification failed'))
+      const tokens = await this.#issueLoginTokens(user.id, user.email, user.role, meta, audience)
+      logger.info({ userId: user.id, reopened }, 'Sign-up with a verified code: existing account updated')
+      return { user: toSafeUser(user), tokens }
+    }
+
+    const orgSlug = dto.organizationSlug ?? (app.homeCountry === 'India' ? 'bangalore' : 'dubai')
+    const orgDoc = await OrganizationModel.findOne({ slug: orgSlug }).select('_id').lean()
+    const created = await this.userRepo.createUser({
+      name:                  dto.name.trim(),
+      email,
+      role:                  'student',
+      enrollmentStatus:      'pending',
+      categories:            [],
+      enrollmentApplication: dto.enrollmentApplication,
+      signupType:            dto.signupType ?? 'full',
+      organizationId:        orgDoc?._id as any,
+      ...(photoUrl ? { avatarUrl: photoUrl } : {}),
+    })
+    /* The code proved the address — no separate verification email. */
+    await UserModel.updateOne({ _id: created.id }, { $set: { isVerified: true } })
+    void this.#notifyAllAdmins(created.name, created.email).catch(err => logger.warn({ err, userId: created.id }, 'admin notification failed'))
+    const user = (await this.userRepo.findById(created.id)) ?? created
+    const tokens = await this.#issueLoginTokens(user.id, user.email, user.role, meta, audience)
+    logger.info({ userId: user.id }, 'User registered with a verified email code')
     return { user: toSafeUser(user), tokens }
   }
 

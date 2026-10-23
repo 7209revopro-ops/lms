@@ -2,7 +2,7 @@ import { Router, type NextFunction, type Request, type Response } from 'express'
 import { z } from 'zod'
 import { authenticate } from '@/middleware/auth.middleware.ts'
 import { validate } from '@/middleware/validate.middleware.ts'
-import { isExpoPushToken, registerPushToken, removePushToken } from '@/services/push.service.ts'
+import { isExpoPushToken, registerPushToken, removePushToken } from '@/services/expoPush.service.ts'
 import { mobileDeviceId } from '@/utils/mobileClient.ts'
 import { sendSuccess } from '@/utils/response.ts'
 

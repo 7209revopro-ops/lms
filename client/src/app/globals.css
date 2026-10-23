@@ -63,8 +63,11 @@
      From `sm` up row 1 returns to 68: 68 + 1 = 69.
      From `md` up the tab row returns as well: 68 + 1 + 44 = 113.
      The border is easy to forget and costs exactly the 1px of clipping this
-     token exists to prevent. */
-  --app-header-h: 61px;
+     token exists to prevent.
+     BELOW `lg` THERE IS NO TOP HEADER AT ALL (Oct 2026): phones and tablets
+     navigate with the bottom tab bar (MobileTabBar) and the More drawer, so
+     the page only keeps clear of the notch / status bar. */
+  --app-header-h: env(safe-area-inset-top, 0px);
 
   /* Shadows read as "depth" on light and as "separation" on dark, where a
      drop shadow is nearly invisible — dark leans on borders instead. */
@@ -76,13 +79,8 @@
   --font-mono:            'JetBrains Mono', monospace;
 }
 
-/* Row 1 grows back to 68px from `sm` up — see ClientTopbar. */
-@media (min-width: 640px) {
-  :root { --app-header-h: 69px; }
-}
-
-/* The tab row only exists from `md` up — see ClientTopbar. */
-@media (min-width: 768px) {
+/* The header (row 1 + the tab row) — laptops and up only. */
+@media (min-width: 1024px) {
   :root { --app-header-h: 113px; }
 }
 
@@ -291,4 +289,34 @@ select:focus, select:focus-visible {
 @keyframes auth-reveal { to { opacity: 1; transform: none; } }
 html:not([data-auth-ready]) .auth-shell [style*="opacity:0"] {
   animation: auth-reveal 0.3s ease-out 2s forwards;
+}
+
+/* ── Messages fills the screen (2026-10-18) ──────────
+   Phones / tablets: the page height minus the dashboard padding and the
+   bottom tab bar, so only the chat's own panes scroll; an open conversation
+   leaves the page entirely (.chat-thread-full) and takes the whole screen.
+   Laptops: pinned to the window under the header, edge to edge, keeping
+   clear of the right panel when it is open (--chat-right). */
+.chat-page {
+  height: calc(100dvh - var(--app-header-h) - 1.5rem - 96px - env(safe-area-inset-bottom, 0px));
+  min-height: 420px;
+}
+@media (min-width: 640px) {
+  .chat-page { height: calc(100dvh - var(--app-header-h) - 2rem - 104px - env(safe-area-inset-bottom, 0px)); }
+}
+@media (min-width: 1024px) {
+  .chat-page {
+    position: fixed; z-index: 10; height: auto; min-height: 0;
+    top: calc(var(--app-header-h) + 1.25rem); bottom: 1.25rem;
+    left: 2rem; right: var(--chat-right, 2rem);
+    transition: right 300ms ease-out;
+  }
+}
+@media (max-width: 767px) {
+  .chat-thread-full {
+    position: fixed; inset: 0; z-index: 60;
+    background: var(--color-bg-surface);
+    padding-top: env(safe-area-inset-top, 0px);
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
 }

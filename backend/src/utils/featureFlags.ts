@@ -34,3 +34,53 @@
    leave them holding seats they are refused at the door. */
 export const CROSS_ORG_CLASSES_ENABLED =
   String(process.env['CROSS_ORG_CLASSES'] ?? '').toLowerCase() === 'true'
+
+/* ── WHICH WHATSAPP TEMPLATES MAY GO OUT AT ALL (2026-10-15) ──────────────
+   WhatsApp is billed per message, so only these are sent (the user's list):
+     class_has_started_v2       a booked class has started — Join
+     class_cancelled_v1         a booked class was cancelled
+     class_rescheduled_v1       a booked class moved
+     class_link_changed_v1      a booked class's joining link changed
+     instructor_review_request_v1  review the mentor after class
+   Every other notice still goes by email and in-app; only its WhatsApp is not
+   sent. Checked where every WhatsApp is made (whatsapp.service.ts sendTemplate)
+   AND where a queued one is delivered, so nothing queued earlier slips out.
+
+   WHATSAPP_TEMPLATES_ON overrides the list: comma-separated names, "all" for
+   every template, "none" for no WhatsApp at all. Tests send everything unless
+   they set it, so the suites keep asserting on their messages. */
+const DEFAULT_WHATSAPP_TEMPLATES_ON = [
+  'class_has_started_v2', 'class_cancelled_v1', 'class_rescheduled_v1', 'class_link_changed_v1', 'instructor_review_request_v1',
+  /* "name@use" lets a template out for one use only: course_update_v1 as a program's "you've been added" message
+     (services/program.service.ts) — program WhatsApps go only from here, never from a CS's own WhatsApp (the
+     commission portal, PROGRAM_CS_WHATSAPP). The Send message page's course_update_v1 stays off. */
+  'course_update_v1@program',
+]
+const WHATSAPP_ON: ReadonlySet<string> | 'all' = (() => {
+  const raw = (process.env['WHATSAPP_TEMPLATES_ON'] ?? '').trim()
+  if (!raw) return process.env['NODE_ENV'] === 'test' ? 'all' : new Set(DEFAULT_WHATSAPP_TEMPLATES_ON)
+  if (/^all$/i.test(raw)) return 'all'
+  if (/^(none|off)$/i.test(raw)) return new Set<string>()
+  return new Set(raw.split(',').map(s => s.trim()).filter(Boolean))
+})()
+
+export function whatsappTemplateOn(name: string, use?: string): boolean {
+  /* A program's message goes only while program WhatsApp is on (below). */
+  if (use === 'program' && !programWhatsAppOn()) return false
+  return WHATSAPP_ON === 'all' || WHATSAPP_ON.has(name) || (!!use && WHATSAPP_ON.has(`${name}@${use}`))
+}
+
+/* Program WhatsApp (the user, 2026-10-18 — "stop sending messages for programs").
+   OFF unless PROGRAM_WHATSAPP=on: a program's students get no WhatsApp at all —
+   not "class has started" (one class of BEGINNER PRACTICE SESSION was ~1,800 of
+   them), not the 5-minute one for an in-person class, not the "you've been
+   added" message (course_update_v1@program), and its classes leave the morning
+   "today's classes" list. The in-app notices still go, and so do the mentor's
+   own reminders. Ordinary live classes are untouched. Read per call, so a
+   restart with the variable changed is enough. Tests default to on, so the
+   suites keep asserting on their messages; programwhatsapp.suite.ts sets it. */
+export function programWhatsAppOn(): boolean {
+  const raw = (process.env['PROGRAM_WHATSAPP'] ?? '').trim().toLowerCase()
+  if (!raw) return process.env['NODE_ENV'] === 'test'
+  return raw === 'on' || raw === 'true' || raw === '1'
+}

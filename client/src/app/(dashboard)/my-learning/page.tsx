@@ -9,6 +9,8 @@ import {
 import { useMyEnrollments, type MyEnrollment } from '@/lib/api/enrollments'
 import type { Course } from '@/types/index'
 import { StreakWidget } from '@/components/ui/StreakWidget'
+import { JourneyBar } from '@/components/class-schedule/JourneyBar'
+import { useRouter } from 'next/navigation'
 import Spinner from '@/components/ui/Spinner'
 import { titleCase } from '@/lib/titleCase'
 
@@ -30,6 +32,7 @@ function bucketOf(e: MyEnrollment): 'not_started' | 'in_progress' | 'completed' 
 }
 
 export default function MyLearningPage() {
+  const router = useRouter()
   const [activeTab, setActiveTab] = useState<StatusTab>('All Status')
   const [search, setSearch] = useState('')
 
@@ -65,6 +68,9 @@ export default function MyLearningPage() {
 
   return (
     <div className="space-y-8">
+      {/* ── Your journey: a level opens that course's classes on the Schedule ── */}
+      <div className="-mb-3"><JourneyBar onPickCourse={id => router.push(`/class-bookings?view=courses&course=${id}`)} /></div>
+
       {/* ── Streak widget ───────────────────────────── */}
       <StreakWidget />
 

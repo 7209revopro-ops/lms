@@ -18,6 +18,7 @@ import { IN_APP_RGB, MEET_RGB, ROOM_RGB, BROADCAST_RGB, LIVEKIT_MAX_SEATS, OPEN_
 import type { LiveClassType } from '@/lib/api/liveClasses'
 import { CLASS_LANGUAGES, withFlag } from '@/lib/languages'
 import { useBackdropClose } from '@/hooks/useBackdropClose'
+import { ClassRoomPicker } from './ClassRoomPicker'
 
 interface Props {
   onClose:          () => void
@@ -257,13 +258,8 @@ export function CreateOfflineClassModal({ onClose, onSuccess, categoryProgram, p
                 style={{ color: 'rgba(255,255,255,0.35)' }}>
                 <Building2 size={9} /> Classroom / Room
               </label>
-              <div className="relative">
-                <Building2 size={13} className="absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none"
-                  style={{ color: '#34D399' }} />
-                <input value={room} onChange={e => setRoom(e.target.value)}
-                  placeholder="e.g. Room 204"
-                  className={`${base} pl-9`} style={iStyle} />
-              </div>
+              <ClassRoomPicker value={room} onChange={setRoom} startISO={start ? datetimeLocalToISO(start) : null}
+                durationMins={durationMins} inputClassName={base} inputStyle={iStyle} />
             </div>
           </div>
 

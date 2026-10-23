@@ -2,6 +2,7 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { api } from '@/lib/axios'
 import type { TetraCs } from '@/lib/api/tetraCs'
+import type { FinanceRequestFilter } from '@/lib/api/salesStatus'
 
 export type EnrollmentRequestStatus = 'pending' | 'approved' | 'rejected' | 'cancelled'
 export type ProgramCategory = '4x-trading' | 'digital-marketing' | 'ai' | 'jura'
@@ -62,16 +63,18 @@ export interface EnrollmentRequest {
 }
 
 const KEYS = {
-  list: (status: string, category?: string) =>
-    ['admin', 'enrollment-requests', status, category ?? 'all'] as const,
+  list: (status: string, category?: string, finance?: string) =>
+    ['admin', 'enrollment-requests', status, category ?? 'all', finance ?? 'any'] as const,
 }
 
 export function useEnrollmentRequests(
   status: EnrollmentRequestStatus | 'all' = 'pending',
   category?: ProgramCategory,
+  /** Where the enrolment stands in finance (2026-10-13) — the backend asks finance. */
+  finance?: FinanceRequestFilter,
 ) {
   return useQuery({
-    queryKey: KEYS.list(status, category),
+    queryKey: KEYS.list(status, category, finance),
     queryFn: async () => {
       /* per_page 100 - the backend's maximum (admin.routes.ts:694) - because
          this table has no pagination control. It was sending nothing, so the
@@ -88,6 +91,7 @@ export function useEnrollmentRequests(
          right answer if these ever run past 100. */
       const params: Record<string, string> = { status, per_page: '100' }
       if (category) params['category'] = category
+      if (finance) params['finance'] = finance
       const res = await api.get<{ success: true; data: EnrollmentRequest[]; meta: { total_count: number; total_pages: number; page: number; has_next: boolean; has_prev: boolean } }>(
         '/admin/enrollment-requests',
         { params },
