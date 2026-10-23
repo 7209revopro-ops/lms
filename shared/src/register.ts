@@ -269,6 +269,24 @@ export function fullBody(f: RegisterForm, docs: { passportUrl: string; idDocUrl:
   }
 }
 
+/** PATCH /auth/me/complete-registration — an express (or rejected) account
+ *  finishing the full registration while signed in. Flat, not nested in
+ *  enrollmentApplication, and with no name / email / password: those exist. */
+export function completeRegistrationBody(f: RegisterForm, docs: { passportUrl: string; idDocUrl: string; photoUrl?: string }) {
+  return {
+    phone: f.phone, emergencyContact: f.emergencyContact, gender: f.gender, dateOfBirth: f.dateOfBirth,
+    nationality: f.nationality.trim(), homeCountry: f.homeCountry, occupation: f.occupation.trim(),
+    idType: f.idType, idNumber: f.idNumber, countryAttendance: f.countryAttendance,
+    villa: f.villa.trim(), city: f.city.trim(), addressCountry: f.addressCountry,
+    passportUrl: docs.passportUrl,
+    idDocUrl: f.idType === 'Passport' ? docs.passportUrl : docs.idDocUrl,
+    photoUrl: docs.photoUrl,
+    experienceLevel: f.experienceLevel, preferredStartDate: f.preferredStartDate, hearAboutUs: f.hearAboutUs,
+    referralName: f.hearAboutUs === REFERRAL && f.referralName.trim() ? f.referralName.trim() : undefined,
+    programs: f.programs, paymentMethod: f.paymentMethod,
+  }
+}
+
 /* Where each field the API can refuse lives — a 422 names fields by payload
    key; the student needs the label and the step. (The website's table.) */
 export const FIELD_STEP: Record<string, { label: string; step: number }> = {

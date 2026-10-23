@@ -85,7 +85,7 @@ function MentorRow({ i }: { i: ChatInstructor }) {
             {conv ? preview : i.programs.map(programName).join(' · ') || preview}
           </Text>
           {unread > 0 && (
-            <View style={{ minWidth: 20, height: 20, borderRadius: 10, paddingHorizontal: 6, backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center' }}>
+            <View style={{ minWidth: 20, height: 20, borderRadius: 10, paddingHorizontal: 6, backgroundColor: colors.primaryFill, alignItems: 'center', justifyContent: 'center' }}>
               <Text style={{ fontFamily: fonts.bold, fontSize: 11, color: colors.onPrimary }}>{unread > 99 ? '99+' : unread}</Text>
             </View>
           )}

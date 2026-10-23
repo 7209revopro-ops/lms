@@ -13,4 +13,14 @@ config.watchFolders = [...(config.watchFolders ?? []), sharedRoot]
 // shared/ has no node_modules of its own: resolve its imports from here.
 config.resolver.nodeModulesPaths = [path.resolve(projectRoot, 'node_modules')]
 
+// Never watch the native build output. A Gradle build writes tens of thousands
+// of files under android/ (build, .cxx, .gradle); a Metro watching them
+// re-hashes every one and stops serving bundles (seen 2026-10-23: 25 min of
+// CPU, no bundle). No JavaScript lives there.
+const escape = p => p.replace(/[/\\]/g, '[/\\\\]').replace(/\./g, '\\.')
+const nativeBuild = ['android/app/build', 'android/build', 'android/.gradle', 'android/app/.cxx', 'ios/build', 'ios/Pods']
+  .map(p => new RegExp(`^${escape(path.resolve(projectRoot, p))}[/\\\\].*`))
+const existing = config.resolver.blockList
+config.resolver.blockList = [...(Array.isArray(existing) ? existing : existing ? [existing] : []), ...nativeBuild]
+
 module.exports = config

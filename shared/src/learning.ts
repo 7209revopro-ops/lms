@@ -11,13 +11,28 @@
 
 export type LessonType = 'video' | 'article' | 'quiz'
 
+export type CourseLevel = 'beginner' | 'intermediate' | 'advanced'
+
 export interface CourseSummary {
   id: string
   title: string
   slug: string
   thumbnailUrl?: string
   lessonCount?: number
-  instructor?: { id: string; name: string }
+  instructor?: { id: string; name: string; avatarUrl?: string; headline?: string }
+  /* Catalogue fields — present on GET /courses and /courses/:slug. */
+  description?: string
+  level?: CourseLevel
+  durationMins?: number
+  language?: string
+  ratingAvg?: number
+  ratingCount?: number
+  enrolledCount?: number
+  /** Free courses can be enrolled from the app; paid ones never show a price (plan.md M6). */
+  isFree?: boolean
+  category?: { id: string; name: string; slug: string }
+  program?: string
+  tags?: string[]
 }
 
 export interface MyEnrollment {
@@ -55,6 +70,9 @@ export interface CourseDetail {
 
 export interface CourseProgress {
   isEnrolled: boolean
+  enrollmentId?: string | null
+  /** Set once the certificate was first downloaded. */
+  certificateId?: string | null
   progressPercent: number
   status: 'active' | 'completed' | 'dropped' | null
   lastLessonId: string | null
@@ -87,17 +105,37 @@ type Raw = Record<string, unknown>
 const str = (v: unknown): string => (v == null ? '' : String(v))
 const idOf = (o: Raw | undefined | null): string => str(o?.['id'] ?? o?.['_id'])
 
-function courseOf(raw: unknown): CourseSummary | null {
+const num = (v: unknown): number | undefined => (typeof v === 'number' && Number.isFinite(v) ? v : undefined)
+
+/** Any course object the API sends — a DTO, or a raw populated document. */
+export function courseOf(raw: unknown): CourseSummary | null {
   if (!raw || typeof raw !== 'object') return null
   const c = raw as Raw
-  const instr = (c['instructorId'] ?? c['instructor']) as Raw | undefined
+  /* The DTO has `instructor`; a populated document has `instructorId` as an object. */
+  const instr = ((c['instructor'] && typeof c['instructor'] === 'object') ? c['instructor'] : c['instructorId']) as Raw | undefined
+  const cat = ((c['category'] && typeof c['category'] === 'object') ? c['category'] : c['categoryId']) as Raw | undefined
+  const level = str(c['level']).toLowerCase()
   return {
     id: idOf(c),
     title: str(c['title']),
     slug: str(c['slug']),
     thumbnailUrl: (c['thumbnailUrl'] as string | undefined) || undefined,
-    lessonCount: typeof c['lessonCount'] === 'number' ? c['lessonCount'] : undefined,
-    instructor: instr && typeof instr === 'object' && instr['name'] ? { id: idOf(instr), name: str(instr['name']) } : undefined,
+    lessonCount: num(c['lessonCount']),
+    instructor: instr && typeof instr === 'object' && instr['name']
+      ? { id: idOf(instr), name: str(instr['name']), avatarUrl: (instr['avatarUrl'] as string) || undefined, headline: (instr['headline'] as string) || undefined }
+      : undefined,
+    description: (c['description'] as string) || undefined,
+    level: level === 'beginner' || level === 'intermediate' || level === 'advanced' ? level : undefined,
+    durationMins: num(c['durationMins']),
+    language: (c['language'] as string) || undefined,
+    ratingAvg: num(c['ratingAvg']),
+    ratingCount: num(c['ratingCount']),
+    enrolledCount: num(c['enrolledCount']),
+    /* The website's rule: paid means !isFree && price > 0. */
+    isFree: c['isFree'] === true || (c['isFree'] !== false && num(c['price']) === 0),
+    category: cat && typeof cat === 'object' && cat['name'] ? { id: idOf(cat), name: str(cat['name']), slug: str(cat['slug']) } : undefined,
+    program: (c['program'] as string) || undefined,
+    tags: Array.isArray(c['tags']) ? (c['tags'] as unknown[]).map(str).filter(Boolean) : undefined,
   }
 }
 

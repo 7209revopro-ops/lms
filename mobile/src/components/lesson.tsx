@@ -18,7 +18,10 @@ import { useTheme } from '@/theme'
    Resumes where the student stopped, reports watched time as the website
    does, and carries the email watermark. */
 
-export function LessonVideo({ lesson }: { lesson: LessonOutline }) {
+/** What the lesson screen may do with the playing video (bookmarks). */
+export interface PlayerHandle { time: () => number; seek: (secs: number) => void }
+
+export function LessonVideo({ lesson, onPlayer }: { lesson: LessonOutline; onPlayer?: (h: PlayerHandle | null) => void }) {
   const { t } = useTranslation()
   const play = useLessonPlayUrl(lesson.id, !!lesson.hasVideo)
   const saved = useLessonProgress(lesson.id, !!lesson.hasVideo)
@@ -28,13 +31,18 @@ export function LessonVideo({ lesson }: { lesson: LessonOutline }) {
   /* Wait for the saved position too, so the first frame is already the
      right one instead of jumping a second after it starts. */
   if (!play.data || saved.isLoading) return <VideoBox><ActivityIndicator color="#fff" /></VideoBox>
-  return <Player lessonId={lesson.id} url={play.data.url} savedSecs={savedPosition(saved.data)} />
+  return <Player lessonId={lesson.id} url={play.data.url} savedSecs={savedPosition(saved.data)} onPlayer={onPlayer} />
 }
 
-function Player({ lessonId, url, savedSecs }: { lessonId: string; url: string; savedSecs: number }) {
+function Player({ lessonId, url, savedSecs, onPlayer }: { lessonId: string; url: string; savedSecs: number; onPlayer?: (h: PlayerHandle | null) => void }) {
   const { t } = useTranslation()
   const { fonts } = useTheme()
   const player = useVideoPlayer(url, p => { p.timeUpdateEventInterval = 1 })
+
+  useEffect(() => {
+    onPlayer?.({ time: () => player.currentTime, seek: s => { seek(player, s); resume(player) } })
+    return () => onPlayer?.(null)
+  }, [player, onPlayer])
   const [failed, setFailed] = useState(false)
   const [resumedFrom, setResumedFrom] = useState(0)
   const watch = useRef<WatchMark>({ mark: 0, last: 0 })
@@ -92,6 +100,10 @@ function Player({ lessonId, url, savedSecs }: { lessonId: string; url: string; s
 function seek(player: VideoPlayer, secs: number): void {
   player.currentTime = secs
 }
+function resume(player: VideoPlayer): void {
+  player.play()
+}
+
 function VideoBox({ children }: { children: React.ReactNode }) {
   return (
     <View style={{ width: '100%', aspectRatio: 16 / 9, backgroundColor: '#000', alignItems: 'center', justifyContent: 'center' }}>

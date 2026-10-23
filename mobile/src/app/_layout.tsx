@@ -19,6 +19,7 @@ import { registerForPush, screenForNotification } from '@/lib/push'
 import { env } from '@/lib/env'
 import { appVersion } from '@/lib/device'
 import { Body, Button, Screen, Title } from '@/components/ui'
+import { ToastProvider } from '@/components/toast'
 import { useTheme } from '@/theme'
 
 void SplashScreen.preventAutoHideAsync()
@@ -119,6 +120,8 @@ function RootNavigator() {
           <Stack.Screen name="class/[id]" options={detail} />
           <Stack.Screen name="watch/[id]" options={detail} />
           <Stack.Screen name="notifications" options={detail} />
+          <Stack.Screen name="tutor" options={detail} />
+          <Stack.Screen name="recordings" options={detail} />
         </Stack.Protected>
         {/* Join and sign-in links work signed in or out — they sign the app in. */}
         <Stack.Screen name="j/[token]" />
@@ -140,7 +143,9 @@ function RootLayout() {
     <SafeAreaProvider>
       <QueryClientProvider client={queryClient}>
         <AuthProvider>
-          <RootNavigator />
+          <ToastProvider>
+            <RootNavigator />
+          </ToastProvider>
         </AuthProvider>
       </QueryClientProvider>
     </SafeAreaProvider>

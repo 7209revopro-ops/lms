@@ -20,7 +20,7 @@
     "android": {
       "package": "com.deltainstitutions.lms",
       "adaptiveIcon": {
-        "backgroundColor": "#0057b8",
+        "backgroundColor": "#FFFFFF",
         "foregroundImage": "./assets/android-icon-foreground.png",
         "backgroundImage": "./assets/android-icon-background.png",
         "monochromeImage": "./assets/android-icon-monochrome.png"
@@ -75,9 +75,13 @@
       [
         "expo-splash-screen",
         {
-          "backgroundColor": "#0057b8",
+          "backgroundColor": "#FFFFFF",
           "image": "./assets/splash-icon.png",
-          "imageWidth": 160
+          "imageWidth": 120,
+          "dark": {
+            "backgroundColor": "#122B4F",
+            "image": "./assets/splash-icon-dark.png"
+          }
         }
       ],
       "@sentry/react-native",
@@ -97,7 +101,9 @@
           "cameraPermission": "Delta Institutions uses the camera to take your profile photo and photos of your passport or ID when you register.",
           "microphonePermission": false
         }
-      ]
+      ],
+      "expo-image",
+      "expo-sharing"
     ],
     "experiments": {
       "typedRoutes": true

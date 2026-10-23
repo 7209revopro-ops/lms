@@ -53,15 +53,25 @@ const RETRY_DELAY_MS = 1_200
 const uploaded = new Map<string, string>()
 
 /** Upload one signup document; returns the server's reference. */
-export async function uploadSignupDoc(f: PreparedFile, kind: 'kyc' | 'photo', label: string): Promise<string> {
+export function uploadSignupDoc(f: PreparedFile, kind: 'kyc' | 'photo', label: string): Promise<string> {
+  return upload(f, '/uploads/signup-doc', label, kind)
+}
+
+/** Upload a document from a signed-in account (completing the registration):
+ *  identity scans to private storage, the photo to documents. */
+export function uploadAccountDoc(f: PreparedFile, kind: 'kyc' | 'photo', label: string): Promise<string> {
+  return upload(f, kind === 'kyc' ? '/uploads/kyc' : '/uploads/document', label)
+}
+
+async function upload(f: PreparedFile, path: string, label: string, kind?: string): Promise<string> {
   const cached = uploaded.get(f.uri)
   if (cached) return cached
   for (let attempt = 1; ; attempt++) {
     const form = new FormData()
     form.append('file', { uri: f.uri, name: f.name, type: f.mimeType } as unknown as Blob)
-    form.append('kind', kind)
+    if (kind) form.append('kind', kind)
     try {
-      const res = await http.post<ApiSuccess<{ url?: string }>>('/uploads/signup-doc', form, {
+      const res = await http.post<ApiSuccess<{ url?: string }>>(path, form, {
         headers: { 'Content-Type': 'multipart/form-data' }, timeout: ATTEMPT_TIMEOUT_MS,
       })
       const url = res.data.data.url

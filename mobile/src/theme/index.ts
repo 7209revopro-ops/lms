@@ -3,7 +3,10 @@ import { useColorScheme } from 'react-native'
 /* The website's tokens (client/src/app/globals.css), light and dark, so the app
    and the site read as one product. Change a colour there, change it here. */
 const light = {
+  /** Text, icons, borders, tints. */
   primary:        '#0057b8',
+  /** Solid fills that carry white text (buttons, bubbles, badges). */
+  primaryFill:    '#0057b8',
   primaryPressed: '#003d80',
   primaryLight:   '#EEF5FF',
   onPrimary:      '#FFFFFF',
@@ -18,12 +21,19 @@ const light = {
   borderStrong:   '#D1D5DB',
   textPrimary:    '#0D0F1A',
   textSecondary:  '#4B5563',
-  textMuted:      '#9CA3AF',
+  textMuted:      '#6B7280',
+  /** Brand: navy of the logo, and its teal-to-mint dot. */
+  navy:           '#122B4F',
+  accentFrom:     '#3EC4D6',
+  accentTo:       '#8ED0A8',
 }
 
 const dark: typeof light = {
-  primary:        '#0057b8',
-  primaryPressed: '#0068d9',
+  /* Brand blue as text on navy is ~2.7:1 — lifted for text and icons
+     (7:1 on bgPage); fills keep the brand blue under white text. */
+  primary:        '#6EA8FE',
+  primaryFill:    '#1565D8',
+  primaryPressed: '#0057b8',
   primaryLight:   'rgba(77,148,255,0.16)',
   onPrimary:      '#FFFFFF',
   success:        '#2ee0a5',
@@ -37,7 +47,10 @@ const dark: typeof light = {
   borderStrong:   '#333A4D',
   textPrimary:    '#E8EAF0',
   textSecondary:  '#A9B0C0',
-  textMuted:      '#6F7788',
+  textMuted:      '#8A93A6',
+  navy:           '#122B4F',
+  accentFrom:     '#3EC4D6',
+  accentTo:       '#8ED0A8',
 }
 
 export type Colors = typeof light

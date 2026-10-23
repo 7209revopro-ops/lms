@@ -22,6 +22,11 @@ export default function ProfileLayout() {
       <Stack.Screen name="support/new" options={{ title: t('support.newTicket'), presentation: 'modal' }} />
       <Stack.Screen name="support/[id]" options={{ title: '' }} />
       <Stack.Screen name="delete" options={{ title: t('account.deleteTitle') }} />
+      <Stack.Screen name="security" options={{ title: t('account.security') }} />
+      <Stack.Screen name="purchases" options={{ title: t('account.purchases') }} />
+      <Stack.Screen name="complete" options={{ title: t('account.completeRegistration') }} />
+      <Stack.Screen name="progress" options={{ title: t('progress.title') }} />
+      <Stack.Screen name="rate" options={{ title: t('rate.title') }} />
     </Stack>
   )
 }

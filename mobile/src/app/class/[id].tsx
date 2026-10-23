@@ -8,6 +8,7 @@ import { useTranslation } from 'react-i18next'
 import { useNow } from '@/hooks/useNow'
 import { CancelSeat, ClassAction, StatusPill, fmtWhen } from '@/components/classes'
 import { Button, Body } from '@/components/ui'
+import { ClassExtras } from '@/components/classExtras'
 import { Empty, Failed, Loading } from '@/components/states'
 import { useTheme } from '@/theme'
 
@@ -87,6 +88,9 @@ export default function ClassDetail() {
         {(watch.data?.recordingUrl || lc.recordingUrl) && (
           <Button variant="ghost" title={t('classes.watchRecording')} onPress={() => router.push({ pathname: '/watch/[id]', params: { id: lc.id, recording: '1' } })} />
         )}
+
+        <ClassExtras lc={lc} booking={booking}
+          ended={lc.status === 'ended' || now > new Date(lc.scheduledStart).getTime() + lc.durationMins * 60_000} />
       </ScrollView>
     </>
   )

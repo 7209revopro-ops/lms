@@ -1,4 +1,4 @@
-import { useMemo } from 'react'
+import { useCallback, useMemo, useRef } from 'react'
 import { KeyboardAvoidingView, Pressable, ScrollView, Text, View } from 'react-native'
 import { Stack, router, useLocalSearchParams } from 'expo-router'
 import { useHeaderHeight } from 'expo-router/react-navigation'
@@ -8,7 +8,8 @@ import { lessonGate, lessonSequence, type LessonGate, type LessonOutline } from 
 import { useCourse, useCourseProgress, useMarkComplete } from '@/lib/api/learning'
 import { useAuth } from '@/lib/auth'
 import { errorText } from '@/lib/errors'
-import { ArticleView, LessonVideo, NoteCard } from '@/components/lesson'
+import { ArticleView, LessonVideo, type PlayerHandle } from '@/components/lesson'
+import { LessonExtras } from '@/components/lessonExtras'
 import { QuizPlayer } from '@/components/QuizPlayer'
 import { useContentGuard } from '@/components/protected'
 import { Button, Notice, Glyph } from '@/components/ui'
@@ -21,10 +22,13 @@ import { useTheme } from '@/theme'
 export default function Lesson() {
   const { slug, lessonId } = useLocalSearchParams<{ slug: string; lessonId: string }>()
   const { t } = useTranslation()
-  const { colors, fonts } = useTheme()
+  const { colors, fonts, radius } = useTheme()
   const { state } = useAuth()
   const headerHeight = useHeaderHeight()
   useContentGuard()
+  /* The playing video, for bookmarks (set by LessonVideo once it has a player). */
+  const playerRef = useRef<PlayerHandle | null>(null)
+  const onPlayer = useCallback((h: PlayerHandle | null) => { playerRef.current = h }, [])
 
   const enrollmentStatus = state.status === 'signedIn' ? state.user.enrollmentStatus : undefined
   const course = useCourse(slug)
@@ -56,7 +60,7 @@ export default function Lesson() {
           {gate !== 'open'
             ? <Locked gate={gate} />
             : lesson.type === 'video'
-              ? <LessonVideo key={lesson.id} lesson={lesson} />
+              ? <LessonVideo key={lesson.id} lesson={lesson} onPlayer={onPlayer} />
               : lesson.type === 'article'
                 ? <ArticleView lesson={lesson} />
                 : <View style={{ padding: 16 }}><QuizPlayer key={lesson.id} lessonId={lesson.id} onNext={next ? () => go(next) : undefined} /></View>}
@@ -88,7 +92,19 @@ export default function Lesson() {
               <NavButton label={t('lesson.next')} icon="chevron-forward" trailing onPress={next ? () => go(next) : undefined} />
             </View>
 
-            {canTrack && <NoteCard key={lesson.id} lessonId={lesson.id} />}
+            <Pressable accessibilityRole="button" accessibilityLabel={t('ai.askTutor')}
+              onPress={() => router.push({ pathname: '/tutor', params: { courseSlug: slug!, lessonId: lesson.id, title: lesson.title } })}
+              style={({ pressed }) => ({ flexDirection: 'row', alignItems: 'center', gap: 10, padding: 14, borderRadius: radius.lg,
+                backgroundColor: pressed ? colors.primaryLight : colors.bgSurface, borderWidth: 1, borderColor: colors.border })}>
+              <Glyph name="sparkles" size={20} color={colors.primary} />
+              <View style={{ flex: 1 }}>
+                <Text style={{ fontFamily: fonts.semibold, fontSize: 15, color: colors.textPrimary }}>{t('ai.askTutor')}</Text>
+                <Text style={{ fontFamily: fonts.body, fontSize: 12, color: colors.textMuted }}>{t('ai.askTutorBody')}</Text>
+              </View>
+              <Glyph name="chevron-forward" size={16} color={colors.textMuted} />
+            </Pressable>
+
+            {canTrack && <LessonExtras key={lesson.id} lessonId={lesson.id} isVideo={lesson.type === 'video'} player={() => playerRef.current} />}
           </View>
         </ScrollView>
       </KeyboardAvoidingView>

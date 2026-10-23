@@ -98,7 +98,7 @@ export default function Thread() {
                 disabled={!draft.trim() || tooLong}
                 style={({ pressed }) => ({
                   width: 42, height: 42, borderRadius: 21, alignItems: 'center', justifyContent: 'center',
-                  backgroundColor: pressed ? colors.primaryPressed : colors.primary, opacity: !draft.trim() || tooLong ? 0.4 : 1,
+                  backgroundColor: pressed ? colors.primaryPressed : colors.primaryFill, opacity: !draft.trim() || tooLong ? 0.4 : 1,
                 })}>
                 <Ionicons name="send" size={18} color={colors.onPrimary} />
               </Pressable>
@@ -139,7 +139,7 @@ function Bubble({ m, seen, onRetry }: { m: ChatMessage; seen: boolean; onRetry?:
       <View style={{
         paddingHorizontal: 13, paddingVertical: 9, borderRadius: 18,
         borderBottomRightRadius: mine ? 6 : 18, borderBottomLeftRadius: mine ? 18 : 6,
-        backgroundColor: mine ? colors.primary : colors.bgSurface,
+        backgroundColor: mine ? colors.primaryFill : colors.bgSurface,
         borderWidth: mine ? 0 : 1, borderColor: colors.border, opacity: m.pending ? 0.7 : 1,
       }}>
         <Text selectable style={{ fontFamily: fonts.body, fontSize: 15, lineHeight: 21, color: mine ? colors.onPrimary : colors.textPrimary }}>{m.body}</Text>

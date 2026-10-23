@@ -17,6 +17,21 @@ export interface CurrentUser {
   enrollmentStatus?: EnrollmentStatus
   organizationId?:   string
   twoFactorEnabled?: boolean
+  headline?:         string
+  bio?:              string
+  /** A new address waiting to be confirmed from its own inbox. */
+  pendingEmail?:     string | null
+  /** 'express' accounts can finish the full registration later. */
+  signupType?:       'express' | 'full'
+  fullRegistrationSubmittedAt?: string | null
+  rejectionReason?:  string | null
+  enrollmentCancellationReason?: string | null
+}
+
+/** The account owes the academy its full registration (website: Settings → Request). */
+export function needsFullRegistration(u: Pick<CurrentUser, 'signupType' | 'enrollmentStatus' | 'fullRegistrationSubmittedAt'>): boolean {
+  if (u.enrollmentStatus === 'rejected' || u.enrollmentStatus === 'cancelled') return true
+  return u.signupType === 'express' && !u.fullRegistrationSubmittedAt && u.enrollmentStatus !== 'approved'
 }
 
 /** The mobile app's session (plan.md §13.4 B1) — tokens in the body, never cookies. */

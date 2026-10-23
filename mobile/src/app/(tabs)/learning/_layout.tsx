@@ -15,9 +15,13 @@ export default function LearningLayout() {
       headerTitleStyle: { fontFamily: fonts.semibold, color: colors.textPrimary },
       contentStyle: { backgroundColor: colors.bgPage },
     }}>
-      <Stack.Screen name="index" options={{ title: t('learning.title') }} />
-      <Stack.Screen name="[slug]/index" options={{ title: t('learning.contents') }} />
+      <Stack.Screen name="index" options={{ title: t('tabs.learning') }} />
+      <Stack.Screen name="[slug]/index" options={{ title: '' }} />
       <Stack.Screen name="[slug]/[lessonId]" options={{ title: '' }} />
+      <Stack.Screen name="[slug]/exam" options={{ title: t('exam.title') }} />
+      <Stack.Screen name="paths/index" options={{ title: t('paths.title') }} />
+      <Stack.Screen name="paths/[slug]" options={{ title: '' }} />
+      <Stack.Screen name="favorites" options={{ title: t('favorites.title') }} />
       <Stack.Screen name="assignments/index" options={{ title: t('assignments.title') }} />
       <Stack.Screen name="assignments/submit" options={{ title: t('assignments.submit'), presentation: 'modal' }} />
     </Stack>
