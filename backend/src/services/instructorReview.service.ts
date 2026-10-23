@@ -176,7 +176,7 @@ export class InstructorReviewService {
   /* ── Admin: one instructor's individual reviews, newest first ──────────── */
   async listForInstructor(
     instructorId: string, orgId: string | undefined, scope: string | undefined,
-    page: number, perPage: number,
+    page: number, perPage: number, range?: { from?: Date; to?: Date },
   ): Promise<{ docs: unknown[]; totalCount: number }> {
     if (!Types.ObjectId.isValid(instructorId)) {
       throw new InstructorReviewError('INVALID_ID', 'Invalid instructor id.', 400)
@@ -184,6 +184,8 @@ export class InstructorReviewService {
     const filter: Record<string, unknown> = { instructorId: new Types.ObjectId(instructorId) }
     if (orgId && Types.ObjectId.isValid(orgId)) filter['organizationId'] = new Types.ObjectId(orgId)
     if (scope) filter['program'] = scope
+    // Only those left in these dates (the portal's Mentor Report, 2026-10-23).
+    if (range?.from || range?.to) filter['createdAt'] = { ...(range.from ? { $gte: range.from } : {}), ...(range.to ? { $lt: range.to } : {}) }
 
     const [docs, totalCount] = await Promise.all([
       InstructorReviewModel.find(filter)

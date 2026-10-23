@@ -659,6 +659,8 @@ const OWN_ACCOUNT_ROUTES = new Set([
   'GET /api/v1/admin/my-organization',
   'GET /api/v1/admin/availability/me',
   'PUT /api/v1/admin/availability/me',
+  'GET /api/v1/admin/time-off/me',
+  'POST /api/v1/admin/time-off/me',
 ])
 
 export async function injectCategoryScope(req: Request, res: Response, next: NextFunction): Promise<void> {

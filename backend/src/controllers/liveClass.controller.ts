@@ -1317,6 +1317,14 @@ export class LiveClassController {
        as before. Admins keep scheduling anyone. */
     await assertInstructorInDepartment(req, instructorId)
 
+    /* The mentor's time off (services/mentorTimeOff.service.ts): refused before a Meet room is made for nothing. The
+       service asks again, for anything that reaches create() some other way. */
+    {
+      const { assertMentorsFree } = await import('@/services/mentorTimeOff.service.ts')
+      const start = new Date(dto.scheduledStart)
+      if (!Number.isNaN(start.getTime())) await assertMentorsFree([instructorId], start, Number(dto.durationMins) || 0)
+    }
+
     /* Auto-generate a Google Meet link for online external sessions */
     let meetingUrl: string | undefined
     let googleMeetCode: string | undefined
@@ -1683,6 +1691,20 @@ export class LiveClassController {
         status: { $in: ['booked', 'attended'] },
       })
       const repeatOverflow = Math.max(0, Number((source as any).overflowSeatsLeft ?? 0) + overflowHeld)
+
+      /* Every week checked against the mentor's time off before any is made — none rather than some (2026-10-23). */
+      {
+        const { firstTimeOffClash, notAvailableMessage } = await import('@/services/mentorTimeOff.service.ts')
+        const spans = Array.from({ length: weeks }, (_, k) => {
+          const d = new Date(source.scheduledStart); d.setDate(d.getDate() + 7 * (k + 1))
+          return { start: d, durationMins: source.durationMins ?? 0 }
+        })
+        const clash = await firstTimeOffClash([String(source.instructorId)], spans)
+        if (clash) {
+          res.status(409).json({ success: false, error: { code: 'MENTOR_NOT_AVAILABLE', message: `${notAvailableMessage(clash)} — no weeks were added` } })
+          return
+        }
+      }
 
       await ensureOrgSlugs()
       const created: unknown[] = []

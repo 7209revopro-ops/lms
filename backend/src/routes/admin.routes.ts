@@ -1962,7 +1962,9 @@ router.get('/mentor-calendar', requireInstructor, async (req: Request, res: Resp
   try {
     const { listMentorsForPortal } = await import('@/services/portal.service.ts')
     const q = req.query as Record<string, string | undefined>
-    sendSuccess(res, await listMentorsForPortal({ remoteOrgId: await mentorCalendarOrg(req), from: q['from'], to: q['to'] }))
+    /* Time off with its reason for an admin; an instructor reads their own only (2026-10-23). */
+    const timeOffReasonsFor = req.user?.role === 'instructor' ? String(req.user?.email ?? '') : 'all'
+    sendSuccess(res, await listMentorsForPortal({ remoteOrgId: await mentorCalendarOrg(req), from: q['from'], to: q['to'], timeOffReasonsFor }))
   } catch (err) { next(err) }
 })
 
@@ -3158,6 +3160,78 @@ router.put('/availability/me', requireInstructor, validate(availabilityUpdateSch
     sendSuccess(res, avail, 'Availability updated')
   } catch (err) { next(err) }
 })
+
+/* ─────────────────────────────────────────────────────
+   MENTOR TIME OFF (2026-10-23) — "not available" from one moment to another; nothing is booked with the mentor
+   inside it, from any portal (services/mentorTimeOff.service.ts).
+   GET    /admin/time-off/me              — the caller's own, from now on
+   POST   /admin/time-off/me              — mark some
+   DELETE /admin/time-off/me/:timeOffId   — take one away
+   …and the same under /admin/mentors/:id/time-off for an admin, about any mentor they reach.
+─────────────────────────────────────────────────────── */
+const timeOffSchema = z.object({
+  startsAt: z.string().datetime({ offset: true }),
+  endsAt:   z.string().datetime({ offset: true }),
+  allDay:   z.boolean().optional(),
+  reason:   z.string().max(300).optional(),
+})
+
+async function timeOffRoute(res: Response, next: NextFunction, fn: () => Promise<void>) {
+  try { await fn() } catch (err: any) {
+    if (err?.name === 'TimeOffError') { res.status(err.statusCode).json({ success: false, error: { code: err.code, message: err.message } }); return }
+    next(err)
+  }
+}
+
+/** The mentor a /mentors/:id/time-off call is about — refused like the availability routes beside it. */
+async function timeOffMentor(req: Request, res: Response): Promise<string | null> {
+  const mentorId = String(req.params['id'] ?? '')
+  if (req.user!.role === 'instructor' && req.user!.id !== mentorId) {
+    res.status(403).json({ success: false, error: { code: 'FORBIDDEN', message: 'Only your own time off' } }); return null
+  }
+  if (req.user!.id !== mentorId && !(await callerMayAccessUser(req, mentorId))) {
+    res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Mentor not found' } }); return null
+  }
+  return mentorId
+}
+
+const listTimeOffOf = async (mentorId: string) => {
+  const { listTimeOff, timeOffDTO } = await import('@/services/mentorTimeOff.service.ts')
+  return (await listTimeOff(mentorId)).map(b => timeOffDTO(b, true))
+}
+const addTimeOffFor = async (req: Request, mentorId: string) => {
+  const { addTimeOff } = await import('@/services/mentorTimeOff.service.ts')
+  const { UserModel } = await import('@/models/schema.ts')
+  const me = await UserModel.findById(req.user!.id).select('name email').lean<{ name?: string; email?: string }>()
+  return addTimeOff({ mentorId, ...(req.body as object), byEmail: me?.email ?? String(req.user?.email ?? ''), byName: me?.name ?? '' })
+}
+
+router.get('/time-off/me', requireInstructor, (req, res, next) => timeOffRoute(res, next, async () => {
+  sendSuccess(res, await listTimeOffOf(req.user!.id))
+}))
+router.post('/time-off/me', requireInstructor, validate(timeOffSchema), (req, res, next) => timeOffRoute(res, next, async () => {
+  sendSuccess(res, await addTimeOffFor(req, req.user!.id), 'Time off marked', 201)
+}))
+router.delete('/time-off/me/:timeOffId', requireInstructor, (req, res, next) => timeOffRoute(res, next, async () => {
+  const { removeTimeOff } = await import('@/services/mentorTimeOff.service.ts')
+  await removeTimeOff(req.user!.id, String(req.params['timeOffId'] ?? ''))
+  sendSuccess(res, { removed: true }, 'Time off removed')
+}))
+
+router.get('/mentors/:id/time-off', requireInstructor, requireDepartmentMember('id'), (req, res, next) => timeOffRoute(res, next, async () => {
+  const mentorId = await timeOffMentor(req, res); if (!mentorId) return
+  sendSuccess(res, await listTimeOffOf(mentorId))
+}))
+router.post('/mentors/:id/time-off', requireInstructor, requireDepartmentMember('id'), validate(timeOffSchema), (req, res, next) => timeOffRoute(res, next, async () => {
+  const mentorId = await timeOffMentor(req, res); if (!mentorId) return
+  sendSuccess(res, await addTimeOffFor(req, mentorId), 'Time off marked', 201)
+}))
+router.delete('/mentors/:id/time-off/:timeOffId', requireInstructor, requireDepartmentMember('id'), (req, res, next) => timeOffRoute(res, next, async () => {
+  const mentorId = await timeOffMentor(req, res); if (!mentorId) return
+  const { removeTimeOff } = await import('@/services/mentorTimeOff.service.ts')
+  await removeTimeOff(mentorId, String(req.params['timeOffId'] ?? ''))
+  sendSuccess(res, { removed: true }, 'Time off removed')
+}))
 
 /* ─────────────────────────────────────────────────────
    ADMIN BOOKING ROSTER

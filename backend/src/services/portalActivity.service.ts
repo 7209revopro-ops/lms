@@ -42,7 +42,7 @@ const MAX_ANSWER = 4800
 /* The student's words in an event: enough for an email, not a whole essay. */
 const EXCERPT = 1000
 
-export type PortalActivityType = 'ticket_opened' | 'ticket_reply' | 'assignment_submitted' | 'assignment_reviewed' | 'class_attended'
+export type PortalActivityType = 'ticket_opened' | 'ticket_reply' | 'assignment_submitted' | 'assignment_reviewed' | 'class_attended' | 'class_unattended'
 
 export interface PortalActivity {
   /** Never changes for the same happening, so a caller can ask with an overlap and drop what it has seen. */
@@ -66,6 +66,8 @@ export interface PortalActivity {
     /** Joined the LMS room, joined through the class's link, or marked attended by hand. */
     attendance: 'joined_room' | 'joined_link' | 'marked'; attendedAt: string
   }
+  /** A seat marked missed or cancelled after all (class_unattended, 2026-10-23): the portal takes back its completion. */
+  booking?: { id: string; status: string; classId: string }
 }
 
 type Msg = { _id?: unknown; senderId?: unknown; senderRole: 'student' | 'admin'; body: string; createdAt?: Date }
@@ -157,19 +159,26 @@ async function lookups(rows: { users?: unknown[]; courses?: unknown[]; classes?:
    when the booking last changed). Told at the later of the two, once, under
    the booking's key; a seat cancelled or marked missed is never told. */
 const TIMETABLE_GRACE_MS = 15 * 60_000
-const MEET_GRACE_MS = 60 * 60_000
+// 20 minutes (2026-10-23; it was an hour, and a CS waited an hour to be told) — Google's word still wins when it
+// comes first; when it comes later the class has been told already, under the same key.
+const MEET_GRACE_MS = 20 * 60_000
+/* How long after the end the end may be written and still be told (2026-10-23): runMeetClassEnd writes Google's end
+   — often minutes before the timetable's — only after the timetable end, so a class that finished early was already
+   behind the portal's window by then and nobody who attended it was told. Its write time (updatedAt) counts as when
+   the end became known, up to this long after it. */
+const END_WRITTEN_WITHIN_MS = 13 * 3600_000
 const LONGEST_CLASS_MS = 600 * 60_000
 
 type ClassRow = {
   _id: unknown; title?: string; courseId?: unknown; instructorId?: unknown; organizationId?: unknown
-  scheduledStart: Date; durationMins: number; status?: string; endedAt?: Date; endSource?: string
+  scheduledStart: Date; durationMins: number; status?: string; endedAt?: Date | null; endSource?: string; updatedAt?: Date
   type?: string; isOnline?: boolean; googleMeetCode?: string; meetingUrl?: string
 }
 type BookingRow = {
   _id: unknown; userId: unknown; liveClassId: unknown; status: string; attendedAt?: Date; attendanceSource?: string
   updatedAt?: Date; seatCourseId?: unknown; seatOrganizationId?: unknown
 }
-const CLASS_FIELDS = 'title courseId instructorId organizationId scheduledStart durationMins status endedAt endSource type isOnline googleMeetCode meetingUrl'
+const CLASS_FIELDS = 'title courseId instructorId organizationId scheduledStart durationMins status endedAt endSource type isOnline googleMeetCode meetingUrl updatedAt'
 const BOOKING_FIELDS = 'userId liveClassId status attendedAt attendanceSource updatedAt seatCourseId seatOrganizationId'
 
 const isMeet = (c: ClassRow) => c.type === 'external' && c.isOnline !== false && (!!c.googleMeetCode || /meet\.google\./i.test(c.meetingUrl ?? ''))
@@ -179,7 +188,9 @@ const heldIn = (c: ClassRow): NonNullable<PortalActivity['class']>['heldIn'] =>
 function overAt(c: ClassRow): { endedAt: number; source: NonNullable<PortalActivity['class']>['endSource']; knownAt: number } {
   if (c.endedAt) {
     const t = new Date(c.endedAt).getTime()
-    return { endedAt: t, source: c.endSource === 'meet' ? 'google_meet' : 'lms_room', knownAt: t }
+    const written = c.updatedAt ? new Date(c.updatedAt).getTime() : t
+    const knownAt = written > t && written - t <= END_WRITTEN_WITHIN_MS ? written : t
+    return { endedAt: t, source: c.endSource === 'meet' ? 'google_meet' : 'lms_room', knownAt }
   }
   const end = new Date(c.scheduledStart).getTime() + c.durationMins * 60_000
   return { endedAt: end, source: 'timetable', knownAt: end + (isMeet(c) ? MEET_GRACE_MS : TIMETABLE_GRACE_MS) }
@@ -190,6 +201,33 @@ const attendedHow = (b: BookingRow): { how: NonNullable<PortalActivity['class']>
     ? { how: b.attendanceSource === 'livekit' ? 'joined_room' : 'joined_link', knownAt: new Date(b.attendedAt).getTime() }
     : { how: 'marked', knownAt: new Date(b.updatedAt ?? 0).getTime() }
 
+/**
+ * Seats marked missed or cancelled in the window, of classes that have begun (2026-10-23) — a mentor correcting the
+ * attendance after the class: the portal takes back a completion nobody has called about yet. Only for a caller that
+ * asks (include=unattended). Keyed by the change, so a seat turned back and forth is told each time.
+ */
+async function classUnattendedEvents(from: Date, now: Date): Promise<PortalActivity[]> {
+  const rows = await ClassBookingModel.find({ status: { $in: ['missed', 'cancelled'] }, updatedAt: { $gt: from, $lte: now } })
+    .select(BOOKING_FIELDS).lean() as unknown as BookingRow[]
+  if (!rows.length) return []
+  const begun = new Set((await LiveClassModel.find({ _id: { $in: [...new Set(rows.map(b => idOf(b.liveClassId)))] }, scheduledStart: { $lte: now } })
+    .select('_id').lean() as unknown as { _id: unknown }[]).map(c => idOf(c._id)))
+  const names = await lookups({ users: rows.map(b => b.userId) })
+  const events: PortalActivity[] = []
+  for (const b of rows) {
+    if (!begun.has(idOf(b.liveClassId))) continue
+    const who = names.user.get(idOf(b.userId))
+    events.push({
+      key: `class-unattended:${idOf(b._id)}:${new Date(b.updatedAt ?? now).getTime()}`,
+      type: 'class_unattended',
+      at: new Date(b.updatedAt ?? now).toISOString(),
+      student: { lmsUserId: idOf(b.userId), email: who?.email ?? '', name: who?.name ?? '' },
+      booking: { id: idOf(b._id), status: b.status, classId: idOf(b.liveClassId) },
+    })
+  }
+  return events
+}
+
 async function classAttendedEvents(from: Date, now: Date): Promise<PortalActivity[]> {
   const f = from.getTime(), n = now.getTime()
   const attended = { $or: [{ status: 'attended' }, { status: 'booked', attendedAt: { $exists: true } }] }
@@ -199,7 +237,10 @@ async function classAttendedEvents(from: Date, now: Date): Promise<PortalActivit
       status: { $ne: 'cancelled' },
       $or: [
         { endedAt: { $gt: from, $lte: now } },
-        { endedAt: { $exists: false }, scheduledStart: { $gte: new Date(f - LONGEST_CLASS_MS - MEET_GRACE_MS), $lte: now } },
+        // Its end written in the window, the end itself earlier (overAt's knownAt).
+        { endedAt: { $gte: new Date(f - END_WRITTEN_WITHIN_MS), $lte: now }, updatedAt: { $gt: from, $lte: now } },
+        // No end (missing or null, as a recreated stream leaves it): the timetable's.
+        { endedAt: null, scheduledStart: { $gte: new Date(f - LONGEST_CLASS_MS - MEET_GRACE_MS), $lte: now } },
       ],
     }).select(CLASS_FIELDS).lean(),
     ClassBookingModel.find({
@@ -266,7 +307,7 @@ async function classAttendedEvents(from: Date, now: Date): Promise<PortalActivit
  * student's own words only: support's replies and the automatic welcome are
  * not something the student did.
  */
-export async function studentActivityForPortal(input: { since: unknown; now?: Date; classes?: boolean }): Promise<{ events: PortalActivity[]; until: string }> {
+export async function studentActivityForPortal(input: { since: unknown; now?: Date; classes?: boolean; unattended?: boolean }): Promise<{ events: PortalActivity[]; until: string }> {
   const now = input.now ?? new Date()
   const since = typeof input.since === 'string' ? new Date(input.since) : new Date(NaN)
   if (Number.isNaN(since.getTime())) throw bad('since must be a date and time (ISO 8601)')
@@ -332,6 +373,7 @@ export async function studentActivityForPortal(input: { since: unknown; now?: Da
 
   // Only for a caller that asks (include=classes): one that doesn't know them yet would take them for something else.
   if (input.classes) events.push(...await classAttendedEvents(from, now))
+  if (input.classes && input.unattended) events.push(...await classUnattendedEvents(from, now))
 
   events.sort((x, y) => x.at.localeCompare(y.at) || x.key.localeCompare(y.key))
   if (events.length > MAX_EVENTS) {

@@ -51,6 +51,13 @@ const httpError = (message: string, statusCode: number) => {
   return new PortalError(code, message, statusCode)
 }
 
+/** The portal's 409 for a time the mentor marked as time off (services/mentorTimeOff.service.ts). */
+async function refuseOverTimeOff(mentorId: unknown, start: Date, durationMins: number): Promise<void> {
+  const { firstTimeOffClash, notAvailableMessage } = await import('@/services/mentorTimeOff.service.ts')
+  const clash = await firstTimeOffClash([String(mentorId)], [{ start, durationMins }])
+  if (clash) throw httpError(notAvailableMessage(clash), 409)
+}
+
 /**
  * The roles somebody can be given here, described rather than enumerated.
  *
@@ -477,6 +484,8 @@ export interface PortalMentor {
     inPerson: boolean
     location: string
   }[]
+  /* When the mentor can't be booked (2026-10-23) — drawn as "Not available"; every booking over it is refused. */
+  timeOff: import('@/services/mentorTimeOff.service.ts').TimeOffDTO[]
 }
 
 /**
@@ -505,6 +514,9 @@ export async function listMentorsForPortal(input: {
      company runs both academies, so its staff book Dubai's and Bangalore's mentors alike) — each with its academy,
      and every class with its title, course and module. */
   allAcademies?: boolean
+  /* Whose time off comes with its reason (2026-10-23): 'all' (an admin, a portal that sorts it out itself), one
+     mentor's email (an instructor looking — their own), or nobody's (the default: "Not available" only). */
+  timeOffReasonsFor?: 'all' | string
 }): Promise<{ timezone: string; from: string; to: string; mentors: PortalMentor[] }> {
   const org = await resolveOrg(input.remoteOrgId)
   const all = input.allAcademies === true
@@ -540,7 +552,8 @@ export async function listMentorsForPortal(input: {
   const ids = mentors.map((m) => m._id)
 
   // Both sides fetched once for the whole list rather than per mentor.
-  const [availability, classes, meetings] = await Promise.all([
+  const { timeOffBetween, timeOffDTO } = await import('@/services/mentorTimeOff.service.ts')
+  const [availability, classes, meetings, timeOff] = await Promise.all([
     MentorAvailabilityModel.find({ mentorId: { $in: ids } }).lean(),
     LiveClassModel.find({
       /* Theirs to teach, or co-mentored (a Program's) — a co-mentor is busy then too. */
@@ -556,7 +569,17 @@ export async function listMentorsForPortal(input: {
     })
       .select('title kind mentorId scheduledStart durationMins attendees bookedByEmail isOnline location')
       .lean(),
+    timeOffBetween(ids, from, to),
   ])
+  const emailOf = new Map(mentors.map((m) => [String(m._id), String(m.email ?? '').toLowerCase()]))
+  const reasonsFor = String(input.timeOffReasonsFor ?? '').toLowerCase()
+  const timeOffByMentor = new Map<string, PortalMentor['timeOff']>()
+  for (const b of timeOff) {
+    const key = String(b.mentorId)
+    const list = timeOffByMentor.get(key) ?? []
+    list.push(timeOffDTO(b, reasonsFor === 'all' || (!!reasonsFor && emailOf.get(key) === reasonsFor)))
+    timeOffByMentor.set(key, list)
+  }
 
   const slotsByMentor = new Map(
     availability.map((a) => [String(a.mentorId), a.slots ?? []]),
@@ -638,6 +661,7 @@ export async function listMentorsForPortal(input: {
         meetings: (meetingsByMentor.get(String(m._id)) ?? []).sort((a, b) =>
           a.startsAt.localeCompare(b.startsAt),
         ),
+        timeOff: timeOffByMentor.get(String(m._id)) ?? [],
       }))
       .sort((a, b) => a.name.localeCompare(b.name)),
   }
@@ -831,6 +855,8 @@ export async function createMentorMeetingForPortal(input: {
       throw httpError(`That overlaps a meeting already booked: ${m.title}`, 409)
     }
   }
+  /* The mentor's time off (2026-10-23): never booked over, from any portal. */
+  await refuseOverTimeOff(mentor._id, start, durationMins)
 
   /* A pasted link is used as given; an empty one is an invitation to make a
      Google Meet. In person there is nothing to join: no link is made, and one
@@ -1073,6 +1099,9 @@ export async function updateMentorMeetingForPortal(input: {
   const timeMoved =
     +new Date(meeting.scheduledStart) !== +start ||
     meeting.durationMins !== durationMins
+  /* Moved into the mentor's time off: refused. Left where it is — a title edit of a meeting that time off was later
+     marked over — it stays editable. */
+  if (timeMoved) await refuseOverTimeOff(meeting.mentorId, start, durationMins)
   /* Off a call and into a room, back again, or to another room: somewhere else
      to be, which people act on as surely as a new time. */
   const placeChanged = wasInPerson !== inPerson || (inPerson && String(meeting.location ?? '') !== location)
@@ -1500,4 +1529,41 @@ export async function classAttendanceForPortal(input: {
   }
   for (const entry of byEmail.values()) entry.classes?.sort((a, b) => (a.startsAt < b.startsAt ? 1 : a.startsAt > b.startsAt ? -1 : 0))
   return { students: [...byEmail.values()] }
+}
+
+/* ── A mentor's time off, from the commission portal (2026-10-23) ─────────────────────────────────────────────────
+   The portal marks it for the mentor it says — the mentor themselves, their chief, an admin: who may is the portal's
+   rule, as booking is — by the mentor's email, any academy's (the portal's calendar lists both). */
+async function mentorByEmail(email: unknown) {
+  const { UserModel } = await import('@/models/schema.ts')
+  const wanted = String(email ?? '').toLowerCase().trim()
+  if (!wanted) throw httpError('mentorEmail is required', 400)
+  const mentor = await UserModel.findOne({ email: wanted, role: 'instructor' }).select('_id name email').lean<{ _id: unknown; name?: string; email?: string }>()
+  if (!mentor) throw httpError('No mentor with that address', 404)
+  return mentor
+}
+
+export async function addMentorTimeOffForPortal(input: {
+  mentorEmail?: string; startsAt?: string; endsAt?: string; allDay?: boolean; reason?: string; byEmail?: string; byName?: string
+}) {
+  const mentor = await mentorByEmail(input.mentorEmail)
+  const { addTimeOff, TimeOffError } = await import('@/services/mentorTimeOff.service.ts')
+  try {
+    return await addTimeOff({ mentorId: String(mentor._id), startsAt: input.startsAt, endsAt: input.endsAt, allDay: input.allDay === true, reason: input.reason, byEmail: input.byEmail, byName: input.byName })
+  } catch (err) {
+    if (err instanceof TimeOffError) throw httpError(err.message, err.statusCode)
+    throw err
+  }
+}
+
+export async function removeMentorTimeOffForPortal(input: { mentorEmail?: string; timeOffId?: string }) {
+  const mentor = await mentorByEmail(input.mentorEmail)
+  const { removeTimeOff, TimeOffError } = await import('@/services/mentorTimeOff.service.ts')
+  try {
+    await removeTimeOff(String(mentor._id), String(input.timeOffId ?? ''))
+  } catch (err) {
+    if (err instanceof TimeOffError) throw httpError(err.message, err.statusCode)
+    throw err
+  }
+  return { removed: true }
 }

@@ -237,6 +237,19 @@ function meetingChoice(input: Record<string, any>, isOnline: boolean): { mode: '
   return { mode }
 }
 
+/** Refuses a schedule that has the mentor or a co-mentor in their time off on any date still ahead (2026-10-23). */
+async function refuseOverTimeOff(p: { instructorId: unknown; coInstructorIds?: unknown[]; time: string; timezone?: string; durationMins: number } & Parameters<typeof programDates>[0]): Promise<void> {
+  const { firstTimeOffClash, describeSpan } = await import('@/services/mentorTimeOff.service.ts')
+  const now = Date.now()
+  const spans = programDates(p).map(d => ({ start: wallToUtc(d, p.time, p.timezone || DEFAULT_TZ), durationMins: Number(p.durationMins) || 0 }))
+    .filter(x => x.start.getTime() > now)
+  const clash = await firstTimeOffClash([String(p.instructorId), ...(p.coInstructorIds ?? []).map(String)], spans)
+  if (clash) {
+    const day = clash.at.toLocaleDateString('en-GB', { timeZone: p.timezone || DEFAULT_TZ, weekday: 'short', day: 'numeric', month: 'short' })
+    throw new ProgramError(`${clash.mentorName} is not available on ${day} — time off ${describeSpan(clash.block)} (Dubai time). Pick other dates or another mentor.`, 409)
+  }
+}
+
 /** Every date of the program still ahead, as a class with the students booked. Returns how many were made. */
 async function makeClasses(p: any, actor: Actor): Promise<number> {
   const { LiveClassModel } = await import('@/models/schema.ts')
@@ -480,6 +493,8 @@ export async function createProgram(input: Record<string, any>, actor: Actor) {
   const { ids, missing } = await resolveStudents(input.students ?? input.studentIds, orgId)
   if (!ids.length) throw new ProgramError(missing.length ? `Not students on the LMS: ${missing.join(', ')}` : 'Add at least one student')
 
+  await refuseOverTimeOff({ ...s, instructorId: mentor._id, coInstructorIds: coMentorIds, timezone: DEFAULT_TZ } as any)
+
   const image = imageOf(input.thumbnailUrl)
   const programId = new Types.ObjectId()
   const course = await CourseModel.create({
@@ -587,6 +602,7 @@ export async function rescheduleProgram(id: string, input: Record<string, any>, 
   if (typeof input.isOnline === 'boolean') p.isOnline = input.isOnline
   if (typeof input.location === 'string') p.location = input.location.trim()
   if (!p.isOnline && String(p.location ?? '').length < 2) throw new ProgramError('Say where it happens')
+  await refuseOverTimeOff({ ...s, instructorId: p.instructorId, coInstructorIds: p.coInstructorIds, timezone: p.timezone } as any)
   Object.assign(p, s)
   await cancelUpcoming(p._id, 'Program moved')
   await p.save()

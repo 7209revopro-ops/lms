@@ -2,11 +2,13 @@
 
 import { useState, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { Clock, Plus, Trash2, Save, CheckCircle, CalendarDays } from 'lucide-react'
+import { Clock, Plus, Trash2, Save, CheckCircle, CalendarDays, CircleSlash } from 'lucide-react'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { useMyAvailability, useUpdateMyAvailability, type AvailabilitySlot } from '@/lib/api/liveClasses'
 import { useCurrentUser } from '@/lib/api/user'
 import Spinner from '@/components/ui/Spinner'
+import { useTimeOff, useRemoveTimeOff, timeOffLabel } from '@/lib/api/mentorCalendar'
+import { TimeOffDialog } from '@/components/live-classes/TimeOffDialog'
 
 const DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
 const SHORT_DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
@@ -234,12 +236,55 @@ export default function AvailabilityPage() {
         ))}
       </div>
 
+      <TimeOffSection />
+
       {/* Summary */}
       {totalSlots > 0 && (
         <p className="mt-4 text-xs" style={{ color: '#9CA3AF' }}>
           {totalSlots} slot{totalSlots !== 1 ? 's' : ''} across {Object.values(byDay).filter(d => d.length > 0).length} day{Object.values(byDay).filter(d => d.length > 0).length !== 1 ? 's' : ''}
         </p>
       )}
+    </div>
+  )
+}
+
+/* ── Time off (2026-10-23) ────────────────────────────────────────────────
+   One-off "not available" — a day, a week, an afternoon. Nobody books you
+   inside it: no class, programme or session, from any portal. */
+const TZ = 'Asia/Dubai'
+function TimeOffSection() {
+  const { data: offs, isLoading } = useTimeOff('me')
+  const remove = useRemoveTimeOff()
+  const [open, setOpen] = useState(false)
+  const BORDER = 'rgba(255,255,255,0.12)'
+  return (
+    <div className="mt-8 rounded-2xl border p-4" style={{ background: '#1a1d2e', borderColor: BORDER }}>
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+        <div>
+          <p className="text-sm font-semibold" style={{ color: '#E8EAF2' }}>Not available</p>
+          <p className="text-xs" style={{ color: '#9CA3AF' }}>Leave, an appointment, a day off — nobody can book you then, from the LMS, the commission portal or the CRMs. Times Dubai.</p>
+        </div>
+        <button onClick={() => setOpen(true)} className="flex items-center gap-1 rounded-lg px-3 py-1.5 text-xs font-semibold"
+          style={{ color: '#FBBF24', border: '1px solid rgba(251,191,36,0.35)' }}>
+          <CircleSlash size={12} />Mark not available
+        </button>
+      </div>
+      {isLoading ? <p className="text-xs" style={{ color: '#9CA3AF' }}>Loading…</p>
+        : !offs?.length ? <p className="text-xs" style={{ color: '#9CA3AF' }}>Nothing marked — you can be booked in your free hours.</p>
+        : (
+          <ul className="space-y-2">
+            {offs.map(t => (
+              <li key={t.id} className="flex items-center justify-between gap-2 rounded-lg px-3 py-2 text-sm" style={{ background: 'rgba(251,191,36,0.08)', color: '#FDE68A' }}>
+                <span>{timeOffLabel(t, TZ)}{t.reason ? <span className="ml-2 text-xs" style={{ color: '#9CA3AF' }}>{t.reason}</span> : null}{t.createdByName ? <span className="ml-2 text-xs" style={{ color: '#6B7280' }}>marked by {t.createdByName}</span> : null}</span>
+                <button disabled={remove.isPending} onClick={() => { if (confirm(`Take away "${timeOffLabel(t, TZ)}"? You can be booked then again.`)) remove.mutate({ mentorId: 'me', id: t.id }) }}
+                  className="flex h-7 w-7 items-center justify-center rounded-lg hover:bg-[rgba(239,68,68,0.15)]" style={{ color: '#EF4444' }} aria-label="Take it away">
+                  <Trash2 size={12} />
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+      {open && <TimeOffDialog mentorId="me" mentorName="you" tz={TZ} onClose={() => setOpen(false)} />}
     </div>
   )
 }
