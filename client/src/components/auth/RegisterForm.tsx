@@ -174,7 +174,7 @@ const REGISTER_FIELD_META: Record<string, { label: string; step: number }> = {
   programs:           { label: 'Programs & Courses',        step: 2 },
   organizationSlug:   { label: 'Preferred Learning Center', step: 3 },
   paymentMethod:      { label: 'Payment Method',            step: 3 },
-  password:           { label: 'Password',                  step: 3 },
+  emailCode:          { label: 'Email verification code',   step: 3 },
 }
 
 /* Stored signup documents, keyed by the File the user picked (M-05). A
@@ -886,8 +886,11 @@ export function RegisterForm({ onSwitch, lockFull = false }: { onSwitch: () => v
   /* The code behind apiErr. EMAIL_TAKEN is the one whose remedy is not on
      this form at all — it is the Sign in screen — so the banner offers it. */
   const [apiErrCode,    setApiErrCode]    = useState<string | null>(null)
-  const [showPw,        setShowPw]        = useState(false)
-  const [showCpw,       setShowCpw]       = useState(false)
+  /* Email verification instead of a password (2026-10-23). */
+  const [emailCode,   setEmailCode]   = useState('')
+  const [codeSentTo,  setCodeSentTo]  = useState('')
+  const [codeSending, setCodeSending] = useState(false)
+  const [codeNote,    setCodeNote]    = useState('')
   const [avatarFile,    setAvatarFile]    = useState<File | null>(null)
   const [avatarPreview, setAvatarPreview] = useState<string | null>(null)
   const [avatarError,   setAvatarError]   = useState<string | null>(null)
@@ -1062,11 +1065,8 @@ export function RegisterForm({ onSwitch, lockFull = false }: { onSwitch: () => v
     if (s === 3) {
       if (!data.organizationSlug) errs.organizationSlug = 'Please select your preferred learning center'
       if (!data.paymentMethod) errs.paymentMethod = 'Please select payment method'
-      if (!data.password)      errs.password      = 'Password is required'
-      else if (data.password.length < 8)          errs.password = 'At least 8 characters required'
-      else if (!/[A-Z]/.test(data.password))      errs.password = 'Must include an uppercase letter'
-      else if (!/[0-9]/.test(data.password))      errs.password = 'Must include a number'
-      if (data.password !== data.confirmPassword) errs.confirmPassword = 'Passwords do not match'
+      /* No password (2026-10-23): the emailed code proves the address instead. */
+      if (!/^\d{6}$/.test(emailCode.trim())) errs.password = codeSentTo ? 'Enter the 6-digit code from your email' : 'Verify your email — tap "Send code"'
       if (!data.termsAccepted) errs.termsAccepted = 'You must accept the terms to continue'
     }
 
@@ -1153,7 +1153,7 @@ export function RegisterForm({ onSwitch, lockFull = false }: { onSwitch: () => v
       const reg = await api.post('/auth/register', {
         name:             data.name.trim(),
         email:            data.email.trim().toLowerCase(),
-        password:         data.password,
+        emailCode:        emailCode.trim(),
         organizationSlug: data.organizationSlug,
         enrollmentApplication: {
           passportUrl, idDocUrl, photoUrl,
@@ -1299,7 +1299,18 @@ export function RegisterForm({ onSwitch, lockFull = false }: { onSwitch: () => v
     }
   }
 
-  const strength = getStrength(data.password)
+  const sendEmailCode = async () => {
+    const email = data.email.trim().toLowerCase()
+    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) { setCodeNote('Enter a valid email address first (step 1).'); return }
+    setCodeSending(true); setCodeNote('')
+    try {
+      await api.post('/auth/register/code', { email })
+      setCodeSentTo(email); setEmailCode('')
+      setCodeNote('Code sent — check your inbox (and spam folder).')
+    } catch (err: any) {
+      setCodeNote(err?.response?.data?.error?.message ?? 'We could not send the code. Please try again in a minute.')
+    } finally { setCodeSending(false) }
+  }
 
   /* ── Step content ───────────────────────────────────── */
   function renderStep() {
@@ -1674,53 +1685,29 @@ export function RegisterForm({ onSwitch, lockFull = false }: { onSwitch: () => v
           />
         </Field>
 
-        <Field label="Password *" error={errors.password}>
-          <div className="relative">
-            <Lock size={14} className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-[var(--color-text-muted)]" />
-            <input
-              type={showPw ? 'text' : 'password'} value={data.password}
-              placeholder="Min. 8 chars, uppercase + number"
-              autoComplete="new-password" enterKeyHint="next"
-              onChange={e => set('password', e.target.value)}
-              className={cn(errors.password ? inputErr : inputBase, 'pl-9 pr-10')}
-            />
-            <button type="button" onClick={() => setShowPw(x => !x)}
-              aria-label={showPw ? 'Hide password' : 'Show password'}
-              /* The glyph is 15px; the tappable button is 44px so a thumb
-                 doesn't need to land on the icon exactly, same fix already
-                 applied to the login forms this session. */
-              className="absolute right-0.5 top-1/2 flex h-11 w-11 -translate-y-1/2 items-center justify-center text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)] transition-colors">
-              {showPw ? <EyeOff size={15} /> : <Eye size={15} />}
-            </button>
-          </div>
-          {data.password && (
-            <div className="flex items-center gap-2 pt-0.5">
-              <div className="flex flex-1 gap-1">
-                {[1,2,3,4].map(i => (
-                  <div key={i} className="h-1.5 flex-1 rounded-full transition-all duration-300"
-                    style={{ background: i <= strength.score ? strength.color: 'var(--color-border)' }} />
-                ))}
-              </div>
-              <span className="text-[10px] font-bold" style={{ color: strength.color }}>{strength.label}</span>
+        {/* Verify the email (2026-10-23) — sign-up has no password: a 6-digit code proves the address. With an
+            account already on it, the verified code updates that account instead of "email already exists". */}
+        <Field label="Verify your email *" error={errors.password}>
+          <div className="space-y-2.5 rounded-xl border border-[var(--color-border)] bg-[var(--color-bg-muted)] p-3.5">
+            <p className="text-xs leading-relaxed text-[var(--color-text-secondary)]">
+              {codeSentTo === data.email.trim().toLowerCase()
+                ? <>We sent a 6-digit code to <strong className="text-[var(--color-text-primary)]">{codeSentTo}</strong>. It expires in 10 minutes.</>
+                : <>We&apos;ll email a 6-digit code to <strong className="text-[var(--color-text-primary)]">{data.email.trim() || 'your email'}</strong> to confirm it&apos;s yours. No password needed — you&apos;ll always sign in with a code.</>}
+            </p>
+            <div className="flex gap-2">
+              <input
+                value={emailCode} inputMode="numeric" autoComplete="one-time-code" maxLength={6}
+                placeholder="6-digit code"
+                onChange={e => { setEmailCode(e.target.value.replace(/\D/g, '').slice(0, 6)); setErrors(p => ({ ...p, password: undefined })) }}
+                className={cn(errors.password ? inputErr : inputBase, 'min-w-0 flex-1 text-center font-mono text-base tracking-[0.3em]')}
+              />
+              <button type="button" onClick={() => void sendEmailCode()} disabled={codeSending || !data.email.trim()}
+                className="shrink-0 rounded-xl px-4 text-sm font-semibold text-white transition-opacity disabled:opacity-50"
+                style={{ background: 'var(--color-primary)' }}>
+                {codeSending ? 'Sending…' : codeSentTo === data.email.trim().toLowerCase() ? 'Resend' : 'Send code'}
+              </button>
             </div>
-          )}
-        </Field>
-
-        <Field label="Confirm Password *" error={errors.confirmPassword}>
-          <div className="relative">
-            <Lock size={14} className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-[var(--color-text-muted)]" />
-            <input
-              type={showCpw ? 'text' : 'password'} value={data.confirmPassword}
-              placeholder="Repeat your password"
-              autoComplete="new-password" enterKeyHint="done"
-              onChange={e => set('confirmPassword', e.target.value)}
-              className={cn(errors.confirmPassword ? inputErr : inputBase, 'pl-9 pr-10')}
-            />
-            <button type="button" onClick={() => setShowCpw(x => !x)}
-              aria-label={showCpw ? 'Hide password' : 'Show password'}
-              className="absolute right-0.5 top-1/2 flex h-11 w-11 -translate-y-1/2 items-center justify-center text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)] transition-colors">
-              {showCpw ? <EyeOff size={15} /> : <Eye size={15} />}
-            </button>
+            {codeNote && <p className="text-xs text-[var(--color-text-muted)]">{codeNote}</p>}
           </div>
         </Field>
 

@@ -25,7 +25,6 @@
    here — /explore sends them through the ordinary sign-up.
 ───────────────────────────────────────────────────────────── */
 import { SignJWT, jwtVerify } from 'jose'
-import { createHash, randomBytes } from 'node:crypto'
 import { Types } from 'mongoose'
 import { env } from '@/config/env.ts'
 import { logger } from '@/utils/logger.ts'
@@ -213,9 +212,9 @@ export async function completeGuestCheckout(claims: GuestClaims, input: {
     const code = await mintSigninCode(claims.uid, coursePath)
     if (firstTime) {
       const emailCode = await mintSigninCode(claims.uid, coursePath)
-      const setPassword = await mintSetPasswordLink(claims.uid)
+      /* No password to set (2026-10-23): students sign in with an emailed code. */
       void sendGuestPurchaseAccess(user.email, user.name, course?.title ?? 'your course', {
-        signInUrl: `${clientUrl}/s/${emailCode}`, setPasswordUrl: `${clientUrl}/reset-password?token=${setPassword}`, newAccount: true,
+        signInUrl: `${clientUrl}/s/${emailCode}`, newAccount: true,
       }).catch(err => logger.warn({ err, userId: claims.uid }, 'guest checkout: access email failed'))
     }
     return { paid: true as const, signIn: `/s/${code}`, emailed: true }
@@ -228,17 +227,6 @@ export async function completeGuestCheckout(claims: GuestClaims, input: {
     }).catch(err => logger.warn({ err, userId: claims.uid }, 'guest checkout: access email failed'))
   }
   return { paid: true as const, signIn: null, emailed: true }
-}
-
-/* A 7-day set-password link, the reset-password flow's own token (as imported students get). */
-async function mintSetPasswordLink(userId: string): Promise<string> {
-  const { AuthTokenModel } = await import('@/models/schema.ts')
-  const raw = randomBytes(32).toString('hex')
-  await AuthTokenModel.create({
-    userId: new Types.ObjectId(userId), tokenHash: createHash('sha256').update(raw).digest('hex'),
-    purpose: 'reset-password', expiresAt: new Date(Date.now() + 7 * 86_400_000),
-  })
-  return raw
 }
 
 export { OrderError }

@@ -44,11 +44,14 @@ const registerSchema = z.object({
     .string()
     .min(8, 'Password must be at least 8 characters')
     .regex(/[A-Z]/, 'Must contain an uppercase letter')
-    .regex(/[0-9]/, 'Must contain a number'),
+    .regex(/[0-9]/, 'Must contain a number')
+    .optional(),
+  /* The sign-up form's email code (2026-10-23) — sign-up has no password any more. */
+  emailCode:  z.string().regex(/^\d{6}$/, 'Enter the six-digit code from your email').optional(),
   signupType:       z.enum(['express', 'full']).optional(),
   organizationSlug: z.enum(['dubai', 'bangalore']).optional(),
   enrollmentApplication: enrollmentAppSchema,
-})
+}).refine(d => !!d.emailCode || !!d.password, { message: 'Verify your email with the code we sent you', path: ['emailCode'] })
 
 const loginSchema = z.object({
   /* .trim() BEFORE .email(): people paste their address out of the mail or
@@ -101,6 +104,8 @@ const verifySchema = z.object({
 
 // Public
 router.post('/register',         authRateLimit, validate(registerSchema), auth.register)
+/* The sign-up form's "Send code" — to any address, account or not (nothing tells which). */
+router.post('/register/code',    authRateLimit, validate(otpRequestSchema), auth.requestSignupCode)
 router.post('/login',            authRateLimit, validate(loginSchema),    auth.login)
 router.post('/login/2fa',        authRateLimit, validate(loginTwoFactorSchema), auth.loginTwoFactor)
 /* Passwordless login: request an email code, then exchange it for a session. */

@@ -573,7 +573,7 @@ export async function sendPasswordSetByAdmin(to: string, name: string, password:
    was added — sign in to open it (the buyer was not signed in, so the owner's inbox is the key). Urgent:
    it is the buyer's only way back in, so it never waits behind bulk mail. */
 export async function sendGuestPurchaseAccess(to: string, name: string, courseTitle: string, opts: {
-  signInUrl: string; setPasswordUrl?: string; newAccount: boolean
+  signInUrl: string; newAccount: boolean
 }): Promise<void> {
   const subject = `You're enrolled: ${courseTitle}`
   const btn = (href: string, label: string) =>
@@ -583,14 +583,13 @@ export async function sendGuestPurchaseAccess(to: string, name: string, courseTi
     <p>Hi ${escapeHtml(name)},</p>
     <p>Thank you for your purchase. <strong>${escapeHtml(courseTitle)}</strong> is now open in your Delta student account.</p>
     <p style="margin:24px 0">${btn(opts.signInUrl, 'Open my course')}</p>
-    ${opts.newAccount && opts.setPasswordUrl ? `
-    <p>We created your account with this email address. Set a password so you can sign in any time:</p>
-    <p style="margin:16px 0 24px"><a href="${escapeHtml(sanitiseUrl(opts.setPasswordUrl))}" style="color:#0057b8;font-weight:600">Set my password →</a> <span style="color:#9CA3AF">(link valid for 7 days)</span></p>` : `
+    ${opts.newAccount ? `
+    <p>We created your Delta account with this email address. There is no password: whenever you sign in, enter this email and we'll send you a one-time code.</p>` : `
     <p>It has been added to your existing account — the button above signs you in.</p>`}
-    <p style="font-size:12px;color:#6B7280">The "Open my course" button works once and for 24 hours. After that, sign in at the student portal with this email${opts.newAccount ? ' and your password, or use "Forgot password?"' : ''}.</p>
+    <p style="font-size:12px;color:#6B7280">The "Open my course" button works once and for 24 hours. After that, sign in at the student portal with this email — we'll email you a code.</p>
   `)
   await sender.send({ urgent: true, priority: 10, to, subject, html,
-    text: `Hi ${name},\n\nThank you for your purchase. ${courseTitle} is now open in your Delta student account.\n\nOpen my course: ${opts.signInUrl}\n${opts.newAccount && opts.setPasswordUrl ? `\nSet your password (valid 7 days): ${opts.setPasswordUrl}\n` : '\nIt has been added to your existing account.\n'}` })
+    text: `Hi ${name},\n\nThank you for your purchase. ${courseTitle} is now open in your Delta student account.\n\nOpen my course: ${opts.signInUrl}\n${opts.newAccount ? '\nTo sign in later, enter this email on the student portal and we will send you a code.\n' : '\nIt has been added to your existing account.\n'}` })
 }
 
 /* A chat message still unread CHAT_EMAIL_DELAY_MINS after it arrived
@@ -620,6 +619,20 @@ const CHAT_EMAIL_DELAY_LABEL = (() => {
   const m = Number.isFinite(n) && n >= 0 ? Math.floor(n) : 10
   return m === 1 ? '1 minute' : `${m} minutes`
 })()
+
+/* The sign-up form's email check (2026-10-23): a 6-digit code to prove the address. Urgent — the
+   student is waiting on it with the form open. */
+export async function sendSignupCode(to: string, code: string): Promise<void> {
+  const subject = `${code} is your Delta verification code`
+  const html = wrap(subject, `
+    <h2 style="margin:0 0 16px;font-size:20px;font-weight:700;color:#0D0F1A">Verify your email</h2>
+    <p>Enter this code on the Delta sign-up form to confirm this is your email address. It expires in 10 minutes.</p>
+    <p style="margin:24px 0;font-size:34px;font-weight:700;letter-spacing:0.18em;color:#0057b8">${escapeHtml(code)}</p>
+    <p style="font-size:12px;color:#9CA3AF">Didn't try to sign up? You can ignore this email.</p>
+  `)
+  await sender.send({ urgent: true, priority: 20, expiresAt: inHours(1), to, subject, html,
+    text: `Your Delta verification code is ${code}. It expires in 10 minutes. If you didn't try to sign up, ignore this email.` })
+}
 
 export async function sendLoginCode(to: string, name: string, code: string): Promise<void> {
   const subject = `${code} is your Delta sign-in code`

@@ -117,10 +117,10 @@ try {
   await settle()
   const mailMark = (await M.OrderModel.findById(order._id).lean() as any)?.guestAccessSentAt
   check('the access email marked sent', !!mailMark)
-  check('a set-password link minted (7 days)', !!(await M.AuthTokenModel.exists({ userId: made._id, purpose: 'reset-password' })))
+  check('no set-password link (sign-in is by emailed code)', !(await M.AuthTokenModel.exists({ userId: made._id, purpose: 'reset-password' })))
   await call('POST', '/public/checkout/complete', j1, { gateway: 'abzer', orderId: String(order._id) })
   check('a reload: the email is not sent again', String((await M.OrderModel.findById(order._id).lean() as any)?.guestAccessSentAt) === String(mailMark)
-    && (await M.AuthTokenModel.countDocuments({ userId: made._id, purpose: 'reset-password' })) === 1)
+    && (await M.AuthTokenModel.countDocuments({ userId: made._id, purpose: 'signin-link' })) === 3)
 
   section('D · paid, existing account')
   const order2 = await M.OrderModel.create({ userId: owner._id, courseId: mbt._id, gateway: 'abzer', amount: 250000, currency: 'AED', status: 'pending' })

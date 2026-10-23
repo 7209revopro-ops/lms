@@ -82,6 +82,13 @@ export class AuthController {
   private readonly service = new AuthService()
 
   /* ── POST /auth/register ────────────────────────── */
+  requestSignupCode = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    try {
+      const out = await this.service.requestSignupCode(String(req.body.email))
+      sendSuccess(res, out, 'If the address can receive mail, a code is on its way.')
+    } catch (err) { next(err) }
+  }
+
   register = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     try {
       const result = await this.service.register(req.body, sessionMeta(req, res))

@@ -51,8 +51,9 @@ export function LoginForm({ onSwitch }: LoginFormProps) {
   const [challengeToken, setChallengeToken] = useState<string | null>(null)
   const [code,           setCode]           = useState('')
   const [verifying,      setVerifying]      = useState(false)
-  /* Passwordless (email → OTP) login — separate flow from the password form. */
-  const [otpStep,  setOtpStep]  = useState<null | 'email' | 'code'>(null)
+  /* Email → 6-digit code is the ONLY way to sign in to the student app (2026-10-23): the password form below
+     is no longer reachable from here. (The backend still accepts a password — the admin app uses one.) */
+  const [otpStep,  setOtpStep]  = useState<null | 'email' | 'code'>('email')
   const [otpEmail, setOtpEmail] = useState('')
   const [otpCode,  setOtpCode]  = useState('')
   const [otpBusy,  setOtpBusy]  = useState(false)
@@ -225,7 +226,6 @@ export function LoginForm({ onSwitch }: LoginFormProps) {
     }
   }
 
-  const exitOtp = () => { setOtpStep(null); setOtpCode(''); setServerError(null) }
 
   /* ─── Passwordless (email → OTP) step ─────────── */
   if (otpStep) {
@@ -312,10 +312,16 @@ export function LoginForm({ onSwitch }: LoginFormProps) {
         </form>
 
         <div className="mt-6 flex items-center justify-between text-sm" style={{ color: 'var(--color-text-muted)' }}>
-          <button type="button" onClick={onEmail ? exitOtp : () => { setOtpStep('email'); setServerError(null) }}
-            className="inline-flex items-center gap-1 font-semibold transition-opacity hover:opacity-70" style={{ color: 'var(--color-primary)' }}>
-            <ArrowLeft size={14} />{onEmail ? 'Use a password' : 'Change email'}
-          </button>
+          {onEmail ? (
+            <span>New here?{' '}
+              <button type="button" onClick={onSwitch} className="font-semibold transition-opacity hover:opacity-70" style={{ color: 'var(--color-primary)' }}>Create an account</button>
+            </span>
+          ) : (
+            <button type="button" onClick={() => { setOtpStep('email'); setServerError(null) }}
+              className="inline-flex items-center gap-1 font-semibold transition-opacity hover:opacity-70" style={{ color: 'var(--color-primary)' }}>
+              <ArrowLeft size={14} />Change email
+            </button>
+          )}
           {!onEmail && (
             <button type="button" disabled={otpBusy}
               onClick={() => requestOtp({ preventDefault() {} } as FormEvent<HTMLFormElement>)}

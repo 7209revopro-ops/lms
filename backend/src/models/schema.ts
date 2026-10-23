@@ -591,6 +591,29 @@ const AuthTokenSchema = new Schema<IAuthToken>(
 )
 
 AuthTokenSchema.index({ userId: 1, purpose: 1 })
+
+/* ── Sign-up email codes (2026-10-23) ─────────────────────────
+   The 6-digit code a new student enters on the sign-up form to prove the
+   address is theirs — sign-up has no password any more. Keyed by EMAIL (there
+   may be no account yet), stored hashed, 10 minutes, 5 tries, one use; a new
+   code replaces the old. With an account already on the address, a verified
+   code updates that account instead of refusing "email taken". */
+export interface ISignupCode extends Document {
+  email: string; codeHash: string; expiresAt: Date; attempts: number; usedAt?: Date; createdAt: Date
+}
+const SignupCodeSchema = new Schema<ISignupCode>(
+  {
+    email:     { type: String, required: true, lowercase: true, trim: true, maxlength: 200 },
+    codeHash:  { type: String, required: true },
+    expiresAt: { type: Date, required: true },
+    attempts:  { type: Number, default: 0 },
+    usedAt:    { type: Date },
+  },
+  baseSchemaOptions,
+)
+SignupCodeSchema.index({ email: 1, createdAt: -1 })
+SignupCodeSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 24 * 3600 })
+export const SignupCodeModel = mongoose.model<ISignupCode>('SignupCode', SignupCodeSchema)
 AuthTokenSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 })
 
 export const AuthTokenModel = mongoose.model<IAuthToken>('AuthToken', AuthTokenSchema)
