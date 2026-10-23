@@ -67,9 +67,9 @@ export function QuizPlayer({ lessonId, onNext }: { lessonId: string; onNext?: ()
   if (quiz.isLoading || summary.isLoading) return <Loading />
   if (quiz.error) {
     const notFound = (quiz.error as { response?: { status?: number } }).response?.status === 404
-    return notFound ? <Empty title={t('quiz.noQuiz')} /> : <Failed error={quiz.error} onRetry={() => void quiz.refetch()} />
+    return notFound ? <Empty icon="clipboard-outline" title={t('quiz.noQuiz')} /> : <Failed error={quiz.error} onRetry={() => void quiz.refetch()} />
   }
-  if (!quiz.data) return <Empty title={t('quiz.noQuiz')} />
+  if (!quiz.data) return <Empty icon="clipboard-outline" title={t('quiz.noQuiz')} />
 
   if (phase === 'taking') {
     return (

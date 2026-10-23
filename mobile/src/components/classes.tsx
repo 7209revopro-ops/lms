@@ -1,5 +1,5 @@
-import { useState } from 'react'
-import { Alert, Pressable, Text, View } from 'react-native'
+import { useEffect, useState } from 'react'
+import { Alert, Animated, Pressable, Text, View } from 'react-native'
 import { router } from 'expo-router'
 import Ionicons from '@expo/vector-icons/Ionicons'
 import { useTranslation } from 'react-i18next'
@@ -32,7 +32,7 @@ function tone(s: DisplayStatus, c: Colors): string {
   switch (s) {
     case 'live': return c.danger
     case 'startingSoon': return c.warning
-    case 'booked': return c.success
+    case 'booked': return c.successInk
     case 'bookable': return c.primary
     case 'attended': return c.primary
     case 'missed': return c.warning
@@ -45,8 +45,58 @@ export function StatusPill({ status }: { status: DisplayStatus }) {
   const { colors, fonts } = useTheme()
   const color = tone(status, colors)
   return (
-    <View style={{ borderRadius: 999, paddingHorizontal: 10, paddingVertical: 3, borderWidth: 1, borderColor: color }}>
+    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5, borderRadius: 999, paddingHorizontal: 9, paddingVertical: 3, backgroundColor: `${color}22` }}>
+      {status === 'live' && <LiveDot color={color} />}
       <Text style={{ fontFamily: fonts.semibold, fontSize: 11, color }}>{t(`status.${status}`)}</Text>
+    </View>
+  )
+}
+
+/** A dot that breathes — "this is happening now". */
+function LiveDot({ color }: { color: string }) {
+  const [pulse] = useState(() => new Animated.Value(1))
+  useEffect(() => {
+    const loop = Animated.loop(Animated.sequence([
+      Animated.timing(pulse, { toValue: 0.25, duration: 650, useNativeDriver: true }),
+      Animated.timing(pulse, { toValue: 1, duration: 650, useNativeDriver: true }),
+    ]))
+    loop.start()
+    return () => loop.stop()
+  }, [pulse])
+  return <Animated.View style={{ width: 7, height: 7, borderRadius: 4, backgroundColor: color, opacity: pulse }} />
+}
+
+/** The calendar tile: weekday, day number, month. */
+function DateTile({ iso, live }: { iso: string; live: boolean }) {
+  const { colors, fonts, radius } = useTheme()
+  const d = new Date(iso)
+  const today = d.toDateString() === new Date().toDateString()
+  const ink = live ? colors.danger : today ? colors.onPrimary : colors.primary
+  return (
+    <View accessible={false} style={{ width: 54, alignSelf: 'flex-start', paddingVertical: 8, borderRadius: radius.md, alignItems: 'center',
+      backgroundColor: live ? colors.dangerLight : today ? colors.primaryFill : colors.primaryLight }}>
+      <Text style={{ fontFamily: fonts.semibold, fontSize: 11, letterSpacing: 0.6, color: ink }}>{d.toLocaleDateString('en-US', { weekday: 'short' }).toUpperCase()}</Text>
+      <Text style={{ fontFamily: fonts.display, fontSize: 22, lineHeight: 26, color: ink }}>{d.getDate()}</Text>
+      <Text style={{ fontFamily: fonts.medium, fontSize: 11, color: ink }}>{d.toLocaleDateString('en-US', { month: 'short' })}</Text>
+    </View>
+  )
+}
+
+/** Seats as a meter — amber when few are left. */
+function Seats({ left, total }: { left: number; total: number }) {
+  const { t } = useTranslation()
+  const { colors, fonts } = useTheme()
+  const few = left > 0 && left <= Math.max(3, Math.ceil(total * 0.15))
+  const pct = total ? ((total - left) / total) * 100 : 0
+  return (
+    <View style={{ gap: 4 }}>
+      {/* No bar while nobody has booked: an empty track reads as broken. */}
+      {pct > 0 && (
+        <View style={{ height: 4, borderRadius: 2, backgroundColor: colors.bgMuted, overflow: 'hidden' }}>
+          <View style={{ width: `${pct}%`, height: '100%', backgroundColor: few || left === 0 ? colors.warning : colors.primary }} />
+        </View>
+      )}
+      <Text style={{ fontFamily: fonts.medium, fontSize: 12, color: few ? colors.warning : colors.textMuted }}>{t('classes.seatsLeft', { left, total })}</Text>
     </View>
   )
 }
@@ -74,28 +124,37 @@ export function ClassCard({ lc, booking, hasOther, heldTwin, now, onPress }: {
   const shown = displayStatus(status, lc, now)
   const inPerson = lc.isOnline === false
   const module = effSectionTitle(lc)
+  const live = shown === 'live'
+  const left = Math.max(0, seatsLeft(lc))
   return (
     <Pressable onPress={onPress} accessibilityRole="button" disabled={!onPress}
+      accessibilityLabel={`${fmtWhen(lc.scheduledStart)}, ${t(`status.${shown}`)}, ${lc.title}`}
       style={({ pressed }) => ({
-        backgroundColor: colors.bgSurface, borderColor: shown === 'live' ? colors.danger : colors.border,
-        borderWidth: 1, borderRadius: radius.lg, padding: 16, gap: 10, opacity: pressed ? 0.85 : 1,
+        backgroundColor: colors.bgSurface, borderColor: live ? colors.danger : colors.border,
+        borderWidth: live ? 1.5 : 1, borderRadius: radius.lg, padding: 14, gap: 12,
+        transform: [{ scale: pressed ? 0.985 : 1 }],
       })}>
-      <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
-        <Text style={{ fontFamily: fonts.semibold, fontSize: 13, color: colors.primary }}>{fmtWhen(lc.scheduledStart)}</Text>
-        <StatusPill status={shown} />
+      <View style={{ flexDirection: 'row', gap: 12 }}>
+        <DateTile iso={lc.scheduledStart} live={live} />
+        <View style={{ flex: 1, gap: 6 }}>
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
+            <Text style={{ fontFamily: fonts.semibold, fontSize: 13, color: colors.textSecondary }}>
+              {`${fmtTime(lc.scheduledStart)} · ${t('classes.minutesShort', { mins: lc.durationMins })}`}
+            </Text>
+            <StatusPill status={shown} />
+          </View>
+          <Text numberOfLines={2} style={{ fontFamily: fonts.bold, fontSize: 16, lineHeight: 21, color: colors.textPrimary }}>{lc.title}</Text>
+          <View style={{ gap: 3 }}>
+            {(effCourseTitle(lc) || module) && <Meta icon="book-outline" text={[effCourseTitle(lc), module].filter(Boolean).join(' · ')} />}
+            {lc.instructor?.name && <Meta icon="person-outline" text={lc.instructor.name} />}
+            <Meta icon={inPerson ? 'location-outline' : 'videocam-outline'}
+              text={inPerson
+                ? [lc.location, lc.room].filter(Boolean).join(' · ') || t('classes.inPerson')
+                : `${t('classes.onlineLabel')}${lc.language ? ` · ${lc.language}` : ''}`} />
+          </View>
+        </View>
       </View>
-      <Text style={{ fontFamily: fonts.bold, fontSize: 16, color: colors.textPrimary }}>{lc.title}</Text>
-      <View style={{ gap: 4 }}>
-        {(effCourseTitle(lc) || module) && <Meta icon="book-outline" text={[effCourseTitle(lc), module].filter(Boolean).join(' · ')} />}
-        {lc.instructor?.name && <Meta icon="person-outline" text={lc.instructor.name} />}
-        <Meta icon={inPerson ? 'location-outline' : 'videocam-outline'}
-          text={inPerson
-            ? [lc.location, lc.room].filter(Boolean).join(' · ') || t('classes.inPerson')
-            : `${t('classes.onlineMeta', { mins: lc.durationMins })}${lc.language ? ` · ${lc.language}` : ''}`} />
-        {(status === 'bookable' || status === 'full') && lc.sessionCapacity > 0 && (
-          <Meta icon="people-outline" text={t('classes.seatsLeft', { left: Math.max(0, seatsLeft(lc)), total: lc.sessionCapacity })} />
-        )}
-      </View>
+      {(status === 'bookable' || status === 'full') && lc.sessionCapacity > 0 && <Seats left={left} total={lc.sessionCapacity} />}
       <ClassAction lc={lc} booking={booking} status={status} heldTwin={heldTwin} now={now} />
     </Pressable>
   )

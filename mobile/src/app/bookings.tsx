@@ -59,7 +59,10 @@ export default function Bookings() {
           keyExtractor={x => x.booking.id}
           contentContainerStyle={{ padding: 16, gap: 12 }}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refresh} tintColor={colors.primary} />}
-          ListEmptyComponent={<Empty title={tab === 'upcoming' ? t('bookings.noneUpcoming') : t('bookings.nonePast')} />}
+          ListEmptyComponent={tab === 'upcoming'
+            ? <Empty icon="calendar-outline" title={t('bookings.noneUpcoming')} body={t('bookings.noneBookedBody')}
+                action={{ label: t('bookings.browse'), onPress: () => router.navigate('/schedule') }} />
+            : <Empty icon="time-outline" title={t('bookings.nonePast')} />}
           renderItem={({ item: x }) => tab === 'upcoming' && x.lc
             ? <ClassCard lc={x.lc} booking={bookingMap.get(x.lc.id)} hasOther={false} now={now} onPress={() => router.push(`/class/${x.lc!.id}`)} />
             : pastRow(x)}

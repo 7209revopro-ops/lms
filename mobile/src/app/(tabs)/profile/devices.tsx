@@ -18,7 +18,7 @@ export default function Devices() {
   const rows = [...(sessions.data ?? [])].sort((a, b) => Number(b.isCurrent) - Number(a.isCurrent))
   return (
     <FlatList data={rows} keyExtractor={s => s.id} contentContainerStyle={{ padding: 16, gap: 10 }}
-      ListEmptyComponent={<Empty title={t('account.devices')} />}
+      ListEmptyComponent={<Empty icon="phone-portrait-outline" title={t('account.devices')} />}
       renderItem={({ item }) => <SessionCard s={item} />} />
   )
 }

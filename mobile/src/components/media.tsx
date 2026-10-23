@@ -19,9 +19,11 @@ type ImgProps = {
   /** Shown while loading and when there is no picture. */
   placeholderColor?: string
   accessibilityLabel?: string
+  /** The picture failed to load (a dead link): let the caller draw something else. */
+  onError?: () => void
 }
 
-export function Img({ uri, style, fit = 'cover', placeholderColor, accessibilityLabel, cover }: ImgProps & {
+export function Img({ uri, style, fit = 'cover', placeholderColor, accessibilityLabel, cover, onError }: ImgProps & {
   /** No picture: draw the brand cover (navy gradient, the logo's dot) instead of a flat block. */
   cover?: boolean
 }) {
@@ -32,9 +34,9 @@ export function Img({ uri, style, fit = 'cover', placeholderColor, accessibility
     // eslint-disable-next-line @typescript-eslint/no-require-imports -- only once this build is known to have the native module
     const { Image } = require('expo-image') as typeof import('expo-image')
     return <Image source={{ uri }} style={[style, { backgroundColor: placeholderColor }]} contentFit={fit} transition={180}
-      cachePolicy="memory-disk" recyclingKey={uri} {...a11y} />
+      cachePolicy="memory-disk" recyclingKey={uri} onError={onError} {...a11y} />
   }
-  return <RNImage source={{ uri }} style={[style, { backgroundColor: placeholderColor }]} resizeMode={fit} {...a11y} />
+  return <RNImage source={{ uri }} style={[style, { backgroundColor: placeholderColor }]} resizeMode={fit} onError={onError} {...a11y} />
 }
 
 /** The brand's cover: navy into blue, a large faint "d" ring and the teal dot. */

@@ -36,7 +36,7 @@ export default function ClassDetail() {
   /* A failed load is not "this class is gone" — say so, with a retry (the
      class-schedule silent-error lesson). */
   if (!lc && classes.error) return <><Stack.Screen options={{ title: '' }} /><Failed error={classes.error} onRetry={() => void classes.refetch()} /></>
-  if (!lc) return <><Stack.Screen options={{ title: '' }} /><Empty title={t('classes.gone')} /></>
+  if (!lc) return <><Stack.Screen options={{ title: '' }} /><Empty icon="calendar-clear-outline" title={t('classes.gone')} /></>
 
   /* Same-slot rule: another seat held in this class's weekly group. */
   const status = getSlotStatus(lc, booking, false)

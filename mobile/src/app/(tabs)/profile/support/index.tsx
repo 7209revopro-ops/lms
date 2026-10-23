@@ -28,7 +28,7 @@ export default function SupportList() {
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => void refresh()} tintColor={colors.primary} />}
       ListHeaderComponent={<Button title={t('support.newTicket')} onPress={() => router.push('/profile/support/new')} />}
       ListHeaderComponentStyle={{ marginBottom: 4 }}
-      ListEmptyComponent={<Empty title={t('support.none')} body={t('support.noneBody')} />}
+      ListEmptyComponent={<Empty icon="help-buoy-outline" title={t('support.none')} body={t('support.noneBody')} />}
       renderItem={({ item }) => <TicketRow tk={item} />}
     />
   )

@@ -11,6 +11,8 @@ const light = {
   primaryLight:   '#EEF5FF',
   onPrimary:      '#FFFFFF',
   success:        '#0ECC8E',
+  /** Green as TEXT: the brand mint is ~2:1 on white, so light mode inks darker. */
+  successInk:     '#047857',
   warning:        '#F59E0B',
   danger:         '#EF4444',
   dangerLight:    '#FEF2F2',
@@ -37,6 +39,7 @@ const dark: typeof light = {
   primaryLight:   'rgba(77,148,255,0.16)',
   onPrimary:      '#FFFFFF',
   success:        '#2ee0a5',
+  successInk:     '#2ee0a5',
   warning:        '#FBBF24',
   danger:         '#F87171',
   dangerLight:    'rgba(248,113,113,0.13)',

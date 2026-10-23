@@ -1,7 +1,8 @@
-import { useMemo, useState } from 'react'
-import { ActivityIndicator, FlatList, KeyboardAvoidingView, Pressable, Text, TextInput, View } from 'react-native'
+import { useEffect, useMemo, useState } from 'react'
+import { ActivityIndicator, FlatList, Keyboard, KeyboardAvoidingView, Pressable, Text, TextInput, View } from 'react-native'
 import { Stack, useLocalSearchParams } from 'expo-router'
 import { useHeaderHeight } from 'expo-router/react-navigation'
+import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import Ionicons from '@expo/vector-icons/Ionicons'
 import { useTranslation } from 'react-i18next'
 import { CHAT_MAX_CHARS, dayKey, isSeen, type ChatMessage } from '@shared'
@@ -21,6 +22,15 @@ export default function Thread() {
   const { colors, fonts, radius } = useTheme()
   const { state } = useAuth()
   const headerHeight = useHeaderHeight()
+  /* No tab bar here, so the composer clears the system navigation bar
+     itself — except while the keyboard is up and already lifts it. */
+  const insets = useSafeAreaInsets()
+  const [keyboardUp, setKeyboardUp] = useState(false)
+  useEffect(() => {
+    const show = Keyboard.addListener('keyboardDidShow', () => setKeyboardUp(true))
+    const hide = Keyboard.addListener('keyboardDidHide', () => setKeyboardUp(false))
+    return () => { show.remove(); hide.remove() }
+  }, [])
   const thread = useChatThread(c || null, instructorId!)
   const [draft, setDraft] = useState('')
   const [olderBusy, setOlderBusy] = useState(false)
@@ -83,7 +93,7 @@ export default function Thread() {
           )}
 
         {approved ? (
-          <View style={{ padding: 10, gap: 6, borderTopWidth: 1, borderTopColor: colors.border, backgroundColor: colors.bgSurface }}>
+          <View style={{ padding: 10, paddingBottom: 10 + (keyboardUp ? 0 : insets.bottom), gap: 6, borderTopWidth: 1, borderTopColor: colors.border, backgroundColor: colors.bgSurface }}>
             {tooLong && <Text style={{ fontFamily: fonts.medium, fontSize: 12, color: colors.danger }}>{t('messages.tooLong', { max: CHAT_MAX_CHARS })}</Text>}
             <View style={{ flexDirection: 'row', alignItems: 'flex-end', gap: 8 }}>
               <TextInput

@@ -203,14 +203,19 @@ export function Badge({ label, tone = 'primary', icon, solid }: {
   )
 }
 
+/* Mid-tone hues: readable as text on their own 16% tint in light and dark. */
+const AVATAR_HUES = ['#3B82F6', '#10B981', '#F59E0B', '#8B5CF6', '#EC4899', '#14B8A6', '#F97316', '#6366F1']
+
 /** A round picture of a person, or their initials when there is none. */
 export function Avatar({ name, uri, size = 40 }: { name: string; uri?: string | null; size?: number }) {
   const { colors, fonts } = useTheme()
   const initials = name.trim().split(/\s+/).slice(0, 2).map(w => w[0]?.toUpperCase() ?? '').join('') || '?'
   if (uri) return <Img uri={uri} style={{ width: size, height: size, borderRadius: size / 2 }} placeholderColor={colors.primaryLight} />
+  /* One stable colour per person, so a list of mentors is told apart at a glance. */
+  const hue = AVATAR_HUES[[...name].reduce((h, ch) => (h * 31 + ch.charCodeAt(0)) >>> 0, 7) % AVATAR_HUES.length]!
   return (
-    <View accessible={false} style={{ width: size, height: size, borderRadius: size / 2, backgroundColor: colors.primaryLight, alignItems: 'center', justifyContent: 'center' }}>
-      <Text style={{ fontFamily: fonts.bold, fontSize: size * 0.38, color: colors.primary }}>{initials}</Text>
+    <View accessible={false} style={{ width: size, height: size, borderRadius: size / 2, backgroundColor: `${hue}29`, alignItems: 'center', justifyContent: 'center' }}>
+      <Text style={{ fontFamily: fonts.bold, fontSize: size * 0.38, color: hue }}>{initials}</Text>
     </View>
   )
 }
@@ -325,4 +330,17 @@ export function ProgressBar({ percent, tone = 'success' }: { percent: number; to
       <View style={{ width: `${p}%`, height: '100%', backgroundColor: tone === 'success' ? colors.success : colors.primary }} />
     </View>
   )
+}
+
+const NOTIFICATION_ICONS: Record<string, ComponentProps<typeof Glyph>['name']> = {
+  'enrollment': 'school', 'lesson-complete': 'checkmark-circle', 'course-complete': 'ribbon',
+  'review-posted': 'star', 'live-class-scheduled': 'calendar', 'achievement': 'trophy',
+  'booking-confirmed': 'checkmark-done', 'booking-cancelled': 'close-circle', 'class-reminder': 'alarm',
+  'mentor-no-show': 'alert-circle', 'support-ticket-raised': 'help-buoy',
+  'instructor-review-requested': 'star-half', 'chat-message': 'chatbubble',
+}
+
+/** The glyph for a notification's kind — the same on Home and in the list. */
+export function notificationIcon(kind: string): ComponentProps<typeof Glyph>['name'] {
+  return NOTIFICATION_ICONS[kind] ?? 'notifications'
 }

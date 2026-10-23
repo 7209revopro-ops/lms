@@ -14,7 +14,7 @@ import { resendVerification } from '@/lib/api/account'
 import { errorText } from '@/lib/errors'
 import { bucketOfDayGreeting } from '@/lib/greeting'
 import { useNow } from '@/hooks/useNow'
-import { Button, Card, Glyph, IconButton, Notice, ProgressBar } from '@/components/ui'
+import { Button, Card, Glyph, IconButton, Notice, ProgressBar, notificationIcon } from '@/components/ui'
 import { Gradient, Img } from '@/components/media'
 import { ClassCard, SectionHeader } from '@/components/classes'
 import { Empty, Failed, Loading } from '@/components/states'
@@ -147,9 +147,8 @@ function Hero({ greeting, name, unread, streak }: {
   const pct = streak?.weeklyGoal ? Math.min(100, (streak.weekProgress / streak.weeklyGoal) * 100) : 0
   return (
     <Gradient colors={[colors.navy, colors.primaryFill]} style={{ borderRadius: radius.xl, padding: 20, gap: 18, overflow: 'hidden' }}>
-      {/* The logo's ring and dot, large and faint, in the corner. */}
+      {/* The logo's ring, large and faint, in the corner. */}
       <View pointerEvents="none" style={{ position: 'absolute', right: -40, top: -40, width: 170, height: 170, borderRadius: 85, borderWidth: 22, borderColor: 'rgba(255,255,255,0.07)' }} />
-      <Gradient colors={[colors.accentFrom, colors.accentTo]} style={{ position: 'absolute', right: 114, top: 34, width: 22, height: 22, borderRadius: 11 }} />
 
       <View style={{ flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12 }}>
         <View style={{ flex: 1 }}>
@@ -248,10 +247,6 @@ function VerifyBanner({ email, onHide }: { email: string; onHide: () => void }) 
   )
 }
 
-const MISSED_ICON: Record<string, React.ComponentProps<typeof Glyph>['name']> = {
-  'live-class-scheduled': 'calendar', 'class-reminder': 'alarm', 'chat-message': 'chatbubble',
-}
-
 /** "What you missed" — the website's once-a-day sheet, as a quiet section:
  *  the newest unread notices, new classes first; tapping one opens it. */
 function Missed() {
@@ -275,7 +270,7 @@ function Missed() {
             style={({ pressed }) => ({ flexDirection: 'row', alignItems: 'center', gap: 12, padding: 14,
               backgroundColor: pressed ? colors.bgMuted : 'transparent', borderTopWidth: i ? 1 : 0, borderTopColor: colors.border })}>
             <View style={{ width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.primaryLight }}>
-              <Glyph name={MISSED_ICON[m.kind] ?? 'notifications'} size={18} color={colors.primary} />
+              <Glyph name={notificationIcon(m.kind)} size={18} color={colors.primary} />
             </View>
             <View style={{ flex: 1, gap: 2 }}>
               <Text numberOfLines={1} style={{ fontFamily: fonts.semibold, fontSize: 14, color: colors.textPrimary }}>{m.title}</Text>

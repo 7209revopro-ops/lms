@@ -1,26 +1,32 @@
-import { useCallback } from 'react'
+import { useCallback, useMemo, useState } from 'react'
 import { FlatList, RefreshControl, Text, View } from 'react-native'
 import { router, useFocusEffect } from 'expo-router'
 import { useQueryClient } from '@tanstack/react-query'
 import { useTranslation } from 'react-i18next'
+import type { ClassGroup } from '@shared'
 import { journeyKeys, markNewClassesSeen, useJourney, useNewClassCount } from '@/lib/api/engage'
 import { useCatalog } from '@/lib/catalog'
 import { Empty, Failed, Loading } from '@/components/states'
-import { Badge, Card, Glyph } from '@/components/ui'
-import { Gradient, Img } from '@/components/media'
+import { Badge, Card, Glyph, SearchField, Segmented } from '@/components/ui'
+import { Gradient } from '@/components/media'
+import { CourseCard, SessionsBoard } from '@/components/schedule'
 import { useTheme } from '@/theme'
 
-/* The Class Schedule — your journey on top, then every one of your own
-   courses with sessions still ahead (the website's ?mine=1). Opening it
-   reads the "new class scheduled" notices, as the website does. */
+type View_ = 'courses' | 'sessions'
+
+/* The Class Schedule, as on the website: your journey on top, a search, then
+   your own courses (the website's ?mine=1) — or every session ahead, by day.
+   Opening it reads the "new class scheduled" notices, as the website does. */
 export default function ScheduleCourses() {
   const { t } = useTranslation()
-  const { colors, fonts, radius } = useTheme()
+  const { colors, fonts } = useTheme()
   const qc = useQueryClient()
-  const { catalog, isLoading, error, refreshing, refresh } = useCatalog()
+  const { catalog, bookingMap, isLoading, error, refreshing, refresh } = useCatalog()
   const journey = useJourney()
   const fresh = useNewClassCount()
-  const levels = (journey.data?.programmes ?? []).flatMap(p => p.levels)
+  const [view, setView] = useState<View_>('courses')
+  const [search, setSearch] = useState('')
+  const levels = useMemo(() => (journey.data?.programmes ?? []).flatMap(p => p.levels), [journey.data])
   const held = levels.filter(l => l.state === 'completed' || l.state === 'current').length
 
   useFocusEffect(useCallback(() => {
@@ -28,8 +34,23 @@ export default function ScheduleCourses() {
     void markNewClassesSeen().then(() => qc.setQueryData(journeyKeys.newClasses, 0)).catch(() => {})
   }, [fresh.data, qc]))
 
+  const q = search.trim().toLowerCase()
+  /* A module or an instructor's name finds the course that holds it. */
+  const courses = useMemo(() => !q ? catalog : catalog.filter(c =>
+    c.title.toLowerCase().includes(q) || (c.program ?? '').toLowerCase().includes(q) ||
+    c.modules.some(m => m.title.toLowerCase().includes(q)) ||
+    c.instructors.some(i => i.name.toLowerCase().includes(q))), [catalog, q])
+  const groups: ClassGroup[] = useMemo(() => {
+    const all = catalog.flatMap(c => c.modules.flatMap(m => m.groups))
+    return !q ? all : all.filter(g =>
+      g.title.toLowerCase().includes(q) || (g.instructor?.name ?? '').toLowerCase().includes(q) ||
+      ((g.slots[0] as { language?: string } | undefined)?.language ?? '').toLowerCase().includes(q))
+  }, [catalog, q])
+
+  const onRefresh = () => { refresh(); void journey.refetch() }
+
   const header = (
-    <View style={{ gap: 12, marginBottom: 4 }}>
+    <View style={{ gap: 12 }}>
       {levels.length > 0 && (
         <Card padded={false} onPress={() => router.push('/schedule/journey')} accessibilityLabel={`${t('journey.entry')}. ${t('journey.entryBody')}`}>
           <Gradient colors={[colors.navy, colors.primaryFill]} style={{ padding: 16, flexDirection: 'row', alignItems: 'center', gap: 14 }}>
@@ -47,36 +68,35 @@ export default function ScheduleCourses() {
         </Card>
       )}
       {!!fresh.data && <Badge label={t('journey.newClasses', { count: fresh.data })} tone="primary" icon="sparkles" />}
+      <SearchField value={search} onChangeText={setSearch} placeholder={t('schedule.search')} />
+      <Segmented<View_> value={view} onChange={setView} options={[
+        { value: 'courses', label: t('schedule.coursesTab') },
+        { value: 'sessions', label: t('schedule.allSessionsTab') },
+      ]} />
     </View>
   )
 
   if (isLoading) return <View style={{ padding: 16 }}><Loading cards={3} /></View>
   if (error && catalog.length === 0) return <Failed error={error} onRetry={refresh} />
 
+  if (view === 'sessions') {
+    return <SessionsBoard groups={groups} bookingMap={bookingMap} header={header} refreshing={refreshing} onRefresh={onRefresh} resetKey={q} />
+  }
+
   return (
     <FlatList
-      data={catalog}
+      data={courses}
       keyExtractor={c => c.id || 'unassigned'}
-      contentContainerStyle={{ padding: 16, gap: 12, flexGrow: 1 }}
-      ListHeaderComponent={header}
-      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { refresh(); void journey.refetch() }} tintColor={colors.primary} />}
-      ListEmptyComponent={<Empty icon="calendar-outline" title={t('schedule.noneTitle')} body={t('schedule.noneBody')} />}
+      contentContainerStyle={{ padding: 16, gap: 14, flexGrow: 1 }}
+      ListHeaderComponent={<View style={{ marginBottom: 2 }}>{header}</View>}
+      keyboardShouldPersistTaps="handled"
+      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} />}
+      ListEmptyComponent={q
+        ? <Empty icon="search-outline" title={t('schedule.noCourseMatch')} body={t('schedule.noCourseMatchBody')} />
+        : <Empty icon="calendar-outline" title={t('schedule.noneTitle')} body={t('schedule.noneBody')} />}
       renderItem={({ item: c }) => (
-        <Card onPress={() => router.push({ pathname: '/schedule/[courseId]', params: { courseId: c.id || '_none' } })}
-          accessibilityLabel={`${c.title}. ${t('schedule.modules', { count: c.modules.length })}, ${t('schedule.sessionsAhead', { count: c.sessionCount })}`}
-          style={{ flexDirection: 'row', gap: 12, padding: 12 }}>
-          <Img cover uri={c.thumbnailUrl} style={{ width: 64, height: 64, borderRadius: radius.md }} placeholderColor={colors.primaryLight} />
-          <View style={{ flex: 1, gap: 4, justifyContent: 'center' }}>
-            <Text numberOfLines={2} style={{ fontFamily: fonts.bold, fontSize: 16, color: colors.textPrimary }}>{c.title}</Text>
-            <Text style={{ fontFamily: fonts.medium, fontSize: 13, color: colors.textSecondary }}>
-              {`${t('schedule.modules', { count: c.modules.length })} · ${t('schedule.sessionsAhead', { count: c.sessionCount })}`}
-            </Text>
-            {c.instructors.length > 0 && (
-              <Text numberOfLines={1} style={{ fontFamily: fonts.body, fontSize: 12, color: colors.textMuted }}>{c.instructors.map(i => i.name).join(', ')}</Text>
-            )}
-          </View>
-          <Glyph name="chevron-forward" size={18} color={colors.textMuted} />
-        </Card>
+        <CourseCard node={c} journey={levels.find(l => l.courseId === c.id)}
+          onPress={() => router.push({ pathname: '/schedule/[courseId]', params: { courseId: c.id || '_none' } })} />
       )}
     />
   )

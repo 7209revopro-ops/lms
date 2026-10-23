@@ -32,7 +32,7 @@ export default function Assignments() {
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => void refresh()} tintColor={colors.primary} />}
       ListHeaderComponent={<Button title={t('assignments.submit')} onPress={() => router.push('/learning/assignments/submit')} />}
       ListHeaderComponentStyle={{ marginBottom: 4 }}
-      ListEmptyComponent={<Empty title={t('assignments.none')} body={t('assignments.noneBody')} />}
+      ListEmptyComponent={<Empty icon="document-text-outline" title={t('assignments.none')} body={t('assignments.noneBody')} />}
       renderItem={({ item }) => <AssignmentRow a={item} />}
     />
   )

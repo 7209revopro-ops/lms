@@ -7,7 +7,7 @@ import { programName, sortInstructors, type ChatInstructor } from '@shared'
 import { useChatInstructors } from '@/lib/api/chat'
 import { useAuth } from '@/lib/auth'
 import { fmtShort } from '@/components/classes'
-import { Notice } from '@/components/ui'
+import { Avatar, Notice } from '@/components/ui'
 import { Empty, Failed, Loading } from '@/components/states'
 import { useTheme } from '@/theme'
 
@@ -49,7 +49,7 @@ export default function MessagesList() {
       contentContainerStyle={{ padding: 16, gap: 10 }}
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => void refresh()} tintColor={colors.primary} />}
       ListHeaderComponent={pending ? <View style={{ marginBottom: 6 }}><Notice tone="info">{t('messages.pending')}</Notice></View> : undefined}
-      ListEmptyComponent={<Empty title={t('messages.none')} body={t('messages.noneBody')} />}
+      ListEmptyComponent={<Empty icon="chatbubbles-outline" title={t('messages.none')} body={t('messages.noneBody')} />}
       renderItem={({ item }) => <MentorRow i={item} />}
     />
   )
@@ -72,9 +72,7 @@ function MentorRow({ i }: { i: ChatInstructor }) {
         flexDirection: 'row', alignItems: 'center', gap: 12, padding: 14, borderRadius: radius.lg,
         backgroundColor: pressed ? colors.bgMuted : colors.bgSurface, borderColor: colors.border, borderWidth: 1,
       })}>
-      <View style={{ width: 44, height: 44, borderRadius: 22, backgroundColor: colors.primaryLight, alignItems: 'center', justifyContent: 'center' }}>
-        <Text style={{ fontFamily: fonts.bold, fontSize: 17, color: colors.primary }}>{i.name.trim().charAt(0).toUpperCase()}</Text>
-      </View>
+      <Avatar name={i.name} size={46} />
       <View style={{ flex: 1, gap: 3 }}>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
           <Text numberOfLines={1} style={{ flex: 1, fontFamily: fonts.semibold, fontSize: 15, color: colors.textPrimary }}>{i.name}</Text>

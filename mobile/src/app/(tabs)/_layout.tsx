@@ -1,3 +1,4 @@
+import { useSegments } from 'expo-router'
 import { Tabs } from 'expo-router/js-tabs'
 import Ionicons from '@expo/vector-icons/Ionicons'
 import { useTranslation } from 'react-i18next'
@@ -22,13 +23,19 @@ export default function TabsLayout() {
   const unread = useChatUnread(true).data ?? 0
   /* New classes scheduled on your courses — read when the Schedule opens. */
   const fresh = useNewClassCount().data ?? 0
+  /* A conversation gets the whole screen, as in any messaging app; the tab
+     bar comes back on leaving it. */
+  const segments = useSegments() as string[]
+  const inThread = segments[1] === 'messages' && segments.length > 2
   const badge = (name: string) => (name === 'messages' ? unread : name === 'schedule' ? fresh : 0)
   return (
     <Tabs screenOptions={{
       headerShown: false,
       tabBarActiveTintColor: colors.primary,
       tabBarInactiveTintColor: colors.textMuted,
-      tabBarStyle: { backgroundColor: colors.bgSurface, borderTopColor: colors.border },
+      tabBarStyle: inThread
+        ? { display: 'none' }
+        : { backgroundColor: colors.bgSurface, borderTopColor: colors.border },
       tabBarLabelStyle: { fontFamily: fonts.medium, fontSize: 11 },
     }}>
       {TABS.map(tab => (
@@ -37,7 +44,11 @@ export default function TabsLayout() {
           /* Spelled out: left to Android, the icon's glyph is read too. */
           tabBarAccessibilityLabel: `${t(`tabs.${tab.label}`)}${badge(tab.name) > 0 ? `, ${badge(tab.name)} new` : ''}`,
           tabBarBadge: badge(tab.name) > 0 ? (badge(tab.name) > 99 ? '99+' : badge(tab.name)) : undefined,
-          tabBarIcon: ({ color, size }) => <Ionicons name={tab.icon} color={String(color ?? colors.textMuted)} size={size} />,
+          /* Filled glyph for the tab you are on, outline for the rest. */
+          tabBarIcon: ({ color, size, focused }) => (
+            <Ionicons name={(focused ? tab.icon.replace('-outline', '') : tab.icon) as IconName}
+              color={String(color ?? colors.textMuted)} size={size} />
+          ),
         }} />
       ))}
     </Tabs>

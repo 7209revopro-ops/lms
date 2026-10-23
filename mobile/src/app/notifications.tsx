@@ -6,6 +6,7 @@ import { appPathFor } from '@shared'
 import { useMarkRead, useNotifications, type AppNotification } from '@/lib/api/notifications'
 import { fmtShort } from '@/components/classes'
 import { Empty, Failed, Loading } from '@/components/states'
+import { Glyph, notificationIcon } from '@/components/ui'
 import { useTheme } from '@/theme'
 
 /* Notifications — newest first, paged. Tapping one marks it read and opens
@@ -52,7 +53,7 @@ export default function Notifications() {
             refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => void refresh()} tintColor={colors.primary} />}
             onEndReached={() => { if (feed.hasNextPage && !feed.isFetchingNextPage) void feed.fetchNextPage() }}
             onEndReachedThreshold={0.4}
-            ListEmptyComponent={<Empty title={t('notifications.none')} body={t('notifications.noneBody')} />}
+            ListEmptyComponent={<Empty icon="notifications-outline" title={t('notifications.none')} body={t('notifications.noneBody')} />}
             ListFooterComponent={feed.isFetchingNextPage ? <Loading /> : undefined}
             renderItem={({ item: n }) => (
               <Pressable onPress={() => open(n)} accessibilityRole="button"
@@ -61,7 +62,15 @@ export default function Notifications() {
                   backgroundColor: pressed ? colors.bgMuted : n.readAt ? 'transparent' : colors.primaryLight,
                   borderBottomWidth: 1, borderBottomColor: colors.border,
                 })}>
-                <View style={{ width: 8, height: 8, borderRadius: 4, marginTop: 7, backgroundColor: n.readAt ? 'transparent' : colors.primary }} />
+                {/* The kind at a glance; a dot on it while unread. */}
+                <View style={{ width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center',
+                  backgroundColor: n.readAt ? colors.bgMuted : colors.bgSurface }}>
+                  <Glyph name={notificationIcon(n.kind)} size={18} color={n.readAt ? colors.textMuted : colors.primary} />
+                  {!n.readAt && (
+                    <View style={{ position: 'absolute', top: 0, right: 0, width: 10, height: 10, borderRadius: 5,
+                      backgroundColor: colors.primary, borderWidth: 2, borderColor: colors.primaryLight }} />
+                  )}
+                </View>
                 <View style={{ flex: 1, gap: 3 }}>
                   <View style={{ flexDirection: 'row', gap: 8 }}>
                     <Text style={{ flex: 1, fontFamily: n.readAt ? fonts.medium : fonts.semibold, fontSize: 15, color: colors.textPrimary }}>{n.title}</Text>

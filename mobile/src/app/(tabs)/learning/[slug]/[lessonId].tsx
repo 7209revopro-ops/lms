@@ -43,7 +43,7 @@ export default function Lesson() {
 
   if (course.isLoading || (progress.isLoading && enrollmentStatus !== 'pending')) return <Loading />
   if (course.error || !course.data) return <Failed error={course.error} onRetry={() => void course.refetch()} />
-  if (!lesson) return <Empty title={t('lesson.notFound')} />
+  if (!lesson) return <Empty icon="help-circle-outline" title={t('lesson.notFound')} />
 
   /* Replace rather than push, so Back returns to the course, not through
      every lesson read on the way. */
