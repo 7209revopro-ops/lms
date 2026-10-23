@@ -59,7 +59,7 @@ const wrap =
  */
 router.get('/student-activity', checkedCaller, wrap(async (req, res) => {
   const include = String(req.query['include'] ?? '').split(',').map(s => s.trim())
-  sendSuccess(res, await studentActivityForPortal({ since: req.query['since'], classes: include.includes('classes') }), 'Activity')
+  sendSuccess(res, await studentActivityForPortal({ since: req.query['since'], classes: include.includes('classes'), unattended: include.includes('unattended') }), 'Activity')
 }))
 
 /**

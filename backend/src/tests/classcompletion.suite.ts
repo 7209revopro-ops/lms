@@ -9,12 +9,17 @@
      A. a seat attended — joined the LMS room, joined through the link, or
         marked attended by hand — is told once the class is over: at the end
         the meeting gave (the LMS room, or Google Meet), else at the timetable
-        end plus a margin (15 minutes; an hour for a Meet class, so Google's
+        end plus a margin (15 minutes; 20 for a Meet class, so Google's
         word comes first); attendance marked later is told when it was marked;
         each under the seat's own key, the same however often it is asked for —
         and only to a caller that asks for classes (include=classes);
      B. never told: a class not over yet, a seat missed or cancelled, a class
         cancelled; nothing outside `since` … now;
+     D. (2026-10-23) a Meet class Google says finished early is told when that
+        end is written — though the end itself is behind the window; a class
+        whose end is null has the timetable's; a seat marked missed or
+        cancelled after the class began is told as class_unattended, only to
+        a caller that asks (include=unattended);
      C. a Meet class past its timetable end is 'ended' when Google records its
         conference ending (endSource 'meet'): not while it is still going, not
         from a conference long before the class, not when Google can't be
@@ -79,8 +84,8 @@ const seat = async (userId: unknown, liveClassId: unknown, o: Record<string, unk
 
 // A — the LMS's own room, which said it ended 50 minutes ago.
 const roomEnded = await klass({ scheduledStart: ago(3 * HOUR), status: 'ended', endedAt: ago(50 * MIN) })
-// B — Google Meet, timetable end 30 minutes ago, nothing from Google yet.
-const meet = await klass({ type: 'external', provider: 'mux', googleMeetCode: 'abc-defg-hij', meetSpace: { name: 'spaces/B', host: 'host@delta.test' }, scheduledStart: ago(150 * MIN) })
+// B — Google Meet, timetable end 10 minutes ago, nothing from Google yet.
+const meet = await klass({ type: 'external', provider: 'mux', googleMeetCode: 'abc-defg-hij', meetSpace: { name: 'spaces/B', host: 'host@delta.test' }, scheduledStart: ago(130 * MIN) })
 // C — a classroom session that finished 3 hours ago.
 const classroom = await klass({ type: 'external', provider: 'mux', isOnline: false, durationMins: 60, scheduledStart: ago(4 * HOUR) })
 // D — not started yet.
@@ -91,7 +96,10 @@ const roomSilent = await klass({ durationMins: 60, scheduledStart: ago(100 * MIN
 const cancelled = await klass({ status: 'cancelled', scheduledStart: ago(3 * HOUR), durationMins: 60 })
 
 const seatA = await seat(s1, roomEnded, { status: 'attended', attendedAt: ago(170 * MIN), attendanceSource: 'livekit' })
-const seatB = await seat(s2, meet, { attendedAt: ago(148 * MIN), attendanceSource: 'click' })
+const seatB = await seat(s2, meet, { attendedAt: ago(128 * MIN), attendanceSource: 'click' })
+// G — the LMS's room, its end left null (a recreated stream): timetable end 40 minutes ago.
+const nullEnd = await klass({ durationMins: 60, scheduledStart: ago(100 * MIN), endedAt: null })
+const seatG = await seat(s3, nullEnd, { status: 'attended', updatedAt: ago(30 * MIN) })
 const seatC = await seat(s3, classroom, { status: 'attended', updatedAt: ago(5 * MIN) })     // marked by hand just now
 await seat(s4, later, { attendedAt: ago(1 * MIN), attendanceSource: 'livekit' })
 await seat(s5, roomEnded, { status: 'missed', updatedAt: ago(20 * MIN) })
@@ -106,8 +114,8 @@ const byKey = (events: Awaited<ReturnType<typeof classEvents>>) => new Map(event
 step('A. attended, and over — told once, at the right moment')
 let events = await classEvents(ago(4 * HOUR))
 let keyed = byKey(events)
-check('three seats told: the room that ended, the classroom marked just now, the silent room past its timetable',
-  events.length === 3 && keyed.has(`class-attended:${seatA}`) && keyed.has(`class-attended:${seatC}`) && keyed.has(`class-attended:${seatE}`),
+check('four seats told: the room that ended, the classroom marked just now, the silent room past its timetable, the room with a null end',
+  events.length === 4 && keyed.has(`class-attended:${seatA}`) && keyed.has(`class-attended:${seatC}`) && keyed.has(`class-attended:${seatE}`) && keyed.has(`class-attended:${seatG}`),
   events.map(e => e.key).join(', '))
 const a = keyed.get(`class-attended:${seatA}`)
 check('the room: over when it said so, joined the room, told at that end',
@@ -128,7 +136,7 @@ check('only for a caller that asks for classes — the portal of before would ta
   (await studentActivityForPortal({ since: iso(ago(4 * HOUR)), now })).events.every(x => x.type !== 'class_attended'))
 
 step('B. never told — not over, missed, cancelled, or outside the window')
-check('the Meet class waits for Google (an hour past its timetable end)', !keyed.has(`class-attended:${seatB}`))
+check('the Meet class waits for Google (20 minutes past its timetable end)', !keyed.has(`class-attended:${seatB}`))
 check('nothing for the class not started, the missed seat, the cancelled seat or the cancelled class',
   events.every(x => ![s4, s5, s6].map(String).includes(x.student.lmsUserId)) && events.filter(x => x.student.lmsUserId === String(s2)).length === 0)
 events = await classEvents(ago(10 * MIN))
@@ -146,7 +154,7 @@ const unknown  = await klass({ type: 'external', provider: 'mux', googleMeetCode
 const tooOld   = await klass({ type: 'external', provider: 'mux', googleMeetCode: 'too-long-ago', durationMins: 60, scheduledStart: ago(14 * HOUR) })
 const inPerson = await klass({ type: 'external', provider: 'mux', isOnline: false, googleMeetCode: 'in-pers-onnn', durationMins: 60, scheduledStart: ago(90 * MIN) })
 await runMeetClassEnd(google({
-  'abc-defg-hij': [{ startTime: ago(2 * DAY), endTime: ago(2 * DAY - HOUR) }, { startTime: ago(152 * MIN), endTime: ago(25 * MIN) }],
+  'abc-defg-hij': [{ startTime: ago(2 * DAY), endTime: ago(2 * DAY - HOUR) }, { startTime: ago(132 * MIN), endTime: ago(25 * MIN) }],
   'run-ning-now': [{ startTime: ago(79 * MIN) }],
   'old-meet-ing': [{ startTime: ago(3 * DAY), endTime: ago(3 * DAY - HOUR) }],
   'not-answ-red': undefined,
@@ -154,17 +162,27 @@ await runMeetClassEnd(google({
 const after = new Map((await LiveClassModel.find({ _id: { $in: [meet, running, reused, unknown, tooOld, inPerson] } }).lean()).map(x => [String(x._id), x]))
 const m = after.get(String(meet))
 check('the Meet class: ended when its own conference ended, started when it began, said by Google Meet',
-  m?.status === 'ended' && m.endedAt?.toISOString() === iso(ago(25 * MIN)) && m.startedAt?.toISOString() === iso(ago(152 * MIN)) && m.endSource === 'meet',
+  m?.status === 'ended' && m.endedAt?.toISOString() === iso(ago(25 * MIN)) && m.startedAt?.toISOString() === iso(ago(132 * MIN)) && m.endSource === 'meet',
   JSON.stringify({ status: m?.status, endedAt: m?.endedAt, endSource: m?.endSource }))
 check('still going: left as it is', after.get(String(running))?.status === 'scheduled' && !after.get(String(running))?.endedAt)
 check('only a conference long before the class: left as it is', after.get(String(reused))?.status === 'scheduled')
 check('Google not answering: left as it is, asked again next time', after.get(String(unknown))?.status === 'scheduled')
 check('12 hours past its end, and the classroom session: not even asked', !asked.includes('too-long-ago') && !asked.includes('in-pers-onnn'), asked.join(', '))
-events = await classEvents(ago(4 * HOUR))
-const b = byKey(events).get(`class-attended:${seatB}`)
-check('…and now the Meet seat is told: Google Meet\'s end, joined through the link',
+// Asked as the portal does — from a few minutes back — just after Google's end was written: that end (25 minutes ago,
+// before the timetable's) is behind the window, and the seat is told all the same, when the end was written.
+const written = after.get(String(meet))!.updatedAt as Date
+const late = new Date(Math.max(Date.now(), written.getTime()) + 1000)
+const bEvents = (await studentActivityForPortal({ since: iso(new Date(written.getTime() - 7 * MIN)), now: late, classes: true })).events.filter(x => x.type === 'class_attended')
+const b = byKey(bEvents).get(`class-attended:${seatB}`)
+check('…and now the Meet seat is told: Google Meet\'s end (it finished early), joined through the link, told when the end was written',
   b?.class?.endSource === 'google_meet' && b.class.heldIn === 'google_meet' && b.class.attendance === 'joined_link'
-    && b.class.endedAt === iso(ago(25 * MIN)) && b.at === iso(ago(25 * MIN)) && b.class.attendedAt === iso(ago(148 * MIN)), JSON.stringify(b))
+    && b.class.endedAt === iso(ago(25 * MIN)) && b.at === iso(written) && b.class.attendedAt === iso(ago(128 * MIN)), JSON.stringify(b))
+
+step('D. a seat marked missed or cancelled after the class began')
+const un = (await studentActivityForPortal({ since: iso(ago(4 * HOUR)), now, classes: true, unattended: true })).events.filter(x => x.type === 'class_unattended')
+check('the missed seat is told as class_unattended, with its booking — the cancelled class\'s and the old seat aren\'t (outside the window or before it began)',
+  un.length === 1 && un[0]!.booking?.status === 'missed' && un[0]!.booking?.classId === String(roomEnded) && un[0]!.student.email === 'student5@lms.test', JSON.stringify(un))
+check('…only to a caller that asks for it', (await studentActivityForPortal({ since: iso(ago(4 * HOUR)), now, classes: true })).events.every(x => x.type !== 'class_unattended'))
 
 await mongoose.connection.dropDatabase()
 await mongoose.disconnect()
