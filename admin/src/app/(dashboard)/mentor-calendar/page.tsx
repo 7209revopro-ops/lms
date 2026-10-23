@@ -1,18 +1,21 @@
 'use client'
 
 import { useMemo, useState } from 'react'
-import { CalendarDays, ChevronLeft, ChevronRight, Plus, X } from 'lucide-react'
+import { CalendarDays, ChevronLeft, ChevronRight, CircleSlash, Plus, X } from 'lucide-react'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { PodBadge } from '@/components/live-classes/PodBadge'
 import Spinner from '@/components/ui/Spinner'
 import { useCurrentUser } from '@/lib/api/user'
-import { useMentorCalendar, useBookMeeting, useCancelMeeting, useMentorClass, type CalendarMentor } from '@/lib/api/mentorCalendar'
+import { useMentorCalendar, useBookMeeting, useCancelMeeting, useMentorClass, useRemoveTimeOff, wallInZone, timeOffLabel, refusal, type CalendarMentor, type MentorTimeOff } from '@/lib/api/mentorCalendar'
+import { TimeOffDialog } from '@/components/live-classes/TimeOffDialog'
 
 /* Mentor Calendar (Tetra Commission's user, 2026-10-08): every mentor's week — the hours they set as free,
    their classes and the sessions booked with them — for instructors as well as admins, and a session booked
    with any mentor from here. The LMS checks clashes and sends the emails, as from the portals; an instructor
    cancels only what they booked. Sessions can be searched by title (a booked session by who is on it too) and
-   classes narrowed to a course and its module (2026-10-09); booked sessions have no course, so they stay. */
+   classes narrowed to a course and its module (2026-10-09); booked sessions have no course, so they stay.
+   Time off (2026-10-23): a mentor marks when they're not available — an admin for any mentor — and it shows on every
+   portal's calendar; nothing is booked inside it. */
 
 const DAY_MS = 864e5
 const weekStart = (d: Date) => { const x = new Date(d); x.setHours(0, 0, 0, 0); x.setDate(x.getDate() - ((x.getDay() + 6) % 7)); return x }
@@ -25,6 +28,7 @@ export default function MentorCalendarPage() {
   const [query, setQuery] = useState('')
   const [booking, setBooking] = useState<CalendarMentor | null>(null)
   const [infoFor, setInfoFor] = useState<string | null>(null)   // the class whose Info is open
+  const [offFor, setOffFor] = useState<CalendarMentor | null>(null)   // marking this mentor not available
   const [find, setFind] = useState('')          // a session's title, its course or module, or who a booked one is with
   const [course, setCourse] = useState('')      // courseId
   const [mod, setMod] = useState('')      // moduleId, within the course
@@ -32,7 +36,18 @@ export default function MentorCalendarPage() {
   const days = useMemo(() => Array.from({ length: 7 }, (_, i) => new Date(start.getTime() + i * DAY_MS)), [start])
   const { data, isLoading, error } = useMentorCalendar(new Date(start.getTime() - DAY_MS).toISOString(), new Date(start.getTime() + 8 * DAY_MS).toISOString())
   const cancel = useCancelMeeting()
+  const removeOff = useRemoveTimeOff()
   const tz = data?.timezone || 'Asia/Dubai'
+  const isAdmin = !!me && (me as any)?.role !== 'instructor'
+  /* Their own, or — an admin — anyone's. */
+  const mayMark = (m: CalendarMentor) => isAdmin || m.email.toLowerCase() === myEmail
+  /** The part of a time off that falls on this academy day, as the calendar shows it. */
+  const offOnDay = (t: MentorTimeOff, key: string) => {
+    const dayFrom = wallInZone(key, '00:00', tz).getTime(), dayTo = dayFrom + DAY_MS
+    const a = Math.max(new Date(t.startsAt).getTime(), dayFrom), b = Math.min(new Date(t.endsAt).getTime(), dayTo)
+    if (b <= a) return null
+    return a === dayFrom && b === dayTo ? 'All day' : `${at(new Date(a).toISOString())}–${b === dayTo ? '24:00' : at(new Date(b).toISOString())}`
+  }
   const dayKey = (d: Date | string) => new Date(d).toLocaleDateString('en-CA', { timeZone: tz })
   const at = (iso: string) => new Date(iso).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', timeZone: tz })
 
@@ -68,7 +83,7 @@ export default function MentorCalendarPage() {
 
   return (
     <div className="space-y-6">
-      <PageHeader title="Mentor Calendar" subtitle={`Every mentor's free hours, classes and booked sessions — book a session with anyone. Times ${tz.replace('_', ' ')}.`} />
+      <PageHeader title="Mentor Calendar" subtitle={`Every mentor's free hours, classes, booked sessions and time off — book a session with anyone, never in their time off. Times ${tz.replace('_', ' ')}.`} />
       <div className="flex flex-wrap items-center gap-2">
         <button type="button" onClick={() => setOffset(o => o - 1)} className="rounded-lg border border-white/10 p-2 hover:bg-white/5" aria-label="Previous week"><ChevronLeft className="h-4 w-4" /></button>
         <button type="button" onClick={() => setOffset(0)} className="flex items-center gap-1.5 rounded-lg border border-white/10 px-3 py-2 text-sm hover:bg-white/5"><CalendarDays className="h-4 w-4" />{offset === 0 ? 'This week' : days[0].toLocaleDateString(undefined, { day: 'numeric', month: 'short' })}</button>
@@ -96,7 +111,10 @@ export default function MentorCalendarPage() {
         <div key={m.id} className="rounded-2xl border border-white/10 p-4">
           <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
             <p className="font-semibold">{m.name}{m.email.toLowerCase() === myEmail && <span className="ml-2 text-xs text-blue-400">you</span>}{m.shared && <span className="ml-2 text-xs opacity-60">lent</span>}</p>
-            <button type="button" onClick={() => setBooking(m)} className="flex items-center gap-1 rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-500"><Plus className="h-3.5 w-3.5" />Book a session</button>
+            <div className="flex flex-wrap gap-2">
+              {mayMark(m) && <button type="button" onClick={() => setOffFor(m)} className="flex items-center gap-1 rounded-lg border border-amber-500/40 px-3 py-1.5 text-xs font-medium text-amber-300 hover:bg-amber-500/10"><CircleSlash className="h-3.5 w-3.5" />Not available</button>}
+              <button type="button" onClick={() => setBooking(m)} className="flex items-center gap-1 rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-500"><Plus className="h-3.5 w-3.5" />Book a session</button>
+            </div>
           </div>
           <div className="grid gap-2 sm:grid-cols-7">
             {days.map(d => {
@@ -105,9 +123,21 @@ export default function MentorCalendarPage() {
               // Cancelled ones too, marked (2026-10-17): a day emptied by cancellations says so rather than looking free.
               const classes = m.classes.filter(c => dayKey(c.startsAt) === key && classShown(c))
               const meetings = m.meetings.filter(v => dayKey(v.startsAt) === key && meetingShown(v))
+              const offs = (m.timeOff ?? []).map(t => ({ t, when: offOnDay(t, key) })).filter(x => x.when)
               return (
                 <div key={key} className="min-h-[72px] rounded-lg border border-white/5 p-2 text-[11px]">
                   <p className="mb-1 font-medium opacity-70">{d.toLocaleDateString(undefined, { weekday: 'short', day: 'numeric' })}</p>
+                  {offs.map(({ t, when }) => (
+                    <p key={t.id} className="mb-1 flex items-start justify-between gap-1 rounded bg-amber-500/15 px-1 text-amber-300"
+                      title={`Not available ${timeOffLabel(t, tz)}${t.reason ? ` — ${t.reason}` : ''}${t.createdByName ? ` (marked by ${t.createdByName})` : ''}`}>
+                      <span>{when} · Not available{t.reason ? <span className="block opacity-70">{t.reason}</span> : null}</span>
+                      {mayMark(m) && (
+                        <button type="button" disabled={removeOff.isPending} aria-label="Take this time off away"
+                          onClick={() => { if (confirm(`Take away "${timeOffLabel(t, tz)}"? ${m.name} can be booked then again.`)) removeOff.mutate({ mentorId: m.email.toLowerCase() === myEmail ? 'me' : m.id, id: t.id }) }}
+                          className="opacity-60 hover:opacity-100"><X className="h-3 w-3" /></button>
+                      )}
+                    </p>
+                  ))}
                   {slots.map((s, i) => <p key={i} className="mb-1 rounded bg-emerald-500/10 px-1 text-emerald-400">{s.startTime}–{s.endTime}</p>)}
                   {classes.map(c => (
                     <button type="button" key={c.id} disabled={!c.mine} onClick={() => setInfoFor(c.id)}
@@ -135,6 +165,7 @@ export default function MentorCalendarPage() {
       {!isLoading && !shownMentors.length && <p className="text-sm opacity-60">{filtering ? 'Nothing this week matches — clear the search or filters.' : 'No mentors to show.'}</p>}
       {booking && <BookDialog mentor={booking} tz={tz} onClose={() => setBooking(null)} />}
       {infoFor && <ClassInfoDialog id={infoFor} tz={tz} onClose={() => setInfoFor(null)} />}
+      {offFor && <TimeOffDialog mentorId={offFor.email.toLowerCase() === myEmail ? 'me' : offFor.id} mentorName={offFor.name} tz={tz} onClose={() => setOffFor(null)} />}
     </div>
   )
 }
@@ -205,16 +236,16 @@ function BookDialog({ mentor, tz, onClose }: { mentor: CalendarMentor; tz: strin
   const [f, setF] = useState({ date: new Date().toLocaleDateString('en-CA', { timeZone: tz }), time: '10:00', durationMins: 30, title: '', kind: 'staff' as 'staff' | 'student' | 'client', name: '', email: '', inPerson: false, location: '', notes: '' })
   const [err, setErr] = useState('')
   const set = (k: string, v: unknown) => setF(x => ({ ...x, [k]: v }))
+  // The time is the academy's (tz): turn it into an instant.
+  const startsAt = wallInZone(f.date, f.time, tz)
+  /* In their time off: said here, and the LMS refuses it anyway. */
+  const off = (mentor.timeOff ?? []).find(t => new Date(t.startsAt).getTime() < startsAt.getTime() + Number(f.durationMins) * 60_000 && new Date(t.endsAt).getTime() > startsAt.getTime())
   const submit = async () => {
     setErr('')
-    // The time is the academy's (tz): turn it into an instant.
-    const asUtc = new Date(`${f.date}T${f.time}:00Z`)
-    const there = new Date(asUtc.toLocaleString('en-US', { timeZone: tz }))
-    const startsAt = new Date(asUtc.getTime() + (asUtc.getTime() - there.getTime()))
     try {
       await book.mutateAsync({ mentorEmail: mentor.email, title: f.title.trim(), kind: f.kind, scheduledStart: startsAt.toISOString(), durationMins: Number(f.durationMins), attendees: [{ name: f.name.trim(), email: f.email.trim() }], inPerson: f.inPerson, location: f.location.trim(), notes: f.notes.trim() })
       onClose()
-    } catch (e) { setErr((e as Error)?.message || 'Could not book it') }
+    } catch (e) { setErr(refusal(e, 'Could not book it')) }
   }
   const field = 'w-full rounded-lg border border-white/10 bg-transparent px-3 py-2 text-sm outline-none'
   return (
@@ -235,10 +266,11 @@ function BookDialog({ mentor, tz, onClose }: { mentor: CalendarMentor; tz: strin
         <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={f.inPerson} onChange={e => set('inPerson', e.target.checked)} />In person (no Meet link)</label>
         {f.inPerson && <input className={field} placeholder="Where — room or office" value={f.location} onChange={e => set('location', e.target.value)} />}
         <textarea className={field} rows={2} placeholder="Notes (optional)" value={f.notes} onChange={e => set('notes', e.target.value)} />
+        {off && <p className="rounded-lg bg-amber-500/10 px-3 py-2 text-sm text-amber-300">{mentor.name} is not available then — {timeOffLabel(off, tz)}. Pick another time.</p>}
         {err && <p className="text-sm text-rose-400">{err}</p>}
         <div className="flex justify-end gap-2">
           <button type="button" onClick={onClose} className="rounded-lg border border-white/10 px-4 py-2 text-sm">Cancel</button>
-          <button type="button" disabled={book.isPending || f.title.trim().length < 3 || !f.name.trim() || (f.inPerson && f.location.trim().length < 2)} onClick={submit} className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white disabled:opacity-50">{book.isPending ? 'Booking…' : 'Book — they are emailed'}</button>
+          <button type="button" disabled={!!off || book.isPending || f.title.trim().length < 3 || !f.name.trim() || (f.inPerson && f.location.trim().length < 2)} onClick={submit} className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white disabled:opacity-50">{book.isPending ? 'Booking…' : 'Book — they are emailed'}</button>
         </div>
       </div>
     </div>

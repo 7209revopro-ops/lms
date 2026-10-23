@@ -639,6 +639,11 @@ export class ClassImportService {
       : null
     const clashName = (b: { title: string; courseId?: Types.ObjectId }) =>
       ownCourses && !ownCourses.has(String(b.courseId)) ? 'a class in another department' : `"${b.title}"`
+    /* The mentors' time off (services/mentorTimeOff.service.ts) — never imported over, --allow-clash or not. */
+    const { timeOffBetween, describeSpan } = await import('@/services/mentorTimeOff.service.ts')
+    const timeOff = instIds.length && starts.length
+      ? await timeOffBetween(instIds, new Date(Math.min(...starts)), new Date(Math.max(...starts) + 600 * 60_000))
+      : []
 
     for (const r of rows) {
       for (const o of r.occurrences) {
@@ -646,6 +651,8 @@ export class ClassImportService {
         if (existing.has(refOf(r, o.dateKey)) || existing.has(legacyRefOf(r, o.dateKey))) { o.state = 'exists'; o.note = 'Already imported'; continue }
         if (!r.instructor) continue
         const s = new Date(o.startISO).getTime(), e = s + r.durationMins * 60_000
+        const off = timeOff.find(b => String(b.mentorId) === r.instructor!.id && b.startsAt.getTime() < e && b.endsAt.getTime() > s)
+        if (off) { o.state = 'conflict'; o.note = `Mentor not available — time off ${describeSpan(off)}`; continue }
         const clash = busy.find(b => String(b.instructorId) === r.instructor!.id
           && !b.importRef?.startsWith(`${r.course.id}:${r.sessionKey}:`) && !b.importRef?.startsWith(`${settings.courseId}:${r.sessionKey}:`)
           && b.scheduledStart.getTime() < e && b.scheduledStart.getTime() + b.durationMins * 60_000 > s)
@@ -657,7 +664,9 @@ export class ClassImportService {
         const conflicts = r.occurrences.filter(o => o.state === 'conflict').length
         const exists = r.occurrences.filter(o => o.state === 'exists').length
         const past = r.occurrences.filter(o => o.state === 'past').length
-        if (conflicts) r.messages.push(`${conflicts} date${conflicts > 1 ? 's' : ''} clash with the mentor's existing classes — skipped.`)
+        const offDays = r.occurrences.filter(o => o.state === 'conflict' && o.note?.startsWith('Mentor not available')).length
+        if (conflicts - offDays) r.messages.push(`${conflicts - offDays} date${conflicts - offDays > 1 ? 's' : ''} clash with the mentor's existing classes — skipped.`)
+        if (offDays) r.messages.push(`${offDays} date${offDays > 1 ? 's fall' : ' falls'} in the mentor's time off — skipped.`)
         const alongside = r.occurrences.filter(o => o.state === 'new' && o.note?.startsWith('Alongside')).length
         if (alongside) r.messages.push(`${alongside} date${alongside > 1 ? 's run' : ' runs'} at the same time as the mentor's other classes — created anyway (--allow-clash).`)
         if (exists) r.messages.push(`${exists} date${exists > 1 ? 's' : ''} already imported — skipped.`)

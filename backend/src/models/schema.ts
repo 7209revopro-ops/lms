@@ -3110,6 +3110,43 @@ export const MentorAvailabilityModel = mongoose.model<IMentorAvailability>(
   MentorAvailabilitySchema,
 )
 
+/* ─────────────────────────────────────────────────────
+   MENTOR TIME OFF — "not available" from one moment to another (the user, 2026-10-23: mentors in the LMS and the
+   commission portal mark when they can't be booked, and no portal books them then). One-off, unlike the weekly slots
+   above; nothing — a class, a programme, an import, a 1:1 meeting — is booked with the mentor inside one
+   (services/mentorTimeOff.service.ts). Removed outright when the mentor is free again.
+───────────────────────────────────────────────────── */
+export interface IMentorTimeOff extends Document {
+  id:             string
+  mentorId:       Types.ObjectId
+  startsAt:       Date
+  endsAt:         Date
+  /** Marked as whole days — how the calendars draw it; startsAt/endsAt are still the exact span. */
+  allDay:         boolean
+  /** For the mentor and the admins; everyone else sees "Not available". */
+  reason:         string
+  createdByEmail: string
+  createdByName:  string
+  createdAt:      Date
+  updatedAt:      Date
+}
+
+const MentorTimeOffSchema = new Schema<IMentorTimeOff>(
+  {
+    mentorId:       { type: Schema.Types.ObjectId, ref: 'User', required: true },
+    startsAt:       { type: Date, required: true },
+    endsAt:         { type: Date, required: true },
+    allDay:         { type: Boolean, default: false },
+    reason:         { type: String, default: '', maxlength: 300 },
+    createdByEmail: { type: String, default: '' },
+    createdByName:  { type: String, default: '' },
+  },
+  baseSchemaOptions,
+)
+MentorTimeOffSchema.index({ mentorId: 1, startsAt: 1, endsAt: 1 })
+
+export const MentorTimeOffModel = mongoose.model<IMentorTimeOff>('MentorTimeOff', MentorTimeOffSchema)
+
 /* ── Program (Tetra Commission's user, 2026-10-09) ───────────────────────────
    A live class that repeats — weekly on chosen days, or monthly on a date — until an end date, for the students picked
    for it and nobody else. Made in the LMS admin (Programs) or from the commission portal for a CS's students.

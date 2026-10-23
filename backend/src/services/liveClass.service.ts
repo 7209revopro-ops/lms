@@ -1,4 +1,5 @@
 import { Types } from 'mongoose'
+import { assertMentorsFree } from '@/services/mentorTimeOff.service.ts'
 import { resolveClassEntitlement, loadEnrolmentIndex, entitlementFrom, doorsFor, type ClassDoors } from '@/services/classEntitlement.service.ts'
 import { LiveClassRepository } from '@/repositories/liveClass.repository.ts'
 import { CourseRepository } from '@/repositories/course.repository.ts'
@@ -456,6 +457,8 @@ export class LiveClassService {
     /* Runs before the Mux stream is opened and before the caller's Meet link
        is spent, so a refused instructor leaves no third-party room behind. */
     await this.#assertInstructorUsable(input.instructorId, classOrgId)
+    /* Never inside the mentor's time off (2026-10-23). */
+    await assertMentorsFree([input.instructorId], new Date(input.scheduledStart), input.durationMins)
 
     /* Validate meetingUrl is provided for online external sessions */
     if (input.type === 'external' && input.isOnline !== false) {
@@ -1019,8 +1022,22 @@ export class LiveClassService {
       .select('type status googleMeetCode recordingUrl scheduledStart organizationId '
             + 'courseId sectionId isOnline provider sessionCapacity bookedCount '
             + 'instructorId hostSeatsLeft overflowSeatsLeft guestCohorts '
-            + 'title durationMins meetSpace')
+            + 'title durationMins meetSpace coInstructorIds')
       .lean()
+
+    /* Moved, lengthened or handed to another mentor — into a mentor's time off: refused (2026-10-23). Left as it is,
+       a class that time off was later marked over can still be renamed or cancelled. */
+    {
+      const cur = current as { scheduledStart?: Date; durationMins?: number; instructorId?: unknown; coInstructorIds?: unknown[]; status?: string } | null
+      const start = input.scheduledStart != null ? new Date(input.scheduledStart) : cur?.scheduledStart ? new Date(cur.scheduledStart) : null
+      const mins = input.durationMins ?? cur?.durationMins ?? 0
+      const changed = (input.scheduledStart != null && +new Date(input.scheduledStart) !== +new Date(cur?.scheduledStart ?? 0))
+        || (input.durationMins != null && input.durationMins !== cur?.durationMins)
+        || (input.instructorId != null && String(input.instructorId) !== String(cur?.instructorId ?? ''))
+      if (cur && start && changed && (input.status ?? cur.status) !== 'cancelled') {
+        await assertMentorsFree([String(input.instructorId ?? cur.instructorId), ...(cur.coInstructorIds ?? []).map(String)], start, mins)
+      }
+    }
 
     const patch: Partial<ILiveClass> = { ...(input as any) }
     /* NEVER let these reach findByIdAndUpdate. guestCohorts carries seatsLeft,

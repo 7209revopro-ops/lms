@@ -15,6 +15,8 @@ import {
   getClassForPortal,
   setUserRoleFromPortal,
   provisionFromPortal,
+  addMentorTimeOffForPortal,
+  removeMentorTimeOffForPortal,
 } from '@/services/portal.service.ts'
 
 const router = Router()
@@ -159,7 +161,28 @@ router.get('/mentors', wrap(async (req, res) => {
   const to = typeof req.query.to === 'string' ? req.query.to : undefined
   // ?allAcademies=1 — both academies' mentors (the portal's Mentor Calendar, 2026-10-15).
   const allAcademies = req.query.allAcademies === '1' || req.query.allAcademies === 'true'
-  sendSuccess(res, await listMentorsForPortal({ remoteOrgId: orgOf(req), from, to, allAcademies }), 'Mentors')
+  /* ?timeOffReasons=all — each time off with its reason, for a caller that shows it only to whom it should (the
+     commission portal: the mentor, their chief, admins). Without it every time off is "Not available" alone. */
+  const timeOffReasonsFor = req.query.timeOffReasons === 'all' ? 'all' : undefined
+  sendSuccess(res, await listMentorsForPortal({ remoteOrgId: orgOf(req), from, to, allAcademies, timeOffReasonsFor }), 'Mentors')
+}))
+
+/* A mentor's time off (2026-10-23): marked from the commission portal — for the mentor it names, by email; who may
+   is the portal's rule. Every booking over it, from any portal, is refused from then on. What was already booked
+   inside it comes back as alreadyBooked: told, never cancelled. */
+router.post('/mentor-time-off', wrap(async (req, res) => {
+  const body = (req.body ?? {}) as Record<string, unknown>
+  sendSuccess(res, await addMentorTimeOffForPortal({
+    mentorEmail: String(body.mentorEmail ?? ''), startsAt: String(body.startsAt ?? ''), endsAt: String(body.endsAt ?? ''),
+    allDay: body.allDay === true, reason: String(body.reason ?? ''), byEmail: String(body.byEmail ?? ''), byName: String(body.byName ?? ''),
+  }), 'Time off marked')
+}))
+
+/* Taken away — free to be booked again. The mentor's email rides along so one mentor's time off can't be removed
+   by naming another's. */
+router.post('/mentor-time-off/:id/remove', wrap(async (req, res) => {
+  const body = (req.body ?? {}) as Record<string, unknown>
+  sendSuccess(res, await removeMentorTimeOffForPortal({ mentorEmail: String(body.mentorEmail ?? ''), timeOffId: String(req.params['id'] ?? '') }), 'Time off removed')
 }))
 
 /**

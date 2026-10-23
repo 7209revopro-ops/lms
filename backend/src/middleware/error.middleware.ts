@@ -8,6 +8,7 @@ import { EnrollmentError } from '@/services/enrollment.service.ts'
 import { ReviewError } from '@/services/review.service.ts'
 import { CategoryError } from '@/services/category.service.ts'
 import { LiveClassError } from '@/services/liveClass.service.ts'
+import { MentorUnavailableError, TimeOffError } from '@/services/mentorTimeOff.service.ts'
 import { NotificationError } from '@/services/notification.service.ts'
 import { FavoriteError } from '@/services/favorite.service.ts'
 import { OutlineError } from '@/services/section.service.ts'
@@ -108,6 +109,11 @@ export function errorMiddleware(
     return
   }
   if (err instanceof CategoryError) {
+    sendError(res, err.code, err.message, err.statusCode)
+    return
+  }
+  /* A mentor's time off (services/mentorTimeOff.service.ts) — refused, never a 500. */
+  if (err instanceof MentorUnavailableError || err instanceof TimeOffError) {
     sendError(res, err.code, err.message, err.statusCode)
     return
   }
