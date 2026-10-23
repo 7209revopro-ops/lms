@@ -100,7 +100,36 @@ export class EnrollmentService {
   }
 
   async listMine(userId: string) {
-    return this.enrollRepo.listForUser(userId)
+    const docs = await this.enrollRepo.listForUser(userId)
+    return this.#withoutFinishedPrograms(docs)
+  }
+
+  /* A programme's enrolment (its hidden "Program: …" course) is listed only while the programme still has
+     something to come — active, with a class not over yet (the user, 2026-10-23: "only new and coming
+     onwards programs"). A stopped programme, or one whose classes have all ended or been cancelled, drops
+     off My Learning and the sidebar. Ordinary courses are never affected. */
+  async #withoutFinishedPrograms<T extends { courseId?: unknown }>(docs: T[]): Promise<T[]> {
+    const { ProgramModel, LiveClassModel } = await import('@/models/schema.ts')
+    const idOf = (c: unknown) => String((c as { _id?: unknown } | null)?._id ?? c ?? '')
+    const courseIds = docs.map(d => idOf(d.courseId)).filter(id => Types.ObjectId.isValid(id))
+    if (!courseIds.length) return docs
+    const programs = await ProgramModel.find({ courseId: { $in: courseIds.map(id => new Types.ObjectId(id)) } })
+      .select('_id courseId status').lean<Array<{ _id: Types.ObjectId; courseId: Types.ObjectId; status?: string }>>()
+    if (!programs.length) return docs
+    const now = Date.now()
+    /* Classes that have not ended: still scheduled or live, and start + length is ahead of now. */
+    const open = await LiveClassModel.find({
+      programId: { $in: programs.map(p => p._id) },
+      status: { $in: ['scheduled', 'live'] },
+      scheduledStart: { $gte: new Date(now - 24 * 3600_000) },
+    }).select('programId scheduledStart durationMins').lean<Array<{ programId: Types.ObjectId; scheduledStart: Date; durationMins?: number }>>()
+    const live = new Set(open
+      .filter(c => new Date(c.scheduledStart).getTime() + (c.durationMins ?? 60) * 60_000 > now)
+      .map(c => String(c.programId)))
+    const finished = new Set(programs
+      .filter(p => p.status !== 'active' || !live.has(String(p._id)))
+      .map(p => String(p.courseId)))
+    return finished.size ? docs.filter(d => !finished.has(idOf(d.courseId))) : docs
   }
 
   async getSummary(userId: string, courseId: string): Promise<{
