@@ -1980,7 +1980,7 @@ router.post('/mentor-calendar/meetings', requireInstructor, async (req: Request,
   try {
     const { createMentorMeetingForPortal } = await import('@/services/portal.service.ts')
     const body = (req.body ?? {}) as Record<string, unknown>
-    sendSuccess(res, await createMentorMeetingForPortal({ ...body, remoteOrgId: await mentorCalendarOrg(req), bookedByEmail: String(req.user?.email ?? '') } as any), 'Meeting booked')
+    sendSuccess(res, await createMentorMeetingForPortal({ ...body, remoteOrgId: await mentorCalendarOrg(req), bookedByEmail: String(req.user?.email ?? ''), bookedVia: 'lms' } as any), 'Meeting booked')
   } catch (err) { next(err) }
 })
 
@@ -3663,6 +3663,94 @@ router.get('/bookings', requireInstructor, requirePermission('bookings','list'),
    "150" again. total_count was already in the response meta and simply never
    read. This returns the real figures for the whole filtered set in one $group,
    using the SAME scope builder as the list so the two can never disagree. */
+/* ── Mentor meetings on the Bookings page (2026-10-24) ────────────────────────
+   GET /admin/meetings — the 1:1 / group meetings booked with mentors (from the commission portal, or LMS
+   admin's Mentor Calendar): who is in each, who booked it and from where, the link or place. Read only.
+   A mentor sees their own; anyone else their academy's (the Bookings page's own rule), optionally one
+   mentor. ?dateFrom&dateTo (days, as the Bookings page sends), ?bucket=upcoming|today|portal|completed|
+   cancelled (the stats cards), ?search= title / participant / booker. Answers the page and the counts of
+   every bucket for the same range, so the cards and the list always agree. */
+const meetingQuerySchema = z.object({
+  dateFrom:     z.string().refine(s => !Number.isNaN(Date.parse(s)), 'Invalid date').optional(),
+  dateTo:       z.string().refine(s => !Number.isNaN(Date.parse(s)), 'Invalid date').optional(),
+  instructorId: z.string().optional(),
+  bucket:       z.enum(['all', 'upcoming', 'today', 'portal', 'completed', 'cancelled']).optional(),
+  search:       z.string().trim().max(80).optional(),
+  page:         z.coerce.number().int().min(1).max(1000).optional(),
+  per_page:     z.coerce.number().int().min(1).max(200).optional(),
+})
+router.get('/meetings', requireInstructor, requirePermission('bookings', 'list'), validate(meetingQuerySchema, 'query'), async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { MentorMeetingModel, UserModel } = await import('@/models/schema.ts')
+    const { Types } = await import('mongoose')
+    const q = req.query as unknown as z.infer<typeof meetingQuerySchema>
+    const page = q.page ?? 1, perPage = q.per_page ?? 50
+    const empty = { items: [], stats: { all: 0, upcoming: 0, today: 0, portal: 0, completed: 0, cancelled: 0 } }
+
+    const base: Record<string, any> = {}
+    if (req.user!.role === 'instructor') base['mentorId'] = new Types.ObjectId(req.user!.id)
+    else {
+      const caller = await callerOrgForRead(req)
+      if (caller.gone) { sendSuccess(res, empty, undefined, 200, buildPaginationMeta(0, page, perPage)); return }
+      if (caller.org && Types.ObjectId.isValid(caller.org)) base['organizationId'] = new Types.ObjectId(caller.org)
+      if (q.instructorId && Types.ObjectId.isValid(q.instructorId)) base['mentorId'] = new Types.ObjectId(q.instructorId)
+    }
+    if (q.dateFrom || q.dateTo) base['scheduledStart'] = dayRangeBounds(q.dateFrom, q.dateTo)
+    if (q.search) {
+      const rx = new RegExp(escapeRegex(q.search), 'i')
+      base['$or'] = [{ title: rx }, { 'attendees.name': rx }, { 'attendees.email': rx }, { bookedByEmail: rx }]
+    }
+
+    /* "From the portal": recorded for new meetings; for older ones, booked by someone with no LMS staff account. */
+    const bookers = await MentorMeetingModel.distinct('bookedByEmail', { ...base, bookedVia: { $exists: false } }) as string[]
+    const staff = bookers.length
+      ? (await UserModel.find({ email: { $in: bookers }, role: { $in: ['super_admin', 'admin', 'sub_admin', 'instructor', 'support'] } }).select('email').lean() as Array<{ email: string }>).map(u => u.email)
+      : []
+    const fromPortal = { $or: [{ bookedVia: 'portal' }, { bookedVia: { $exists: false }, bookedByEmail: { $nin: staff } }] }
+
+    const now = new Date()
+    const dayStart = new Date(now); dayStart.setHours(0, 0, 0, 0)      // the server's day — Dubai (config/timezone.ts)
+    const dayEnd = new Date(dayStart.getTime() + 864e5 - 1)
+    const live = { cancelledAt: null }
+    const buckets: Record<string, Record<string, unknown>> = {
+      all:       {},
+      upcoming:  { ...live, scheduledStart: { ...(base['scheduledStart'] ?? {}), $gt: now } },
+      today:     { ...live, scheduledStart: { $gte: dayStart, $lte: dayEnd } },
+      portal:    fromPortal,
+      /* Over: started before now (and not cancelled) — the end is checked below, it needs the length. */
+      completed: { ...live, scheduledStart: { ...(base['scheduledStart'] ?? {}), $lte: now } },
+      cancelled: { cancelledAt: { $ne: null } },
+    }
+    const and = (extra: Record<string, unknown>) => ({ $and: [base, extra] })
+    const counts = await Promise.all(Object.entries(buckets).map(async ([k, f]) => [k, await MentorMeetingModel.countDocuments(and(f))] as const))
+    const stats = Object.fromEntries(counts) as Record<string, number>
+
+    const filter = and(buckets[q.bucket ?? 'all'] ?? {})
+    const total = await MentorMeetingModel.countDocuments(filter)
+    const rows = await MentorMeetingModel.find(filter)
+      .sort({ scheduledStart: q.bucket === 'upcoming' || q.bucket === 'today' ? 1 : -1 })
+      .skip((page - 1) * perPage).limit(perPage)
+      .populate('mentorId', 'name email avatarUrl')
+      .lean() as any[]
+    const staffSet = new Set(staff)
+    const items = rows.map(m => {
+      const end = new Date(m.scheduledStart).getTime() + (m.durationMins ?? 30) * 60_000
+      return {
+        id: String(m._id), title: m.title, kind: m.kind,
+        scheduledStart: m.scheduledStart, durationMins: m.durationMins,
+        mentor: m.mentorId ? { id: String(m.mentorId._id), name: m.mentorId.name, email: m.mentorId.email, avatarUrl: m.mentorId.avatarUrl } : null,
+        attendees: (m.attendees ?? []).map((a: any) => ({ name: a.name, email: a.email || null })),
+        bookedByEmail: m.bookedByEmail,
+        bookedVia: m.bookedVia ?? (staffSet.has(m.bookedByEmail) ? 'lms' : 'portal'),
+        isOnline: m.isOnline !== false, meetingUrl: m.meetingUrl || null, location: m.location || null,
+        notes: m.notes || null,
+        status: m.cancelledAt ? 'cancelled' : end <= now.getTime() ? 'completed' : new Date(m.scheduledStart).getTime() <= now.getTime() ? 'live' : 'upcoming',
+      }
+    })
+    sendSuccess(res, { items, stats }, undefined, 200, buildPaginationMeta(total, page, perPage))
+  } catch (err) { next(err) }
+})
+
 router.get('/bookings/stats', requireInstructor, requirePermission('bookings', 'list'),
   validate(bookingQuerySchema, 'query'), async (req: Request, res: Response, next: NextFunction) => {
   try {

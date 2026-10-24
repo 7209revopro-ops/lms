@@ -3361,6 +3361,9 @@ export interface IMentorMeeting extends Document {
   /* Who booked it, in the portal. Kept as an address rather than a reference
      because they are an account in another system entirely. */
   bookedByEmail:  string
+  /** Where it was booked (2026-10-24): the commission portal, or LMS admin's Mentor Calendar. Absent on
+      meetings booked before this was kept — the Bookings page infers it from who booked them. */
+  bookedVia?:     'portal' | 'lms'
   cancelledAt?:   Date
   createdAt:      Date
   updatedAt:      Date
@@ -3390,6 +3393,7 @@ const MentorMeetingSchema = new Schema<IMentorMeeting>(
     },
     notes:          { type: String, default: '', maxlength: 2000 },
     bookedByEmail:  { type: String, required: true, lowercase: true, trim: true },
+    bookedVia:      { type: String, enum: ['portal', 'lms'] },
     cancelledAt:    { type: Date, default: null },
   },
   baseSchemaOptions,
