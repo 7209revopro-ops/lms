@@ -109,22 +109,34 @@ function EnrolledCard({ e }: { e: MyEnrollment }) {
   const course = e.course!
   const bucket = bucketOf(e)
   const done = bucket === 'completed'
+  const label = done ? t('learning.completed') : bucket === 'notStarted' ? t('learning.notStarted') : t('learning.percent', { percent: Math.round(e.progressPercent) })
+  /* The website's "continue": straight back into the last lesson. */
+  const resume = !done && e.lastLessonId
   return (
-    <Card onPress={() => router.push({ pathname: '/learning/[slug]', params: { slug: course.slug } })}
-      accessibilityLabel={`${course.title}, ${done ? t('learning.completed') : bucket === 'notStarted' ? t('learning.notStarted') : t('learning.percent', { percent: Math.round(e.progressPercent) })}`}
-      style={{ flexDirection: 'row', gap: 14, padding: 12 }}>
-      <Img cover uri={course.thumbnailUrl} style={{ width: 92, height: 92, borderRadius: radius.md }} placeholderColor={colors.primaryLight} />
-      <View style={{ flex: 1, gap: 6, justifyContent: 'center' }}>
-        <Text numberOfLines={2} style={{ fontFamily: fonts.bold, fontSize: 15, lineHeight: 20, color: colors.textPrimary }}>{course.title}</Text>
-        {course.instructor && <Text numberOfLines={1} style={{ fontFamily: fonts.body, fontSize: 13, color: colors.textMuted }}>{course.instructor.name}</Text>}
-        <ProgressBar percent={e.progressPercent} />
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-          {done && <Glyph name="checkmark-circle" size={14} color={colors.successInk} />}
-          <Text style={{ fontFamily: fonts.semibold, fontSize: 12, color: done ? colors.successInk : colors.textSecondary }}>
-            {done ? t('learning.completed') : bucket === 'notStarted' ? t('learning.notStarted') : t('learning.percent', { percent: Math.round(e.progressPercent) })}
-          </Text>
+    <Card padded={false}>
+      <Pressable onPress={() => router.push({ pathname: '/learning/[slug]', params: { slug: course.slug } })}
+        accessibilityRole="button" accessibilityLabel={`${course.title}, ${label}`}
+        style={({ pressed }) => ({ flexDirection: 'row', gap: 14, padding: 12, opacity: pressed ? 0.85 : 1 })}>
+        <Img cover uri={course.thumbnailUrl} style={{ width: 92, height: 92, borderRadius: radius.md }} placeholderColor={colors.primaryLight} />
+        <View style={{ flex: 1, gap: 6, justifyContent: 'center' }}>
+          <Text numberOfLines={2} style={{ fontFamily: fonts.bold, fontSize: 15, lineHeight: 20, color: colors.textPrimary }}>{course.title}</Text>
+          {course.instructor && <Text numberOfLines={1} style={{ fontFamily: fonts.body, fontSize: 13, color: colors.textMuted }}>{course.instructor.name}</Text>}
+          <ProgressBar percent={e.progressPercent} />
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+            {done && <Glyph name="checkmark-circle" size={14} color={colors.successInk} />}
+            <Text style={{ fontFamily: fonts.semibold, fontSize: 12, color: done ? colors.successInk : colors.textSecondary }}>{label}</Text>
+          </View>
         </View>
-      </View>
+      </Pressable>
+      {resume && (
+        <Pressable onPress={() => router.push({ pathname: '/learning/[slug]/[lessonId]', params: { slug: course.slug, lessonId: e.lastLessonId! } })}
+          accessibilityRole="button" accessibilityLabel={`${t('learning.continue')}, ${course.title}`}
+          style={({ pressed }) => ({ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, minHeight: 46,
+            borderTopWidth: 1, borderTopColor: colors.border, backgroundColor: pressed ? colors.primaryLight : 'transparent' })}>
+          <Glyph name="play-circle" size={18} color={colors.primary} />
+          <Text style={{ fontFamily: fonts.semibold, fontSize: 14, color: colors.primary }}>{t('learning.continue')}</Text>
+        </Pressable>
+      )}
     </Card>
   )
 }

@@ -67,6 +67,8 @@ export const en = {
     startingSoon: 'Starting soon',
   },
   classes: {
+    directions: 'Get directions',
+    noSameDayCancel: 'In-person seats cannot be cancelled on the day of the class. If you cannot come, let the academy know.',
     bookingsFailed: 'We could not load your bookings, so we cannot show what you can do with this class yet.',
     book: 'Book a seat',
     bookFailed: 'Could not book',

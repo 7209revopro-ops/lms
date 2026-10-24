@@ -1,10 +1,10 @@
 import { useEffect, useState } from 'react'
-import { Alert, Animated, Pressable, Text, View } from 'react-native'
+import { Alert, Animated, Linking, Platform, Pressable, Text, View } from 'react-native'
 import { router } from 'expo-router'
 import Ionicons from '@expo/vector-icons/Ionicons'
 import { useTranslation } from 'react-i18next'
 import {
-  effCourseTitle, effSectionTitle, displayStatus, getJoinPhase, getSlotStatus, seatsLeft, bookingCutoffLabel,
+  effCourseTitle, effSectionTitle, displayStatus, offlineDayOffset, getJoinPhase, getSlotStatus, seatsLeft, bookingCutoffLabel,
   type LiveClass, type MyBooking, type DisplayStatus, type SlotStatus,
 } from '@shared'
 import { useBookClass, useCancelBooking } from '@/lib/api/classes'
@@ -164,6 +164,13 @@ export function ClassCard({ lc, booking, hasOther, heldTwin, now, onPress }: {
   )
 }
 
+/** The phone's maps app, searching for the class's address. */
+async function openMaps(place: string) {
+  const q = encodeURIComponent(place)
+  const url = Platform.OS === 'ios' ? `maps:0,0?q=${q}` : `geo:0,0?q=${q}`
+  try { await Linking.openURL(url) } catch { await Linking.openURL(`https://www.google.com/maps/search/?api=1&query=${q}`) }
+}
+
 /** Give the seat back — the confirm step, then DELETE /bookings/:id. */
 export function CancelSeat({ lc, booking }: { lc: LiveClass; booking: MyBooking }) {
   const { t } = useTranslation()
@@ -212,10 +219,17 @@ export function ClassAction({ lc, booking, status, heldTwin, now }: {
   const held = booking?.status === 'booked'
   if (held && (status === 'booked' || status === 'live')) {
     if (lc.isOnline === false) {
+      /* The website's rule: an in-person seat is not given back ON THE DAY —
+         the room is already counted. The place is on the card already, so
+         the useful thing here is the way there. */
+      const sameDay = offlineDayOffset(lc.scheduledStart) === 0
+      const place = [lc.location, lc.room].filter(Boolean).join(', ')
       return (
         <View style={{ gap: 8 }}>
-          {note(lc.location ? t('classes.inPersonAt', { place: lc.location }) : t('classes.inPersonHere'))}
-          {status === 'booked' && <CancelSeat lc={lc} booking={booking} />}
+          {lc.location
+            ? <Button variant="ghost" title={t('classes.directions')} onPress={() => void openMaps(lc.location!)} />
+            : note(t('classes.inPersonHere'))}
+          {status === 'booked' && (sameDay ? note(t('classes.noSameDayCancel', { place: place || t('classes.inPersonWord') })) : <CancelSeat lc={lc} booking={booking} />)}
         </View>
       )
     }

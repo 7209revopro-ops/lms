@@ -72,13 +72,6 @@ export default function Home() {
           </Card>
         )}
 
-        <Missed />
-
-        {news.map(a => (
-          <AnnouncementCard key={a.id} a={a} onDismiss={() => { dismissedAnnouncements.add(a.id); rerender(n => n + 1) }} />
-        ))}
-
-
         <SectionHeader title={t('bookings.nextClass')} action={{ label: t('bookings.all'), onPress: () => router.push('/bookings') }} />
         {isLoading ? <Loading cards={1} />
           : error && !next ? <Failed error={error} onRetry={refresh} />
@@ -92,6 +85,14 @@ export default function Home() {
           ) : (
             <Text style={{ fontFamily: fonts.body, color: colors.textSecondary }}>{next.booking.liveClassId.title}</Text>
           )}
+
+        {/* The class comes first — it is what the app is opened for; then what
+            happened while away, then the academy's news. */}
+        <Missed />
+
+        {news.map(a => (
+          <AnnouncementCard key={a.id} a={a} onDismiss={() => { dismissedAnnouncements.add(a.id); rerender(n => n + 1) }} />
+        ))}
 
         {rest.length > 0 && <SectionHeader title={t('bookings.comingUp')} />}
         {rest.slice(0, 4).map(x => x.lc && (
