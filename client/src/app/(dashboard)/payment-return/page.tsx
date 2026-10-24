@@ -27,7 +27,8 @@ function ReturnContent() {
   const status      = params.get('status')
   const amount      = params.get('amount')
   const currency    = params.get('currencyCode')
-  const orderId     = params.get('orderId')
+  /* Tamara returns OUR order as lmsOrder (its own orderId rides alongside) — order.service returnUrls. */
+  const orderId     = params.get('lmsOrder') ?? params.get('orderId')
   const txId        = params.get('transactionId')
   const docRef      = params.get('docRefNumber')
 

@@ -38,7 +38,7 @@ router.post('/pay', checkoutRateLimit, wrap(async (req, res) => {
   const { OrderError } = await import('@/services/order.service.ts')
   const claims = await claimsOf(req)
   try {
-    sendSuccess(res, await startGuestPayment(claims, req.body?.method, req.body?.couponCode), undefined, 201)
+    sendSuccess(res, await startGuestPayment(claims, req.body?.method, req.body?.couponCode, { isMobile: /Mobi|Android|iPhone/i.test(req.get('user-agent') ?? '') }), undefined, 201)
   } catch (err) {
     if (err instanceof GuestCheckoutError || err instanceof OrderError) throw err
     /* The gateway itself failed (down, refused, timed out). Its own text never reaches the buyer — it can

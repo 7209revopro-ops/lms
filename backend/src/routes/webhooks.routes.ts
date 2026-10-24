@@ -467,6 +467,8 @@ router.post('/tamara', async (req: Request, res: Response) => {
          it flows on to capture. Acting on the event name alone would strip a
          paying student of their course after a partial adjustment, so the
          decision is deferred to the order's real status. */
+      /* order_updated is the same partial adjustment, announced on its own. */
+      case 'order_updated':
       case 'order_canceled': {
         await orderSvc.reconcileTamaraCancellation(tamaraOrderId, ourOrderId)
         break

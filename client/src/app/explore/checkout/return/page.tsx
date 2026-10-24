@@ -23,7 +23,8 @@ function ReturnInner() {
   const q = useSearchParams()
   const gateway = q.get('gateway') ?? ''
   const status  = q.get('status')
-  const orderId = q.get('orderId') ?? ''
+  /* Tamara returns OUR order as lmsOrder (its own orderId rides alongside) — order.service returnUrls. */
+  const orderId = q.get('lmsOrder') ?? q.get('orderId') ?? ''
   const [state, setState] = useState<'working' | 'emailed' | 'pending' | 'error'>('working')
   const [msg, setMsg] = useState('')
   const [slug, setSlug] = useState<string | null>(null)

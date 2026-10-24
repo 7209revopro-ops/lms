@@ -178,7 +178,7 @@ router.post('/tamara/create-order', authenticate, checkoutRateLimit, requireChec
   }
   try {
     const { courseId, slug, couponCode } = req.body as { courseId: string; slug: string; couponCode?: string }
-    const result = await orderSvc.createTamaraOrder(req.user!.id, courseId, slug, couponCode)
+    const result = await orderSvc.createTamaraOrder(req.user!.id, courseId, slug, couponCode, { isMobile: /Mobi|Android|iPhone/i.test(req.get('user-agent') ?? '') })
     sendSuccess(res, result, 'Tamara checkout created', 201)
   } catch (err) { next(err) }
 })

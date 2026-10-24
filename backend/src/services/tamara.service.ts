@@ -70,9 +70,17 @@ export function tamaraStatusIsDead(status: string): boolean {
 }
 
 /* ─── Webhook events ─────────────────────────────────────────────────────── */
+/* The go-live checklist asks for Approved, Authorised, Captured, Canceled,
+   Refunded, Expired and Declined; registerwebhookurl's enum lists
+   order_updated but not declined/expired, while its own example sends them.
+   So: the checklist's set plus order_updated, and the enum-only set as the
+   fallback if Tamara refuses the wider one (registerWebhook). */
 export const TAMARA_WEBHOOK_EVENTS = [
   'order_approved', 'order_authorised', 'order_declined', 'order_expired',
-  'order_canceled', 'order_captured', 'order_refunded',
+  'order_canceled', 'order_updated', 'order_captured', 'order_refunded',
+] as const
+export const TAMARA_WEBHOOK_EVENTS_DOCUMENTED = [
+  'order_approved', 'order_authorised', 'order_canceled', 'order_updated', 'order_captured', 'order_refunded',
 ] as const
 export type TamaraWebhookEvent = (typeof TAMARA_WEBHOOK_EVENTS)[number]
 
@@ -163,10 +171,18 @@ export interface TamaraCreateCheckoutOptions {
   instalments?: number
   lang?:       'en' | 'ar'
   /** risk_assessment — required by Tamara's checkout schema and go-live checklist (2026-10-18). */
+  /* docs.tamara.co/docs/educational-services — dates dd-mm-yyyy; the two
+     paid dates are null on a first order, never absent. */
   riskAssessment?: {
     is_premium_customer: boolean; account_creation_date: string; total_order_count: number
-    date_first_paid?: string; date_last_paid?: string
+    date_first_paid: string | null; date_last_paid: string | null
+    education: {
+      education_type: string; start_date: string; end_date: string
+      event_location: 'Online' | 'Offline' | 'Hybrid' | string; purchase_type: string
+    }
   }
+  /** The checkout was started on a phone (Tamara tailors its hosted page). */
+  isMobile?: boolean
   successUrl:  string
   cancelUrl:   string
   failureUrl:  string
@@ -238,6 +254,8 @@ function assertTamaraId(value: string, what: string): void {
    holds a webhook (and the student's checkout request) open indefinitely. */
 const READ_TIMEOUT_MS  = 15_000
 const WRITE_TIMEOUT_MS = 25_000
+/* The eligibility pre-check sits in front of a button: a short budget, and past it Tamara is shown. */
+const ELIGIBILITY_TIMEOUT_MS = 1_000
 
 /* ─── TamaraService ──────────────────────────────────────────────────────── */
 
@@ -298,11 +316,18 @@ export class TamaraService {
     if (!this.isConfigured) return { available: false, rejectionReason: null, message: null }
 
     try {
-      const r = await this.call<{
-        has_available_payment_options?: boolean
-        available_payment_labels?: unknown[]
-      }>('/pre-checkout/v1/eligibility', {
+      /* The response has ONE field, `is_eligible`
+         (docs.tamara.co/reference/pre-checkout-eligibility). We used to read
+         `has_available_payment_options`, which the endpoint never returns, so
+         every customer read as eligible and the go-live check — grey Tamara
+         out for an ineligible customer — never fired.
+         Tamara asks for a 200 ms budget and "show Tamara" past it. From our
+         servers that round trip alone is longer, so 200 ms would time out
+         every call and the check would never decide anything; 1 s keeps the
+         page responsive and still lets a real answer through. */
+      const r = await this.call<{ is_eligible?: boolean }>('/pre-checkout/v1/eligibility', {
         method: 'POST',
+        timeoutMs: ELIGIBILITY_TIMEOUT_MS,
         body: JSON.stringify({
           order: { amount: Number(opts.amountAED.toFixed(2)), currency: env.TAMARA_CURRENCY },
           customer: {
@@ -319,7 +344,7 @@ export class TamaraService {
         return { available: true, rejectionReason: null, message: null }
       }
 
-      const available = r.data?.has_available_payment_options !== false
+      const available = r.data?.is_eligible !== false
       return available
         ? { available: true, rejectionReason: null, message: null }
         : {
@@ -377,7 +402,10 @@ export class TamaraService {
       country_code:       'AE',
       payment_type:       'PAY_BY_INSTALMENTS',
       instalments:        opts.instalments ?? 3,
-      locale:             opts.lang === 'ar' ? 'ar_AE' : 'en_US',
+      /* ar_SA or en_US are the only values (createcheckoutsession); with none,
+         a new customer gets Arabic. ar_AE was not one of them. */
+      locale:             opts.lang === 'ar' ? 'ar_SA' : 'en_US',
+      ...(opts.isMobile !== undefined && { is_mobile: opts.isMobile }),
       items:              [item],
       consumer: {
         first_name:   firstName,
@@ -387,6 +415,8 @@ export class TamaraService {
         ...(opts.buyerEmail && { email: opts.buyerEmail }),
       } satisfies TamaraConsumer,
       shipping_address: address,
+      /* "Required if available" — a course bills to the same address. */
+      billing_address:  address,
       ...(opts.riskAssessment && { risk_assessment: opts.riskAssessment }),
       platform:  'Delta LMS (web)',
       /* Both objects are required even at zero. */
@@ -489,9 +519,12 @@ export class TamaraService {
       `/orders/${encodeURIComponent(tamaraOrderId)}/authorise`,
       { method: 'POST', body: JSON.stringify({}), timeoutMs: WRITE_TIMEOUT_MS },
     )
+    /* A warning, not the alarm: a concurrent delivery that already authorised
+       is refused here too. The caller re-reads the order and raises the error
+       only when the refusal was real. */
     if (!r.ok) {
-      logger.error({ status: r.status, tamaraOrderId, body: r.text.slice(0, 300) },
-        'Tamara authorise FAILED — order will not be fulfilled')
+      logger.warn({ status: r.status, tamaraOrderId, body: r.text.slice(0, 300) },
+        'Tamara authorise refused')
       return { ok: false, status: '', autoCaptured: false }
     }
     /* Auto-capture is an account-level flag: when it is on, this call returns
@@ -545,9 +578,11 @@ export class TamaraService {
         tax_amount:      money(0),
       }),
     })
+    /* As with authorise: a second capture of an order already captured is
+       refused, and the caller checks for that before raising the alarm. */
     if (!r.ok) {
-      logger.error({ status: r.status, tamaraOrderId: opts.tamaraOrderId, body: r.text.slice(0, 300) },
-        'Tamara capture FAILED — order authorised but not captured, settlement needs follow-up')
+      logger.warn({ status: r.status, tamaraOrderId: opts.tamaraOrderId, body: r.text.slice(0, 300) },
+        'Tamara capture refused')
       return false
     }
     logger.info({ tamaraOrderId: opts.tamaraOrderId }, 'Tamara order captured')
@@ -611,10 +646,9 @@ export class TamaraService {
     const r = await this.call(`/orders/${encodeURIComponent(opts.tamaraOrderId)}/cancel`, {
       method: 'POST',
       timeoutMs: WRITE_TIMEOUT_MS,
-      body: JSON.stringify({
-        total_amount: money(opts.amountAED),
-        items: [],
-      }),
+      /* total_amount is the only required field (cancelorder); an empty
+         items list is not "no items", it is a malformed one. */
+      body: JSON.stringify({ total_amount: money(opts.amountAED) }),
     })
     if (!r.ok) {
       logger.error({ status: r.status, tamaraOrderId: opts.tamaraOrderId, body: r.text.slice(0, 300) },
@@ -639,13 +673,23 @@ export class TamaraService {
       return null
     }
 
-    const r = await this.call<{ webhook_id?: string }>('/webhooks', {
+    /* `type` is required (registerwebhookurl): without it the request does
+       not match either schema variant. */
+    const register = (list: readonly string[]) => this.call<{ webhook_id?: string }>('/webhooks', {
       method: 'POST',
       timeoutMs: WRITE_TIMEOUT_MS,
-      body: JSON.stringify({ url: clip(url, 255), events: [...events] }),
+      body: JSON.stringify({ type: 'order', url: clip(url, 255), events: [...list] }),
     })
+    let r = await register(events)
+    if (!r.ok && r.status >= 400 && r.status < 500 && events === TAMARA_WEBHOOK_EVENTS) {
+      logger.warn({ status: r.status }, 'Tamara refused the checklist event set — registering the documented enum only')
+      r = await register(TAMARA_WEBHOOK_EVENTS_DOCUMENTED)
+    }
     if (!r.ok) {
-      logger.warn({ status: r.status, body: r.text.slice(0, 300) }, 'Tamara webhook registration failed (non-fatal)')
+      /* ERROR, not warn: with no webhook a paid order is only ever confirmed
+         by the return page and the stuck-order sweep. */
+      logger.error({ status: r.status, body: r.text.slice(0, 300) },
+        'Tamara webhook NOT registered — register it in the Partners Portal (Settings → Webhooks) or fix the request')
       return null
     }
     const id = r.data?.webhook_id ?? null

@@ -19,6 +19,10 @@ process.env.JWT_REFRESH_SECRET ??= 'guestcheckout-refresh-secret-0123456789abcde
 process.env.ABZER_ACCESS_KEY = 'test-access'; process.env.ABZER_SECRET_KEY = 'test-secret'; process.env.ABZER_CURRENCY = 'AED'
 process.env.RAZORPAY_KEY_ID = 'rzp_test_x'; process.env.RAZORPAY_KEY_SECRET = 'rzp_secret_x'
 process.env.CLIENT_URL = 'https://lms.test'
+/* Set, even to empty: app.ts loads dotenv, which fills any UNSET key from the developer's backend/.env —
+   real Tabby/Tamara keys there used to switch those methods on and fail the "card only" check. */
+process.env.TABBY_SECRET_KEY = ''; process.env.TABBY_PUBLIC_KEY = ''; process.env.TABBY_MERCHANT_CODE = ''; process.env.TAMARA_API_KEY = ''
+process.env.WHATSAPP_API_KEY = ''; process.env.GOOGLE_CLIENT_ID = ''; process.env.R2_ACCESS_KEY_ID = ''
 export {}
 let pass = 0, fail = 0
 const lines: string[] = []

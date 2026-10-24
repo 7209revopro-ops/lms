@@ -124,6 +124,8 @@ try {
     check('payment_type is PAY_BY_INSTALMENTS', b?.payment_type === 'PAY_BY_INSTALMENTS')
     check('our order id travels as order_reference_id', b?.order_reference_id === 'ord_abc')
     check('the single line item carries the course', b?.items?.length === 1 && b.items[0].type === 'Digital')
+    check('billing_address is sent ("required if available")', b?.billing_address?.country_code === 'AE')
+    check('English checkout is en_US', b?.locale === 'en_US')
 
     /* Documented length caps. */
     calls = []
@@ -134,6 +136,27 @@ try {
       successUrl: 'https://s', cancelUrl: 'https://c', failureUrl: 'https://f',
     })
     const long = calls[0]?.body
+    check('is_mobile is left out when unknown', !('is_mobile' in (long ?? {})))
+
+    /* Arabic is ar_SA — the only Arabic value createcheckoutsession takes. */
+    calls = []
+    replies = [{ status: 200, body: { checkout_id: 'c', order_id: ORDER_ID, checkout_url: 'https://checkout.tamara.co/z' } }]
+    await svc.createCheckout({
+      amountAED: 10, orderId: 'o', courseTitle: 'x', courseId: 'y', lang: 'ar', isMobile: true,
+      buyerEmail: 'a@b.c', buyerName: 'A B', buyerPhone: '501234567',
+      successUrl: 'https://s', cancelUrl: 'https://c', failureUrl: 'https://f',
+      riskAssessment: {
+        is_premium_customer: false, account_creation_date: '05-03-2026', total_order_count: 0,
+        date_first_paid: null, date_last_paid: null,
+        education: { education_type: 'course', start_date: '24-10-2026', end_date: '24-10-2027', event_location: 'Online', purchase_type: 'One-time' },
+      },
+    })
+    const ar = calls[0]?.body
+    check('Arabic checkout is ar_SA, not ar_AE', ar?.locale === 'ar_SA', String(ar?.locale))
+    check('is_mobile travels when known', ar?.is_mobile === true)
+    check('risk_assessment carries the education block', ar?.risk_assessment?.education?.purchase_type === 'One-time')
+    check('first-order paid dates are null, not absent',
+      'date_first_paid' in (ar?.risk_assessment ?? {}) && ar?.risk_assessment?.date_first_paid === null)
     check('item name is clipped to 255', long?.items?.[0]?.name?.length === 255, String(long?.items?.[0]?.name?.length))
     check('item sku is clipped to 128', long?.items?.[0]?.sku?.length === 128, String(long?.items?.[0]?.sku?.length))
     check('description is clipped to 256', long?.description?.length <= 256, String(long?.description?.length))
@@ -193,6 +216,8 @@ try {
     await svc.cancelOrder({ tamaraOrderId: ORDER_ID, amountAED: 730.33, orderId: 'ord_abc' })
     check('cancel posts to /orders/{id}/cancel',
       calls[0]?.url === `https://api-sandbox.tamara.co/orders/${ORDER_ID}/cancel`, calls[0]?.url)
+    check('cancel sends total_amount and no empty items list',
+      calls[0]?.body?.total_amount?.amount === 730.33 && !('items' in (calls[0]?.body ?? {})))
 
     /* A refused money call must be reported, never swallowed. */
     calls = []; replies = [{ status: 400, body: { message: 'nope' } }]
@@ -256,8 +281,8 @@ try {
   section('Webhook events')
   {
     const ev = TAMARA_WEBHOOK_EVENTS as readonly string[]
-    check('all seven order events are subscribed', ev.length === 7, String(ev.length))
-    for (const e of ['order_approved','order_authorised','order_declined','order_expired','order_canceled','order_captured','order_refunded']) {
+    check('the checklist events plus order_updated are subscribed', ev.length === 8, String(ev.length))
+    for (const e of ['order_approved','order_authorised','order_declined','order_expired','order_canceled','order_updated','order_captured','order_refunded']) {
       check(`subscribes ${e}`, ev.includes(e))
     }
     check('event names are lowercase — they were matched UPPERCASE before, so nothing fired',
@@ -337,10 +362,10 @@ try {
   section('Eligibility fails SAFE')
   {
     stubFetch()
-    replies = [{ status: 200, body: { has_available_payment_options: true } }]
+    replies = [{ status: 200, body: { is_eligible: true } }]
     check('an eligible customer is available', (await svc.checkEligibility({ amountAED: 500 })).available)
 
-    replies = [{ status: 200, body: { has_available_payment_options: false } }]
+    replies = [{ status: 200, body: { is_eligible: false } }]
     const no = await svc.checkEligibility({ amountAED: 500 })
     check('an ineligible customer is not', !no.available)
     check('and carries copy to show rather than a raw code', typeof no.message === 'string' && no.message!.length > 20)
@@ -349,13 +374,18 @@ try {
     replies = [{ status: 500, body: {} }]
     check('a 500 from Tamara fails SAFE (still available)', (await svc.checkEligibility({ amountAED: 500 })).available)
 
-    calls = []; replies = [{ status: 200, body: { has_available_payment_options: true } }]
+    calls = []; replies = [{ status: 200, body: { is_eligible: true } }]
     await svc.checkEligibility({ amountAED: 500, phone: '+971501234567' })
     check('eligibility posts to /pre-checkout/v1/eligibility',
       calls[0]?.url === 'https://api-sandbox.tamara.co/pre-checkout/v1/eligibility', calls[0]?.url)
     check('with the INTERNATIONAL phone shape this endpoint wants',
       calls[0]?.body?.customer?.phone_number === '971501234567', String(calls[0]?.body?.customer?.phone_number))
     check('and an explicit AED order value', calls[0]?.body?.order?.currency === 'AED')
+
+    /* The field Tamara does NOT send must not decide anything: a body holding
+       only the old field reads as eligible, and only is_eligible:false hides. */
+    replies = [{ status: 200, body: { has_available_payment_options: false } }]
+    check('the undocumented old field is ignored (still available)', (await svc.checkEligibility({ amountAED: 500 })).available)
     restoreFetch()
   }
 
@@ -375,7 +405,15 @@ try {
     calls = []
     const okId = await svc.registerWebhook('https://api.delta.test/api/v1/webhooks/tamara')
     check('an HTTPS URL registers and returns the id', okId === 'wh_1')
-    check('subscribing all seven events', (calls[0]?.body?.events ?? []).length === 7)
+    check('registration sends type "order" (required by registerwebhookurl)', calls[0]?.body?.type === 'order')
+    check('subscribing the eight events', (calls[0]?.body?.events ?? []).length === 8)
+
+    /* Refused (4xx) for the wider set: retried with the documented enum. */
+    replies = [{ status: 422, body: { message: 'invalid event' } }, { status: 200, body: { webhook_id: 'wh_2' } }]
+    calls = []
+    const fallback = await svc.registerWebhook('https://api.delta.test/api/v1/webhooks/tamara')
+    check('a refused event set falls back to the documented enum', fallback === 'wh_2' && calls.length === 2
+      && (calls[1]?.body?.events ?? []).length === 6 && !calls[1]!.body.events.includes('order_expired'))
     restoreFetch()
   }
 

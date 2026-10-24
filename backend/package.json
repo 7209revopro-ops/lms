@@ -17,6 +17,7 @@
     "test:security": "bun src/tests/security.suite.ts",
     "test:tabby": "bun src/tests/tabby.suite.ts",
     "test:tamara": "bun src/tests/tamara.suite.ts",
+    "test:tamarafulfil": "bun --no-env-file src/tests/tamarafulfil.suite.ts",
     "test:paymentaccess": "bun --no-env-file src/tests/paymentaccess.suite.ts",
     "test:commissionstudents": "bun --no-env-file src/tests/commissionstudents.suite.ts",
     "test:portalactivity": "bun --no-env-file src/tests/portalactivity.suite.ts",

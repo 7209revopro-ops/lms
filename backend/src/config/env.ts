@@ -180,4 +180,12 @@ if (!parsed.success) {
 
 export const env = parsed.data
 
+/* Tamara keys are per environment: a live token answers "Merchant is not
+   found" on api-sandbox, and a sandbox token does the same on api. Loud
+   rather than fatal — refusing to boot would take the whole LMS down over one
+   payment method. */
+if (env.NODE_ENV === 'production' && env.TAMARA_API_KEY && /api-sandbox\./.test(env.TAMARA_BASE_URL)) {
+  console.error('⚠️  TAMARA_BASE_URL points at the Tamara SANDBOX in production — every Tamara checkout will fail. Set TAMARA_BASE_URL=https://api.tamara.co')
+}
+
 export type Env = typeof env

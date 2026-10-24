@@ -141,7 +141,7 @@ export async function prepareGuestCheckout(input: { slug?: unknown; name?: unkno
 }
 
 /* ── 2. pay ─────────────────────────────────────────────── */
-export async function startGuestPayment(claims: GuestClaims, method: unknown, couponCode?: unknown) {
+export async function startGuestPayment(claims: GuestClaims, method: unknown, couponCode?: unknown, ctx: { isMobile?: boolean } = {}) {
   const { CourseModel } = await import('@/models/schema.ts')
   const course: any = await CourseModel.findById(claims.cid).select('slug').lean()
   if (!course) throw new GuestCheckoutError('COURSE_NOT_FOUND', 'This course is not available', 404)
@@ -156,7 +156,7 @@ export async function startGuestPayment(claims: GuestClaims, method: unknown, co
       return { kind: 'redirect' as const, url: r.checkoutUrl, orderId: r.orderId }
     }
     case 'tamara': {
-      const r = await orders.createTamaraOrder(claims.uid, claims.cid, course.slug, coupon, { guest: true })
+      const r = await orders.createTamaraOrder(claims.uid, claims.cid, course.slug, coupon, { guest: true, ...ctx })
       return { kind: 'redirect' as const, url: r.checkoutUrl, orderId: r.orderId }
     }
     case 'razorpay': {

@@ -61,6 +61,13 @@ export function inrPriceFor(course: { price: number; priceINR?: number }): numbe
   return course.priceINR ?? Math.round(course.price * env.INR_EXCHANGE_RATE)
 }
 
+/** dd-mm-yyyy, the one date format Tamara's risk_assessment takes — in
+    academy (Dubai) time, which is this process's zone (config/timezone.ts). */
+export function tamaraDay(d: Date): string {
+  const p = (n: number) => String(n).padStart(2, '0')
+  return `${p(d.getDate())}-${p(d.getMonth() + 1)}-${d.getFullYear()}`
+}
+
 export function aedPriceFor(course: { price: number; priceAED?: number }): number {
   return course.priceAED ?? Math.round(course.price * env.UAE_EXCHANGE_RATE * 100) / 100
 }
@@ -136,11 +143,16 @@ export class OrderService {
      a public page; the order is tied to them by an httpOnly checkout cookie, never by the URL. */
   static returnUrls(gateway: 'tabby' | 'tamara' | 'abzer', orderId: string, guest = false) {
     const base = `${env.CLIENT_URL}${guest ? '/explore/checkout/return' : '/payment-return'}?gateway=${gateway}`
+    /* Tamara appends its OWN `orderId` (its order id) and `paymentStatus` to
+       the redirect, and its docs do not say whether it appends or overwrites.
+       Ours travels under a name it never uses, so either way the return page
+       reads OUR order — the pages read `lmsOrder` first, then `orderId`. */
+    const key = gateway === 'tamara' ? 'lmsOrder' : 'orderId'
     return {
-      successUrl: `${base}&orderId=${orderId}`,
+      successUrl: `${base}&${key}=${orderId}`,
       /* Tabby QA: a cancelled or failed payment returns to checkout — the order id lets the page do that. */
-      cancelUrl:  `${base}&status=cancelled&orderId=${orderId}`,
-      failureUrl: `${base}&status=failed&orderId=${orderId}`,
+      cancelUrl:  `${base}&status=cancelled&${key}=${orderId}`,
+      failureUrl: `${base}&status=failed&${key}=${orderId}`,
     }
   }
 
@@ -1165,7 +1177,7 @@ export class OrderService {
     courseId:    string,
     slug:        string,
     couponCode?: string,
-    opts:        { guest?: boolean } = {},
+    opts:        { guest?: boolean; isMobile?: boolean } = {},
   ): Promise<{ checkoutUrl: string; tamaraCheckoutId: string; orderId: string }> {
     if (!env.TAMARA_API_KEY) {
       throw new OrderError('TAMARA_NOT_CONFIGURED', 'Tamara is not configured on this server.', 503)
@@ -1220,7 +1232,7 @@ export class OrderService {
       /* phone and createdAt were never selected, so consumer.phone_number (required) went empty. */
       const user       = await UserModel.findById(userId).select('name email phone createdAt enrollmentApplication').exec()
       const { successUrl, cancelUrl, failureUrl } = OrderService.returnUrls('tamara', order.id, opts.guest)
-      const risk       = await this._tamaraRiskAssessment(userId, (user as { createdAt?: Date } | null)?.createdAt)
+      const risk       = await this._tamaraRiskAssessment(userId, (user as { createdAt?: Date } | null)?.createdAt, courseId)
       const app        = (user as { enrollmentApplication?: { city?: string; villa?: string; addressCountry?: string } } | null)?.enrollmentApplication ?? {}
 
       const result = await this.tamaraSvc.createCheckout({
@@ -1234,6 +1246,7 @@ export class OrderService {
         ...(app.city && { city: String(app.city) }),
         ...((app.villa || app.addressCountry) && { addressLine: String(app.villa || app.addressCountry) }),
         riskAssessment: risk,
+        ...(opts.isMobile !== undefined && { isMobile: opts.isMobile }),
         successUrl,
         cancelUrl,
         failureUrl,
@@ -1247,17 +1260,44 @@ export class OrderService {
 
   /* Tamara's risk_assessment (required by its checkout schema and its go-live checklist): who the customer
      is to us — since when, and what they have paid for before. From their own settled orders. */
-  private async _tamaraRiskAssessment(userId: string, createdAt?: Date) {
+  /* Shape and formats per docs.tamara.co/docs/educational-services: every
+     date is dd-mm-yyyy (ISO dates were sent before); date_first_paid and
+     date_last_paid are REQUIRED and null on a first order (they were left
+     out); and an education merchant sends the `education` block. */
+  private async _tamaraRiskAssessment(userId: string, createdAt: Date | undefined, courseId: string) {
     const paid = (await this.orderRepo.listForUser(userId))
       .filter(o => o.status === 'paid')
       .map(o => new Date((o as { paidAt?: Date }).paidAt ?? (o as { createdAt?: Date }).createdAt ?? Date.now()))
       .sort((a, b) => a.getTime() - b.getTime())
-    const day = (d: Date) => d.toISOString().slice(0, 10)
     return {
       is_premium_customer:   false,
-      account_creation_date: day(createdAt ?? new Date()),
+      account_creation_date: tamaraDay(createdAt ?? new Date()),
       total_order_count:     paid.length,
-      ...(paid.length && { date_first_paid: day(paid[0]!), date_last_paid: day(paid[paid.length - 1]!) }),
+      date_first_paid:       paid.length ? tamaraDay(paid[0]!) : null,
+      date_last_paid:        paid.length ? tamaraDay(paid[paid.length - 1]!) : null,
+      education:             await this._tamaraEducation(courseId),
+    }
+  }
+
+  /* The course as Tamara's education block describes it. A course has no
+     dates of its own, so its live classes give them: the first and last
+     session still ahead, and whether they meet online, in person or both.
+     With nothing scheduled, the purchase opens a year of access from today. */
+  private async _tamaraEducation(courseId: string) {
+    const { LiveClassModel } = await import('@/models/schema.ts')
+    const sessions = await LiveClassModel.find({
+      courseId, status: { $ne: 'cancelled' }, scheduledStart: { $gte: new Date() },
+    }).select('scheduledStart isOnline').sort({ scheduledStart: 1 }).lean() as { scheduledStart: Date; isOnline?: boolean }[]
+    const start = sessions[0]?.scheduledStart ?? new Date()
+    const end   = sessions.at(-1)?.scheduledStart ?? new Date(start.getTime() + 365 * 86_400_000)
+    const inPerson = sessions.some(s => s.isOnline === false)
+    const online   = sessions.length === 0 || sessions.some(s => s.isOnline !== false)
+    return {
+      education_type: 'course',
+      start_date:     tamaraDay(start),
+      end_date:       tamaraDay(end),
+      event_location: inPerson && online ? 'Hybrid' : inPerson ? 'Offline' : 'Online',
+      purchase_type:  'One-time',
     }
   }
 
@@ -1360,13 +1400,24 @@ export class OrderService {
        and it has a 72-hour fuse. */
     if (status === 'approved') {
       const auth = await this.tamaraSvc.authoriseOrder(tamaraOrderId)
-      if (!auth.ok) {
-        /* Retry rather than ignore: the customer HAS paid, and letting this
-           lapse silently is how an order expires with their money taken. */
-        logger.error({ tamaraOrderId, orderId: order.id }, 'Tamara: authorise refused — will retry')
-        return 'retry'
+      if (auth.ok) {
+        status = auth.status || 'authorised'
+      } else {
+        /* The return page and the order_approved webhook land together, and
+           both authorise: the second is refused because the first already
+           did it. Ask Tamara where the order stands now before calling it a
+           failure — otherwise the student sees "payment not confirmed" while
+           the webhook enrols them. */
+        const now = await this.tamaraSvc.getOrder(tamaraOrderId).catch(() => null)
+        if (now && tamaraStatusIsPaid(now.status)) {
+          status = now.status
+        } else {
+          /* Retry rather than ignore: the customer HAS paid, and letting this
+             lapse silently is how an order expires with their money taken. */
+          logger.error({ tamaraOrderId, orderId: order.id }, 'Tamara: authorise refused — will retry')
+          return 'retry'
+        }
       }
-      status = auth.status || 'authorised'
     }
 
     if (!tamaraStatusIsPaid(status)) {
@@ -1392,9 +1443,14 @@ export class OrderService {
          funds are committed and the enrolment is owed. An uncaptured payment
          is money not yet collected — a settlement problem to chase from the
          logs, and loud rather than silent. */
-      if (!captured) {
+      /* A concurrent delivery (return page + webhook, or two webhooks) may
+         have captured first, and Tamara refuses the second. Only a capture
+         Tamara still does not show is worth the alarm. */
+      const capturedElsewhere = !captured
+        && ((await this.tamaraSvc.getOrder(tamaraOrderId).catch(() => null))?.capturedFils ?? 0) > 0
+      if (!captured && !capturedElsewhere) {
         logger.error({ tamaraOrderId, orderId: order.id },
-          'Tamara: fulfilling an UNCAPTURED order — collect manually before the 21-day auto-capture')
+          'Tamara: fulfilling an UNCAPTURED order — Tamara auto-captures 21 days after authorisation; the stuck-order sweep retries the capture')
       }
     }
 
