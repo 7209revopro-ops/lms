@@ -771,6 +771,8 @@ export async function createMentorMeetingForPortal(input: {
   attendees?: unknown
   notes?: string
   bookedByEmail?: string
+  /** Where it was booked: the portal (default) or LMS admin's Mentor Calendar. */
+  bookedVia?: 'portal' | 'lms'
   /** Any academy's mentor — the portal's calendar lists both academies' (listMentorsForPortal allAcademies). */
   allAcademies?: boolean
 }): Promise<{ meeting: PortalMentorMeeting; mentorEmail: string; linkNote: string | null }> {
@@ -881,6 +883,7 @@ export async function createMentorMeetingForPortal(input: {
     attendees,
     notes: String(input.notes ?? '').trim(),
     bookedByEmail,
+    bookedVia: input.bookedVia === 'lms' ? 'lms' : 'portal',
   })
 
   /* Told, not just recorded. A booking the mentor has to go looking for is a

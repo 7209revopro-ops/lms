@@ -25,6 +25,7 @@ import { datetimeLocalToISO } from '@/lib/timezone'
 import { CLASS_LANGUAGES } from '@/lib/languages'
 import { hasJoined, joinedLabel } from '@/lib/attendance'
 import { CsTag, csName, csTeam } from '@/components/ui/CsTag'
+import { MeetingsView } from '@/components/bookings/MeetingsView'
 
 /* ─── Custom dark dropdown ───────────────────────────────── */
 interface SelectOption { value: string; label: string }
@@ -539,6 +540,8 @@ export default function BookingsPage() {
   const [sort, setSort] = useState<NonNullable<AdminBookingParams['sort']>>('scheduledStart')
   const [courseFilter,     setCourseFilter]     = useState('')
   const [instructorFilter, setInstructorFilter] = useState('')
+  /* Class bookings, or the mentors' meetings (2026-10-24) — same dates, its own cards and list. */
+  const [view, setView] = useState<'classes' | 'meetings'>('classes')
   const [langFilter,       setLangFilter]       = useState('')
   const [search,           setSearch]           = useState('')
   const [page,             setPage]             = useState(1)
@@ -926,6 +929,22 @@ export default function BookingsPage() {
         </div>
       </motion.div>
 
+      {/* ── Class bookings | Meetings ─────────────────── */}
+      <div className="mb-5 inline-flex rounded-2xl p-1" role="tablist" aria-label="What to show"
+        style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)' }}>
+        {([['classes', 'Class bookings'], ['meetings', 'Meetings']] as const).map(([k, label]) => (
+          <button key={k} type="button" role="tab" aria-selected={view === k} onClick={() => setView(k)}
+            className="rounded-xl px-4 py-1.5 text-sm font-semibold transition-colors"
+            style={view === k ? { background: 'rgba(0,87,184,0.22)', color: '#fff' } : { color: 'rgba(255,255,255,0.5)' }}>
+            {label}
+          </button>
+        ))}
+      </div>
+
+      {view === 'meetings' ? (
+        <MeetingsView dateFrom={toYMD(dateFrom)} dateTo={toYMD(dateTo)} isInstructor={isInstructor}
+          mentors={instructors.map(i => ({ id: i.id, name: i.name }))} />
+      ) : (<>
       {/* ── Stats ─────────────────────────────────────── */}
       {!isLoading && !isError && (bookings.length > 0 || needsMarking) && (
         <StatsStrip stats={stats} needsMarking={needsMarking}
@@ -1302,6 +1321,7 @@ export default function BookingsPage() {
           </motion.div>
         )}
       </AnimatePresence>
+      </>)}
     </div>
   )
 }
