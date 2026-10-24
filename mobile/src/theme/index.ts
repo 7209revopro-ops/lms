@@ -14,6 +14,8 @@ const light = {
   /** Green as TEXT: the brand mint is ~2:1 on white, so light mode inks darker. */
   successInk:     '#047857',
   warning:        '#F59E0B',
+  /** Amber as TEXT: #F59E0B is ~2:1 on white, so light mode inks darker. */
+  warningInk:     '#B45309',
   danger:         '#EF4444',
   dangerLight:    '#FEF2F2',
   bgPage:         '#F4F5F8',
@@ -41,6 +43,7 @@ const dark: typeof light = {
   success:        '#2ee0a5',
   successInk:     '#2ee0a5',
   warning:        '#FBBF24',
+  warningInk:     '#FBBF24',
   danger:         '#F87171',
   dangerLight:    'rgba(248,113,113,0.13)',
   bgPage:         '#0B0D14',

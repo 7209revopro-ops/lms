@@ -142,7 +142,7 @@ function AchievementList({ items, earned, total }: { items: Achievement[]; earne
               <Text numberOfLines={1} style={{ fontFamily: fonts.semibold, fontSize: 14, color: colors.textPrimary }}>{a.title}</Text>
               <Text numberOfLines={2} style={{ fontFamily: fonts.body, fontSize: 12, lineHeight: 16, color: colors.textMuted }}>{a.description}</Text>
               {a.earned
-                ? <Text style={{ fontFamily: fonts.semibold, fontSize: 11, color: colors.warning }}>{t('progress.earned')}</Text>
+                ? <Text style={{ fontFamily: fonts.semibold, fontSize: 11, color: colors.warningInk }}>{t('progress.earned')}</Text>
                 : <><ProgressBar percent={pct} tone="primary" /><Text style={{ fontFamily: fonts.medium, fontSize: 11, color: colors.textMuted }}>{`${a.progress} / ${a.target}`}</Text></>}
             </View>
           )

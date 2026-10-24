@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react'
-import { Alert, Pressable, RefreshControl, ScrollView, Text, View } from 'react-native'
+import { Alert, KeyboardAvoidingView, Pressable, RefreshControl, ScrollView, Text, View } from 'react-native'
 import { Stack, router, useLocalSearchParams } from 'expo-router'
+import { useHeaderHeight } from 'expo-router/react-navigation'
 import { useTranslation } from 'react-i18next'
 import {
   durationLabel, lessonGate, lessonSequence, outlineOf, problemOf, resumeLesson,
@@ -19,6 +20,7 @@ import { haptic } from '@/lib/haptics'
 import { Avatar, Badge, Button, Card, Field, Glyph, IconButton, Notice, ProgressBar, Segmented } from '@/components/ui'
 import { CourseRow, StarInput, Stars } from '@/components/catalog'
 import { Img } from '@/components/media'
+import { CourseLiveClasses } from '@/components/schedule'
 import { Empty, Failed, Loading } from '@/components/states'
 import { useToast } from '@/components/toast'
 import { useTheme } from '@/theme'
@@ -42,6 +44,7 @@ export default function CoursePage() {
   const pending = enrollmentStatus === 'pending'
 
   const course = useCourse(slug)
+  const headerHeight = useHeaderHeight()
   /* /progress refuses students who are not approved; they browse the outline. */
   const progress = useCourseProgress(slug, approved)
   const enroll = useEnrollFree(slug ?? '')
@@ -82,7 +85,9 @@ export default function CoursePage() {
   return (
     <>
       <Stack.Screen options={{ title: '', headerRight: () => <FavoriteHeart course={c} /> }} />
-      <ScrollView
+      {/* The review comment and its Post button must stay above the keyboard. */}
+      <KeyboardAvoidingView style={{ flex: 1 }} behavior="padding" keyboardVerticalOffset={headerHeight}>
+      <ScrollView keyboardShouldPersistTaps="handled"
         contentContainerStyle={{ paddingBottom: action ? 104 : 32 }}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => void refresh()} tintColor={colors.primary} />}>
         <Hero course={c} lessons={seq.length} />
@@ -92,6 +97,7 @@ export default function CoursePage() {
           {enrolled && <EnrolledPanel progress={progress.data!} title={c.title} />}
           {!enrolled && approved && !c.isFree && <Notice tone="info">{t('catalog.paidNotice')}</Notice>}
           {enrolled && <ExamCard courseId={c.id} slug={slug!} />}
+          {enrolled && <CourseLiveClasses courseId={c.id} />}
 
           <Segmented<Tab> value={tab} onChange={setTab} options={[
             { value: 'curriculum', label: t('catalog.tabs.curriculum') },
@@ -104,6 +110,7 @@ export default function CoursePage() {
           {tab === 'reviews' && <Reviews course={c} slug={slug!} canWrite={enrolled} />}
         </View>
       </ScrollView>
+      </KeyboardAvoidingView>
 
       {action && (
         <View style={{ position: 'absolute', left: 0, right: 0, bottom: 0, paddingHorizontal: 16, paddingTop: 12, paddingBottom: 12,
@@ -193,7 +200,7 @@ function EnrolledPanel({ progress, title }: { progress: CourseProgress; title: s
   return (
     <Card style={{ gap: 10 }}>
       <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
-        <Text style={{ fontFamily: fonts.semibold, fontSize: 14, color: completed ? colors.success : colors.textPrimary }}>
+        <Text style={{ fontFamily: fonts.semibold, fontSize: 14, color: completed ? colors.successInk : colors.textPrimary }}>
           {completed ? t('catalog.courseComplete') : t('learning.percent', { percent: pct })}
         </Text>
         {completed && <Glyph name="trophy" size={20} color={colors.warning} />}
@@ -353,6 +360,8 @@ function Reviews({ course: c, slug, canWrite }: { course: CourseSummary; slug: s
   const toast = useToast()
   const hist = useRatingHistogram(slug)
   const list = useCourseReviews(c.id)
+  /* One vote in flight at a time: a double tap would vote, then un-vote. */
+  const [voting, setVoting] = useState<string | null>(null)
   const write = useWriteReview(c.id, slug)
   const [rating, setRating] = useState(0)
   const [comment, setComment] = useState('')
@@ -417,7 +426,14 @@ function Reviews({ course: c, slug, canWrite }: { course: CourseSummary; slug: s
             )}
             <View style={{ flexDirection: 'row', gap: 16 }}>
               <SmallAction icon="thumbs-up-outline" label={r.helpfulVotes ? t('reviews.helpfulN', { count: r.helpfulVotes }) : t('reviews.helpful')}
-                onPress={() => void toggleHelpful(r.id).then(x => { toast(x.alreadyVoted ? t('reviews.unvoted') : t('reviews.voted'), 'info'); void list.refetch() }).catch(e => toast(errorText(e), 'danger'))} />
+                onPress={() => {
+                  if (voting) return
+                  setVoting(r.id)
+                  void toggleHelpful(r.id)
+                    .then(x => { toast(x.alreadyVoted ? t('reviews.unvoted') : t('reviews.voted'), 'info'); void list.refetch() })
+                    .catch(e => toast(errorText(e), 'danger'))
+                    .finally(() => setVoting(null))
+                }} />
               <SmallAction icon="flag-outline" label={t('reviews.report')}
                 onPress={() => Alert.alert(t('reviews.reportTitle'), t('reviews.reportBody'), [
                   { text: t('common.back'), style: 'cancel' },

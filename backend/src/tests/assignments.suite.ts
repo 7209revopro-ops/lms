@@ -273,6 +273,18 @@ try {
       ok(o) && (o.body?.data ?? []).length === 0, why(o))
     const anon = await call('GET', '/class-assignments/submittable')
     check('...and it is not readable without a session', anon.status === 401, why(anon))
+
+    /* A seat for a class that has not run yet is not one to hand work in for
+       — the picker says "a class you attended". Made and removed here so no
+       later section counts it. */
+    const ahead = await mkClass('Next Week Session', teacherA, -3)
+    const seat = await ClassBookingModel.create({ userId: attendee._id, liveClassId: ahead._id, status: 'booked' })
+    const f = await call('GET', '/class-assignments/submittable', { jar: attendeeJar })
+    const fIds = (f.body?.data ?? []).map((c: any) => String(c._id ?? c.id))
+    check('a booked class that has NOT started yet is not offered', ok(f) && !fIds.includes(String(ahead._id)) && fIds.length === 2,
+      `${fIds.length}: ${fIds.join(',')}`)
+    await ClassBookingModel.deleteOne({ _id: seat._id })
+    await LiveClassModel.deleteOne({ _id: ahead._id })
   }
 
   /* ══════════ 1b. WHO SEES WHAT ══════════

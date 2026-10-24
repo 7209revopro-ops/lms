@@ -63,8 +63,8 @@ export default function DeleteAccount() {
         <View style={{ gap: 12 }}>
           {!useCode ? <>
             <Field label={t('account.deleteWithPassword')} value={password} onChangeText={setPassword} secureTextEntry autoComplete="current-password" />
-            <Text onPress={() => { setUseCode(true); setProblem(null) }} accessibilityRole="button"
-              style={{ fontFamily: fonts.semibold, fontSize: 14, color: colors.primary }}>{t('account.deleteWithCode')}</Text>
+            <Text onPress={() => { setUseCode(true); setProblem(null) }} accessibilityRole="button" suppressHighlighting
+              style={{ fontFamily: fonts.semibold, fontSize: 14, color: colors.primary, paddingVertical: 12 }}>{t('account.deleteWithCode')}</Text>
           </> : <>
             {!codeSent
               ? <Button variant="ghost" title={t('account.deleteWithCode')} loading={busy} onPress={() => void sendCode()} />
@@ -72,8 +72,8 @@ export default function DeleteAccount() {
                 <Notice tone="info">{t('account.codeSent')}</Notice>
                 <Field label={t('account.code')} value={code} onChangeText={v => setCode(v.replace(/\D/g, '').slice(0, 6))} keyboardType="number-pad" textContentType="oneTimeCode" autoComplete="one-time-code" />
               </>}
-            <Text onPress={() => { setUseCode(false); setProblem(null) }} accessibilityRole="button"
-              style={{ fontFamily: fonts.semibold, fontSize: 14, color: colors.primary }}>{t('account.deleteWithPassword')}</Text>
+            <Text onPress={() => { setUseCode(false); setProblem(null) }} accessibilityRole="button" suppressHighlighting
+              style={{ fontFamily: fonts.semibold, fontSize: 14, color: colors.primary, paddingVertical: 12 }}>{t('account.deleteWithPassword')}</Text>
           </>}
 
           {problem && <Notice>{problem}</Notice>}

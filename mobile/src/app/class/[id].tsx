@@ -1,13 +1,14 @@
 import { useMemo, useState } from 'react'
-import { Alert, ScrollView, Text, View } from 'react-native'
+import { Alert, KeyboardAvoidingView, ScrollView, Text, View } from 'react-native'
 import { Stack, router, useLocalSearchParams } from 'expo-router'
+import { useHeaderHeight } from 'expo-router/react-navigation'
 import { displayStatus, effCourseTitle, effSectionTitle, getSlotStatus, isInteractiveRoom } from '@shared'
 import { bookingMapOf, useLiveClasses, useMyBookings, useWatchAccess } from '@/lib/api/classes'
 import { enterRoom } from '@/lib/join'
 import { useTranslation } from 'react-i18next'
 import { useNow } from '@/hooks/useNow'
 import { CancelSeat, ClassAction, StatusPill, fmtWhen } from '@/components/classes'
-import { Button, Body } from '@/components/ui'
+import { Button, Body, Notice } from '@/components/ui'
 import { ClassExtras } from '@/components/classExtras'
 import { Empty, Failed, Loading } from '@/components/states'
 import { useTheme } from '@/theme'
@@ -31,6 +32,7 @@ export default function ClassDetail() {
   const internal = lc?.type === 'internal'
   const watch = useWatchAccess(id, internal)
   const [entering, setEntering] = useState(false)
+  const headerHeight = useHeaderHeight()
 
   if (classes.isLoading) return <Loading />
   /* A failed load is not "this class is gone" — say so, with a retry (the
@@ -46,15 +48,23 @@ export default function ClassDetail() {
 
   const room = async () => {
     setEntering(true)
-    const r = await enterRoom(lc.id)
-    setEntering(false)
-    if (!r.ok) Alert.alert(lc.title, r.message)
+    try {
+      const r = await enterRoom(lc.id)
+      if (!r.ok) Alert.alert(lc.title, r.message)
+    } finally {
+      setEntering(false)
+    }
   }
+  /* Without the bookings, a held seat reads as "Book" and has no Cancel —
+     say they could not be loaded instead of offering the wrong action. */
+  const bookingsFailed = !!bookings.error && !bookings.data
 
   return (
     <>
       <Stack.Screen options={{ title: lc.title }} />
-      <ScrollView contentContainerStyle={{ padding: 20, gap: 16 }}>
+      {/* The homework and rating fields below must stay above the keyboard. */}
+      <KeyboardAvoidingView style={{ flex: 1 }} behavior="padding" keyboardVerticalOffset={headerHeight}>
+      <ScrollView contentContainerStyle={{ padding: 20, gap: 16 }} keyboardShouldPersistTaps="handled">
         <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
           <Text style={{ fontFamily: fonts.semibold, fontSize: 14, color: colors.primary }}>{fmtWhen(lc.scheduledStart)}</Text>
           <StatusPill status={displayStatus(status, lc, now)} />
@@ -74,7 +84,12 @@ export default function ClassDetail() {
         </View>
 
         {/* Book / cancel / Meet join — the shared rules decide which. */}
-        {!internal || !held ? <ClassAction lc={lc} booking={booking} status={status} now={now} /> : null}
+        {bookingsFailed
+          ? <View style={{ gap: 8 }}>
+              <Notice>{t('classes.bookingsFailed')}</Notice>
+              <Button variant="ghost" title={t('common.tryAgain')} onPress={() => void bookings.refetch()} />
+            </View>
+          : !internal || !held ? <ClassAction lc={lc} booking={booking} status={status} now={now} /> : null}
 
         {internal && held && lc.isOnline !== false && (
           <View style={{ gap: 8 }}>
@@ -92,6 +107,7 @@ export default function ClassDetail() {
         <ClassExtras lc={lc} booking={booking}
           ended={lc.status === 'ended' || now > new Date(lc.scheduledStart).getTime() + lc.durationMins * 60_000} />
       </ScrollView>
+      </KeyboardAvoidingView>
     </>
   )
 }

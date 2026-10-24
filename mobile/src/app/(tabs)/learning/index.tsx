@@ -5,7 +5,7 @@ import { useTranslation } from 'react-i18next'
 import { bucketOf, type LearningBucket, type MyEnrollment } from '@shared'
 import { useMyEnrollments } from '@/lib/api/learning'
 import { useAuth } from '@/lib/auth'
-import { Card, Chip, Glyph, Notice, ProgressBar, Segmented } from '@/components/ui'
+import { Card, Chip, Glyph, Notice, ProgressBar, SearchField, Segmented } from '@/components/ui'
 import { Img } from '@/components/media'
 import { ExploreCatalog } from '@/components/explore'
 import { Empty, Failed, Loading } from '@/components/states'
@@ -33,11 +33,17 @@ function MyCourses({ header, onExplore }: { header: React.ReactElement; onExplor
   const { state } = useAuth()
   const enrollments = useMyEnrollments()
   const [filter, setFilter] = useState<Filter>('all')
+  const [q, setQ] = useState('')
   const [refreshing, setRefreshing] = useState(false)
 
   /* A course deleted after enrolment has nothing to open — leave it out. */
   const live = useMemo(() => (enrollments.data ?? []).filter(e => e.course), [enrollments.data])
-  const rows = useMemo(() => (filter === 'all' ? live : live.filter(e => bucketOf(e) === filter)), [live, filter])
+  /* The website's My Learning search: the course and its instructor. */
+  const rows = useMemo(() => {
+    const term = q.trim().toLowerCase()
+    return live.filter(e => (filter === 'all' || bucketOf(e) === filter)
+      && (!term || `${e.course!.title} ${e.course!.instructor?.name ?? ''}`.toLowerCase().includes(term)))
+  }, [live, filter, q])
   const pending = state.status === 'signedIn' && state.user.enrollmentStatus === 'pending'
 
   const refresh = async () => {
@@ -54,6 +60,7 @@ function MyCourses({ header, onExplore }: { header: React.ReactElement; onExplor
         <QuickLink icon="git-network-outline" label={t('paths.title')} onPress={() => router.push('/learning/paths')} />
         <QuickLink icon="heart-outline" label={t('favorites.title')} onPress={() => router.push('/learning/favorites')} />
       </ScrollView>
+      {live.length > 3 && <SearchField value={q} onChangeText={setQ} placeholder={t('learning.searchMine')} />}
       {live.length > 0 && (
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8 }}>
           {(['all', 'inProgress', 'notStarted', 'completed'] as const).map(f => (
@@ -112,8 +119,8 @@ function EnrolledCard({ e }: { e: MyEnrollment }) {
         {course.instructor && <Text numberOfLines={1} style={{ fontFamily: fonts.body, fontSize: 13, color: colors.textMuted }}>{course.instructor.name}</Text>}
         <ProgressBar percent={e.progressPercent} />
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-          {done && <Glyph name="checkmark-circle" size={14} color={colors.success} />}
-          <Text style={{ fontFamily: fonts.semibold, fontSize: 12, color: done ? colors.success : colors.textSecondary }}>
+          {done && <Glyph name="checkmark-circle" size={14} color={colors.successInk} />}
+          <Text style={{ fontFamily: fonts.semibold, fontSize: 12, color: done ? colors.successInk : colors.textSecondary }}>
             {done ? t('learning.completed') : bucket === 'notStarted' ? t('learning.notStarted') : t('learning.percent', { percent: Math.round(e.progressPercent) })}
           </Text>
         </View>

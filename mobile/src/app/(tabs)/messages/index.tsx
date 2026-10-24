@@ -67,7 +67,7 @@ function MentorRow({ i }: { i: ChatInstructor }) {
   const preview = conv ? (conv.lastSenderRole === 'student' ? t('messages.you', { text: conv.lastMessagePreview }) : conv.lastMessagePreview) : t('messages.start')
   return (
     <Pressable accessibilityRole="button" onPress={() => openThread(i)}
-      accessibilityLabel={`${i.name}${unread ? `, ${unread} unread` : ''}`}
+      accessibilityLabel={`${i.name}, ${preview}${unread ? `, ${t('messages.unreadCount', { count: unread })}` : ''}`}
       style={({ pressed }) => ({
         flexDirection: 'row', alignItems: 'center', gap: 12, padding: 14, borderRadius: radius.lg,
         backgroundColor: pressed ? colors.bgMuted : colors.bgSurface, borderColor: colors.border, borderWidth: 1,

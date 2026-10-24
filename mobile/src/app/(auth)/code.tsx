@@ -41,8 +41,9 @@ export default function CodeSignIn() {
       {sent && (
         <>
           <Notice tone="info">{t('auth.codeSent', { email: email.trim() })}</Notice>
-          <Field label={t('auth.code')} value={code} onChangeText={setCode}
-            keyboardType="number-pad" autoComplete="one-time-code" textContentType="oneTimeCode" maxLength={6}
+          {/* Digits only, so a pasted "123 456" still works. */}
+          <Field label={t('auth.code')} value={code} onChangeText={v => setCode(v.replace(/\D/g, '').slice(0, 6))}
+            keyboardType="number-pad" autoComplete="one-time-code" textContentType="oneTimeCode"
             returnKeyType="go" onSubmitEditing={() => void verify()} />
         </>
       )}
@@ -50,6 +51,7 @@ export default function CodeSignIn() {
       {sent
         ? <Button title={t('auth.verify')} onPress={() => void verify()} loading={busy} />
         : <Button title={t('auth.sendCode')} onPress={() => void send()} loading={busy} />}
+      {sent && <Button variant="ghost" title={t('auth.resendCode')} onPress={() => void send()} disabled={busy} />}
       <Button variant="ghost" title={t('auth.usePassword')} onPress={() => router.back()} />
     </Screen>
   )

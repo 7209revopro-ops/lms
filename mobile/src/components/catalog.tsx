@@ -10,13 +10,14 @@ import { Badge, Card, Glyph } from './ui'
 
 /** Read-only stars, e.g. 4.6 ★★★★½ (2,134). */
 export function Stars({ value, count, size = 13 }: { value?: number; count?: number; size?: number }) {
+  const { t } = useTranslation()
   const { colors, fonts } = useTheme()
   if (!value) return null
   const full = Math.floor(value), half = value - full >= 0.5
   return (
-    <View accessible accessibilityLabel={`Rated ${value.toFixed(1)} out of 5${count ? `, ${count} ratings` : ''}`}
+    <View accessible accessibilityLabel={`${t('catalog.ratedOf', { value: value.toFixed(1) })}${count ? `, ${t('catalog.ratingsCount', { count })}` : ''}`}
       style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-      <Text style={{ fontFamily: fonts.bold, fontSize: size, color: colors.warning }}>{value.toFixed(1)}</Text>
+      <Text style={{ fontFamily: fonts.bold, fontSize: size, color: colors.textPrimary }}>{value.toFixed(1)}</Text>
       <View style={{ flexDirection: 'row' }}>
         {[1, 2, 3, 4, 5].map(i => (
           <Glyph key={i} name={i <= full ? 'star' : i === full + 1 && half ? 'star-half' : 'star-outline'} size={size} color={colors.warning} />
@@ -29,10 +30,11 @@ export function Stars({ value, count, size = 13 }: { value?: number; count?: num
 
 /** Tap-to-rate, 1–5, with the website's words under it. */
 export function StarInput({ value, onChange, size = 34 }: { value: number; onChange: (v: number) => void; size?: number }) {
+  const { t } = useTranslation()
   const { colors, fonts } = useTheme()
   return (
     <View style={{ gap: 6, alignItems: 'center' }}>
-      <View accessibilityRole="adjustable" accessibilityLabel="Rating" accessibilityValue={{ min: 0, max: 5, now: value, text: value ? `${value} — ${RATING_WORDS[value]}` : 'Not rated' }}
+      <View accessibilityRole="adjustable" accessibilityLabel={t('catalog.rating')} accessibilityValue={{ min: 0, max: 5, now: value, text: value ? `${value} — ${RATING_WORDS[value]}` : t('catalog.notRated') }}
         accessibilityActions={[{ name: 'increment' }, { name: 'decrement' }]}
         onAccessibilityAction={e => onChange(Math.max(1, Math.min(5, value + (e.nativeEvent.actionName === 'increment' ? 1 : -1))))}
         style={{ flexDirection: 'row', gap: 6 }}>

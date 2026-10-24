@@ -6,11 +6,12 @@ import { router } from 'expo-router'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useTranslation } from 'react-i18next'
 import {
-  displayStatus, filterGroups, getSlotStatus, groupByDay, moduleFacets, programName, seatsLeft, showFacet,
+  displayStatus, effProgram, filterGroups, getSlotStatus, groupByDay, moduleFacets, programName, seatsLeft, showFacet,
   type ClassGroup, type CourseNode, type DayBucket, type JourneyLevel, type LiveClass, type ModuleNode,
   type MyBooking, type SessionMode, type SlotStatus,
 } from '@shared'
 import { useAuth } from '@/lib/auth'
+import { useCatalog } from '@/lib/catalog'
 import { useNow } from '@/hooks/useNow'
 import { Gradient, Img } from './media'
 import { Avatar, Glyph } from './ui'
@@ -251,8 +252,8 @@ export function ModuleCard({ node, position, courseTitle, onPress }: { node: Mod
         <View style={{ flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', columnGap: 12, rowGap: 3 }}>
           {locked && (
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 3 }}>
-              <Glyph name="lock-closed" size={12} color={colors.warning} />
-              <Text style={{ fontFamily: fonts.bold, fontSize: 12, color: colors.warning }}>{t('schedule.locked')}</Text>
+              <Glyph name="lock-closed" size={12} color={colors.warningInk} />
+              <Text style={{ fontFamily: fonts.bold, fontSize: 12, color: colors.warningInk }}>{t('schedule.locked')}</Text>
             </View>
           )}
           <Meta icon="calendar-outline" text={empty ? t('schedule.nothingScheduled') : t('schedule.sessionCount', { count: node.sessionCount })} />
@@ -362,12 +363,18 @@ function Stat({ icon, value, label, accent }: { icon: 'calendar-outline' | 'glob
 
 /* ── Level 3: the dated sessions ────────────────────────────────── */
 
+/** Running at this moment: started, not over, not cancelled. */
+const runningAt = (lc: LiveClass, now: number) => {
+  const s = new Date(lc.scheduledStart).getTime()
+  return lc.status !== 'cancelled' && s <= now && now < s + (lc.durationMins || 60) * 60_000
+}
+
 /** Still ahead on the screen's own clock: not cancelled, not yet over. */
 const isAheadAt = (lc: LiveClass, now: number) =>
   lc.status !== 'cancelled' && now < new Date(lc.scheduledStart).getTime() + (lc.durationMins || 60) * 60_000
 
-interface Picks { key?: string; language: string | null; tutorId: string | null; mode: SessionMode | null; day: string }
-const NO_PICKS = { language: null, tutorId: null, mode: null, day: 'all' } as const
+interface Picks { key?: string; language: string | null; tutorId: string | null; mode: SessionMode | null; program: string | null; day: string }
+const NO_PICKS = { language: null, tutorId: null, mode: null, program: null, day: 'all' } as const
 
 interface Dated { lc: LiveClass; group: ClassGroup; booking?: MyBooking; status: SlotStatus; heldTwin?: LiveClass }
 
@@ -398,7 +405,7 @@ export function SessionsBoard({ groups, bookingMap, blocked = false, header, ref
   const [picks, setPicks] = useState<Picks>({ key: resetKey, ...NO_PICKS })
   const cur = picks.key === resetKey ? picks : { key: resetKey, ...NO_PICKS }
   const pick = (p: Partial<Picks>) => setPicks({ ...cur, ...p })
-  const clear = () => pick({ language: null, tutorId: null, mode: null })
+  const clear = () => pick({ language: null, tutorId: null, mode: null, program: null })
   const [sheet, setSheet] = useState(false)
 
   const now = useNow(useMemo(() => groups.flatMap(g => g.slots), [groups]))
@@ -412,15 +419,20 @@ export function SessionsBoard({ groups, bookingMap, blocked = false, header, ref
   const showLang = showFacet(facets.languages)
   const showTutor = showFacet(facets.instructors)
   const showMode = showFacet(facets.modes)
+  /* Programme (Forex, Digital Marketing…) — the website's programme filter;
+     offered only when the board spans more than one. */
+  const programmes = useMemo(() => [...new Set(live.map(g => effProgram(g.slots[0]!)).filter((p): p is string => !!p))].sort(), [live])
+  const showProg = programmes.length > 1
 
   /* A pick that is no longer offered stops filtering from off-screen. */
   const language = showLang && cur.language && facets.languages.includes(cur.language) ? cur.language : null
   const tutorId = showTutor && cur.tutorId && facets.instructors.some(i => i.id === cur.tutorId) ? cur.tutorId : null
   const mode = showMode && cur.mode && facets.modes.includes(cur.mode) ? cur.mode : null
+  const program = showProg && cur.program && programmes.includes(cur.program) ? cur.program : null
 
   const filtered = useMemo(
-    () => filterGroups(live, language, tutorId, mode),
-    [live, language, tutorId, mode],
+    () => filterGroups(program ? live.filter(g => effProgram(g.slots[0]!) === program) : live, language, tutorId, mode),
+    [live, program, language, tutorId, mode],
   )
 
   const { buckets, rows } = useMemo(() => {
@@ -453,11 +465,17 @@ export function SessionsBoard({ groups, bookingMap, blocked = false, header, ref
     () => groups.reduce((n, g) => n + g.slots.filter(lc => isAheadAt(lc, nowMin * 60_000)).length, 0),
     [groups, nowMin],
   )
+  /* "Live now": running at this moment (started, not over) — the website's
+     Live Now filter, as a chip on the day strip, shown only while one is on. */
+  const liveCount = useMemo(() => [...rows.values()].filter(r => runningAt(r.lc, nowMin * 60_000)).length, [rows, nowMin])
   /* A picked day that no longer has sessions falls back to all. */
-  const day = cur.day !== 'all' && buckets.some(b => b.key === cur.day) ? cur.day : 'all'
-  const shownBuckets = day === 'all' ? buckets : buckets.filter(b => b.key === day)
-  const activeFilters = [language, tutorId, mode].filter(Boolean).length
-  const hasFilters = showLang || showTutor || showMode
+  const day = cur.day === 'live' ? (liveCount ? 'live' : 'all')
+    : cur.day !== 'all' && buckets.some(b => b.key === cur.day) ? cur.day : 'all'
+  const shownBuckets = day === 'all' ? buckets
+    : day === 'live' ? buckets.map(b => ({ ...b, items: b.items.filter(lc => runningAt(lc, nowMin * 60_000)) })).filter(b => b.items.length)
+    : buckets.filter(b => b.key === day)
+  const activeFilters = [language, tutorId, mode, program].filter(Boolean).length
+  const hasFilters = showLang || showTutor || showMode || showProg
   const filtering = activeFilters > 0
 
   return (
@@ -475,7 +493,7 @@ export function SessionsBoard({ groups, bookingMap, blocked = false, header, ref
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, paddingRight: 16 }}>
               <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ flex: 1 }}
                 contentContainerStyle={{ gap: 8, paddingLeft: 16, paddingRight: 4 }}>
-                {[{ key: 'all', label: t('schedule.all'), n: shown }, ...buckets.map(b => ({ key: b.key, label: b.label, n: b.items.length }))].map(c => (
+                {[{ key: 'all', label: t('schedule.all'), n: shown }, ...(liveCount ? [{ key: 'live', label: t('schedule.liveNow'), n: liveCount }] : []), ...buckets.map(b => ({ key: b.key, label: b.label, n: b.items.length }))].map(c => (
                   <DayChip key={c.key} label={c.label} count={c.n} active={day === c.key} onPress={() => { haptic.select(); pick({ day: c.key }) }} />
                 ))}
               </ScrollView>
@@ -524,6 +542,10 @@ export function SessionsBoard({ groups, bookingMap, blocked = false, header, ref
         {showTutor && (
           <FilterRow icon="person-outline" label={t('schedule.instructor')} value={tutorId} onChange={v => pick({ tutorId: v })}
             options={facets.instructors.map(i => ({ id: i.id, label: i.name, avatar: i.avatarUrl ?? null }))} />
+        )}
+        {showProg && (
+          <FilterRow icon="school-outline" label={t('schedule.programme')} value={program} onChange={v => pick({ program: v })}
+            options={programmes.map(p => ({ id: p, label: programName(p) }))} />
         )}
         {showMode && (
           <FilterRow icon="location-outline" label={t('schedule.mode')} value={mode} onChange={v => pick({ mode: v as SessionMode | null })}
@@ -608,8 +630,9 @@ function SessionCard({ s, blocked, pendingReg, now }: { s: Dated; blocked: boole
   const heldTwin = s.heldTwin
 
   return (
-    <Pressable onPress={() => router.push(`/class/${lc.id}`)} accessibilityRole="button"
-      accessibilityLabel={`${fmtTime(lc.scheduledStart)}, ${lc.title}${group.instructor ? `, ${group.instructor.name}` : ''}, ${t(`status.${shown}`)}`}
+    /* Not grouped: Book / Join / Cancel inside must stay reachable by a
+       screen reader. The title is the card's summary and opens the class. */
+    <Pressable onPress={() => router.push(`/class/${lc.id}`)} accessible={false}
       style={({ pressed }) => ({
         backgroundColor: colors.bgSurface, borderRadius: radius.lg, padding: 14, gap: 10,
         borderWidth: live ? 1.5 : 1, borderColor: live ? colors.danger : colors.border,
@@ -631,7 +654,9 @@ function SessionCard({ s, blocked, pendingReg, now }: { s: Dated; blocked: boole
         <StatusPill status={shown} />
       </View>
 
-      <Text numberOfLines={2} style={{ fontFamily: fonts.bold, fontSize: 15, lineHeight: 20, color: colors.textPrimary }}>{lc.title}</Text>
+      <Text numberOfLines={2} onPress={() => router.push(`/class/${lc.id}`)} accessibilityRole="button"
+        accessibilityLabel={`${fmtTime(lc.scheduledStart)}, ${lc.title}${group.instructor ? `, ${group.instructor.name}` : ''}, ${t(`status.${shown}`)}`}
+        style={{ fontFamily: fonts.bold, fontSize: 15, lineHeight: 20, color: colors.textPrimary }}>{lc.title}</Text>
 
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
         {group.instructor ? (
@@ -653,7 +678,7 @@ function SessionCard({ s, blocked, pendingReg, now }: { s: Dated; blocked: boole
       {showSeats && (
         <View style={{ gap: 5 }}>
           <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
-            <Text style={{ fontFamily: fonts.bold, fontSize: 12, color: scarce ? colors.warning : colors.textSecondary }}>
+            <Text style={{ fontFamily: fonts.bold, fontSize: 12, color: scarce ? colors.warningInk : colors.textSecondary }}>
               {left === 0 ? t('schedule.noSeats') : yours ? t('schedule.seatsYours', { count: left }) : t('schedule.seatsLeft', { count: left, total: cap })}
             </Text>
             {!yours && <Text style={{ fontFamily: fonts.bold, fontSize: 11, color: colors.textMuted }}>{t('schedule.bookedCount', { count: cap - left })}</Text>}
@@ -699,7 +724,7 @@ function FilterSheet({ visible, onClose, onClear, shown, children }: {
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose} statusBarTranslucent navigationBarTranslucent>
       <View style={{ flex: 1, justifyContent: 'flex-end' }}>
-        <Pressable onPress={onClose} accessibilityRole="button" accessibilityLabel="Close" style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(2,6,16,0.5)' }} />
+        <Pressable onPress={onClose} accessibilityRole="button" accessibilityLabel={t('common.close')} style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(2,6,16,0.5)' }} />
         <View style={{ backgroundColor: colors.bgSurface, borderTopLeftRadius: radius.xl, borderTopRightRadius: radius.xl,
           paddingHorizontal: 20, paddingTop: 10, paddingBottom: 16 + insets.bottom, gap: 18 }}>
           <View style={{ alignSelf: 'center', width: 40, height: 4, borderRadius: 2, backgroundColor: colors.borderStrong }} />
@@ -722,7 +747,7 @@ function FilterSheet({ visible, onClose, onClear, shown, children }: {
 }
 
 function FilterRow({ icon, label, options, value, onChange }: {
-  icon: 'globe-outline' | 'person-outline' | 'location-outline'; label: string
+  icon: 'globe-outline' | 'person-outline' | 'location-outline' | 'school-outline'; label: string
   options: { id: string; label: string; avatar?: string | null }[]
   value: string | null; onChange: (v: string | null) => void
 }) {
@@ -749,6 +774,57 @@ function FilterRow({ icon, label, options, value, onChange }: {
         {chip(null, t('schedule.all'))}
         {options.map(o => chip(o.id, o.label, o.avatar))}
       </View>
+    </View>
+  )
+}
+
+/* ── The course page's live classes (the website's LiveClassesPanel) ───── */
+
+/** The next sessions of one course, each a tap from its detail, and a way
+ *  into that course's full schedule. Nothing at all when none is ahead. */
+export function CourseLiveClasses({ courseId }: { courseId: string }) {
+  const { t } = useTranslation()
+  const { colors, fonts, radius } = useTheme()
+  const { catalog, bookingMap } = useCatalog()
+  const now = useNow()
+  const node = catalog.find(c => c.id === courseId)
+  const next = useMemo(() => (node ? node.modules.flatMap(m => m.groups.flatMap(g => g.slots)) : [])
+    .filter(lc => isAheadAt(lc, now))
+    .sort((a, b) => a.scheduledStart.localeCompare(b.scheduledStart)), [node, now])
+  if (!node || next.length === 0) return null
+
+  return (
+    <View style={{ gap: 10 }}>
+      <SectionHead label={t('schedule.courseClasses')} note={t('schedule.sessionCount', { count: next.length })} />
+      {next.slice(0, 3).map(lc => {
+        const booked = bookingMap.get(lc.id)?.status === 'booked'
+        const running = runningAt(lc, now)
+        return (
+          <Pressable key={lc.id} onPress={() => router.push(`/class/${lc.id}`)} accessibilityRole="button"
+            accessibilityLabel={`${lc.title}, ${whenLabel(new Date(lc.scheduledStart).getTime(), t)}${booked ? `, ${t('status.booked')}` : ''}`}
+            style={({ pressed }) => ({ flexDirection: 'row', alignItems: 'center', gap: 12, padding: 12, borderRadius: radius.lg,
+              backgroundColor: colors.bgSurface, borderWidth: 1, borderColor: running ? colors.danger : colors.border, transform: [{ scale: pressed ? 0.985 : 1 }] })}>
+            <View style={{ width: 40, height: 40, borderRadius: 12, alignItems: 'center', justifyContent: 'center',
+              backgroundColor: running ? colors.dangerLight : colors.primaryLight }}>
+              <Glyph name={lc.isOnline === false ? 'location-outline' : 'videocam-outline'} size={18} color={running ? colors.danger : colors.primary} />
+            </View>
+            <View style={{ flex: 1, gap: 2 }}>
+              <Text numberOfLines={1} style={{ fontFamily: fonts.semibold, fontSize: 14, color: colors.textPrimary }}>{lc.title}</Text>
+              <Text numberOfLines={1} style={{ fontFamily: fonts.medium, fontSize: 12, color: running ? colors.danger : colors.textMuted }}>
+                {running ? t('schedule.liveNow') : whenLabel(new Date(lc.scheduledStart).getTime(), t)}
+                {lc.instructor?.name ? ` · ${lc.instructor.name}` : ''}
+              </Text>
+            </View>
+            {booked
+              ? <Glyph name="checkmark-circle" size={20} color={colors.successInk} accessibilityLabel={t('status.booked')} />
+              : <Glyph name="chevron-forward" size={18} color={colors.textMuted} />}
+          </Pressable>
+        )
+      })}
+      <Pressable onPress={() => router.push({ pathname: '/schedule/[courseId]', params: { courseId } })} accessibilityRole="link"
+        style={{ alignSelf: 'flex-start', paddingVertical: 6 }}>
+        <Text style={{ fontFamily: fonts.semibold, fontSize: 14, color: colors.primary }}>{t('schedule.seeCourseSchedule')}</Text>
+      </Pressable>
     </View>
   )
 }

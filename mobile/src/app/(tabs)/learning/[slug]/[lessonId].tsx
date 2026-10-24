@@ -79,7 +79,7 @@ export default function Lesson() {
             {canTrack && (isDone ? (
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
                 <Ionicons name="checkmark-circle" size={20} color={colors.success} />
-                <Text style={{ fontFamily: fonts.semibold, fontSize: 15, color: colors.success }}>{t('lesson.completed')}</Text>
+                <Text style={{ fontFamily: fonts.semibold, fontSize: 15, color: colors.successInk }}>{t('lesson.completed')}</Text>
               </View>
             ) : (
               <Button title={next ? t('lesson.completeNext') : t('lesson.complete')} loading={complete.isPending}

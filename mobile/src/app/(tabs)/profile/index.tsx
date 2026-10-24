@@ -10,7 +10,8 @@ import { useAuth } from '@/lib/auth'
 import { appVersion } from '@/lib/device'
 import { env } from '@/lib/env'
 import { registerForPush } from '@/lib/push'
-import { Avatar, Badge, Body, Card, Glyph, Group, ListRow } from '@/components/ui'
+import { Avatar, Badge, Body, Card, Glyph, Group, ListRow, Segmented } from '@/components/ui'
+import { setThemePref, useThemePref, type ThemePref } from '@/lib/themePref'
 import { useTheme } from '@/theme'
 
 const STATUS_TONE = { approved: 'success', pending: 'warning', rejected: 'danger', cancelled: 'danger' } as const
@@ -21,6 +22,7 @@ const STATUS_TONE = { approved: 'success', pending: 'warning', rejected: 'danger
    leaving (sign out; delete — which the stores require to be easy to find). */
 export default function Profile() {
   const { t } = useTranslation()
+  const themePref = useThemePref()
   const { colors, fonts } = useTheme()
   const { state, signOut } = useAuth()
   const [push, setPush] = useState<'on' | 'off' | null>(null)
@@ -89,6 +91,17 @@ export default function Profile() {
         <ListRow icon="notifications-outline" label={t('account.notifications')}
           detail={push === 'on' ? t('account.notificationsOn') : push === 'off' ? t('account.notificationsOff') : undefined}
           onPress={() => void Linking.openSettings()} />
+      </Group>
+
+      {/* The website's theme toggle: follow the phone, or always light / dark. */}
+      <Group title={t('account.sections.appearance')}>
+        <View style={{ padding: 12 }}>
+          <Segmented<ThemePref> value={themePref} onChange={p => void setThemePref(p)} options={[
+            { value: 'system', label: t('account.themeSystem') },
+            { value: 'light', label: t('account.themeLight') },
+            { value: 'dark', label: t('account.themeDark') },
+          ]} />
+        </View>
       </Group>
 
       <Group title={t('account.sections.support')}>

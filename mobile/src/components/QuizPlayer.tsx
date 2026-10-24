@@ -114,7 +114,7 @@ function Summary({ quiz, summary, onStart }: {
       </View>
       {summary?.hasAttempted && (
         <View style={{ flexDirection: 'row', justifyContent: 'center', gap: 32 }}>
-          <Stat label={t('quiz.best')} value={`${Math.round(summary.bestScore ?? 0)}%`} color={passed ? colors.success : colors.danger} />
+          <Stat label={t('quiz.best')} value={`${Math.round(summary.bestScore ?? 0)}%`} color={passed ? colors.successInk : colors.danger} />
           <Stat label={t('quiz.attempts')} value={String(summary.attempts)} color={colors.textPrimary} />
         </View>
       )}
@@ -238,7 +238,7 @@ function Result({ quiz, result, timedOut, onRetry, onNext }: {
         <View style={{ alignItems: 'center', gap: 6 }}>
           <Ionicons name={result.passed ? 'checkmark-circle' : 'close-circle'} size={40} color={result.passed ? colors.success : colors.danger} />
           <Text style={{ fontFamily: fonts.display, fontSize: 32, color: colors.textPrimary }}>{t('quiz.score', { score: result.scorePercent })}</Text>
-          <Text style={{ fontFamily: fonts.semibold, fontSize: 15, color: result.passed ? colors.success : colors.danger }}>
+          <Text style={{ fontFamily: fonts.semibold, fontSize: 15, color: result.passed ? colors.successInk : colors.danger }}>
             {result.passed ? t('quiz.passed') : t('quiz.failed')}
           </Text>
           {!result.passed && <Text style={{ fontFamily: fonts.body, fontSize: 14, color: colors.textSecondary }}>{t('quiz.needed', { pass: quiz.passPercent })}</Text>}
@@ -253,7 +253,7 @@ function Result({ quiz, result, timedOut, onRetry, onNext }: {
         return (
           <Card key={b.questionId}>
             <Text style={{ fontFamily: fonts.semibold, fontSize: 14, color: colors.textPrimary }}>{q.text}</Text>
-            <Text style={{ fontFamily: fonts.medium, fontSize: 14, color: b.correct ? colors.success : colors.danger }}>
+            <Text style={{ fontFamily: fonts.medium, fontSize: 14, color: b.correct ? colors.successInk : colors.danger }}>
               {b.correct ? t('quiz.correct') : t('quiz.wrong', { answer })}
             </Text>
             {!!b.explanation && <Text style={{ fontFamily: fonts.body, fontSize: 13, color: colors.textSecondary }}>{b.explanation}</Text>}

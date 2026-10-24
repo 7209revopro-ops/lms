@@ -1,8 +1,9 @@
+import { useMemo, useState } from 'react'
 import { FlatList, RefreshControl, Text, View } from 'react-native'
 import { router } from 'expo-router'
 import { useTranslation } from 'react-i18next'
 import { useLearningPaths } from '@/lib/api/catalog'
-import { Card, Glyph } from '@/components/ui'
+import { Card, Glyph, SearchField } from '@/components/ui'
 import { Img } from '@/components/media'
 import { Empty, Failed, Loading } from '@/components/states'
 import { useTheme } from '@/theme'
@@ -13,18 +14,32 @@ export default function Paths() {
   const { t } = useTranslation()
   const { colors, fonts } = useTheme()
   const paths = useLearningPaths()
+  const [q, setQ] = useState('')
+  /* The website's search on the paths list: title and description. */
+  const rows = useMemo(() => {
+    const term = q.trim().toLowerCase()
+    return (paths.data ?? []).filter(p => !term || `${p.title} ${p.description ?? ''}`.toLowerCase().includes(term))
+  }, [paths.data, q])
 
   if (paths.isLoading) return <View style={{ padding: 16 }}><Loading cards={3} media /></View>
   if (paths.error && !paths.data) return <Failed error={paths.error} onRetry={() => void paths.refetch()} />
 
   return (
     <FlatList
-      data={paths.data ?? []}
+      data={rows}
+      keyboardShouldPersistTaps="handled"
       keyExtractor={p => p.id}
       contentContainerStyle={{ padding: 16, gap: 14, flexGrow: 1 }}
       refreshControl={<RefreshControl refreshing={paths.isRefetching} onRefresh={() => void paths.refetch()} tintColor={colors.primary} />}
-      ListHeaderComponent={<Text style={{ fontFamily: fonts.body, fontSize: 14, lineHeight: 20, color: colors.textSecondary }}>{t('paths.intro')}</Text>}
-      ListEmptyComponent={<Empty icon="git-network-outline" title={t('paths.none')} />}
+      ListHeaderComponent={
+        <View style={{ gap: 12 }}>
+          <Text style={{ fontFamily: fonts.body, fontSize: 14, lineHeight: 20, color: colors.textSecondary }}>{t('paths.intro')}</Text>
+          {(paths.data?.length ?? 0) > 3 && <SearchField value={q} onChangeText={setQ} placeholder={t('paths.search')} />}
+        </View>
+      }
+      ListEmptyComponent={q.trim()
+        ? <Empty icon="search-outline" title={t('learning.noMatch')} />
+        : <Empty icon="git-network-outline" title={t('paths.none')} />}
       renderItem={({ item: p }) => (
         <Card padded={false} onPress={() => router.push({ pathname: '/learning/paths/[slug]', params: { slug: p.slug } })} accessibilityLabel={p.title}>
           <Img cover uri={p.thumbnailUrl} style={{ width: '100%', aspectRatio: 21 / 9 }} placeholderColor={colors.primaryLight} />

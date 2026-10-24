@@ -104,7 +104,7 @@ export default function Thread() {
                   backgroundColor: colors.bgPage, borderRadius: radius.lg, borderWidth: 1, borderColor: colors.border,
                   paddingHorizontal: 14, paddingTop: 10, paddingBottom: 10,
                 }} />
-              <Pressable onPress={send} accessibilityRole="button" accessibilityLabel={t('messages.send')}
+              <Pressable onPress={send} hitSlop={6} accessibilityRole="button" accessibilityLabel={t('messages.send')}
                 disabled={!draft.trim() || tooLong}
                 style={({ pressed }) => ({
                   width: 42, height: 42, borderRadius: 21, alignItems: 'center', justifyContent: 'center',

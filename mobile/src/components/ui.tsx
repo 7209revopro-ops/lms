@@ -119,8 +119,8 @@ const styles = StyleSheet.create({
 export function Chip({ label, active, onPress }: { label: string; active: boolean; onPress: () => void }) {
   const { colors, fonts } = useTheme()
   return (
-    <Pressable onPress={onPress} accessibilityRole="button" accessibilityState={{ selected: active }}
-      style={{ paddingHorizontal: 14, paddingVertical: 7, borderRadius: 999, borderWidth: 1,
+    <Pressable onPress={onPress} accessibilityRole="button" accessibilityState={{ selected: active }} hitSlop={6}
+      style={{ paddingHorizontal: 14, paddingVertical: 7, minHeight: 36, justifyContent: 'center', borderRadius: 999, borderWidth: 1,
         borderColor: active ? colors.primary : colors.border, backgroundColor: active ? colors.primaryLight : colors.bgSurface }}>
       <Text style={{ fontFamily: fonts.medium, fontSize: 13, color: active ? colors.primary : colors.textSecondary }}>{label}</Text>
     </Pressable>
@@ -192,7 +192,9 @@ export function Badge({ label, tone = 'primary', icon, solid }: {
 }) {
   const { colors, fonts } = useTheme()
   const tint = tone === 'muted' ? colors.textSecondary : tone === 'primary' ? colors.primaryFill : colors[tone]
-  const fg = solid ? '#FFFFFF' : tone === 'muted' ? colors.textSecondary : colors[tone]
+  /* As text, green and amber take their ink: the bright fills are ~2:1 on white. */
+  const fg = solid ? '#FFFFFF' : tone === 'muted' ? colors.textSecondary
+    : tone === 'success' ? colors.successInk : tone === 'warning' ? colors.warningInk : colors[tone]
   const bg = solid ? (tone === 'success' ? '#059669' : tint) : tone === 'muted' ? colors.bgMuted : `${fg}1F`
   return (
     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, alignSelf: 'flex-start', paddingHorizontal: 9, paddingVertical: 3,
@@ -209,7 +211,9 @@ const AVATAR_HUES = ['#3B82F6', '#10B981', '#F59E0B', '#8B5CF6', '#EC4899', '#14
 /** A round picture of a person, or their initials when there is none. */
 export function Avatar({ name, uri, size = 40 }: { name: string; uri?: string | null; size?: number }) {
   const { colors, fonts } = useTheme()
-  const initials = name.trim().split(/\s+/).slice(0, 2).map(w => w[0]?.toUpperCase() ?? '').join('') || '?'
+  /* Letters and digits only: "[QA] Reviewer One" reads QR, not "[R". */
+  const initials = name.replace(/[^\p{L}\p{N}\s]/gu, ' ').trim().split(/\s+/).slice(0, 2)
+    .map(w => w[0]?.toUpperCase() ?? '').join('') || '?'
   if (uri) return <Img uri={uri} style={{ width: size, height: size, borderRadius: size / 2 }} placeholderColor={colors.primaryLight} />
   /* One stable colour per person, so a list of mentors is told apart at a glance. */
   const hue = AVATAR_HUES[[...name].reduce((h, ch) => (h * 31 + ch.charCodeAt(0)) >>> 0, 7) % AVATAR_HUES.length]!

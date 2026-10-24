@@ -156,6 +156,11 @@ export function useQaMutations(lessonId: string) {
       mutationFn: (b: { threadId: string; commentId: string }) => apiPost(`/comments/${b.commentId}/upvote`),
       onSuccess: (_d, b) => void qc.invalidateQueries({ queryKey: engageKeys.comments(b.threadId) }),
     }),
+    /* The website's "delete my reply" (DELETE /comments/:id — the server checks it is yours). */
+    removeComment: useMutation({
+      mutationFn: (b: { threadId: string; commentId: string }) => http.delete(`/comments/${b.commentId}`),
+      onSuccess: (_d, b) => { threads(); void qc.invalidateQueries({ queryKey: engageKeys.comments(b.threadId) }) },
+    }),
   }
 }
 

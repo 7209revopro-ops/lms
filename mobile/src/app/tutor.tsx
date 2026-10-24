@@ -2,7 +2,6 @@ import { useRef, useState } from 'react'
 import { ActivityIndicator, FlatList, KeyboardAvoidingView, Pressable, Text, TextInput, View } from 'react-native'
 import { Stack, useLocalSearchParams } from 'expo-router'
 import { useHeaderHeight } from 'expo-router/react-navigation'
-import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useTranslation } from 'react-i18next'
 import { problemOf, type AiTurn } from '@shared'
 import { askTutor } from '@/lib/api/engage'
@@ -23,7 +22,6 @@ export default function Tutor() {
   const { t } = useTranslation()
   const { colors, fonts, radius } = useTheme()
   const headerHeight = useHeaderHeight()
-  const insets = useSafeAreaInsets()
   const [msgs, setMsgs] = useState<Msg[]>([])
   const [draft, setDraft] = useState('')
   const [busy, setBusy] = useState(false)
@@ -118,7 +116,7 @@ export default function Tutor() {
           </View>
         ) : undefined}
       />
-      <View style={{ flexDirection: 'row', alignItems: 'flex-end', gap: 8, paddingHorizontal: 12, paddingTop: 10, paddingBottom: 10 + insets.bottom,
+      <View style={{ flexDirection: 'row', alignItems: 'flex-end', gap: 8, paddingHorizontal: 12, paddingTop: 10, paddingBottom: 10,
         backgroundColor: colors.bgSurface, borderTopWidth: 1, borderTopColor: colors.border }}>
         <TextInput value={draft} onChangeText={setDraft} placeholder={t('ai.placeholder')} placeholderTextColor={colors.textMuted}
           accessibilityLabel={t('ai.placeholder')} multiline maxLength={4000}

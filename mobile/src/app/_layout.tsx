@@ -11,11 +11,12 @@ import { DMSans_400Regular, DMSans_500Medium, DMSans_600SemiBold, DMSans_700Bold
 import { BricolageGrotesque_700Bold } from '@expo-google-fonts/bricolage-grotesque'
 import * as Sentry from '@sentry/react-native'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { SafeAreaProvider } from 'react-native-safe-area-context'
+import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useTranslation } from 'react-i18next'
 import { AuthProvider, useAuth } from '@/lib/auth'
 import { useAppGate } from '@/lib/appConfig'
 import { registerForPush, screenForNotification } from '@/lib/push'
+import { restoreThemePref } from '@/lib/themePref'
 import { env } from '@/lib/env'
 import { appVersion } from '@/lib/device'
 import { Body, Button, Screen, Title } from '@/components/ui'
@@ -23,6 +24,8 @@ import { ToastProvider } from '@/components/toast'
 import { useTheme } from '@/theme'
 
 void SplashScreen.preventAutoHideAsync()
+/* The student's light / dark choice, back before the first screen draws. */
+void restoreThemePref()
 
 /* A link that opens the app straight on a class, the bookings or the
    notifications (a Join button, a push) still has the tabs under it, so Back
@@ -88,6 +91,8 @@ function RootNavigator() {
   const { state } = useAuth()
   const { gate, config } = useAppGate()
   const { colors, scheme } = useTheme()
+  const insets = useSafeAreaInsets()
+  const { t } = useTranslation()
 
   useEffect(() => {
     if (state.status !== 'booting') void SplashScreen.hideAsync()
@@ -107,6 +112,9 @@ function RootNavigator() {
     headerStyle: { backgroundColor: colors.bgSurface },
     headerTintColor: colors.primary,
     headerTitleStyle: { fontFamily: 'DMSans_600SemiBold', color: colors.textPrimary },
+    /* No tab bar under these: keep their content clear of the system
+       navigation bar, which the app draws behind (edge to edge). */
+    contentStyle: { backgroundColor: colors.bgPage, paddingBottom: insets.bottom },
   }
   return (
     <>
@@ -121,7 +129,7 @@ function RootNavigator() {
           <Stack.Screen name="watch/[id]" options={detail} />
           <Stack.Screen name="notifications" options={detail} />
           <Stack.Screen name="tutor" options={detail} />
-          <Stack.Screen name="recordings" options={detail} />
+          <Stack.Screen name="recordings" options={{ ...detail, title: t('recordings.title') }} />
         </Stack.Protected>
         {/* Join and sign-in links work signed in or out — they sign the app in. */}
         <Stack.Screen name="j/[token]" />

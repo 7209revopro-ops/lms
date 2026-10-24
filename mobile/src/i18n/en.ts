@@ -2,6 +2,7 @@
    Arabic (and right-to-left) is a translation file, not a rewrite (plan.md M9). */
 export const en = {
   common: {
+    close: 'Close',
     continue: 'Continue',
     back: 'Back',
     tryAgain: 'Try again',
@@ -10,6 +11,7 @@ export const en = {
     timeout: 'The server took too long to answer. Please try again.',
   },
   auth: {
+    resendCode: 'Send a new code',
     welcome: 'Welcome back',
     subtitle: 'Sign in to your Delta Institutions account.',
     email: 'Email address',
@@ -45,7 +47,7 @@ export const en = {
     maintenanceTitle: 'Back soon',
     maintenanceBody: 'We are improving Delta Institutions. Please try again in a little while.',
   },
-  tabs: { home: 'Home', schedule: 'Schedule', learning: 'Learning', messages: 'Messages', profile: 'Profile' },
+  tabs: { newCount: '{{count}} new', home: 'Home', schedule: 'Schedule', learning: 'Learning', messages: 'Messages', profile: 'Profile' },
   home: {
     greeting: { morning: 'Good morning', afternoon: 'Good afternoon', evening: 'Good evening' },
     quick: 'Shortcuts',
@@ -65,6 +67,7 @@ export const en = {
     startingSoon: 'Starting soon',
   },
   classes: {
+    bookingsFailed: 'We could not load your bookings, so we cannot show what you can do with this class yet.',
     book: 'Book a seat',
     bookFailed: 'Could not book',
     closesBefore: 'Booking closes {{rule}} before the class.',
@@ -173,6 +176,10 @@ export const en = {
     bookedCount: '{{count}} booked',
     finishRegistration: 'Finish your registration to book a seat.',
     shared: 'Shared with your academy',
+    liveNow: 'Live now',
+    courseClasses: 'Live classes',
+    seeCourseSchedule: 'See the full class schedule',
+    programme: 'Programme',
     moduleLocked: 'This module is locked for you, so this session cannot be booked.',
   },
   bookings: {
@@ -187,6 +194,29 @@ export const en = {
     noneBooked: 'No classes booked',
     noneBookedBody: 'Book a seat in the class schedule.',
     browse: 'Browse the schedule',
+    /* The website's Booking History. */
+    statBooked: 'Booked',
+    statAttended: 'Attended',
+    statMissed: 'Missed',
+    statRate: 'Attendance',
+    search: 'Search your bookings',
+    noMatch: 'No bookings match your search',
+    tabs: { all: 'All', upcoming: 'Upcoming', attended: 'Attended', missed: 'Missed', cancelled: 'Cancelled' },
+    verdict: {
+      booked: 'Booked', live: 'Live now', attended: 'Attended', missed: 'Missed', cancelled: 'Cancelled',
+      'called-off': 'Class cancelled', unmarked: 'No record',
+    },
+    noteCalledOff: 'This class was cancelled by the academy. Your seat was released automatically.',
+    noteUnmarked: 'The class has finished — attendance has not been recorded yet.',
+    bookedOn: 'Booked {{date}}',
+    cancelledOn: 'Cancelled {{date}}',
+    empty: {
+      all: { title: 'No bookings yet', body: 'Every class you reserve a seat for is recorded here — before it runs, and long after.' },
+      upcoming: { title: 'Nothing booked ahead', body: 'You have no seats reserved for a class that has not run yet.' },
+      attended: { title: 'No attended classes', body: 'Classes you show up to appear here once your instructor takes the register.' },
+      missed: { title: 'Nothing missed', body: 'A class you booked but did not attend would be listed here.' },
+      cancelled: { title: 'No cancellations', body: 'Seats you release before a class starts are kept here for your records.' },
+    },
   },
   watch: {
     noRecording: 'No recording yet',
@@ -213,6 +243,7 @@ export const en = {
     completed: 'Completed',
     noneTitle: 'No courses yet',
     noneBody: 'Courses you are enrolled on appear here.',
+    searchMine: 'Search your courses',
     noMatch: 'No courses in this list',
     percent: '{{percent}}% complete',
     lessons_one: '{{count}} lesson', lessons_other: '{{count}} lessons',
@@ -253,6 +284,8 @@ export const en = {
     title: 'My note',
     placeholder: 'Write a private note for this lesson…',
     save: 'Save note',
+    delete: 'Delete note',
+    deleteTitle: 'Delete this note?',
     saved: 'Saved',
     failed: 'Could not save the note',
   },
@@ -314,6 +347,7 @@ export const en = {
     remove: 'Remove',
   },
   messages: {
+    unreadCount_one: '{{count}} unread message', unreadCount_other: '{{count}} unread messages',
     title: 'Messages',
     subtitle: 'Message the mentors of your programme.',
     none: 'No mentors to message yet',
@@ -335,6 +369,8 @@ export const en = {
     empty: 'No messages yet. Write the first one.',
   },
   notifications: {
+    unreadCount_one: '{{count}} unread', unreadCount_other: '{{count}} unread',
+    unread: 'unread',
     title: 'Notifications',
     none: 'No notifications',
     noneBody: 'Booking updates, class reminders and replies appear here.',
@@ -487,7 +523,10 @@ export const en = {
     completeRegistration: 'Complete your registration',
     completeRegistrationBody: 'Add your details and documents so the academy can approve your enrolment.',
     registrationRejected: 'Your registration needs changes',
-    sections: { learning: 'Learning', account: 'Account', support: 'Help', danger: 'Account removal' },
+    sections: { learning: 'Learning', account: 'Account', support: 'Help', danger: 'Account removal', appearance: 'Appearance' },
+    themeSystem: 'System',
+    themeLight: 'Light',
+    themeDark: 'Dark',
   },
   complete: {
     stepOf: 'Step {{n}} of {{total}} · {{label}}',
@@ -539,6 +578,10 @@ export const en = {
     otherAccount: 'This link belongs to another student. Sign out first, or open your own link.',
   },
   catalog: {
+    ratedOf: 'Rated {{value}} out of 5',
+    ratingsCount_one: '{{count}} rating', ratingsCount_other: '{{count}} ratings',
+    rating: 'Rating',
+    notRated: 'Not rated',
     explore: 'Explore',
     browse: 'Browse courses',
     search: 'Search courses',
@@ -594,6 +637,7 @@ export const en = {
   paths: {
     title: 'Learning paths',
     intro: 'Guided routes through several courses, in the order that builds the skill.',
+    search: 'Search learning paths',
     none: 'No learning paths yet',
     courses_one: '{{count}} course', courses_other: '{{count}} courses',
     doneOf: '{{done}} of {{total}} done',
@@ -675,6 +719,7 @@ export const en = {
     noBookmarks: 'No bookmarks yet',
     noBookmarksBody: 'Save moments of the video to jump back to them.',
     untitled: 'Untitled bookmark',
+    deleteBookmarkTitle: 'Delete this bookmark?',
     deleteBookmark: 'Delete bookmark',
     noTranscript: 'No transcript for this lesson yet',
   },
@@ -697,6 +742,8 @@ export const en = {
     reopen: 'Reopen',
     delete: 'Delete',
     deleteTitle: 'Delete this question?',
+    deleteReply: 'Delete my reply',
+    deleteReplyTitle: 'Delete this reply?',
     mentorAnswer: 'Mentor answer',
     reply: 'Write a reply',
     send: 'Reply',

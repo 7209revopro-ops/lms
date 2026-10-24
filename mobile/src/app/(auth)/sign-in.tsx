@@ -43,7 +43,17 @@ export default function SignIn() {
 
   const verify = () => {
     if (!/^\d{6}$/.test(code.trim())) return setError(t('auth.codeRequired'))
-    void run(() => verifyCode(email, code))
+    void run(async () => {
+      try {
+        await verifyCode(email, code)
+      } catch (err) {
+        /* A refused new device spends the code: back to "Email me a code",
+           so coming back after approval is one tap, not a stale code. */
+        const p = problemOf(err)
+        if (p.kind === 'refused' && p.code === 'DEVICE_PENDING') { setSentTo(null); setCode('') }
+        throw err
+      }
+    })
   }
 
   const withPassword = async () => {

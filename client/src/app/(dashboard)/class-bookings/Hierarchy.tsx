@@ -1300,6 +1300,12 @@ function SessionCard({
      class and every past state still say exactly what they are. */
   const shown: SlotStatus = barred && (status === 'bookable' || status === 'full') ? 'locked' : status
   const c = SC[shown]
+  /* 'live' opens 15 minutes before the start (LIVE_LEAD_MINS), but the join
+     link only opens AT the start — so until the class has really begun the
+     badge says "Starting soon", not "Live Now" over a Join that answers
+     "opens when the class starts". The app's displayStatus, same rule. */
+  const startingSoon = shown === 'live' && !lc.startedAt && now < new Date(lc.scheduledStart).getTime()
+  const badge = startingSoon ? 'Starting soon' : c.label
 
   const cap   = lc.sessionCapacity
   const left  = Math.max(0, seatsLeft(lc))
@@ -1334,7 +1340,7 @@ function SessionCard({
        writes its own latestValues over the style prop, so `opacity: 0.85`
        there is silently discarded by the entry animation landing on 1. */
     <motion.article
-      aria-label={`${dayLabel} at ${time}, ${titleCase(lc.title)}${group.instructor ? `, ${group.instructor.name}` : ''} — ${c.label}`}
+      aria-label={`${dayLabel} at ${time}, ${titleCase(lc.title)}${group.instructor ? `, ${group.instructor.name}` : ''} — ${badge}`}
       initial={reduce ? false : { opacity: 0, y: 12 }}
       animate={{
         opacity: barred ? 0.85 : 1, y: 0,
@@ -1361,12 +1367,12 @@ function SessionCard({
           </div>
           <span className="flex flex-shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-bold"
             style={{ background: c.bg, color: ink(c.color), border: `1px solid ${c.border}` }}>
-            {shown === 'live' && (
+            {shown === 'live' && !startingSoon && (
               <motion.span aria-hidden className="h-1.5 w-1.5 rounded-full" style={{ background: c.color }}
                 animate={reduce ? undefined : { opacity: [1, 0.25, 1] }}
                 transition={{ duration: 1.4, repeat: Infinity, ease: 'easeInOut' }} />
             )}
-            {c.label}
+            {badge}
           </span>
         </div>
 

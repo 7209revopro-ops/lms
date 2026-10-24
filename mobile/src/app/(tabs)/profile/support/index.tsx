@@ -45,7 +45,7 @@ function TicketRow({ tk }: { tk: SupportTicket }) {
         <Text numberOfLines={1} style={{ flex: 1, fontFamily: tk.userUnread ? fonts.bold : fonts.semibold, fontSize: 15, color: colors.textPrimary }}>{tk.subject}</Text>
         <Text style={{ fontFamily: fonts.body, fontSize: 12, color: colors.textMuted }}>{fmtShort(tk.lastMessageAt)}</Text>
       </View>
-      <Text style={{ fontFamily: fonts.medium, fontSize: 12, color: done ? colors.textMuted : tk.status === 'pending' ? colors.warning : colors.primary }}>
+      <Text style={{ fontFamily: fonts.medium, fontSize: 12, color: done ? colors.textMuted : tk.status === 'pending' ? colors.warningInk : colors.primary }}>
         {`${t(`support.status.${tk.status}`)} · ${t(`support.categories.${tk.category}`)}`}
       </Text>
     </Pressable>

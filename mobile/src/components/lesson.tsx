@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { ActivityIndicator, Image, StyleSheet, Text, TextInput, View } from 'react-native'
+import { ActivityIndicator, Alert, Image, StyleSheet, Text, TextInput, View } from 'react-native'
 import { useEventListener } from 'expo'
 import { useVideoPlayer, VideoView, type VideoPlayer } from 'expo-video'
 import * as WebBrowser from 'expo-web-browser'
@@ -186,7 +186,14 @@ export function NoteCard({ lessonId }: { lessonId: string }) {
         <Button title={t('notes.save')} loading={save.isPending}
           onPress={() => save.mutate(text, { onSuccess: () => setDraft(null) })} />
       )}
-      {!dirty && save.isSuccess && <Text style={{ fontFamily: fonts.medium, fontSize: 13, color: colors.success }}>{t('notes.saved')}</Text>}
+      {!dirty && save.isSuccess && <Text style={{ fontFamily: fonts.medium, fontSize: 13, color: colors.successInk }}>{t('notes.saved')}</Text>}
+      {/* The website's "delete note": saving an empty note deletes it. */}
+      {!dirty && !!stored && !save.isPending && (
+        <Button variant="ghost" title={t('notes.delete')} onPress={() => Alert.alert(t('notes.deleteTitle'), undefined, [
+          { text: t('common.back'), style: 'cancel' },
+          { text: t('notes.delete'), style: 'destructive', onPress: () => save.mutate('', { onSuccess: () => setDraft(null) }) },
+        ])} />
+      )}
     </View>
   )
 }

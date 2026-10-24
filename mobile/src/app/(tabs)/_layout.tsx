@@ -42,7 +42,7 @@ export default function TabsLayout() {
         <Tabs.Screen key={tab.name} name={tab.name} options={{
           title: t(`tabs.${tab.label}`),
           /* Spelled out: left to Android, the icon's glyph is read too. */
-          tabBarAccessibilityLabel: `${t(`tabs.${tab.label}`)}${badge(tab.name) > 0 ? `, ${badge(tab.name)} new` : ''}`,
+          tabBarAccessibilityLabel: `${t(`tabs.${tab.label}`)}${badge(tab.name) > 0 ? `, ${t('tabs.newCount', { count: badge(tab.name) })}` : ''}`,
           tabBarBadge: badge(tab.name) > 0 ? (badge(tab.name) > 99 ? '99+' : badge(tab.name)) : undefined,
           /* Filled glyph for the tab you are on, outline for the rest. */
           tabBarIcon: ({ color, size, focused }) => (

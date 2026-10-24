@@ -8,6 +8,7 @@ import { useTheme } from '@/theme'
 import { StarInput, Stars } from './catalog'
 import { useToast } from './toast'
 import { Badge, Button, Card, Field, Glyph } from './ui'
+import { Failed } from './states'
 
 /* Under a class: the session's homework (the website's SessionHomework —
    answered with text or a link) and, once it has ended and the student was
@@ -26,6 +27,8 @@ function Homework({ classId }: { classId: string }) {
   const { t } = useTranslation()
   const { colors, fonts } = useTheme()
   const list = useHomework(classId)
+  /* A failed load is not "no homework": say so, with a retry. */
+  if (list.error && !list.data) return <Failed error={list.error} onRetry={() => void list.refetch()} />
   if (!list.data?.length) return null
   return (
     <View style={{ gap: 10 }}>

@@ -56,8 +56,11 @@ export class ClassAssignmentService {
       .lean()
     if (bookings.length === 0) return []
 
+    /* Only classes that have STARTED. Work is handed in after a class ("a
+       class you attended" on both the website and the app), so tonight's and
+       next week's seats are not offered in the picker. */
     return LiveClassModel
-      .find({ _id: { $in: bookings.map(b => b.liveClassId) }, status: { $ne: 'cancelled' } })
+      .find({ _id: { $in: bookings.map(b => b.liveClassId) }, status: { $ne: 'cancelled' }, scheduledStart: { $lte: new Date() } })
       .select('title scheduledStart courseId sectionId instructorId')
       .populate('courseId', 'title slug')
       .populate('sectionId', 'title')

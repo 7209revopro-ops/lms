@@ -31,11 +31,11 @@ export const fmtShort = (iso: string) => new Date(iso).toDateString() === new Da
 function tone(s: DisplayStatus, c: Colors): string {
   switch (s) {
     case 'live': return c.danger
-    case 'startingSoon': return c.warning
+    case 'startingSoon': return c.warningInk
     case 'booked': return c.successInk
     case 'bookable': return c.primary
     case 'attended': return c.primary
-    case 'missed': return c.warning
+    case 'missed': return c.warningInk
     default: return c.textMuted
   }
 }
@@ -96,7 +96,7 @@ function Seats({ left, total }: { left: number; total: number }) {
           <View style={{ width: `${pct}%`, height: '100%', backgroundColor: few || left === 0 ? colors.warning : colors.primary }} />
         </View>
       )}
-      <Text style={{ fontFamily: fonts.medium, fontSize: 12, color: few ? colors.warning : colors.textMuted }}>{t('classes.seatsLeft', { left, total })}</Text>
+      <Text style={{ fontFamily: fonts.medium, fontSize: 12, color: few ? colors.warningInk : colors.textMuted }}>{t('classes.seatsLeft', { left, total })}</Text>
     </View>
   )
 }
@@ -127,8 +127,10 @@ export function ClassCard({ lc, booking, hasOther, heldTwin, now, onPress }: {
   const live = shown === 'live'
   const left = Math.max(0, seatsLeft(lc))
   return (
-    <Pressable onPress={onPress} accessibilityRole="button" disabled={!onPress}
-      accessibilityLabel={`${fmtWhen(lc.scheduledStart)}, ${t(`status.${shown}`)}, ${lc.title}`}
+    /* Not one accessible element: a screen reader must reach Book / Join /
+       Cancel inside the card, which a grouped card would hide (iOS). The
+       title carries the card's summary and opens the class. */
+    <Pressable onPress={onPress} disabled={!onPress} accessible={false}
       style={({ pressed }) => ({
         backgroundColor: colors.bgSurface, borderColor: live ? colors.danger : colors.border,
         borderWidth: live ? 1.5 : 1, borderRadius: radius.lg, padding: 14, gap: 12,
@@ -143,7 +145,9 @@ export function ClassCard({ lc, booking, hasOther, heldTwin, now, onPress }: {
             </Text>
             <StatusPill status={shown} />
           </View>
-          <Text numberOfLines={2} style={{ fontFamily: fonts.bold, fontSize: 16, lineHeight: 21, color: colors.textPrimary }}>{lc.title}</Text>
+          <Text numberOfLines={2} onPress={onPress} accessibilityRole={onPress ? 'button' : 'text'}
+            accessibilityLabel={`${fmtWhen(lc.scheduledStart)}, ${t(`status.${shown}`)}, ${lc.title}`}
+            style={{ fontFamily: fonts.bold, fontSize: 16, lineHeight: 21, color: colors.textPrimary }}>{lc.title}</Text>
           <View style={{ gap: 3 }}>
             {(effCourseTitle(lc) || module) && <Meta icon="book-outline" text={[effCourseTitle(lc), module].filter(Boolean).join(' · ')} />}
             {lc.instructor?.name && <Meta icon="person-outline" text={lc.instructor.name} />}
@@ -188,9 +192,12 @@ export function ClassAction({ lc, booking, status, heldTwin, now }: {
   const doBook = () => book.mutate(lc.id, { onError: err => Alert.alert(t('classes.bookFailed'), errorText(err)) })
   const doJoin = async () => {
     setJoining(true)
-    const r = await joinMeet(lc.id)
-    setJoining(false)
-    if (!r.ok) Alert.alert(t('classes.join'), r.message)
+    try {
+      const r = await joinMeet(lc.id)
+      if (!r.ok) Alert.alert(t('classes.join'), r.message)
+    } finally {
+      setJoining(false)
+    }
   }
 
   if (status === 'bookable') {
@@ -251,7 +258,11 @@ export function SectionHeader({ title, action }: { title: string; action?: { lab
   return (
     <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline', marginTop: 8 }}>
       <Text accessibilityRole="header" style={{ fontFamily: fonts.bold, fontSize: 17, color: colors.textPrimary }}>{title}</Text>
-      {action && <Text accessibilityRole="link" onPress={action.onPress} style={{ fontFamily: fonts.semibold, fontSize: 14, color: colors.primary }}>{action.label}</Text>}
+      {action && (
+        <Pressable onPress={action.onPress} accessibilityRole="link" hitSlop={12} style={{ minHeight: 44, justifyContent: 'center' }}>
+          <Text style={{ fontFamily: fonts.semibold, fontSize: 14, color: colors.primary }}>{action.label}</Text>
+        </Pressable>
+      )}
     </View>
   )
 }

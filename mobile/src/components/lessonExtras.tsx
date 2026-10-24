@@ -66,18 +66,27 @@ function Bookmarks({ lessonId, player }: { lessonId: string; player: () => Playe
         : list.error ? <Failed error={list.error} onRetry={() => void list.refetch()} />
         : !list.data?.length ? <Empty icon="bookmark-outline" title={t('extras.noBookmarks')} body={t('extras.noBookmarksBody')} />
         : list.data.map(b => (
-          <Pressable key={b.id} accessibilityRole="button" accessibilityLabel={`${clockLabel(b.timeSecs)}${b.label ? `, ${b.label}` : ''}`}
-            onPress={() => { haptic.tap(); player()?.seek(b.timeSecs) }}
-            style={({ pressed }) => ({ flexDirection: 'row', alignItems: 'center', gap: 12, padding: 12, borderRadius: radius.md,
-              backgroundColor: pressed ? colors.bgMuted : colors.bgSurface, borderWidth: 1, borderColor: colors.border })}>
-            <View style={{ paddingHorizontal: 10, paddingVertical: 4, borderRadius: 999, backgroundColor: colors.primaryLight }}>
-              <Text style={{ fontFamily: fonts.bold, fontSize: 13, color: colors.primary, fontVariant: ['tabular-nums'] }}>{clockLabel(b.timeSecs)}</Text>
-            </View>
-            <Text numberOfLines={2} style={{ flex: 1, fontFamily: fonts.medium, fontSize: 14, color: b.label ? colors.textPrimary : colors.textMuted }}>
-              {b.label || t('extras.untitled')}
-            </Text>
-            <IconButton icon="trash-outline" size={18} color={colors.textMuted} label={t('extras.deleteBookmark')} onPress={() => remove.mutate(b.id)} />
-          </Pressable>
+          /* Two siblings, not one button holding another: the delete must be
+             reachable by a screen reader on its own. */
+          <View key={b.id} style={{ flexDirection: 'row', alignItems: 'center', borderRadius: radius.md,
+            backgroundColor: colors.bgSurface, borderWidth: 1, borderColor: colors.border }}>
+            <Pressable accessibilityRole="button" accessibilityLabel={`${clockLabel(b.timeSecs)}${b.label ? `, ${b.label}` : ''}`}
+              onPress={() => { haptic.tap(); player()?.seek(b.timeSecs) }}
+              style={({ pressed }) => ({ flex: 1, flexDirection: 'row', alignItems: 'center', gap: 12, padding: 12, borderRadius: radius.md,
+                backgroundColor: pressed ? colors.bgMuted : 'transparent' })}>
+              <View style={{ paddingHorizontal: 10, paddingVertical: 4, borderRadius: 999, backgroundColor: colors.primaryLight }}>
+                <Text style={{ fontFamily: fonts.bold, fontSize: 13, color: colors.primary, fontVariant: ['tabular-nums'] }}>{clockLabel(b.timeSecs)}</Text>
+              </View>
+              <Text numberOfLines={2} style={{ flex: 1, fontFamily: fonts.medium, fontSize: 14, color: b.label ? colors.textPrimary : colors.textMuted }}>
+                {b.label || t('extras.untitled')}
+              </Text>
+            </Pressable>
+            <IconButton icon="trash-outline" size={18} color={colors.textMuted} label={t('extras.deleteBookmark')}
+              onPress={() => Alert.alert(t('extras.deleteBookmarkTitle'), undefined, [
+                { text: t('common.back'), style: 'cancel' },
+                { text: t('qa.delete'), style: 'destructive', onPress: () => remove.mutate(b.id, { onError: e => toast(errorText(e), 'danger') }) },
+              ])} />
+          </View>
         ))}
     </View>
   )
@@ -171,8 +180,16 @@ function ThreadCard({ th, lessonId }: { th: Thread; lessonId: string }) {
                     {c.isInstructorAnswer && <Badge label={t('qa.mentorAnswer')} tone="success" />}
                   </View>
                   <Text style={{ fontFamily: fonts.body, fontSize: 14, lineHeight: 20, color: colors.textSecondary }}>{c.body}</Text>
-                  <Small icon="arrow-up-circle-outline" label={String(c.upvoteCount)} a11y={t('qa.upvote')}
-                    onPress={() => m.upvoteComment.mutate({ threadId: th.id, commentId: c.id })} />
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 16 }}>
+                    <Small icon="arrow-up-circle-outline" label={String(c.upvoteCount)} a11y={t('qa.upvote')}
+                      onPress={() => m.upvoteComment.mutate({ threadId: th.id, commentId: c.id })} />
+                    {c.author?.id === me && <Small icon="trash-outline" a11y={t('qa.deleteReply')} onPress={() => Alert.alert(t('qa.deleteReplyTitle'), undefined, [
+                      { text: t('common.back'), style: 'cancel' },
+                      { text: t('qa.delete'), style: 'destructive', onPress: () => m.removeComment.mutate({ threadId: th.id, commentId: c.id }, {
+                        onError: e => toast(errorText(e), 'danger'),
+                      }) },
+                    ])} />}
+                  </View>
                 </View>
               </View>
             ))}

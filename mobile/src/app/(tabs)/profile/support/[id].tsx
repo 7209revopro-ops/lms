@@ -66,7 +66,7 @@ export default function Ticket() {
                 placeholderTextColor={colors.textMuted} accessibilityLabel={t('support.reply')}
                 style={{ flex: 1, maxHeight: 120, minHeight: 42, fontFamily: fonts.body, fontSize: 15, color: colors.textPrimary,
                   backgroundColor: colors.bgPage, borderRadius: radius.lg, borderWidth: 1, borderColor: colors.border, paddingHorizontal: 14, paddingVertical: 10 }} />
-              <Pressable onPress={send} disabled={!draft.trim() || reply.isPending} accessibilityRole="button" accessibilityLabel={t('support.send')}
+              <Pressable onPress={send} hitSlop={6} disabled={!draft.trim() || reply.isPending} accessibilityRole="button" accessibilityLabel={t('support.send')}
                 style={({ pressed }) => ({ width: 42, height: 42, borderRadius: 21, alignItems: 'center', justifyContent: 'center',
                   backgroundColor: pressed ? colors.primaryPressed : colors.primaryFill, opacity: !draft.trim() || reply.isPending ? 0.4 : 1 })}>
                 <Ionicons name="send" size={18} color={colors.onPrimary} />

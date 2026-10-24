@@ -156,7 +156,7 @@ function Hero({ greeting, name, unread, streak }: {
           <Text accessibilityRole="header" numberOfLines={1} style={{ fontFamily: fonts.display, fontSize: 30, color: '#fff' }}>{name}</Text>
         </View>
         <Pressable onPress={() => router.push('/notifications')} accessibilityRole="button" hitSlop={8}
-          accessibilityLabel={`${t('notifications.open')}${unread ? `, ${unread} unread` : ''}`}
+          accessibilityLabel={`${t('notifications.open')}${unread ? `, ${t('notifications.unreadCount', { count: unread })}` : ''}`}
           style={({ pressed }) => ({ width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center',
             backgroundColor: pressed ? 'rgba(255,255,255,0.28)' : 'rgba(255,255,255,0.16)' })}>
           <Glyph name="notifications-outline" size={22} color="#fff" />

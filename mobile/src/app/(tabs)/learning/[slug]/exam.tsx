@@ -95,7 +95,7 @@ function Rule({ text, warn }: { text: string; warn?: boolean }) {
   const { colors, fonts } = useTheme()
   return (
     <View style={{ flexDirection: 'row', gap: 8 }}>
-      <Glyph name={warn ? 'warning-outline' : 'checkmark-circle-outline'} size={16} color={warn ? colors.warning : colors.success} />
+      <Glyph name={warn ? 'warning-outline' : 'checkmark-circle-outline'} size={16} color={warn ? colors.warningInk : colors.successInk} />
       <Text style={{ flex: 1, fontFamily: fonts.body, fontSize: 14, lineHeight: 20, color: colors.textSecondary }}>{text}</Text>
     </View>
   )
@@ -267,7 +267,7 @@ function Result({ examId, title }: { examId: string; title: string }) {
       ) : (
         <Card style={{ alignItems: 'center', gap: 6 }}>
           <Glyph name={d.passed ? 'trophy' : 'refresh-circle-outline'} size={44} color={d.passed ? colors.warning : colors.textMuted} />
-          <Text style={{ fontFamily: fonts.display, fontSize: 40, color: d.passed ? colors.success : colors.danger }}>{`${pct}%`}</Text>
+          <Text style={{ fontFamily: fonts.display, fontSize: 40, color: d.passed ? colors.successInk : colors.danger }}>{`${pct}%`}</Text>
           <Text style={{ fontFamily: fonts.semibold, fontSize: 15, color: colors.textPrimary }}>{d.passed ? t('exam.passed') : t('exam.failed')}</Text>
           <Text style={{ fontFamily: fonts.body, fontSize: 13, color: colors.textMuted }}>{t('exam.score', { got: d.totalMarks, max: d.maxMarks, pass: d.passPercent })}</Text>
         </Card>
@@ -276,7 +276,7 @@ function Result({ examId, title }: { examId: string; title: string }) {
         <Card key={q.id} style={{ gap: 6 }}>
           <Text style={{ fontFamily: fonts.semibold, fontSize: 14, lineHeight: 20, color: colors.textPrimary }}>{`${i + 1}. ${q.text}`}</Text>
           <Text style={{ fontFamily: fonts.body, fontSize: 14, color: colors.textSecondary }}>{`${t('exam.yourAnswer')}: ${q.yourAnswer || '—'}`}</Text>
-          {q.marksAwarded != null && <Text style={{ fontFamily: fonts.medium, fontSize: 13, color: q.marksAwarded >= q.maxMarks ? colors.success : colors.textMuted }}>{t('exam.marksOf', { got: q.marksAwarded, max: q.maxMarks })}</Text>}
+          {q.marksAwarded != null && <Text style={{ fontFamily: fonts.medium, fontSize: 13, color: q.marksAwarded >= q.maxMarks ? colors.successInk : colors.textMuted }}>{t('exam.marksOf', { got: q.marksAwarded, max: q.maxMarks })}</Text>}
           {!!q.feedback && <Text style={{ fontFamily: fonts.body, fontSize: 13, color: colors.textSecondary }}>{q.feedback}</Text>}
           {!!q.explanation && <Text style={{ fontFamily: fonts.body, fontSize: 13, fontStyle: 'italic', color: colors.textMuted }}>{q.explanation}</Text>}
         </Card>

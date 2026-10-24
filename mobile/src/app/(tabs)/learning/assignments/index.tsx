@@ -42,8 +42,8 @@ function AssignmentRow({ a }: { a: MyAssignment }) {
   const { t } = useTranslation()
   const { colors, fonts, radius } = useTheme()
   const tone: Record<AssignmentStatus, { fg: string; bg: string }> = {
-    pending:  { fg: colors.warning, bg: colors.bgMuted },
-    approved: { fg: colors.success, bg: colors.bgMuted },
+    pending:  { fg: colors.warningInk, bg: colors.bgMuted },
+    approved: { fg: colors.successInk, bg: colors.bgMuted },
     rejected: { fg: colors.danger,  bg: colors.dangerLight },
   }
   const where = [a.liveClass?.title, a.course?.title].filter(Boolean).join(' · ')

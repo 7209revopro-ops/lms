@@ -451,9 +451,14 @@ export async function resolveMeetJoin(
      and best-effort: a write failure here must never block the student from
      actually getting into class. runAttendanceFinalization (reminders.job.ts)
      is what turns this timestamp into the booking's real 'attended' status
-     once the class is over. */
+     once the class is over.
+
+     AWAITED, still best-effort (the catch swallows a failure). Fired and
+     forgotten, the join answered before the write landed, so the join-link
+     fallback reported { recorded: true } for an attendance that a read right
+     after could not yet see (joinlink.suite section I, intermittently). */
   const { ClassBookingModel } = await import('@/models/schema.ts')
-  void ClassBookingModel.updateOne(
+  await ClassBookingModel.updateOne(
     { userId: new Types.ObjectId(ctx.userId), liveClassId: live._id, status: 'booked', attendedAt: { $exists: false } },
     { $set: { attendedAt: new Date(), attendanceSource: 'click' } },
   ).catch(err => logger.error({ err, liveClassId: live.id, actor: ctx.userId }, 'auto-attendance write failed'))

@@ -54,7 +54,7 @@ export default function PathDetail() {
                 <View style={{ flex: 1, gap: 6, paddingBottom: 6 }}>
                   {s.isPrerequisite && <Badge label={t('paths.prerequisite')} tone="warning" />}
                   <CourseRow course={s.course} onPress={() => router.push({ pathname: '/learning/[slug]', params: { slug: s.course.slug } })}
-                    right={e ? <Text style={{ fontFamily: fonts.semibold, fontSize: 12, color: done ? colors.success : colors.primary }}>{done ? t('learning.completed') : `${Math.round(e.progressPercent)}%`}</Text> : undefined} />
+                    right={e ? <Text style={{ fontFamily: fonts.semibold, fontSize: 12, color: done ? colors.successInk : colors.primary }}>{done ? t('learning.completed') : `${Math.round(e.progressPercent)}%`}</Text> : undefined} />
                 </View>
               </View>
             )
