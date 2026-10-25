@@ -1,5 +1,6 @@
 'use client'
 
+import { useQueryState, setQueryParams } from '@/lib/useQueryState'
 import { useState, useMemo } from 'react'
 import { useRouter } from 'next/navigation'
 import { motion, AnimatePresence } from 'framer-motion'
@@ -663,9 +664,10 @@ export function LiveClassesSection({ courseId }: Props) {
   const createMutation               = useCreateLiveClass()
   const [showForm, setShowForm]      = useState(false)
   const [error,    setError]         = useState<string | null>(null)
-  const [search,   setSearch]        = useState('')
-  const [statusFilter, setStatusFilter] = useState<typeof STATUS_FILTERS[number]['key']>('all')
-  const [page,     setPage]          = useState(1)
+  /* In the address bar (lib/useQueryState.ts), prefixed so they never clash with the page's own keys. */
+  const [search]                     = useQueryState('lq', '', { history: 'replace' })
+  const [statusFilter]               = useQueryState<typeof STATUS_FILTERS[number]['key']>('lstatus', 'all')
+  const [page,     setPage]          = useQueryState('lpage', 1)
 
   const filtered = useMemo(() => {
     let list = items ?? []
@@ -684,8 +686,8 @@ export function LiveClassesSection({ courseId }: Props) {
   const upcoming = paged.filter(l => l.status === 'scheduled' || l.status === 'live')
   const past     = paged.filter(l => l.status === 'ended' || l.status === 'cancelled')
 
-  const handleSearchChange = (v: string) => { setSearch(v); setPage(1) }
-  const handleStatusChange = (v: typeof STATUS_FILTERS[number]['key']) => { setStatusFilter(v); setPage(1) }
+  const handleSearchChange = (v: string) => setQueryParams({ lq: v, lpage: null }, 'replace')
+  const handleStatusChange = (v: typeof STATUS_FILTERS[number]['key']) => setQueryParams({ lstatus: v === 'all' ? null : v, lpage: null })
 
   return (
     <section className="mt-6 rounded-2xl p-5 space-y-4"

@@ -1,5 +1,6 @@
 'use client'
 
+import { useQueryState, setQueryParams } from '@/lib/useQueryState'
 import { useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import Link from 'next/link'
@@ -127,7 +128,8 @@ export function CourseDetail({ id }: { id: string }) {
   const updateCourse = useUpdateCourse()
   const deleteCourse = useDeleteCourse()
   const [publishing,     setPublishing]     = useState(false)
-  const [studentsOpen,   setStudentsOpen]   = useState(false)
+  /* The students panel open or not, in the address bar — a link can open it (lib/useQueryState.ts). */
+  const [studentsOpen,   setStudentsOpen]   = useQueryState('students', false)
   const [deleting,       setDeleting]       = useState(false)
   const [confirmDelete,  setConfirmDelete]  = useState(false)
 
@@ -400,7 +402,7 @@ export function CourseDetail({ id }: { id: string }) {
           third of the page is a table nobody reads. */}
       <AnimatePresence>
         {studentsOpen && (
-          <CourseStudentsPanel courseId={course.id} onClose={() => setStudentsOpen(false)} />
+          <CourseStudentsPanel courseId={course.id} onClose={() => setQueryParams({ students: null, sq: null, spage: null, ssource: null })} />
         )}
       </AnimatePresence>
 

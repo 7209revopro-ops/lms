@@ -1,5 +1,6 @@
 'use client'
 
+import { useQueryState, setQueryParams } from '@/lib/useQueryState'
 import { useMemo, useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
@@ -56,9 +57,10 @@ export function CourseStudentsPanel({ courseId, onClose }: {
   courseId: string
   onClose?: () => void
 }) {
-  const [page,   setPage]   = useState(1)
-  const [search, setSearch] = useState('')
-  const [source, setSource] = useState<'all' | EnrollmentSource>('all')
+  /* In the address bar (lib/useQueryState.ts), prefixed so they never clash with the page's own keys. */
+  const [page,   setPage]   = useQueryState('spage', 1)
+  const [search]            = useQueryState('sq', '', { history: 'replace' })
+  const [source]            = useQueryState<'all' | EnrollmentSource>('ssource', 'all')
 
   const { data, isLoading, isError } = useCourseStudents(courseId, {
     page, per_page: 25, search, source: source === 'all' ? undefined : source,
@@ -123,7 +125,7 @@ export function CourseStudentsPanel({ courseId, onClose }: {
               style={{ color: 'rgba(255,255,255,0.35)' }} />
             <input
               value={search}
-              onChange={e => { setSearch(e.target.value); setPage(1) }}
+              onChange={e => setQueryParams({ sq: e.target.value, spage: null }, 'replace')}
               placeholder="Search name or email…"
               className="h-10 w-full rounded-xl pl-9 pr-3 text-sm outline-none sm:w-60"
               style={{
@@ -151,14 +153,14 @@ export function CourseStudentsPanel({ courseId, onClose }: {
       {/* Source filter — counts span the whole course, not this page */}
       <div className="mb-4 flex flex-wrap items-center gap-2">
         <FilterChip label="All" count={allCount} active={source === 'all'}
-          onClick={() => { setSource('all'); setPage(1) }} color="#4D94FF" />
+          onClick={() => setQueryParams({ ssource: null, spage: null })} color="#4D94FF" />
         {ORDER.filter(s => (bySource[s] ?? 0) > 0).map(s => (
           <FilterChip
             key={s}
             label={SOURCE_META[s].label}
             count={bySource[s] ?? 0}
             active={source === s}
-            onClick={() => { setSource(s); setPage(1) }}
+            onClick={() => setQueryParams({ ssource: s, spage: null })}
             color={SOURCE_META[s].color}
             icon={SOURCE_META[s].icon}
           />
