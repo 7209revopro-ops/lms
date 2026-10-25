@@ -1,6 +1,7 @@
 'use client'
 
-import { useState, useCallback, useRef } from 'react'
+import { useState, useCallback, useRef, useEffect } from 'react'
+import { useQueryState, setQueryParams } from '@/lib/useQueryState'
 import { Zap, Search, Users, Shield, ShieldOff, Trash2, ChevronLeft, ChevronRight, Globe, X, AlertTriangle } from 'lucide-react'
 import { useExpressMembers, useToggleExpressMember, useDeleteExpressMember, type ExpressMember, type ExpressMemberStatus } from '@/lib/api/expressMembers'
 import { AvatarImg } from '@/components/ui/AvatarImg'
@@ -92,10 +93,12 @@ const STATUS_TABS: { key: ExpressMemberStatus; label: string }[] = [
 
 /* ── Main page ─────────────────────────────────── */
 export default function ExpressMembersPage() {
-  const [status, setStatus]       = useState<ExpressMemberStatus>('all')
-  const [search, setSearch]       = useState('')
-  const [debouncedSearch, setDebouncedSearch] = useState('')
-  const [page, setPage]           = useState(1)
+  /* Every filter in the address bar (lib/useQueryState.ts): a reload keeps the view, the link can be shared.
+     The search box types into local state; the debounced value is what goes in the URL (?q=). */
+  const [status, setStatus]       = useQueryState<ExpressMemberStatus>('status', 'all')
+  const [debouncedSearch]         = useQueryState('q', '', { history: 'replace' })
+  const [search, setSearch]       = useState(debouncedSearch)
+  const [page, setPage]           = useQueryState('page', 1)
   const [toDelete, setToDelete]   = useState<ExpressMember | null>(null)
   const debounceRef               = useRef<ReturnType<typeof setTimeout> | null>(null)
 
@@ -105,6 +108,9 @@ export default function ExpressMembersPage() {
   const totalCount = meta?.total_count ?? 0
   const totalPages = meta?.total_pages ?? 1
 
+  /* The box follows the URL when it changes from outside (reload, Back/Forward). */
+  useEffect(() => { setSearch(debouncedSearch) }, [debouncedSearch])
+
   const toggleMutation = useToggleExpressMember()
   const deleteMutation = useDeleteExpressMember()
 
@@ -112,8 +118,7 @@ export default function ExpressMembersPage() {
     setSearch(val)
     if (debounceRef.current) clearTimeout(debounceRef.current)
     debounceRef.current = setTimeout(() => {
-      setDebouncedSearch(val)
-      setPage(1)
+      setQueryParams({ q: val, page: null }, 'replace')
     }, 350)
   }, [])
 

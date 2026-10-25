@@ -14,6 +14,7 @@ import { useCurrentUser } from '@/lib/api/user'
 import { datetimeLocalToISO, isoToDatetimeLocal } from '@/lib/timezone'
 import { MediaUploadField } from '@/components/ui/MediaUploadField'
 import Spinner from '@/components/ui/Spinner'
+import { useQueryState } from '@/lib/useQueryState'
 import { useToast } from '@/store/ui.store'
 import { useBackdropClose } from '@/hooks/useBackdropClose'
 
@@ -270,7 +271,7 @@ function AnnouncementFormModal({ initial, onClose }: { initial?: AdminAnnounceme
 
 /* ─── Page ───────────────────────────────────────────── */
 export default function AdminAnnouncementsPage() {
-  const [page,     setPage]     = useState(1)
+  const [page,     setPage]     = useQueryState('page', 1)   // in the address bar: a reload keeps the page
   const [modal,    setModal]    = useState<'create' | AdminAnnouncement | null>(null)
   const [deleting, setDeleting] = useState<string | null>(null)
 

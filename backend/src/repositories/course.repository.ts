@@ -174,8 +174,16 @@ export class CourseRepository extends BaseRepository<ICourse> {
      Same shape as listPublished but the status filter
      comes from the caller rather than being hardcoded.
   ───────────────────────────────────────────────────── */
-  async listAdmin(params: CourseListParams & { status?: 'draft' | 'published' | 'archived' | 'all' }): Promise<{ docs: ICourse[]; totalCount: number }> {
+  async listAdmin(params: CourseListParams & { status?: 'draft' | 'published' | 'archived' | 'all'; excludePrograms?: boolean }): Promise<{ docs: ICourse[]; totalCount: number }> {
     const filter: Record<string, unknown> = {}
+
+    /* The Courses page leaves out programmes' hidden "Program: …" courses — programmes have their own page
+       (2026-10-24). Other callers (class pickers, filters) still get them: a programme's class needs its course. */
+    if (params.excludePrograms) {
+      const { ProgramModel } = await import('@/models/schema.ts')
+      const ids = await ProgramModel.distinct('courseId')
+      if (ids.length) filter['_id'] = { $nin: ids }
+    }
 
     if (params.status && params.status !== 'all') filter['status'] = params.status
 

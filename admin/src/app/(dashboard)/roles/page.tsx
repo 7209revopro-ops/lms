@@ -16,6 +16,7 @@ import {
 } from '@/lib/api/roles'
 import { useUsers, type AdminUser } from '@/lib/api/users'
 import { useCurrentUser } from '@/lib/api/user'
+import { useQueryState, setQueryParams } from '@/lib/useQueryState'
 import Spinner from '@/components/ui/Spinner'
 import { useRouter } from 'next/navigation'
 import { AvatarImg } from '@/components/ui/AvatarImg'
@@ -367,8 +368,9 @@ function RoleSelect({ userId, currentId, roles, disabled }: RoleSelectProps) {
 /* ── Users tab ──────────────────────────────────────────────────── */
 
 function UsersTab({ roles }: { roles: Role[] }) {
-  const [search, setSearch]       = useState('')
-  const [roleFilter, setRoleFilter] = useState<'all' | 'instructor' | 'admin'>('all')
+  /* Filters in the address bar (lib/useQueryState.ts): a reload keeps the view, the link can be shared. */
+  const [search, setSearch]       = useQueryState('q', '', { history: 'replace' })
+  const [roleFilter, setRoleFilter] = useQueryState<'all' | 'instructor' | 'admin'>('role', 'all')
 
   const { data: instructors, isLoading: loadInst } = useUsers('instructor', { per_page: 100 })
   const { data: admins,      isLoading: loadAdmin } = useUsers('admin',      { per_page: 100 })
@@ -521,7 +523,7 @@ export default function RolesPage() {
   const deleteMutation  = useDeleteRole()
 
   /* Tab state */
-  const [tab, setTab] = useState<TabKey>('roles')
+  const [tab] = useQueryState<TabKey>('tab', 'roles')
 
   /* Selected role */
   const [selectedId, setSelectedId] = useState<string | null>(null)
@@ -631,7 +633,7 @@ export default function RolesPage() {
           const Icon = t.icon
           const active = tab === t.key
           return (
-            <button key={t.key} onClick={() => setTab(t.key)}
+            <button key={t.key} onClick={() => setQueryParams({ tab: t.key === 'roles' ? null : t.key, q: null, role: null })}
               className="relative flex items-center gap-2 px-4 py-2.5 text-sm font-medium transition-colors"
               style={{ color: active ? '#0057b8' : 'rgba(255,255,255,0.4)' }}>
               <Icon size={14} />

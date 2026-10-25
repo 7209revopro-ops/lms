@@ -1,6 +1,5 @@
 'use client'
 
-import { useState } from 'react'
 import { motion } from 'framer-motion'
 import {
   BarChart3, Users, CheckCircle, XCircle, Download, Calendar,
@@ -11,6 +10,7 @@ import { useCurrentUser } from '@/lib/api/user'
 import { useQuery } from '@tanstack/react-query'
 import { apiGet } from '@/lib/axios'
 import Spinner from '@/components/ui/Spinner'
+import { useQueryState, setQueryParams } from '@/lib/useQueryState'
 import { CsTag, csName, csTeam } from '@/components/ui/CsTag'
 import type { TetraCs } from '@/lib/api/tetraCs'
 
@@ -117,9 +117,10 @@ function RateRing({ pct, size = 52 }: { pct: number; size?: number }) {
 export default function ReportsPage() {
   const { data: me } = useCurrentUser()
 
-  const [mentorId, setMentorId] = useState('')
-  const [from,     setFrom]     = useState('')
-  const [to,       setTo]       = useState('')
+  /* Filters in the address bar (lib/useQueryState.ts). Dates fire on every keyed digit → replace. */
+  const [mentorId]              = useQueryState('mentor', '')
+  const [from,     setFrom]     = useQueryState('from', '', { history: 'replace' })
+  const [to,       setTo]       = useQueryState('to', '', { history: 'replace' })
 
   const attendance     = useAttendanceReport(from, to)
   const mentorSchedule = useMentorScheduleReport(mentorId, from, to)
@@ -147,7 +148,7 @@ export default function ReportsPage() {
         <input type="date" value={to} onChange={e => setTo(e.target.value)}
           className={inputBase} style={{ color: '#0D0F1A' }} title="To date" />
         {(from || to || mentorId) && (
-          <button onClick={() => { setFrom(''); setTo(''); setMentorId('') }}
+          <button onClick={() => setQueryParams({ from: null, to: null, mentor: null })}
             className="rounded-xl border border-[#E4E7ED] bg-white px-3 py-2 text-sm text-[#6B7280] hover:bg-gray-50">
             Clear filters
           </button>

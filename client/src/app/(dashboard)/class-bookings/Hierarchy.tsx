@@ -24,7 +24,7 @@
      passed in — one place that knows what the API can refuse.
    ───────────────────────────────────────────────────────────────────────── */
 
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import Link from 'next/link'
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion'
 import {
@@ -51,6 +51,14 @@ import {
   groupByDay, zonedKey, bookingClosedAt, offlineDayOffset,
   type ClassGroup, type SlotStatus, type CourseNode, type ModuleNode, type DayBucket, type SessionMode,
 } from '@/lib/classSchedule'
+import { useQueryState, setQueryParams } from '@/lib/useQueryState'
+
+/* A module's own filters, in the address bar (2026-10-24): ?mlang= language,
+   ?mmentor= instructor id, ?mode=online|offline, ?date=YYYY-MM-DD (the date
+   strip). Prefixed where the flat Sessions list already uses the plain name
+   (?lang=, ?mentor=), so the two views never filter each other from off
+   screen. The page drops all four when the student leaves the module. */
+export const MODULE_SHEET_KEYS = ['mlang', 'mmentor', 'mode', 'date'] as const
 
 /** "1 module" / "2 modules" — screen readers read the aria-label out loud. */
 const plural = (n: number, one: string, many = one + 's') => `${n} ${n === 1 ? one : many}`
@@ -1553,17 +1561,32 @@ export function ModuleSheet({
   const { data: me } = useCurrentUser()
   const pendingReg = me?.enrollmentStatus === 'pending'
 
-  const [language, setLanguage] = useState<string | null>(null)
-  const [tutorId,  setTutorId]  = useState<string | null>(null)
-  const [mode,     setMode]     = useState<SessionMode | null>(null)
+  const [langParam,  setLangParam]  = useQueryState('mlang', '')
+  const [tutorParam, setTutorParam] = useQueryState('mmentor', '')
+  const [modeParam,  setModeParam]  = useQueryState('mode', '')
+  const language = langParam || null
+  const tutorId  = tutorParam || null
+  const mode: SessionMode | null = modeParam === 'online' || modeParam === 'offline' ? modeParam : null
+  const setLanguage = (v: string | null) => setLangParam(v ?? '')
+  const setTutorId  = (v: string | null) => setTutorParam(v ?? '')
+  const setMode     = (v: SessionMode | null) => setModeParam(v ?? '')
+  /* Automatic corrections (a filter that no longer applies) replace the
+     history entry instead of adding one Back would have to step through. */
+  const dropSheet = (keys: Partial<Record<typeof MODULE_SHEET_KEYS[number], null>>) => setQueryParams(keys, 'replace')
 
   /* Reset when the module changes. Without this, walking from a module taught
      in Hindi to one that is English-only would carry `language: 'Hindi'`
-     across and show an empty screen for a module that has sessions. */
+     across and show an empty screen for a module that has sessions. Not on
+     mount: then the values are the ones the link arrived with. */
   /* The date strip: 'all', or one day's key (YYYY-MM-DD). */
-  const [day, setDay] = useState<string>('all')
+  const [day, setDay] = useQueryState('date', 'all')
   const [showFilters, setShowFilters] = useState(false)
-  useEffect(() => { setLanguage(null); setTutorId(null); setMode(null); setDay('all') }, [node.id])
+  const firstNode = useRef(node.id)
+  useEffect(() => {
+    if (firstNode.current === node.id) return
+    firstNode.current = node.id
+    dropSheet({ mlang: null, mmentor: null, mode: null, date: null })
+  }, [node.id])  // eslint-disable-line react-hooks/exhaustive-deps
 
   /* THE LIST IS DERIVED ON A MINUTE, NOT ON A SECOND. `now` ticks once a
      second while any booked session is within two minutes of a join
@@ -1604,10 +1627,10 @@ export function ModuleSheet({
 
   /* A chip that is no longer offered must not keep filtering from off-screen. */
   useEffect(() => {
-    if (language && !facets.languages.includes(language)) setLanguage(null)
-    if (tutorId  && !facets.instructors.some(i => i.id === tutorId)) setTutorId(null)
-    if (mode     && !facets.modes.includes(mode)) setMode(null)
-  }, [facets, language, tutorId, mode])
+    if (language && !facets.languages.includes(language)) dropSheet({ mlang: null })
+    if (tutorId  && !facets.instructors.some(i => i.id === tutorId)) dropSheet({ mmentor: null })
+    if (mode     && !facets.modes.includes(mode)) dropSheet({ mode: null })
+  }, [facets, language, tutorId, mode])  // eslint-disable-line react-hooks/exhaustive-deps
 
   const groups = useMemo(
     () => filterGroups(live, showLang ? language : null, showTutor ? tutorId : null, showMode ? mode : null),
@@ -1664,7 +1687,7 @@ export function ModuleSheet({
   )
   const narrowed = shownCount !== totalCount
   /* A picked day that no longer has sessions (filters changed, or it ended) falls back to all. */
-  useEffect(() => { if (day !== 'all' && !buckets.some(b => b.key === day)) setDay('all') }, [buckets, day])
+  useEffect(() => { if (day !== 'all' && !buckets.some(b => b.key === day)) dropSheet({ date: null }) }, [buckets, day])  // eslint-disable-line react-hooks/exhaustive-deps
   const shownBuckets = day === 'all' ? buckets : buckets.filter(b => b.key === day)
   const activeFilters = [showLang && language, showTutor && tutorId, showMode && mode].filter(Boolean).length
   const hasFilters = showLang || showTutor || showMode
@@ -1766,7 +1789,7 @@ export function ModuleSheet({
               )}
             </div>
             <div className="dm grid grid-cols-2 gap-2 px-4 pb-4 pt-3">
-              <button type="button" onClick={() => { setLanguage(null); setTutorId(null); setMode(null) }}
+              <button type="button" onClick={() => setQueryParams({ mlang: null, mmentor: null, mode: null })}
                 className="rounded-2xl py-3 text-sm font-bold" style={{ background: 'var(--color-bg-inset)', color: 'var(--color-text-primary)' }}>Clear</button>
               <button type="button" onClick={() => setShowFilters(false)}
                 className="rounded-2xl py-3 text-sm font-bold text-white" style={{ background: 'var(--color-primary)' }}>

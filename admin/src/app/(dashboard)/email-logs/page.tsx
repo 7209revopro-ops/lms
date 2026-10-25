@@ -9,6 +9,7 @@ import {
 import { useEmailLogs, useEmailLogSummary, fetchEmailLogHtml, useSendEmailNow, type EmailLog, type EmailLogStatus } from '@/lib/api/emailLogs'
 import { LogSummary, DateRange } from '@/components/logs/LogSummary'
 import Spinner from '@/components/ui/Spinner'
+import { useQueryState, setQueryParams } from '@/lib/useQueryState'
 
 /* ─── Helpers ──────────────────────────────────────────── */
 function fmtDate(iso: string): string {
@@ -222,19 +223,22 @@ function LogRow({ log, index }: { log: EmailLog; index: number }) {
 
 /* ─── Page ─────────────────────────────────────────────── */
 export default function EmailLogsPage() {
-  const [page,      setPage]      = useState(1)
-  const [status,    setStatus]    = useState<EmailLogStatus | ''>('')
-  const [toInput,   setToInput]   = useState('')
-  const [to,        setTo]        = useState('')
-  const [from,      setFrom]      = useState('')
-  const [until,     setUntil]     = useState('')
+  /* Filters in the address bar (lib/useQueryState.ts): a reload keeps the view, the link can be shared. */
+  const [page,      setPage]      = useQueryState('page', 1)
+  const [status]                  = useQueryState<EmailLogStatus | ''>('status', '')
+  const [to]                      = useQueryState('q', '')   // applied on Enter, not per key
+  const [from]                    = useQueryState('from', '')
+  const [until]                   = useQueryState('to', '')
+  /* The box is applied on Enter — keep what is typed locally, follow the URL (reload / Back). */
+  const [toInput,   setToInput]   = useState(to)
+  useEffect(() => { setToInput(to) }, [to])
 
   /* The search box matches the recipient OR the subject. */
   const { data, isLoading, isError } = useEmailLogs({ page, status: status || undefined, q: to || undefined, from: from || undefined, until: until || undefined })
   const { data: summary } = useEmailLogSummary()
 
-  const applyTo   = () => { setTo(toInput.trim()); setPage(1) }
-  const clearAll  = () => { setStatus(''); setToInput(''); setTo(''); setFrom(''); setUntil(''); setPage(1) }
+  const applyTo   = () => setQueryParams({ q: toInput.trim() || null, page: null })
+  const clearAll  = () => { setToInput(''); setQueryParams({ status: null, q: null, from: null, to: null, page: null }) }
   const hasFilter = !!status || !!to || !!from || !!until
 
   return (
@@ -264,12 +268,12 @@ export default function EmailLogsPage() {
         )}
       </div>
 
-      <LogSummary data={summary} onPick={s => { setStatus(s); setPage(1) }} />
+      <LogSummary data={summary} onPick={s => setQueryParams({ status: s || null, page: null })} />
 
       {/* Filters */}
       <div className="flex flex-wrap items-center gap-3">
-        <StatusDropdown value={status} onChange={v => { setStatus(v); setPage(1) }} />
-        <DateRange from={from} until={until} onChange={(f, u) => { setFrom(f); setUntil(u); setPage(1) }} />
+        <StatusDropdown value={status} onChange={v => setQueryParams({ status: v || null, page: null })} />
+        <DateRange from={from} until={until} onChange={(f, u) => setQueryParams({ from: f || null, to: u || null, page: null })} />
 
         <div className="flex items-center gap-1.5 rounded-xl px-3 py-2"
           style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)' }}>
@@ -282,7 +286,7 @@ export default function EmailLogsPage() {
             className="bg-transparent text-xs text-white outline-none placeholder:text-white/25 w-56"
           />
           {toInput && (
-            <button onClick={() => { setToInput(''); setTo(''); setPage(1) }}>
+            <button onClick={() => { setToInput(''); setQueryParams({ q: null, page: null }) }}>
               <X size={10} style={{ color: 'rgba(255,255,255,0.3)' }} />
             </button>
           )}

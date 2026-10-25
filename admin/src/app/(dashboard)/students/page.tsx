@@ -7,18 +7,19 @@ import { PageHeader } from '@/components/ui/PageHeader'
 import { UserTable } from '@/components/users/UserTable'
 import { AddStudentModal } from '@/components/users/AddStudentModal'
 import { useCurrentUser } from '@/lib/api/user'
-import { useRouter, useSearchParams } from 'next/navigation'
+import { useSearchParams } from 'next/navigation'
+import { setQueryParams } from '@/lib/useQueryState'
 
 export default function StudentsPage() {
   const searchParams = useSearchParams()
-  const router = useRouter()
   const [modalOpen, setModalOpen] = useState(() => searchParams.get('add') === '1')
   const { data: me } = useCurrentUser()
   const canAddStudent = ['super_admin', 'admin', 'instructor'].includes(me?.role ?? '')
 
   const handleClose = () => {
     setModalOpen(false)
-    router.replace('/students', { scroll: false })
+    /* Drop only ?add=1 — the list's filters stay in the address bar. */
+    setQueryParams({ add: null }, 'replace')
   }
 
   return (

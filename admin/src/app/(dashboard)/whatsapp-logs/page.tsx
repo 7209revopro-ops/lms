@@ -5,7 +5,7 @@
    to, the message as they read it, and whether it went (sent = WhatsApp
    accepted it; delivered / read are not reported to us). super_admin only.
 ───────────────────────────────────────────────────────────── */
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { motion } from 'framer-motion'
 import {
   MessageCircle, ChevronLeft, ChevronRight, Search, X, AlertCircle, CheckCircle2, Clock, XCircle, Inbox,
@@ -15,6 +15,7 @@ import {
 } from '@/lib/api/whatsappLogs'
 import { LogSummary, DateRange } from '@/components/logs/LogSummary'
 import Spinner from '@/components/ui/Spinner'
+import { useQueryState, setQueryParams } from '@/lib/useQueryState'
 
 const fmtDate = (iso: string) => new Date(iso).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
 const fmtPhone = (d: string) => `+${d}`
@@ -120,20 +121,24 @@ function LogRow({ log, index }: { log: WhatsAppLog; index: number }) {
 }
 
 export default function WhatsAppLogsPage() {
-  const [page, setPage] = useState(1)
-  const [status, setStatus] = useState<WhatsAppLogStatus | ''>('')
-  const [template, setTemplate] = useState('')
-  const [qInput, setQInput] = useState('')
-  const [q, setQ] = useState('')
-  const [from, setFrom] = useState('')
-  const [until, setUntil] = useState('')
+  /* Filters in the address bar (lib/useQueryState.ts): a reload keeps the view, the link can be shared. */
+  const [page, setPage] = useQueryState('page', 1)
+  const [status] = useQueryState<WhatsAppLogStatus | ''>('status', '')
+  const [template] = useQueryState('template', '')
+  const [q] = useQueryState('q', '')   // applied on Enter, not per key
+  const [from] = useQueryState('from', '')
+  const [until] = useQueryState('to', '')
+  /* What is typed stays local until Enter; it follows the URL on reload / Back. */
+  const [qInput, setQInput] = useState(q)
+  useEffect(() => { setQInput(q) }, [q])
 
   const { data, isLoading, isError } = useWhatsAppLogs({ page, status, template, q, from, until })
   const { data: summary } = useWhatsAppLogSummary()
   const { data: templates = [] } = useWhatsAppTemplates()
 
-  const reset = () => setPage(1)
-  const clearAll = () => { setStatus(''); setTemplate(''); setQInput(''); setQ(''); setFrom(''); setUntil(''); setPage(1) }
+  /* Every filter change goes back to page 1, in the same history entry. */
+  const applyFilter = (next: Record<string, string | null>) => setQueryParams({ ...next, page: null })
+  const clearAll = () => { setQInput(''); setQueryParams({ status: null, template: null, q: null, from: null, to: null, page: null }) }
   const hasFilter = !!(status || template || q || from || until)
 
   return (
@@ -158,22 +163,22 @@ export default function WhatsAppLogsPage() {
         )}
       </div>
 
-      <LogSummary data={summary} onPick={s => { setStatus(s); reset() }} />
+      <LogSummary data={summary} onPick={s => applyFilter({ status: s || null })} />
 
       <div className="flex flex-wrap items-center gap-3">
-        <select value={status} onChange={e => { setStatus(e.target.value as WhatsAppLogStatus | ''); reset() }} className={selectCls} style={selectStyle} aria-label="Status">
+        <select value={status} onChange={e => applyFilter({ status: e.target.value || null })} className={selectCls} style={selectStyle} aria-label="Status">
           <option value="">All statuses</option><option value="sent">Sent</option><option value="failed">Failed</option><option value="pending">Pending</option>
         </select>
-        <select value={template} onChange={e => { setTemplate(e.target.value); reset() }} className={selectCls} style={selectStyle} aria-label="Template">
+        <select value={template} onChange={e => applyFilter({ template: e.target.value || null })} className={selectCls} style={selectStyle} aria-label="Template">
           <option value="">All messages</option>
           {templates.map(t => <option key={t.name} value={t.name}>{t.label}</option>)}
         </select>
-        <DateRange from={from} until={until} onChange={(f, u) => { setFrom(f); setUntil(u); reset() }} />
+        <DateRange from={from} until={until} onChange={(f, u) => applyFilter({ from: f || null, to: u || null })} />
         <div className="flex items-center gap-1.5 rounded-xl px-3 py-2" style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)' }}>
           <Search size={11} style={{ color: 'rgba(255,255,255,0.3)' }} />
-          <input value={qInput} onChange={e => setQInput(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') { setQ(qInput.trim()); reset() } }}
+          <input value={qInput} onChange={e => setQInput(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') applyFilter({ q: qInput.trim() || null }) }}
             placeholder="Phone, name or email… (Enter)" className="bg-transparent text-xs text-white outline-none placeholder:text-white/25 w-56" />
-          {qInput && <button onClick={() => { setQInput(''); setQ(''); reset() }}><X size={10} style={{ color: 'rgba(255,255,255,0.3)' }} /></button>}
+          {qInput && <button onClick={() => { setQInput(''); applyFilter({ q: null }) }}><X size={10} style={{ color: 'rgba(255,255,255,0.3)' }} /></button>}
         </div>
       </div>
 

@@ -24,8 +24,11 @@ import Spinner from '@/components/ui/Spinner'
 import { useCheckoutCurrency, formatCoursePrice } from '@/lib/coursePrice'
 import { titleCase } from '@/lib/titleCase'
 import { SHOW_PRICING, SHOW_FREE_BADGE } from '@/lib/pricingVisibility'
+import { useQueryState, setQueryParams } from '@/lib/useQueryState'
 
 const STATUS_TABS = ['All Status', 'Not Started', 'In Progress', 'Completed']
+/* The tab as it reads in the address bar (?status=in-progress). */
+const statusSlug = (tab: string) => tab === 'All Status' ? 'all' : tab.toLowerCase().replace(/ /g, '-')
 const SORTS = [
   { value: 'popular',  label: 'Most popular' },
   { value: 'rating',   label: 'Highest rated' },
@@ -130,20 +133,44 @@ function TypeBadge({ type }: { type: string }) {
 
 export default function CoursesPage() {
   const { rightPanelOpen } = useUIStore()
-  const [search,      setSearch]      = useState('')
-  const [activeTab,   setActiveTab]   = useState('All Status')
-  const [level,       setLevel]       = useState('all')
-  const [category,    setCategory]    = useState('all')
-  const [sort,        setSort]        = useState('popular')
-  const [free,        setFree]        = useState(false)
-  const [page,        setPage]        = useState(1)
+  /* Every filter lives in the address bar (lib/useQueryState.ts, 2026-10-24):
+     ?q= ?status= ?program= ?level= ?category= ?sort= ?free= ?type= ?duration=
+     ?price= ?mentor= ?page=. A reload keeps the view, Back steps back through
+     it. Values the page does not know fall back to the default. */
+  const [search,       ]                = useQueryState('q', '', { history: 'replace' })
+  const [statusParam,  setStatusParam]  = useQueryState('status', 'all')
+  const [levelParam]                    = useQueryState('level', 'all')
+  const [category]                      = useQueryState('category', 'all')
+  const [sortParam]                     = useQueryState('sort', 'popular')
+  const [free]                          = useQueryState('free', false)
+  const [page,         setPage]         = useQueryState('page', 1)
   const [showSort,    setShowSort]    = useState(false)
   const [showFilters, setShowFilters] = useState(false)
-  const [contentType, setContentType] = useState('all')
-  const [duration,    setDuration]    = useState<DurationKey>('any')
-  const [priceRange,  setPriceRange]  = useState<PriceKey>('any')
-  const [program,     setProgram]     = useState('all')
-  const [instructor,  setInstructor]  = useState('')
+  const [contentTypeParam, setContentType] = useQueryState('type', 'all')
+  const [durationParam] = useQueryState<DurationKey>('duration', 'any')
+  const [priceParam]    = useQueryState<PriceKey>('price', 'any')
+  const [programParam]  = useQueryState('program', 'all')
+  const [instructor]    = useQueryState('mentor', '')
+  const activeTab   = STATUS_TABS.find(t => statusSlug(t) === statusParam) ?? 'All Status'
+  const setActiveTab = (tab: string) => setStatusParam(statusSlug(tab))
+  const level       = (LEVELS as readonly string[]).includes(levelParam) ? levelParam : 'all'
+  const sort        = SORTS.some(s => s.value === sortParam) ? sortParam : 'popular'
+  const contentType = CONTENT_TYPES.some(t => t.value === contentTypeParam) ? contentTypeParam : 'all'
+  const duration: DurationKey = DURATIONS.some(d => d.key === durationParam) ? durationParam : 'any'
+  const priceRange: PriceKey  = PRICES.some(p => p.key === priceParam) ? priceParam : 'any'
+  const program     = PROGRAM_FILTERS.some(p => p.id === programParam) ? programParam : 'all'
+  /* A filter change goes back to page 1 — in ONE history entry, so Back
+     undoes the filter rather than first the page and then the filter. */
+  const FILTER_DEFAULTS = {
+    q: '', level: 'all', category: 'all', sort: 'popular', free: false,
+    duration: 'any', price: 'any', program: 'all', mentor: '',
+  } as const
+  type FilterKeyName = keyof typeof FILTER_DEFAULTS
+  const update = (next: Partial<Record<FilterKeyName, string | boolean>>, history: 'push' | 'replace' = 'push') =>
+    setQueryParams({
+      ...Object.fromEntries(Object.entries(next).map(([k, v]) => [k, v === FILTER_DEFAULTS[k as FilterKeyName] ? null : v])),
+      page: null,
+    }, history)
 
   const lvl = level === 'all' ? '' : level
   const cat = category === 'all' ? '' : category
@@ -219,7 +246,7 @@ export default function CoursesPage() {
             return (
               <MotionButton
                 key={p.id}
-                onClick={() => { setProgram(p.id); setPage(1) }}
+                onClick={() => update({ program: p.id })}
                 whileHover={{ y: -2, scale: 1.02 }}
                 whileTap={{ scale: 0.97 }}
                 variant="ghost"
@@ -284,7 +311,7 @@ export default function CoursesPage() {
             <div className="relative">
               <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none"
                 style={{ color: 'var(--color-text-muted)' }} />
-              <input value={search} onChange={e => { setSearch(e.target.value); setPage(1) }}
+              <input value={search} onChange={e => update({ q: e.target.value }, 'replace')}
                 placeholder="Search…"
                 className="h-11 w-full rounded-xl pl-9 pr-3 text-sm sm:w-36 sm:transition-all sm:focus:w-48 lg:h-auto lg:py-2"
                 style={{ background: 'var(--color-bg-surface)', border: '1px solid var(--color-border)', color: 'var(--color-text-primary)' }} />
@@ -333,7 +360,7 @@ export default function CoursesPage() {
                       className="absolute right-0 top-full mt-1 w-52 rounded-2xl p-1.5 z-50 bg-[var(--color-bg-surface)]"
                       style={{ border: '1px solid var(--color-border)', boxShadow: '0 16px 40px rgba(0,0,0,0.10)' }}>
                       {SORTS.map(s => (
-                        <Button key={s.value} onClick={() => { setSort(s.value); setShowSort(false); setPage(1) }}
+                        <Button key={s.value} onClick={() => { update({ sort: s.value }); setShowSort(false) }}
                           variant="ghost"
                           size="sm"
                           className="flex w-full items-center justify-between rounded-xl px-3 py-2 text-sm h-auto"
@@ -377,7 +404,7 @@ export default function CoursesPage() {
                   <p className="mb-2 text-[11px] sm:text-[10px] font-semibold uppercase tracking-wider" style={{ color: 'var(--color-text-muted)' }}>Level</p>
                   <div className="flex flex-wrap gap-2">
                     {LEVELS.map(l => (
-                      <Button key={l} onClick={() => { setLevel(l); setPage(1) }}
+                      <Button key={l} onClick={() => update({ level: l })}
                         variant="ghost"
                         size="sm"
                         className="rounded-xl px-3 py-1.5 text-xs font-semibold capitalize h-auto min-h-11 lg:min-h-0 transition-all"
@@ -394,7 +421,7 @@ export default function CoursesPage() {
                   <p className="mb-2 text-[11px] sm:text-[10px] font-semibold uppercase tracking-wider" style={{ color: 'var(--color-text-muted)' }}>Category</p>
                   <div className="flex flex-wrap gap-2">
                     {categories.map(c => (
-                      <Button key={c} onClick={() => { setCategory(c); setPage(1) }}
+                      <Button key={c} onClick={() => update({ category: c })}
                         variant="ghost"
                         size="sm"
                         className="rounded-xl px-3 py-1.5 text-xs font-semibold h-auto min-h-11 lg:min-h-0 transition-all"
@@ -411,7 +438,7 @@ export default function CoursesPage() {
                   <p className="mb-2 text-[11px] sm:text-[10px] font-semibold uppercase tracking-wider" style={{ color: 'var(--color-text-muted)' }}>Duration</p>
                   <div className="flex flex-wrap gap-2">
                     {DURATIONS.map(d => (
-                      <Button key={d.key} onClick={() => { setDuration(d.key); setPage(1) }}
+                      <Button key={d.key} onClick={() => update({ duration: d.key })}
                         variant="ghost"
                         size="sm"
                         className="rounded-xl px-3 py-1.5 text-xs font-semibold h-auto min-h-11 lg:min-h-0 transition-all"
@@ -431,7 +458,7 @@ export default function CoursesPage() {
                   <p className="mb-2 text-[11px] sm:text-[10px] font-semibold uppercase tracking-wider" style={{ color: 'var(--color-text-muted)' }}>Price</p>
                   <div className="flex flex-wrap gap-2">
                     {PRICES.map(p => (
-                      <Button key={p.key} onClick={() => { setPriceRange(p.key); setPage(1) }}
+                      <Button key={p.key} onClick={() => update({ price: p.key })}
                         variant="ghost"
                         size="sm"
                         className="rounded-xl px-3 py-1.5 text-xs font-semibold h-auto min-h-11 lg:min-h-0 transition-all"
@@ -449,7 +476,7 @@ export default function CoursesPage() {
                     <p className="mb-2 text-[11px] sm:text-[10px] font-semibold uppercase tracking-wider" style={{ color: 'var(--color-text-muted)' }}>Instructor</p>
                     <div className="flex flex-wrap gap-2">
                       <Button
-                        onClick={() => { setInstructor(''); setPage(1) }}
+                        onClick={() => update({ mentor: '' })}
                         variant="ghost" size="sm"
                         className="flex items-center gap-1.5 rounded-xl px-3 py-1.5 text-xs font-semibold h-auto min-h-11 lg:min-h-0 transition-all"
                         style={!instructor
@@ -460,7 +487,7 @@ export default function CoursesPage() {
                       {instructors.map(ins => (
                         <Button
                           key={ins.id}
-                          onClick={() => { setInstructor(instructor === ins.id ? '' : ins.id); setPage(1) }}
+                          onClick={() => update({ mentor: instructor === ins.id ? '' : ins.id })}
                           variant="ghost" size="sm"
                           className="flex items-center gap-1.5 rounded-xl px-3 py-1.5 text-xs font-semibold h-auto min-h-11 lg:min-h-0 transition-all"
                           style={instructor === ins.id
@@ -478,7 +505,7 @@ export default function CoursesPage() {
                 )}
                 {/* Free toggle + clear */}
                 <div className="flex items-center gap-3 pt-1" style={{ borderTop: '1px solid var(--color-border)' }}>
-                  <Button onClick={() => { setFree(v => !v); setPage(1) }}
+                  <Button onClick={() => update({ free: !free })}
                     variant="ghost"
                     size="sm"
                     className="flex items-center gap-1.5 rounded-xl px-3 py-1.5 text-xs font-semibold h-auto min-h-11 lg:min-h-0 transition-all"
@@ -488,9 +515,7 @@ export default function CoursesPage() {
                     {free ? '✓ ' : ''}Free only
                   </Button>
                   <Button onClick={() => {
-                    setLevel('all'); setCategory('all'); setFree(false)
-                    setContentType('all'); setDuration('any'); setPriceRange('any')
-                    setInstructor(''); setPage(1)
+                    setQueryParams({ level: null, category: null, free: null, type: null, duration: null, price: null, mentor: null, page: null })
                   }}
                     variant="ghost"
                     size="sm"
@@ -532,8 +557,7 @@ export default function CoursesPage() {
           <p className="text-base font-bold" style={{ color: 'var(--color-text-primary)' }}>No courses found</p>
           <p className="text-sm text-center" style={{ color: 'var(--color-text-muted)' }}>Try adjusting your filters or search query</p>
           <Button onClick={() => {
-            setSearch(''); setLevel('all'); setCategory('all'); setFree(false)
-            setDuration('any'); setPriceRange('any')
+            setQueryParams({ q: null, level: null, category: null, free: null, duration: null, price: null })
           }}
             variant="ghost"
             size="sm"

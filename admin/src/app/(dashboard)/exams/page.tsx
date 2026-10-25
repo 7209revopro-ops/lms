@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useQueryState } from '@/lib/useQueryState'
 import Link from 'next/link'
 import { motion } from 'framer-motion'
 import { FileCheck2, Search, ChevronRight, BookOpen } from 'lucide-react'
@@ -9,7 +9,7 @@ import { PageHeader } from '@/components/ui/PageHeader'
 import Spinner from '@/components/ui/Spinner'
 
 export default function ExamsPage() {
-  const [search, setSearch] = useState('')
+  const [search, setSearch] = useQueryState('q', '', { history: 'replace' })   // in the address bar (lib/useQueryState.ts)
   const { data, isLoading } = useCourses({ per_page: 100, search: search || undefined })
   const courses = data?.docs ?? []
 

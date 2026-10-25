@@ -28,6 +28,21 @@ import { CLASS_LANGUAGES } from '@/lib/languages'
    of this; these are the same helpers it uses, so the two screens cannot
    disagree about which course a class belongs to. */
 import { effCourseTitle, effCourseSlug } from '@/lib/classSchedule'
+import { useQueryState } from '@/lib/useQueryState'
+
+/* The picked calendar day travels as ?date=YYYY-MM-DD; inside the page it is
+   still the Date#toDateString() key the calendar and the filter compare on. */
+function ymdToDateString(s: string): string | null {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s)
+  if (!m) return null
+  const d = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]))
+  return Number.isNaN(d.getTime()) ? null : d.toDateString()
+}
+function dateStringToYmd(s: string): string {
+  const d = new Date(s)
+  if (Number.isNaN(d.getTime())) return ''
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
 
 /* ── Helpers ─────────────────────────────────────────── */
 function fmtTime(iso: string) {
@@ -80,8 +95,9 @@ function MiniCalendar({
   onSelect:     (d: string | null) => void
 }) {
   const today = new Date()
-  const [viewYear,  setViewYear]  = useState(today.getFullYear())
-  const [viewMonth, setViewMonth] = useState(today.getMonth())
+  /* Opens on the picked day's month when a link arrived with ?date=. */
+  const [viewYear,  setViewYear]  = useState(() => (selectedDate ? new Date(selectedDate) : today).getFullYear())
+  const [viewMonth, setViewMonth] = useState(() => (selectedDate ? new Date(selectedDate) : today).getMonth())
 
   /* Days that have sessions */
   const activeDays = useMemo(() => {
@@ -507,11 +523,14 @@ export default function LiveClassesPage() {
      two minutes of its join window opening/closing, 30 s otherwise. Drives
      both the countdown labels and the Join buttons. */
   const now = useJoinClock(data)
-  const [filter,          setFilter]       = useState<FilterKey>('all')
-  const [typeFilter,      setTypeFilter]   = useState<'all' | 'internal' | 'external'>('all')
-  const [languageFilter,  setLanguageFilter] = useState('')
-  const [search,          setSearch]       = useState('')
-  const [selectedDate,    setSelectedDate] = useState<string | null>(null)
+  /* Every filter in the address bar (lib/useQueryState.ts): ?status= ?type= ?lang= ?q= ?date= */
+  const [filter,          setFilter]       = useQueryState<FilterKey>('status', 'all')
+  const [typeFilter,      setTypeFilter]   = useQueryState<'all' | 'internal' | 'external'>('type', 'all')
+  const [languageFilter,  setLanguageFilter] = useQueryState('lang', '')
+  const [search,          setSearch]       = useQueryState('q', '', { history: 'replace' })
+  const [dateParam,       setDateParam]    = useQueryState('date', '')
+  const selectedDate = useMemo(() => ymdToDateString(dateParam), [dateParam])
+  const setSelectedDate = (d: string | null) => setDateParam(d ? dateStringToYmd(d) : '')
   const [showContactAdmin, setShowContactAdmin] = useState(false)
 
   const all = useMemo(() => (data ?? []).filter(l => l.status !== 'cancelled'), [data])

@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useQueryState } from '@/lib/useQueryState'
 import { motion } from 'framer-motion'
 import {
   UserX, ChevronLeft, ChevronRight, AlertCircle, Clock, CheckCircle2,
@@ -81,7 +81,7 @@ function AlertRow({ alert, index }: { alert: NoShowAlert; index: number }) {
 
 /* ─── Page ─────────────────────────────────────────────── */
 export default function InstructorAttendancePage() {
-  const [page, setPage] = useState(1)
+  const [page, setPage] = useQueryState('page', 1)   // in the address bar (lib/useQueryState.ts)
   const { data, isLoading, isError } = useNoShowAlerts({ page })
 
   return (

@@ -12,6 +12,7 @@ import { useUsers, useDeleteUser, type AdminUser } from '@/lib/api/users'
 import { useToggleBlock } from '@/lib/api/enrollmentRequests'
 import { useCurrentUser } from '@/lib/api/user'
 import { useToast } from '@/store/ui.store'
+import { useQueryState, setQueryParams } from '@/lib/useQueryState'
 import Spinner from '@/components/ui/Spinner'
 import { useDocumentUrl } from '@/lib/api/documents'
 import { programLabel } from '@/lib/programs'
@@ -323,9 +324,10 @@ export default function ViewersPage() {
   const { data: me } = useCurrentUser()
   const toast        = useToast()
 
-  const [tab,          setTab]          = useState<ViewerTab>('pending')
-  const [search,       setSearch]       = useState('')
-  const [page,         setPage]         = useState(1)
+  /* Every filter in the address bar (lib/useQueryState.ts): a reload keeps the view, the link can be shared. */
+  const [tab]                           = useQueryState<ViewerTab>('tab', 'pending')
+  const [search,       setSearch]       = useQueryState('q', '', { history: 'replace' })
+  const [page,         setPage]         = useQueryState('page', 1)
   const [detailTarget, setDetailTarget] = useState<AdminUser | null>(null)
   const [deleteTarget, setDeleteTarget] = useState<string | null>(null)
 
@@ -369,9 +371,8 @@ export default function ViewersPage() {
   }
 
   const handleTabChange = (t: ViewerTab) => {
-    setTab(t)
-    setPage(1)
-    setSearch('')
+    /* One history entry for the tab switch, page and search reset together. */
+    setQueryParams({ tab: t === 'pending' ? null : t, page: null, q: null })
   }
 
   return (

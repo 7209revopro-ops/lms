@@ -35,7 +35,8 @@ import {
   getSlotStatus, SC, buildGroups, groupKeyOf, buildCatalog,
   type SlotStatus, type ClassGroup,
 } from '@/lib/classSchedule'
-import { Hierarchy, allGroupsIn } from './Hierarchy'
+import { Hierarchy, allGroupsIn, MODULE_SHEET_KEYS } from './Hierarchy'
+import { useQueryState, setQueryParams } from '@/lib/useQueryState'
 import { CLASS_LANGUAGES } from '@/lib/languages'
 
 /* ── Google Fonts ──────────────────────────────────────────── */
@@ -83,6 +84,19 @@ function getMondayOfWeek(d: Date): Date {
   r.setDate(r.getDate() - (day === 0 ? 6 : day - 1)); r.setHours(0,0,0,0); return r
 }
 function addDays(d: Date, n: number): Date { const r = new Date(d); r.setDate(r.getDate() + n); return r }
+/* The week window in the address bar (?from=&to=) as the student's own calendar days. */
+function toYmd(d: Date): string {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+/* ?module= sentinels — see the view/course/module block in the page. */
+const NO_MODULE = '\u0000'
+const GENERAL_IN_URL = 'general'
+function fromYmd(s: string): Date | null {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s)
+  if (!m) return null
+  const d = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]))
+  return Number.isNaN(d.getTime()) ? null : d
+}
 function isSameDay(a: Date, b: Date): boolean {
   return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate()
 }
@@ -1172,19 +1186,40 @@ function MetricTile({ icon, label, value, accent, pulse = false, index = 0 }: {
 }
 
 export default function ClassBookingsPage() {
-  const [rangeStart, setRangeStart] = useState<Date>(()=>getMondayOfWeek(new Date()))
-  const [rangeEnd,   setRangeEnd]   = useState<Date>(()=>addDays(getMondayOfWeek(new Date()),6))
+  /* Every filter lives in the address bar (lib/useQueryState.ts, 2026-10-24):
+     a reload keeps the view, Back steps back through it, the link can be sent.
+     The week window is ?from=&to= (YYYY-MM-DD, the student's own days) and is
+     left out of the URL while it is the current week. */
+  const thisMonday = getMondayOfWeek(new Date())
+  const defFrom = toYmd(thisMonday), defTo = toYmd(addDays(thisMonday,6))
+  const [fromStr] = useQueryState('from', defFrom)
+  const [toStr]   = useQueryState('to',   defTo)
+  const rangeStart = useMemo(()=>fromYmd(fromStr) ?? getMondayOfWeek(new Date()),[fromStr])
+  const rangeEnd   = useMemo(()=>fromYmd(toStr) ?? addDays(getMondayOfWeek(new Date()),6),[toStr])
+  const setRange=(s:Date,e:Date)=>{
+    const f=toYmd(s), t=toYmd(e)
+    setQueryParams({from: f===defFrom?null:f, to: t===defTo?null:t})
+  }
   const [showCal,    setShowCal]    = useState(false)
   const [showPanel,  setShowPanel]  = useState(false)
 
-  const [search,           setSearch]           = useState('')
-  const [filterStatus,     setFilterStatus]     = useState<StatusFilter>('all')
-  const [filterAccess,     setFilterAccess]     = useState<AccessFilter>('all')
-  const [filterDelivery,   setFilterDelivery]   = useState<DeliveryFilter>('all')
-  const [filterProgram,    setFilterProgram]    = useState<ProgramFilter>('all')
-  const [filterCourse,     setFilterCourse]     = useState('all')
-  const [filterInstructor, setFilterInstructor] = useState('all')
-  const [filterLanguage,   setFilterLanguage]   = useState('all')
+  const [search,           setSearch]           = useQueryState('q', '', { history: 'replace' })
+  const [filterStatus,     setFilterStatus]     = useQueryState<StatusFilter>('status', 'all')
+  const [filterAccess,     setFilterAccess]     = useQueryState<AccessFilter>('access', 'all')
+  const [filterDelivery,   setFilterDelivery]   = useQueryState<DeliveryFilter>('delivery', 'all')
+  const [filterProgram]                         = useQueryState<ProgramFilter>('program', 'all')
+  /* `pcourse`, not `course`: ?course= is the catalogue drill-down below (and
+     what My Learning links to), this is the programme-scoped course picker. */
+  const [filterCourse,     setFilterCourse]     = useQueryState('pcourse', 'all')
+  const [filterInstructor, setFilterInstructor] = useQueryState('mentor', 'all')
+  const [filterLanguage,   setFilterLanguage]   = useQueryState('lang', 'all')
+  /* A new programme resets the course & instructor picked inside the old one.
+     This was an effect on filterProgram, which would now also fire on mount
+     and wipe a ?pcourse= / ?mentor= the link arrived with. */
+  const setFilterProgram=(p:ProgramFilter)=>{
+    if(p===filterProgram) return
+    setQueryParams({program: p==='all'?null:p, pcourse:null, mentor:null})
+  }
 
   /* ── WHICH VIEW, AND WHERE IN IT ─────────────────────────────────────
      'courses' is the catalogue: Course -> Module -> Class. 'sessions' is the
@@ -1194,50 +1229,39 @@ export default function ClassBookingsPage() {
      those all carry ?view=sessions and keep arriving at the flat list.
 
      Held in the URL rather than only in React so a drill-down can be linked,
-     bookmarked and backed out of. Read on mount rather than during render:
-     `window` does not exist server-side, and seeding state from it directly
-     would make the first client render disagree with the server's. */
-  const [view,    setView]    = useState<'courses'|'sessions'>('courses')
-  const [hCourse, setHCourse] = useState<string|null>(null)
-  const [hModule, setHModule] = useState<string|null>(null)
+     bookmarked and backed out of: ?view=sessions, ?course=<id>, ?module=<id>.
+     Read through useQueryState, which renders the defaults on the server and
+     the address on the client, and follows back/forward. */
+  const [viewParam]   = useQueryState('view', 'courses')
+  const [courseParam] = useQueryState('course', '')
+  /* The "General sessions" module's id is '' (GENERAL_MODULE_ID), which an
+     empty ?module= used to carry. useQueryState drops empty values, so it is
+     written as ?module=general (never an ObjectId) and both spellings read
+     back as ''. An absent ?module= is no module at all (null). */
+  const [moduleParam] = useQueryState('module', NO_MODULE)
+  const view: 'courses'|'sessions' = viewParam==='sessions'?'sessions':'courses'
+  const hCourse = courseParam || null
+  const hModule = moduleParam===NO_MODULE ? null : moduleParam===GENERAL_IN_URL ? '' : moduleParam
+  const moduleToUrl = (m:string|null) => m===null ? null : m==='' ? GENERAL_IN_URL : m
 
   const [openKey,    setOpenKey]    = useState<GroupKey|null>(null)
   const [showAdmin,  setShowAdmin]  = useState(false)
   const [bookPending,setBookPending]= useState<Set<string>>(new Set())
   const [cancelPend, setCancelPend] = useState<Set<string>>(new Set())
 
-  /* URL -> state, on mount and on every back/forward. */
-  useEffect(()=>{
-    const read=()=>{
-      const q=new URLSearchParams(window.location.search)
-      setView(q.get('view')==='sessions'?'sessions':'courses')
-      setHCourse(q.get('course'))
-      setHModule(q.get('module'))
-    }
-    read()
-    window.addEventListener('popstate',read)
-    return ()=>window.removeEventListener('popstate',read)
-  },[])
-
-  /* state -> URL. `push` for a navigation the back button should undo,
-     `replace` for the view toggle, which is a preference rather than a place. */
-  const syncUrl=(v:'courses'|'sessions',c:string|null,m:string|null,mode:'push'|'replace')=>{
-    const q=new URLSearchParams(window.location.search)
-    v==='sessions' ? q.set('view','sessions') : q.delete('view')
-    c ? q.set('course',c) : q.delete('course')
-    m !== null ? q.set('module',m) : q.delete('module')
-    const url=q.toString()?`${window.location.pathname}?${q}`:window.location.pathname
-    window.history[mode==='push'?'pushState':'replaceState'](null,'',url)
-  }
-
+  /* `push` for a navigation the back button should undo, `replace` for the
+     view toggle, which is a preference rather than a place. A module's own
+     filters (language, mentor, mode, day — Hierarchy's MODULE_SHEET_KEYS)
+     belong to that module, so they are dropped whenever the student leaves it. */
+  const clearModuleSheet=Object.fromEntries(MODULE_SHEET_KEYS.map(k=>[k,null]))
   const navigate=(c:string|null,m:string|null)=>{
-    setHCourse(c); setHModule(m); syncUrl('courses',c,m,'push')
+    setQueryParams({view:null, course:c, module:moduleToUrl(m), ...clearModuleSheet},'push')
     window.scrollTo({top:0,behavior:'smooth'})
   }
   const switchView=(v:'courses'|'sessions')=>{
-    setView(v)
-    if(v==='sessions'){ setHCourse(null); setHModule(null) }
-    syncUrl(v, v==='sessions'?null:hCourse, v==='sessions'?null:hModule, 'replace')
+    setQueryParams(v==='sessions'
+      ? {view:'sessions', course:null, module:null, ...clearModuleSheet}
+      : {view:null, course:hCourse, module:moduleToUrl(hModule)}, 'replace')
   }
 
   const calRef   = useRef<HTMLDivElement>(null)
@@ -1320,8 +1344,7 @@ export default function ClassBookingsPage() {
     return uniqueInstructors.filter(ins=>allClasses.some(lc=>lc.instructor?.id===ins.id&&effProgram(lc)===filterProgram))
   },[uniqueInstructors,filterProgram,allClasses])
 
-  /* Reset course & instructor when program changes */
-  useEffect(()=>{ setFilterCourse('all'); setFilterInstructor('all') },[filterProgram])
+  /* Course & instructor reset when the programme changes — in setFilterProgram above. */
 
   /* ── Status counts for tabs ── */
   const statusCounts = useMemo(()=>{
@@ -1526,7 +1549,7 @@ export default function ClassBookingsPage() {
     if(autoEntered.current||loadCls||view!=='courses'||hCourse) return
     if(catalog.length===1&&catalog[0]?.id){
       autoEntered.current=true
-      setHCourse(catalog[0].id); setHModule(null); syncUrl('courses',catalog[0].id,null,'replace')
+      setQueryParams({view:null, course:catalog[0].id, module:null},'replace')
     }
   },[catalog,loadCls,view,hCourse])  // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -1581,7 +1604,7 @@ export default function ClassBookingsPage() {
   const isCurrWeek = isSameDay(rangeStart,getMondayOfWeek(new Date()))&&isSameDay(rangeEnd,addDays(getMondayOfWeek(new Date()),6))
   function shiftRange(dir:1|-1){
     const span=Math.round((rangeEnd.getTime()-rangeStart.getTime())/86_400_000)+1
-    setRangeStart(addDays(rangeStart,dir*span));setRangeEnd(addDays(rangeEnd,dir*span))
+    setRange(addDays(rangeStart,dir*span),addDays(rangeEnd,dir*span))
   }
   function toggleDelivery(mode:'online'|'offline'){
     setFilterDelivery(v=>v===mode?'all':mode)
@@ -1592,8 +1615,8 @@ export default function ClassBookingsPage() {
   ].filter(Boolean).length
 
   const hasAnyFilter = !!(search||filterAccess!=='all'||filterDelivery!=='all'||filterProgram!=='all'||filterCourse!=='all'||filterInstructor!=='all'||filterLanguage!=='all'||filterStatus!=='all')
-  const clearAll = ()=>{setSearch('');setFilterStatus('all');setFilterAccess('all');setFilterDelivery('all');setFilterProgram('all');setFilterCourse('all');setFilterInstructor('all');setFilterLanguage('all')}
-  const clearPanel = ()=>{setFilterAccess('all');setFilterProgram('all');setFilterCourse('all');setFilterInstructor('all');setFilterLanguage('all')}
+  const clearAll = ()=>setQueryParams({q:null,status:null,access:null,delivery:null,program:null,pcourse:null,mentor:null,lang:null})
+  const clearPanel = ()=>setQueryParams({access:null,program:null,pcourse:null,mentor:null,lang:null})
   /* The catalogue hides the chrome that only makes sense over a dated list —
      the week shifter, the status tabs, the metric tiles and the panel filters
      whose axes (course, programme) the tree navigates by instead. Search
@@ -1650,7 +1673,7 @@ export default function ClassBookingsPage() {
               <div className="relative flex items-center gap-2" ref={calRef}>
                 {!isCurrWeek&&(
                   <button type="button"
-                    onClick={()=>{const m=getMondayOfWeek(new Date());setRangeStart(m);setRangeEnd(addDays(m,6))}}
+                    onClick={()=>setQueryParams({from:null,to:null})}
                     className="rounded-full px-3 py-1.5 text-[11px] font-semibold"
                     style={{background:'rgba(0,87,184,0.10)',color: 'var(--color-primary)',border:'1px solid rgba(0,87,184,0.22)'}}>
                     ← Today
@@ -1676,7 +1699,7 @@ export default function ClassBookingsPage() {
                 </div>
                 <AnimatePresence>
                   {showCal&&<MiniCalendar rangeStart={rangeStart} rangeEnd={rangeEnd}
-                    onRangeChange={(s,e)=>{setRangeStart(s);setRangeEnd(e)}} onClose={()=>setShowCal(false)}/>}
+                    onRangeChange={setRange} onClose={()=>setShowCal(false)}/>}
                 </AnimatePresence>
               </div>
             )}
@@ -1919,7 +1942,7 @@ export default function ClassBookingsPage() {
                 {/* Reset scoped filters */}
                 {(filterCourse!=='all'||filterInstructor!=='all'||filterLanguage!=='all')&&(
                   <button type="button"
-                    onClick={()=>{setFilterCourse('all');setFilterInstructor('all');setFilterLanguage('all')}}
+                    onClick={()=>setQueryParams({pcourse:null,mentor:null,lang:null})}
                     className="dm flex items-center gap-1 rounded-full px-2.5 py-1.5 text-[11px] font-semibold"
                     style={{color: 'var(--color-danger)',border:'1px solid rgba(239,68,68,0.18)'}}>
                     <X size={10}/>Reset

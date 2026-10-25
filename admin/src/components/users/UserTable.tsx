@@ -9,6 +9,7 @@ import {
 } from 'lucide-react'
 import { useUsers, useUpdateUser, useImpersonateClient, useRecheckCs, type AdminUser } from '@/lib/api/users'
 import { useCurrentUser } from '@/lib/api/user'
+import { useQueryState } from '@/lib/useQueryState'
 import { categoryScopeOf, isProgrammeScoped } from '@/lib/programScope'
 import Spinner from '@/components/ui/Spinner'
 import { AvatarImg } from '@/components/ui/AvatarImg'
@@ -51,11 +52,12 @@ export function UserTable({ role, label }: Props) {
      (plan.md §10): the chips that offered the other three become a label. */
   const { data: viewer } = useCurrentUser()
   const viewerDepartment = isProgrammeScoped(viewer) ? categoryScopeOf(viewer) : undefined
-  const [search,      setSearch]      = useState('')
-  const [page,        setPage]        = useState(1)
-  const [category,    setCategory]    = useState<CategoryFilter>('')
-  const [noPhone,     setNoPhone]     = useState(false)
-  const [onboarded,   setOnboarded]   = useState<'' | 'yes' | 'no' | 'none'>('')
+  /* Every filter in the address bar (lib/useQueryState.ts): a reload keeps the view, the link can be shared. */
+  const [search,      setSearch]      = useQueryState('q', '', { history: 'replace' })
+  const [page,        setPage]        = useQueryState('page', 1)
+  const [category,    setCategory]    = useQueryState<CategoryFilter>('program', '')
+  const [noPhone,     setNoPhone]     = useQueryState('nophone', false)
+  const [onboarded,   setOnboarded]   = useQueryState<'' | 'yes' | 'no' | 'none'>('onboarded', '')
   const [editingUser, setEditingUser] = useState<AdminUser | null>(null)
   const [historyUser, setHistoryUser] = useState<AdminUser | null>(null)
 

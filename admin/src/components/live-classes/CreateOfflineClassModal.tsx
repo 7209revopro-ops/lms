@@ -44,7 +44,9 @@ export function CreateOfflineClassModal({ onClose, onSuccess, categoryProgram, p
   const createMutation = useCreateLiveClass()
   const { data: coursesData,     isLoading: loadingCourses }     = useCourses({ per_page: 200, ...(categoryProgram ? { program: categoryProgram } : {}) })
 
-  const courses     = coursesData?.docs     ?? []
+  /* Archived courses are not offered for a new class (2026-10-25): a class put on an old copy (the archived
+     Bangalore duplicates) belongs to the wrong academy and shows the wrong time. */
+  const courses     = (coursesData?.docs ?? []).filter(c => c.status !== 'archived')
 
   const [courseId,        setCourseId]        = useState(courses[0]?.id ?? '')
   /* Only the chosen course's programme teaches it. */

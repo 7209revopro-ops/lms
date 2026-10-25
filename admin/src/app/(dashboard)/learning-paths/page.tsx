@@ -13,6 +13,7 @@ import {
 } from '@/lib/api/stats'
 import { useCourses } from '@/lib/api/courses'
 import Spinner from '@/components/ui/Spinner'
+import { useQueryState } from '@/lib/useQueryState'
 import { useOrgCurrency, formatCoursePrice } from '@/lib/currency'
 
 /* ─── Local types ────────────────────────────────────── */
@@ -435,7 +436,7 @@ function PathFormModal({ initial, onClose }: { initial?: AdminLearningPath; onCl
 
 /* ─── Page ─────────────────────────────────────────────── */
 export default function AdminLearningPathsPage() {
-  const [page,     setPage]     = useState(1)
+  const [page,     setPage]     = useQueryState('page', 1)   // in the address bar: a reload keeps the page
   const [modal,    setModal]    = useState<'create' | AdminLearningPath | null>(null)
   const [deleting, setDeleting] = useState<string | null>(null)
 

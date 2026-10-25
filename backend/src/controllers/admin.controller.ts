@@ -98,6 +98,7 @@ export class AdminController {
         sort:           q['sort'] as 'popular' | 'rating' | 'newest' | 'price_lo' | 'price_hi' | undefined,
         instructorId:   isTeachingStaff ? req.user!.id : undefined,
         organizationId: req.user!.organizationId,
+        excludePrograms: q['programs'] === 'exclude',
       })
       const counts = await Promise.all(docs.map(c => this.lessonRepo.countByCourse(c.id)))
       const dtos   = docs.map((c, i) => toCourseDTO(c, counts[i]))

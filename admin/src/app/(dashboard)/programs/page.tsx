@@ -6,6 +6,7 @@ import { PageHeader } from '@/components/ui/PageHeader'
 import Spinner from '@/components/ui/Spinner'
 import { useCurrentUser } from '@/lib/api/user'
 import { useMentorCalendar } from '@/lib/api/mentorCalendar'
+import { useQueryState } from '@/lib/useQueryState'
 import {
   usePrograms, useCreateProgram, useChangeProgramStudents, useRescheduleProgram, useStopProgram, useProgramStudentSearch,
   useProgramAudiences, fetchProgramGroup, useProgramGuests,
@@ -31,7 +32,7 @@ export default function ProgramsPage() {
   const { data, isLoading, error } = usePrograms()
   const [creating, setCreating] = useState(false)
   const [open, setOpen] = useState<string | null>(null)
-  const [showStopped, setShowStopped] = useState(false)
+  const [showStopped, setShowStopped] = useQueryState('stopped', false)   // in the address bar (lib/useQueryState.ts)
   const list = (data ?? []).filter(p => showStopped || p.status === 'active')
 
   return (

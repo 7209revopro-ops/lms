@@ -13,6 +13,7 @@ import {
   type InstructorPerformance, type ReviewStats,
 } from '@/lib/api/classAssignments'
 import { useCurrentUser } from '@/lib/api/user'
+import { useQueryState } from '@/lib/useQueryState'
 import { useToast } from '@/store/ui.store'
 import { CsTag } from '@/components/ui/CsTag'
 
@@ -362,9 +363,10 @@ function ReviewCard({ a }: { a: ReviewAssignment }) {
 
 /* ── Page ────────────────────────────────────────────── */
 export default function AdminAssignmentsPage() {
-  const [tab,          setTab]          = useState<'all' | ClassAssignmentStatus>('pending')
-  const [search,       setSearch]       = useState('')
-  const [instructorId, setInstructorId] = useState<string>('')
+  /* Filters in the address bar (lib/useQueryState.ts): a reload keeps the view, the link can be shared. */
+  const [tab,          setTab]          = useQueryState<'all' | ClassAssignmentStatus>('tab', 'pending')
+  const [search,       setSearch]       = useQueryState('q', '', { history: 'replace' })
+  const [instructorId, setInstructorId] = useQueryState<string>('mentor', '')
 
   /* The dashboard is its own request, not a count of `data`. The queue is
      capped at 200 and filtered by the tab above, so counting it would report

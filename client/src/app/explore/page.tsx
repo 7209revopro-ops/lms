@@ -5,12 +5,13 @@
    priced in what its checkout charges; a signed-in student always sees their
    own academy's. Each card opens /explore/<slug>: the modules and Buy.
 ───────────────────────────────────────────────────────────── */
-import { Suspense, useMemo, useState } from 'react'
+import { Suspense, useMemo } from 'react'
 import { useSearchParams } from 'next/navigation'
 import { useQuery } from '@tanstack/react-query'
 import { motion } from 'framer-motion'
 import { Search, X } from 'lucide-react'
 import { api } from '@/lib/axios'
+import { useQueryState } from '@/lib/useQueryState'
 import type { Course } from '@/types'
 import {
   ExploreHeader, ExploreFooter, CourseCard, useAcademy, useSignedIn, priceOf, programOf, PROGRAMS, ACADEMIES, type Academy,
@@ -40,9 +41,12 @@ function ExploreInner() {
   const academy = lockedAcademy ?? chosenAcademy
   const signedIn = useSignedIn()
   const { data: courses, isLoading, isError, refetch } = useCatalogue(academy)
-  const [chosenProgram, setProgram] = useState<string>('all')
-  const program = lockedProgram ?? chosenProgram
-  const [q, setQ] = useState('')
+  /* The clicked chip and the search box live in the address bar — ?cat= and
+     ?q= — so a reload or a shared link keeps them. ?cat=, not ?program=:
+     ?program= is the LOCK above, which hides the chips altogether. The
+     academy switch keeps its own localStorage memory (useAcademy). */
+  const [chosenProgram, setProgram] = useQueryState('cat', 'all')
+  const [q, setQ] = useQueryState('q', '', { history: 'replace' })
 
   /* Programmes in a fixed order, Forex first; a programme with no course here is not offered. */
   const programs = useMemo(() => {
@@ -50,6 +54,9 @@ function ExploreInner() {
     for (const c of courses ?? []) counts.set(c.program ?? 'other', (counts.get(c.program ?? 'other') ?? 0) + 1)
     return [...Object.keys(PROGRAMS), 'other'].filter(p => counts.has(p)).map(p => ({ key: p, n: counts.get(p)! }))
   }, [courses])
+  /* A ?cat= this academy has no chip for (another academy's, or a typo) shows all rather than nothing. */
+  const program = lockedProgram
+    ?? (chosenProgram === 'all' || !courses || programs.some(p => p.key === chosenProgram) ? chosenProgram : 'all')
 
   const shown = useMemo(() => {
     const needle = q.trim().toLowerCase()

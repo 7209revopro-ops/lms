@@ -41,6 +41,11 @@ export class AdminService {
     // already-scoped course/enrollment lists shown right next to them.
     const courseMatch: Record<string, unknown> = { ...orgMatch }
     if (program) courseMatch['program'] = program
+    /* A programme's hidden "Program: …" course is not a course in the catalogue (2026-10-24): programmes
+       have their own page, so the course cards — and the students counted on courses — leave them out. */
+    const { ProgramModel } = await import('@/models/schema.ts')
+    const programCourseIds = await ProgramModel.distinct('courseId')
+    if (programCourseIds.length) courseMatch['_id'] = { $nin: programCourseIds }
 
     /* The enrolments this dashboard is reporting on are the ones sitting on the
        courses it is already showing — so ask that directly.

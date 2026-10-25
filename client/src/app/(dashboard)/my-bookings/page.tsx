@@ -58,6 +58,7 @@ import { titleCase } from '@/lib/titleCase'
 import { AvatarImg } from '@/components/ui/AvatarImg'
 import { useToast } from '@/store/ui.store'
 import Spinner from '@/components/ui/Spinner'
+import { useQueryState } from '@/lib/useQueryState'
 
 /* ── Type faces ───────────────────────────────────────────────────────────
    Syne/DM Sans are declared per-page in this app (the Class Schedule carries
@@ -913,8 +914,11 @@ const PAGE_SIZE = 100
 
 export default function MyBookingsPage() {
   const reduce = useReducedMotion()
-  const [tab, setTab]       = useState<TabKey>('all')
-  const [search, setSearch] = useState('')
+  /* The tab and the search live in the address bar (?tab=upcoming&q=…) — a
+     reload keeps them, Back steps back through them. */
+  const [tabParam, setTab]  = useQueryState<TabKey>('tab', 'all')
+  const tab: TabKey = TABS.some(t => t.key === tabParam) ? tabParam : 'all'
+  const [search, setSearch] = useQueryState('q', '', { history: 'replace' })
 
   /* APP_TIMEZONE is the DEVICE zone in the browser and the SERVER's zone
      during Next's prerender — Asia/Dubai in production. Printing it straight

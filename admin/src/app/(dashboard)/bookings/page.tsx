@@ -26,6 +26,7 @@ import { CLASS_LANGUAGES } from '@/lib/languages'
 import { hasJoined, joinedLabel } from '@/lib/attendance'
 import { CsTag, csName, csTeam } from '@/components/ui/CsTag'
 import { MeetingsView } from '@/components/bookings/MeetingsView'
+import { useQueryState } from '@/lib/useQueryState'
 
 /* ─── Custom dark dropdown ───────────────────────────────── */
 interface SelectOption { value: string; label: string }
@@ -541,7 +542,8 @@ export default function BookingsPage() {
   const [courseFilter,     setCourseFilter]     = useState('')
   const [instructorFilter, setInstructorFilter] = useState('')
   /* Class bookings, or the mentors' meetings (2026-10-24) — same dates, its own cards and list. */
-  const [view, setView] = useState<'classes' | 'meetings'>('classes')
+  /* ?tab=meetings — through lib/useQueryState.ts, so the URL writer below must leave it alone. */
+  const [view, setView] = useQueryState<'classes' | 'meetings'>('tab', 'classes')
   const [langFilter,       setLangFilter]       = useState('')
   const [search,           setSearch]           = useState('')
   const [page,             setPage]             = useState(1)
@@ -643,7 +645,11 @@ export default function BookingsPage() {
      letter by letter instead of leaving the page. */
   useEffect(() => {
     if (!hydrated || typeof window === 'undefined') return
-    const sp = new URLSearchParams()
+    /* Start from the address as it is and rewrite only this writer's own keys:
+       ?tab and the Meetings view's ?mbucket / ?mentor / ?mq / ?mpage live there
+       too (lib/useQueryState.ts) and a fresh URLSearchParams() wiped them. */
+    const sp = new URLSearchParams(window.location.search)
+    for (const k of ['from', 'to', 'status', 'delivery', 'sort', 'unmarked', 'course', 'instructor', 'lang', 'q', 'page']) sp.delete(k)
     /* Only non-defaults, so a clean view has a clean URL. */
     sp.set('from', toYMD(dateFrom))
     sp.set('to',   toYMD(dateTo))
@@ -942,6 +948,9 @@ export default function BookingsPage() {
       </div>
 
       {view === 'meetings' ? (
+        /* Not before the URL has been read: the dates would change under it on
+           mount and reset its page (?mpage) on every reload. */
+        !hydrated ? null :
         <MeetingsView dateFrom={toYMD(dateFrom)} dateTo={toYMD(dateTo)} isInstructor={isInstructor}
           mentors={instructors.map(i => ({ id: i.id, name: i.name }))} />
       ) : (<>

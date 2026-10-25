@@ -6,6 +6,7 @@ import { PageHeader } from '@/components/ui/PageHeader'
 import { PodBadge } from '@/components/live-classes/PodBadge'
 import Spinner from '@/components/ui/Spinner'
 import { useCurrentUser } from '@/lib/api/user'
+import { useQueryState, setQueryParams } from '@/lib/useQueryState'
 import { useMentorCalendar, useBookMeeting, useCancelMeeting, useMentorClass, useRemoveTimeOff, wallInZone, timeOffLabel, refusal, type CalendarMentor, type MentorTimeOff } from '@/lib/api/mentorCalendar'
 import { TimeOffDialog } from '@/components/live-classes/TimeOffDialog'
 
@@ -19,19 +20,34 @@ import { TimeOffDialog } from '@/components/live-classes/TimeOffDialog'
 
 const DAY_MS = 864e5
 const weekStart = (d: Date) => { const x = new Date(d); x.setHours(0, 0, 0, 0); x.setDate(x.getDate() - ((x.getDay() + 6) % 7)); return x }
+const pad2 = (n: number) => String(n).padStart(2, '0')
+/** A local date as YYYY-MM-DD — the week's Monday, as the address bar keeps it. */
+const ymd = (d: Date) => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`
 
 export default function MentorCalendarPage() {
   const { data: me } = useCurrentUser()
   const myEmail = String((me as any)?.email ?? '').toLowerCase()
-  const [offset, setOffset] = useState(0)
-  const [onlyMe, setOnlyMe] = useState(false)
-  const [query, setQuery] = useState('')
+  /* Filters in the address bar (lib/useQueryState.ts): a reload keeps the view, the link can be shared.
+     The week is kept as its Monday (YYYY-MM-DD); none = this week. */
+  const [week, setWeek] = useQueryState('week', '')
+  const offset = useMemo(() => {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(week)) return 0
+    const n = Math.round((weekStart(new Date(`${week}T00:00:00`)).getTime() - weekStart(new Date()).getTime()) / (7 * DAY_MS))
+    return Number.isFinite(n) ? n : 0
+  }, [week])
+  const setOffset = (next: number | ((o: number) => number)) => {
+    const n = typeof next === 'function' ? next(offset) : next
+    const s = weekStart(new Date()); s.setDate(s.getDate() + n * 7)
+    setWeek(n === 0 ? '' : ymd(s))
+  }
+  const [onlyMe, setOnlyMe] = useQueryState('mine', false)
+  const [query, setQuery] = useQueryState('mq', '', { history: 'replace' })   // a mentor's name or email
   const [booking, setBooking] = useState<CalendarMentor | null>(null)
   const [infoFor, setInfoFor] = useState<string | null>(null)   // the class whose Info is open
   const [offFor, setOffFor] = useState<CalendarMentor | null>(null)   // marking this mentor not available
-  const [find, setFind] = useState('')          // a session's title, its course or module, or who a booked one is with
-  const [course, setCourse] = useState('')      // courseId
-  const [mod, setMod] = useState('')      // moduleId, within the course
+  const [find, setFind] = useQueryState('q', '', { history: 'replace' })          // a session's title, its course or module, or who a booked one is with
+  const [course] = useQueryState('course', '')      // courseId
+  const [mod, setMod] = useQueryState('module', '')      // moduleId, within the course
   const start = useMemo(() => { const s = weekStart(new Date()); s.setDate(s.getDate() + offset * 7); return s }, [offset])
   const days = useMemo(() => Array.from({ length: 7 }, (_, i) => new Date(start.getTime() + i * DAY_MS)), [start])
   const { data, isLoading, error } = useMentorCalendar(new Date(start.getTime() - DAY_MS).toISOString(), new Date(start.getTime() + 8 * DAY_MS).toISOString())
@@ -93,7 +109,7 @@ export default function MentorCalendarPage() {
       </div>
       <div className="flex flex-wrap items-center gap-2">
         <input value={find} onChange={e => setFind(e.target.value)} placeholder="Search sessions — title, course, module, who it's with…" className="min-w-[240px] flex-1 rounded-lg border border-white/10 bg-transparent px-3 py-2 text-sm outline-none" />
-        <select value={course} onChange={e => { setCourse(e.target.value); setMod('') }} className="rounded-lg border border-white/10 bg-transparent px-3 py-2 text-sm" aria-label="Course">
+        <select value={course} onChange={e => setQueryParams({ course: e.target.value, module: null })} className="rounded-lg border border-white/10 bg-transparent px-3 py-2 text-sm" aria-label="Course">
           <option value="">All courses</option>
           {courses.map(([id, title]) => <option key={id} value={id}>{title}</option>)}
         </select>
@@ -101,7 +117,7 @@ export default function MentorCalendarPage() {
           <option value="">{course && !modules.length ? 'No modules' : 'All modules'}</option>
           {modules.map(([id, title]) => <option key={id} value={id}>{title}</option>)}
         </select>
-        {filtering && <button type="button" onClick={() => { setFind(''); setCourse(''); setMod('') }} className="rounded-lg border border-white/10 px-3 py-2 text-sm hover:bg-white/5">Clear</button>}
+        {filtering && <button type="button" onClick={() => setQueryParams({ q: null, course: null, module: null })} className="rounded-lg border border-white/10 px-3 py-2 text-sm hover:bg-white/5">Clear</button>}
       </div>
 
       {isLoading && <div className="flex justify-center py-12"><Spinner /></div>}

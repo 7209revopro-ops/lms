@@ -6,6 +6,7 @@ import { useStaffConversations } from '@/lib/api/chat'
 import { useCurrentUser } from '@/lib/api/user'
 import { ChatPanel } from '@/components/chat/ChatPanel'
 import Spinner from '@/components/ui/Spinner'
+import { useQueryState } from '@/lib/useQueryState'
 
 /* Typing asks the server once the typist pauses, not on every keystroke. */
 function useSettled(value: string, ms = 300) {
@@ -18,7 +19,8 @@ function useSettled(value: string, ms = 300) {
 function Inbox() {
   const { data: me } = useCurrentUser()
   const isInstructor = me?.role === 'instructor'
-  const [search, setSearch] = useState('')
+  /* The search box in the address bar beside ?c (lib/useQueryState.ts). */
+  const [search, setSearch] = useQueryState('q', '', { history: 'replace' })
   const list = useStaffConversations(isInstructor, useSettled(search))
 
   return (

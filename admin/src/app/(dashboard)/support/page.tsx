@@ -16,6 +16,7 @@ import {
 } from '@/lib/api/support'
 import { useCurrentUser } from '@/lib/api/user'
 import Spinner from '@/components/ui/Spinner'
+import { useQueryState } from '@/lib/useQueryState'
 import { CsTag } from '@/components/ui/CsTag'
 
 /* ─── helpers ──────────────────────────────────────── */
@@ -354,10 +355,11 @@ export default function AdminSupportPage() {
   const role = me?.role ?? ''
   const isSuperAdmin = role === 'admin' || role === 'super_admin'
 
-  const [activeTab,     setActiveTab]     = useState<'inbox' | 'performance'>('inbox')
-  const [programFilter, setProgramFilter] = useState('all')
-  const [statusFilter,  setStatusFilter]  = useState('all')
-  const [search,        setSearch]        = useState('')
+  /* Filters in the address bar (lib/useQueryState.ts): a reload keeps the view, the link can be shared. */
+  const [activeTab,     setActiveTab]     = useQueryState<'inbox' | 'performance'>('tab', 'inbox')
+  const [programFilter, setProgramFilter] = useQueryState('program', 'all')
+  const [statusFilter,  setStatusFilter]  = useQueryState('status', 'all')
+  const [search,        setSearch]        = useQueryState('q', '', { history: 'replace' })
   const [activeTicket,  setActiveTicket]  = useState<string | null>(null)
 
   const filter = {

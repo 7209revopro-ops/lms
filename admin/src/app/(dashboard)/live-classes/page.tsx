@@ -24,6 +24,7 @@ import type { GuestCohortInput } from '@/lib/api/liveClasses'
 import { useOrgStore } from '@/store/org.store'
 import { useUsers, useProgramInstructors, useDropInstructorOutside } from '@/lib/api/users'
 import { useCurrentUser } from '@/lib/api/user'
+import { useQueryState, setQueryParams } from '@/lib/useQueryState'
 import { EditLiveClassModal } from '@/components/live-classes/EditLiveClassModal'
 import {
   useViewerAcademy, useAcademyView, academyViewOf,
@@ -923,9 +924,20 @@ function CalendarView({ items, meetings = [], onSlotClick }: {
 }) {
   const todayRef = useMemo(() => { const d = new Date(); d.setHours(0, 0, 0, 0); return d }, [])
 
-  const [monthDate, setMonthDate] = useState<Date>(() => {
-    const d = new Date(); d.setDate(1); d.setHours(0, 0, 0, 0); return d
-  })
+  /* The month shown, in the address bar (lib/useQueryState.ts) as its first day
+     YYYY-MM-DD on the local clock the grid is built from; none = this month. */
+  const [monthKey, setMonthKey] = useQueryState('date', '')
+  const monthDate = useMemo(() => {
+    const m = /^(\d{4})-(\d{2})-\d{2}$/.exec(monthKey)
+    const d = m ? new Date(Number(m[1]), Number(m[2]) - 1, 1) : new Date()
+    if (Number.isNaN(d.getTime())) { const t = new Date(); t.setDate(1); t.setHours(0, 0, 0, 0); return t }
+    d.setDate(1); d.setHours(0, 0, 0, 0); return d
+  }, [monthKey])
+  const setMonthDate = (d: Date) => {
+    const now = new Date()
+    setMonthKey(d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth()
+      ? '' : `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-01`)
+  }
   const [editLive, setEditLive] = useState<LiveClass | null>(null)
   /* Resolved ONCE for the whole grid rather than per chip — the hook reads the
      viewer's academy, and a month can hold a hundred chips. */
@@ -1328,7 +1340,9 @@ function QuickCreateModal({ onClose, onSuccess, categoryProgram }: { onClose: ()
   const backdrop = useBackdropClose(onClose)
   const createMutation = useCreateLiveClass()
   const { data: coursesData,     isLoading: loadingCourses }     = useCourses({ per_page: 200, ...(categoryProgram ? { program: categoryProgram } : {}) })
-  const courses     = coursesData?.docs     ?? []
+  /* Archived courses are not offered for a new class (2026-10-25): a class put on an old copy (the archived
+     Bangalore duplicates) belongs to the wrong academy and shows the wrong time. */
+  const courses     = (coursesData?.docs ?? []).filter(c => c.status !== 'archived')
 
   const [courseId,        setCourseId]        = useState(courses[0]?.id ?? '')
   /* Only the chosen course's programme teaches it — a Forex class offers Forex
@@ -1952,26 +1966,27 @@ const seatsFor = (t: LiveClassType, p: 'mux' | 'livekit') =>
   t === 'internal' && p === 'livekit' ? LIVEKIT_MAX_SEATS : OPEN_SEATS_DEFAULT
 
 export default function LiveClassesPage() {
-  const [activeFilter,   setActiveFilter]   = useState<FilterKey>('all')
-  const [typeFilter,     setTypeFilter]     = useState<'all' | 'internal' | 'external'>('all')
-  const [deliveryFilter, setDeliveryFilter] = useState<'all' | 'online' | 'offline'>('all')
-  const [courseFilter,      setCourseFilter]      = useState('')
-  const [languageFilter,    setLanguageFilter]    = useState('')
-  const [instructorFilter,  setInstructorFilter]  = useState('')
-  const [search,         setSearch]         = useState('')
+  /* Every filter in the address bar (lib/useQueryState.ts): a reload keeps the view, the link can be shared. */
+  const [activeFilter,   setActiveFilter]   = useQueryState<FilterKey>('status', 'all')
+  const [typeFilter,     setTypeFilter]     = useQueryState<'all' | 'internal' | 'external'>('type', 'all')
+  const [deliveryFilter, setDeliveryFilter] = useQueryState<'all' | 'online' | 'offline'>('delivery', 'all')
+  const [courseFilter,      setCourseFilter]      = useQueryState('course', '')
+  const [languageFilter,    setLanguageFilter]    = useQueryState('lang', '')
+  const [instructorFilter,  setInstructorFilter]  = useQueryState('mentor', '')
+  const [search,         setSearch]         = useQueryState('q', '', { history: 'replace' })
   /* A date window and a time-of-day window. Both read each class on its OWN
      academy's clock — the clock its row prints — so "4–7 PM" means the times
      you can see, whichever academy hosts the class. */
-  const [dateFrom, setDateFrom] = useState('')   // YYYY-MM-DD
-  const [dateTo,   setDateTo]   = useState('')
-  const [timeFrom, setTimeFrom] = useState('')   // HH:mm
-  const [timeTo,   setTimeTo]   = useState('')
+  const [dateFrom, setDateFrom] = useQueryState('from', '')   // YYYY-MM-DD
+  const [dateTo,   setDateTo]   = useQueryState('to', '')
+  const [timeFrom, setTimeFrom] = useQueryState('tfrom', '', { history: 'replace' })   // HH:mm
+  const [timeTo,   setTimeTo]   = useQueryState('tto', '', { history: 'replace' })
   const rangeActive = !!(dateFrom || dateTo || timeFrom || timeTo)
   const [createOpen,         setCreateOpen]         = useState(false)
   const [offlineCreateOpen,  setOfflineCreateOpen]  = useState(false)
   /* The one Backup dialog — see TableRow's onBackup. */
   const [backupLive,         setBackupLive]         = useState<LiveClass | null>(null)
-  const [view,               setView]               = useState<'table' | 'month' | 'grid'>('table')
+  const [view,               setView]               = useQueryState<'table' | 'month' | 'grid'>('view', 'table')
 
   const { data: me } = useCurrentUser()
   const isInstructor = me?.role === 'instructor'
@@ -2337,7 +2352,7 @@ export default function LiveClassesPage() {
           const on = dateFrom === from && dateTo === to
           return (
             <Button key={label} variant="ghost" size="sm"
-              onClick={() => { setDateFrom(on ? '' : from); setDateTo(on ? '' : to) }}
+              onClick={() => setQueryParams({ from: on ? null : from, to: on ? null : to })}
               className="rounded-lg px-2.5 py-1 text-[11px] font-semibold"
               style={on
                 ? { background: 'rgba(0,87,184,0.15)', color: '#0057b8', border: '1px solid rgba(0,87,184,0.25)' }
@@ -2363,7 +2378,7 @@ export default function LiveClassesPage() {
 
         {rangeActive && (
           <Button variant="ghost" size="sm"
-            onClick={() => { setDateFrom(''); setDateTo(''); setTimeFrom(''); setTimeTo('') }}
+            onClick={() => setQueryParams({ from: null, to: null, tfrom: null, tto: null })}
             className="flex items-center gap-1 rounded-lg px-2.5 py-1 text-[11px] font-semibold"
             style={{ color: 'rgba(255,255,255,0.55)', border: '1px solid rgba(255,255,255,0.10)' }}>
             <X size={11} />Clear

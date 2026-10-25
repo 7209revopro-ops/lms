@@ -6,13 +6,14 @@
    clicking one shows just those meetings. A row opens the meeting in full.
    Shares the page's date range; an admin can pick one mentor.
 ───────────────────────────────────────────────────────────── */
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
   CalendarClock, CalendarCheck2, Ban, CheckCircle2, Globe2, MapPin, Search, Users, Video, X, ChevronLeft, ChevronRight, ExternalLink, Clock,
 } from 'lucide-react'
 import { useMentorMeetings, type MeetingBucket, type MentorMeetingRow } from '@/lib/api/meetings'
 import Spinner from '@/components/ui/Spinner'
+import { useQueryState, setQueryParams } from '@/lib/useQueryState'
 
 const CARDS: Array<{ key: MeetingBucket; label: string; icon: typeof CalendarClock; color: string }> = [
   { key: 'upcoming',  label: 'Upcoming',             icon: CalendarClock,  color: '#60A5FA' },
@@ -35,14 +36,27 @@ export function MeetingsView({ dateFrom, dateTo, isInstructor, mentors }: {
   dateFrom: string; dateTo: string; isInstructor: boolean
   mentors: Array<{ id: string; name: string }>
 }) {
-  const [bucket, setBucket] = useState<MeetingBucket>('all')
-  const [mentorId, setMentorId] = useState('')
-  const [search, setSearch] = useState('')
-  const [q, setQ] = useState('')
-  const [page, setPage] = useState(1)
+  /* Filters in the address bar (lib/useQueryState.ts), m-prefixed so they never
+     clash with the class-bookings keys the page writes (?status, ?q, ?page…). */
+  const [bucket] = useQueryState<MeetingBucket>('mbucket', 'all')
+  const [mentorId] = useQueryState('mentor', '')
+  const [search] = useQueryState('mq', '', { history: 'replace' })
+  const [page, setPage] = useQueryState('mpage', 1)
+  /* The server is asked once typing pauses; the box itself is the URL value. */
+  const [q, setQ] = useState(search.trim())
   const [open, setOpen] = useState<MentorMeetingRow | null>(null)
   useEffect(() => { const t = setTimeout(() => setQ(search.trim()), 300); return () => clearTimeout(t) }, [search])
-  useEffect(() => { setPage(1) }, [bucket, mentorId, q, dateFrom, dateTo])
+  /* Every filter change goes back to page 1: bucket / mentor / search in their
+     handlers (one history entry), a date change here — but not on mount, so a
+     reload keeps ?mpage. */
+  const pickBucket = (b: MeetingBucket) => setQueryParams({ mbucket: b === 'all' ? null : b, mpage: null })
+  const dates = `${dateFrom}|${dateTo}`
+  const lastDates = useRef(dates)
+  useEffect(() => {
+    if (lastDates.current === dates) return
+    lastDates.current = dates
+    setQueryParams({ mpage: null }, 'replace')
+  }, [dates])
 
   const { data, isLoading, isError, isFetching } = useMentorMeetings({
     dateFrom, dateTo, bucket, search: q || undefined, page, per_page: 50,
@@ -61,7 +75,7 @@ export function MeetingsView({ dateFrom, dateTo, isInstructor, mentors }: {
           const I = c.icon
           return (
             <motion.button key={c.key} type="button" whileHover={{ y: -2 }} whileTap={{ scale: 0.98 }}
-              onClick={() => setBucket(on ? 'all' : c.key)} aria-pressed={on}
+              onClick={() => pickBucket(on ? 'all' : c.key)} aria-pressed={on}
               className="rounded-2xl p-4 text-left transition-colors"
               style={{ background: on ? `${c.color}1f` : 'rgba(255,255,255,0.03)', border: `1px solid ${on ? `${c.color}66` : 'rgba(255,255,255,0.07)'}` }}>
               <div className="flex items-center justify-between">
@@ -79,19 +93,19 @@ export function MeetingsView({ dateFrom, dateTo, isInstructor, mentors }: {
       <div className="mb-4 flex flex-wrap items-center gap-2">
         <div className="relative">
           <Search size={13} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2" style={{ color: muted }} />
-          <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search title, participant or who booked"
+          <input value={search} onChange={e => setQueryParams({ mq: e.target.value, mpage: null }, 'replace')} placeholder="Search title, participant or who booked"
             className="w-72 max-w-full rounded-xl py-2 pl-8 pr-3 text-sm text-white outline-none placeholder:text-white/30"
             style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.09)' }} />
         </div>
         {!isInstructor && (
-          <select value={mentorId} onChange={e => setMentorId(e.target.value)} aria-label="Mentor"
+          <select value={mentorId} onChange={e => setQueryParams({ mentor: e.target.value || null, mpage: null })} aria-label="Mentor"
             className="rounded-xl px-3 py-2 text-sm text-white outline-none" style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.09)', colorScheme: 'dark' }}>
             <option value="">All mentors</option>
             {mentors.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
           </select>
         )}
         {bucket !== 'all' && (
-          <button type="button" onClick={() => setBucket('all')} className="inline-flex items-center gap-1 rounded-xl px-3 py-2 text-xs font-semibold"
+          <button type="button" onClick={() => pickBucket('all')} className="inline-flex items-center gap-1 rounded-xl px-3 py-2 text-xs font-semibold"
             style={{ background: 'rgba(255,255,255,0.06)', color: 'rgba(255,255,255,0.7)' }}>
             <X size={12} />{CARDS.find(c => c.key === bucket)?.label} — show all
           </button>

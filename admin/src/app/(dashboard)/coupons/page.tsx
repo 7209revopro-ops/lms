@@ -7,6 +7,7 @@ import { useAdminCoupons, type AdminCoupon } from '@/lib/api/stats'
 import { api } from '@/lib/axios'
 import { useQueryClient } from '@tanstack/react-query'
 import Spinner from '@/components/ui/Spinner'
+import { useQueryState } from '@/lib/useQueryState'
 import { useToast } from '@/store/ui.store'
 
 /* ─── Create / Edit form ──────────────────────────── */
@@ -162,7 +163,7 @@ function CouponFormModal({
 
 /* ─── Page ────────────────────────────────────────── */
 export default function AdminCouponsPage() {
-  const [page, setPage] = useState(1)
+  const [page, setPage] = useQueryState('page', 1)   // in the address bar: a reload keeps the page
   const [modal, setModal] = useState<'create' | AdminCoupon | null>(null)
   const [deleting, setDeleting] = useState<string | null>(null)
   const qc = useQueryClient()

@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { motion } from 'framer-motion'
 import {
   ClipboardList, ChevronLeft, ChevronRight, Search, X,
@@ -8,6 +8,7 @@ import {
 } from 'lucide-react'
 import { useAuditLogs, type AuditLog } from '@/lib/api/auditlogs'
 import Spinner from '@/components/ui/Spinner'
+import { useQueryState, setQueryParams } from '@/lib/useQueryState'
 
 /* ─── Helpers ──────────────────────────────────────────── */
 function fmtDate(iso: string): string {
@@ -146,16 +147,19 @@ function LogRow({ log, index }: { log: AuditLog; index: number }) {
 
 /* ─── Page ─────────────────────────────────────────────── */
 export default function AuditLogsPage() {
-  const [page,      setPage]      = useState(1)
-  const [action,    setAction]    = useState('')
-  const [entity,    setEntity]    = useState('')
-  const [actorInput,setActorInput]= useState('')
-  const [actorId,   setActorId]   = useState('')
+  /* Filters in the address bar (lib/useQueryState.ts): a reload keeps the view, the link can be shared. */
+  const [page,      setPage]      = useQueryState('page', 1)
+  const [action]                  = useQueryState('action', '')
+  const [entity]                  = useQueryState('entity', '')
+  const [actorId]                 = useQueryState('actor', '')   // applied on Enter, not per key
+  /* What is typed stays local until Enter; it follows the URL on reload / Back. */
+  const [actorInput,setActorInput]= useState(actorId)
+  useEffect(() => { setActorInput(actorId) }, [actorId])
 
   const { data, isLoading, isError } = useAuditLogs({ page, action: action || undefined, entity: entity || undefined, actorId: actorId || undefined })
 
-  const applyActor = () => { setActorId(actorInput.trim()); setPage(1) }
-  const clearAll   = () => { setAction(''); setEntity(''); setActorInput(''); setActorId(''); setPage(1) }
+  const applyActor = () => setQueryParams({ actor: actorInput.trim() || null, page: null })
+  const clearAll   = () => { setActorInput(''); setQueryParams({ action: null, entity: null, actor: null, page: null }) }
   const hasFilter  = !!action || !!entity || !!actorId
 
   return (
@@ -190,7 +194,7 @@ export default function AuditLogsPage() {
         {/* Action */}
         <select
           value={action}
-          onChange={e => { setAction(e.target.value); setPage(1) }}
+          onChange={e => setQueryParams({ action: e.target.value || null, page: null })}
           className="rounded-xl px-3 py-2 text-xs text-white outline-none"
           style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)' }}>
           {ACTION_OPTIONS.map(a => (
@@ -203,7 +207,7 @@ export default function AuditLogsPage() {
         {/* Entity */}
         <select
           value={entity}
-          onChange={e => { setEntity(e.target.value); setPage(1) }}
+          onChange={e => setQueryParams({ entity: e.target.value || null, page: null })}
           className="rounded-xl px-3 py-2 text-xs text-white outline-none"
           style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)' }}>
           {ENTITY_OPTIONS.map(e => (
@@ -225,7 +229,7 @@ export default function AuditLogsPage() {
             className="bg-transparent text-xs text-white outline-none placeholder:text-white/25 w-44"
           />
           {actorInput && (
-            <button onClick={() => { setActorInput(''); setActorId(''); setPage(1) }}>
+            <button onClick={() => { setActorInput(''); setQueryParams({ actor: null, page: null }) }}>
               <X size={10} style={{ color: 'rgba(255,255,255,0.3)' }} />
             </button>
           )}

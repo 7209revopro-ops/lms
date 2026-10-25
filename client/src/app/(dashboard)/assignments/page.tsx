@@ -14,6 +14,7 @@ import {
 import { useToast } from '@/store/ui.store'
 import Spinner from '@/components/ui/Spinner'
 import { titleCase } from '@/lib/titleCase'
+import { useQueryState } from '@/lib/useQueryState'
 
 /* ── Constants that mirror the API's own limits ──────────
    Keeping these in step with the backend is what makes the form refuse a
@@ -392,7 +393,8 @@ function AssignmentCard({ a }: { a: MyClassAssignment }) {
 /* ── Page ────────────────────────────────────────────── */
 export default function AssignmentsPage() {
   const { data: mine, isLoading } = useMyClassAssignments()
-  const [filter, setFilter] = useState<'all' | ClassAssignmentStatus>('all')
+  /* The status pill lives in the address bar (?status=pending): a reload keeps it. */
+  const [filter, setFilter] = useQueryState<'all' | ClassAssignmentStatus>('status', 'all')
 
   const list  = mine ?? []
   const shown = filter === 'all' ? list : list.filter(a => a.status === filter)

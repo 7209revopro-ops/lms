@@ -20,6 +20,7 @@ import {
   type EnrollmentRequest, type EnrollmentRequestStatus, type ProgramCategory,
 } from '@/lib/api/enrollmentRequests'
 import { useCurrentUser } from '@/lib/api/user'
+import { useQueryState, setQueryParams } from '@/lib/useQueryState'
 import { useToast } from '@/store/ui.store'
 import { api } from '@/lib/axios'
 import { useQueryClient } from '@tanstack/react-query'
@@ -991,18 +992,19 @@ export default function EnrollmentRequestsPage() {
   const { data: me } = useCurrentUser()
   const toast        = useToast()
 
-  const [statusFilter,   setStatusFilter]   = useState<EnrollmentRequestStatus | 'all'>('pending')
-  const [search,         setSearch]         = useState('')
+  /* Every filter in the address bar (lib/useQueryState.ts): a reload keeps the view, the link can be shared. */
+  const [statusFilter]                      = useQueryState<EnrollmentRequestStatus | 'all'>('status', 'pending')
+  const [search,         setSearch]         = useQueryState('q', '', { history: 'replace' })
   const [approveTarget,  setApproveTarget]  = useState<EnrollmentRequest | null>(null)
   const [rejectTarget,   setRejectTarget]   = useState<EnrollmentRequest | null>(null)
   const [removingCat,    setRemovingCat]    = useState<{ userId: string; cat: ProgramCategory } | null>(null)
   const [detailTarget,   setDetailTarget]   = useState<EnrollmentRequest | null>(null)
   const [deleteTarget,   setDeleteTarget]   = useState<string | null>(null)
-  const [blockFilter,    setBlockFilter]    = useState<'all' | 'blocked' | 'unblocked'>('all')
-  const [accountType,    setAccountType]    = useState<'full' | 'express'>('full')
+  const [blockFilter,    setBlockFilter]    = useQueryState<'all' | 'blocked' | 'unblocked'>('block', 'all')
+  const [accountType]                       = useQueryState<'full' | 'express'>('type', 'full')
   const [expressDelete,  setExpressDelete]  = useState<ExpressMember | null>(null)
   /* Where the enrolment stands in finance (2026-10-13) — the backend asks finance. */
-  const [financeFilter,  setFinanceFilter]  = useState<FinanceRequestFilter | ''>('')
+  const [financeFilter,  setFinanceFilter]  = useQueryState<FinanceRequestFilter | ''>('finance', '')
 
   const approve         = useApproveEnrollment()
   const reject          = useRejectEnrollment()
@@ -1210,7 +1212,7 @@ export default function EnrollmentRequestsPage() {
         {/* Account-type switcher — TOP RIGHT */}
         <div className="flex overflow-hidden rounded-xl flex-shrink-0" style={{ border: '1px solid rgba(255,255,255,0.10)', background: 'rgba(255,255,255,0.03)' }}>
           <button
-            onClick={() => { setAccountType('full'); setBlockFilter('all') }}
+            onClick={() => setQueryParams({ type: null, block: null })}
             className="flex items-center gap-2 px-4 py-2 text-sm font-medium transition-all"
             style={{
               color:      accountType === 'full' ? 'rgba(255,255,255,0.9)' : 'rgba(255,255,255,0.35)',
@@ -1227,7 +1229,7 @@ export default function EnrollmentRequestsPage() {
             )}
           </button>
           <button
-            onClick={() => { setAccountType('express'); setBlockFilter('all') }}
+            onClick={() => setQueryParams({ type: 'express', block: null })}
             className="flex items-center gap-2 px-4 py-2 text-sm font-medium transition-all"
             style={{
               color:      accountType === 'express' ? '#A78BFA' : 'rgba(255,255,255,0.35)',
@@ -1311,7 +1313,7 @@ export default function EnrollmentRequestsPage() {
             {STATUS_TABS.map(t => (
               <button
                 key={t.value}
-                onClick={() => { setStatusFilter(t.value); setBlockFilter('all') }}
+                onClick={() => setQueryParams({ status: t.value === 'pending' ? null : t.value, block: null })}
                 className="relative px-4 py-2 text-sm font-medium transition-all"
                 style={{
                   color:      statusFilter === t.value ? t.color : 'rgba(255,255,255,0.45)',

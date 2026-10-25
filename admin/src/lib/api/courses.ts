@@ -29,6 +29,8 @@ export const courseKeys = {
 /* ─── List ───────────────────────────────────────── */
 export function useCourses(params: {
   page?: number; per_page?: number; search?: string; status?: string; sort?: string; program?: string
+  /** 'exclude' — leave programmes' hidden "Program: …" courses out (the Courses page). */
+  programs?: 'exclude'
 } = {}) {
   return useQuery({
     queryKey: courseKeys.list(params),

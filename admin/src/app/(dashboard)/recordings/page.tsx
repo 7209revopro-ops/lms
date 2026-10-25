@@ -1,6 +1,7 @@
 'use client'
 
 import { useState } from 'react'
+import { useQueryState } from '@/lib/useQueryState'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
   Film, Search, Play, Clock, Calendar, User, BookOpen,
@@ -81,8 +82,9 @@ function PlayerModal({ row, url, onClose }: { row: RecordingRow; url: string; on
 /* ── Page ───────────────────────────────────────────── */
 export default function RecordingsPage() {
   const { data: me } = useCurrentUser()
-  const [search, setSearch]   = useState('')
-  const [page,   setPage]     = useState(1)
+  /* Search and page in the address bar (lib/useQueryState.ts). */
+  const [search, setSearch]   = useQueryState('q', '', { history: 'replace' })
+  const [page,   setPage]     = useQueryState('page', 1)
   const [playing, setPlaying] = useState<{ row: RecordingRow; url: string } | null>(null)
   const [failed,  setFailed]  = useState<string | null>(null)
 

@@ -1,10 +1,11 @@
 'use client'
 
-import { useMemo, useState } from 'react'
+import { useMemo } from 'react'
 import { CalendarDays, ChevronLeft, ChevronRight, DoorOpen, School } from 'lucide-react'
 import { PageHeader } from '@/components/ui/PageHeader'
 import Spinner from '@/components/ui/Spinner'
 import { usePods, type PodBookingRow, type PodMentor } from '@/lib/api/pods'
+import { useQueryState } from '@/lib/useQueryState'
 
 /* Pods (the user, 2026-10-18): the HRMS meeting pods online classes are given — pods 4 and 6–11 — and who has
    each through the day: classes (yours marked), and staff meetings booked in the HRMS. Online classes with no
@@ -37,7 +38,17 @@ const dubaiMidnight = (offset: number) => {
 const at = (iso: string) => new Date(iso).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', timeZone: TZ })
 
 export default function PodsPage() {
-  const [offset, setOffset] = useState(0)
+  /* The day in the address bar (lib/useQueryState.ts) as a Dubai YYYY-MM-DD; none = today. */
+  const [date, setDate] = useQueryState('date', '')
+  const offset = useMemo(() => {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return 0
+    const n = Math.round((Date.parse(`${date}T00:00:00+04:00`) - dubaiMidnight(0).getTime()) / 864e5)
+    return Number.isFinite(n) ? n : 0
+  }, [date])
+  const setOffset = (next: number | ((o: number) => number)) => {
+    const n = typeof next === 'function' ? next(offset) : next
+    setDate(n === 0 ? '' : dubaiMidnight(n).toLocaleDateString('en-CA', { timeZone: TZ }))
+  }
   const day = useMemo(() => dubaiMidnight(offset), [offset])
   const from = new Date(day.getTime()).toISOString()
   const to = new Date(day.getTime() + 864e5).toISOString()

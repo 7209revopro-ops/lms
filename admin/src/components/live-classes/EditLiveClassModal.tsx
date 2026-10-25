@@ -50,7 +50,9 @@ export function EditLiveClassModal({ live, onClose, onSuccess }: Props) {
   const repeatMutation  = useRepeatLiveClassWeekly(activeCourseId)
 
   const { data: coursesData } = useCourses({ per_page: 200 })
-  const courses = coursesData?.docs ?? []
+  /* Archived courses are not offered (2026-10-25) — except the one this class is already on, so its course
+     box is never blank; it can be moved off it to a live course. */
+  const courses = (coursesData?.docs ?? []).filter(c => c.status !== 'archived' || c.id === originalCourseId)
 
   /* Only the chosen course's programme teaches it — follows the course
      switcher, so moving the class to a Forex course offers Forex instructors. */

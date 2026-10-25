@@ -6,6 +6,7 @@ import { useOversightConversations, useOversightInstructors } from '@/lib/api/ch
 import { useCurrentUser } from '@/lib/api/user'
 import { ChatPanel } from '@/components/chat/ChatPanel'
 import Spinner from '@/components/ui/Spinner'
+import { useQueryState } from '@/lib/useQueryState'
 
 function useSettled(value: string, ms = 300) {
   const [v, setV] = useState(value)
@@ -16,8 +17,9 @@ function useSettled(value: string, ms = 300) {
 /* Super admin, read-only: every student ↔ instructor chat, filtered by
    instructor; follows the org switcher (plan.md §11.2 C5). */
 function Oversight() {
-  const [instructorId, setInstructorId] = useState('')
-  const [search, setSearch] = useState('')
+  /* Filters in the address bar beside ?c (lib/useQueryState.ts). */
+  const [instructorId, setInstructorId] = useQueryState('instructor', '')
+  const [search, setSearch] = useQueryState('q', '', { history: 'replace' })
   const { data: instructors } = useOversightInstructors()
   const list = useOversightConversations(instructorId, useSettled(search))
 

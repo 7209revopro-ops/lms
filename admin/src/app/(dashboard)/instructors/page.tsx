@@ -7,11 +7,11 @@ import { PageHeader } from '@/components/ui/PageHeader'
 import { UserTable } from '@/components/users/UserTable'
 import { AddInstructorModal } from '@/components/instructors/AddInstructorModal'
 import { useCurrentUser } from '@/lib/api/user'
-import { useRouter, useSearchParams } from 'next/navigation'
+import { useSearchParams } from 'next/navigation'
+import { setQueryParams } from '@/lib/useQueryState'
 
 export default function InstructorsPage() {
   const searchParams = useSearchParams()
-  const router = useRouter()
   const [modalOpen, setModalOpen] = useState(() => searchParams.get('add') === '1')
   const { data: me } = useCurrentUser()
   /* Support is not staff-management ('admin' in name), but POST /admin/users
@@ -23,7 +23,8 @@ export default function InstructorsPage() {
 
   const handleClose = () => {
     setModalOpen(false)
-    router.replace('/instructors', { scroll: false })
+    /* Drop only ?add=1 — the list's filters stay in the address bar. */
+    setQueryParams({ add: null }, 'replace')
   }
 
   return (

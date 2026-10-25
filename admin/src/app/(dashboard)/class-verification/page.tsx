@@ -8,7 +8,7 @@
    A mentor sees their own classes; admins see every mentor's, filterable by
    mentor and date. One row per class → its page (/class-verification/<id>).
 ───────────────────────────────────────────────────────────── */
-import { useState } from 'react'
+import { useQueryState } from '@/lib/useQueryState'
 import Link from 'next/link'
 import { ClipboardCheck, Clock, AlertTriangle, CheckCircle2, ChevronRight, Star } from 'lucide-react'
 import { useCurrentUser } from '@/lib/api/user'
@@ -41,10 +41,11 @@ function MentorFilter({ value, onChange }: { value: string; onChange: (v: string
 export default function ClassVerificationPage() {
   const { data: me } = useCurrentUser()
   const isMentor = me?.role === 'instructor'
-  const [status, setStatus] = useState<VerifyStatus>('pending')
-  const [mentorId, setMentorId] = useState('')
-  const [from, setFrom] = useState('')
-  const [to, setTo] = useState('')
+  /* Filters in the address bar (lib/useQueryState.ts): a reload keeps the view, the link can be shared. */
+  const [status, setStatus] = useQueryState<VerifyStatus>('status', 'pending')
+  const [mentorId, setMentorId] = useQueryState('mentor', '')
+  const [from, setFrom] = useQueryState('from', '')   // YYYY-MM-DD
+  const [to, setTo] = useQueryState('to', '')
   const { data, isLoading, isError } = useVerifyList({ status, mentorId: isMentor ? undefined : mentorId, from, to })
 
   return (

@@ -110,7 +110,7 @@ export class CourseService {
 
   /* ─── Admin ─────────────────────────────────────── */
 
-  async listAdmin(params: CourseListParams & { status?: 'draft' | 'published' | 'archived' | 'all'; organizationId?: string }) {
+  async listAdmin(params: CourseListParams & { status?: 'draft' | 'published' | 'archived' | 'all'; organizationId?: string; excludePrograms?: boolean }) {
     return this.repo.listAdmin(params)
   }
 

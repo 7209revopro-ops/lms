@@ -12,6 +12,7 @@ import {
   useUsers, useDeleteUser, useImpersonateUser, type AdminUser,
 } from '@/lib/api/users'
 import Spinner from '@/components/ui/Spinner'
+import { useQueryState } from '@/lib/useQueryState'
 import { useCurrentUser, type CurrentAdmin } from '@/lib/api/user'
 import { useImpersonationStore } from '@/store/impersonation.store'
 import { useToast } from '@/store/ui.store'
@@ -149,10 +150,11 @@ export function AdminUsersPanel() {
   const { data: me, isLoading: meLoading } = useCurrentUser()
   const router = useRouter()
 
-  const [search,       setSearch]       = useState('')
-  const [page,         setPage]         = useState(1)
-  const [roleFilter,   setRoleFilter]   = useState<RoleFilter>('all')
-  const [statusFilter, setStatusFilter] = useState<StatusFilter>('all')
+  /* Every filter in the address bar (lib/useQueryState.ts): a reload keeps the view, the link can be shared. */
+  const [search,       setSearch]       = useQueryState('q', '', { history: 'replace' })
+  const [page,         setPage]         = useQueryState('page', 1)
+  const [roleFilter,   setRoleFilter]   = useQueryState<RoleFilter>('role', 'all')
+  const [statusFilter, setStatusFilter] = useQueryState<StatusFilter>('status', 'all')
   const [addOpen,      setAddOpen]      = useState(false)
   const [viewUser,     setViewUser]     = useState<AdminUser | null>(null)
   const [editUser,     setEditUser]     = useState<AdminUser | null>(null)

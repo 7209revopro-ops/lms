@@ -225,7 +225,10 @@ export function ChatPanel({ list, mode, emptyText, search, onSearch }: {
 
   const pick = (c: ChatConversation | null) => {
     setSelected(c?.id ?? null); setHeld(c)
-    router.replace(c ? `?c=${c.id}` : '?', { scroll: false })
+    /* Only ?c changes — the page's own filters (?q, ?instructor) stay in the address. */
+    const sp = new URLSearchParams(window.location.search)
+    if (c) sp.set('c', c.id); else sp.delete('c')
+    router.replace(`?${sp.toString()}`, { scroll: false })
   }
 
   return (

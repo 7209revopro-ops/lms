@@ -11,6 +11,7 @@ import {
 } from 'lucide-react'
 import { useCourses, useBulkCourses } from '@/lib/api/courses'
 import { useAdminStats } from '@/lib/api/stats'
+import { useQueryState, setQueryParams } from '@/lib/useQueryState'
 import { useUIStore } from '@/store/ui.store'
 import type { Course, CourseStatus } from '@/types/index'
 import { useOrgCurrency, formatCoursePrice } from '@/lib/currency'
@@ -472,19 +473,20 @@ export function CourseTable() {
      become a fixed label for them. */
   const { data: me } = useCurrentUser()
   const myDepartment = isProgrammeScoped(me) ? categoryScopeOf(me) : undefined
-  const [search,   setSearch]   = useState('')
-  const [status,   setStatus]   = useState<string>('all')
-  const [program,  setProgram]  = useState<string>('')
-  const [page,     setPage]     = useState(1)
-  const [sortKey,  setSortKey]  = useState<SortKey>('createdAt')
-  const [sortDir,  setSortDir]  = useState<'asc' | 'desc'>('desc')
+  /* Every filter in the address bar (lib/useQueryState.ts): a reload keeps the view, the link can be shared. */
+  const [search,   setSearch]   = useQueryState('q', '', { history: 'replace' })
+  const [status,   setStatus]   = useQueryState<string>('status', 'all')
+  const [program,  setProgram]  = useQueryState<string>('program', '')
+  const [page,     setPage]     = useQueryState('page', 1)
+  const [sortKey,  setSortKey]  = useQueryState<SortKey>('sort', 'createdAt')
+  const [sortDir,  setSortDir]  = useQueryState<'asc' | 'desc'>('dir', 'desc')
   /* Cleared whenever the visible set changes - page, search, status or
      programme. It used to survive all four, so ticking five courses on page
      one, paging to two and ticking two more produced "Delete 7 course(s)?"
      and deleted five rows the admin could no longer see. A selection you
      cannot see is not a selection you can confirm. */
   const [selected, setSelected] = useState<Set<string>>(new Set())
-  const [view,     setView]     = useState<ViewMode>('table')
+  const [view,     setView]     = useQueryState<ViewMode>('view', 'table')
   const toast = useToast()
 
   const { openDeleteModal } = useUIStore()
@@ -494,6 +496,8 @@ export function CourseTable() {
     page, per_page: view === 'grid' ? 12 : 8,
     search, status,
     program: program || undefined,
+    /* Programmes have their own page — their hidden "Program: …" courses are not listed here (2026-10-24). */
+    programs: 'exclude',
     sort: `${sortKey}:${sortDir}`,
   })
 
@@ -560,7 +564,7 @@ export function CourseTable() {
           <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2" style={{ color: 'rgba(255,255,255,0.28)' }} />
           <input
             value={search}
-            onChange={e => { setSearch(e.target.value); setPage(1); setSelected(new Set()) }}
+            onChange={e => { setQueryParams({ q: e.target.value, page: null }, 'replace'); setSelected(new Set()) }}
             placeholder="Search courses…"
             className="w-full rounded-xl py-2 pl-9 pr-4 text-sm text-white outline-none transition-all placeholder:text-white/20"
             style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.08)' }}
@@ -573,7 +577,7 @@ export function CourseTable() {
           {/* Status filter pills */}
           <div className="flex rounded-xl p-0.5" style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.07)' }}>
             {statusFilters.map(f => (
-              <button key={f.value} onClick={() => { setStatus(f.value); setPage(1); setSelected(new Set()) }}
+              <button key={f.value} onClick={() => { setQueryParams({ status: f.value === 'all' ? null : f.value, page: null }); setSelected(new Set()) }}
                 className="rounded-lg px-3 py-1.5 text-xs font-semibold transition-all"
                 style={status === f.value
                   ? { background: 'rgba(0,87,184,0.18)', color: '#0057b8' }
@@ -594,7 +598,7 @@ export function CourseTable() {
           ) : (
           <div className="flex items-center gap-1">
             {(['', '4x-trading', 'digital-marketing', 'ai', 'jura'] as const).map(p => (
-              <button key={p || 'all'} onClick={() => { setProgram(p); setPage(1); setSelected(new Set()) }}
+              <button key={p || 'all'} onClick={() => { setQueryParams({ program: p || null, page: null }); setSelected(new Set()) }}
                 className="rounded-xl px-3 py-1.5 text-xs font-semibold transition-all"
                 style={program === p
                   ? { background: 'rgba(0,87,184,0.18)', color: '#0057b8', border: '1px solid rgba(0,87,184,0.4)' }

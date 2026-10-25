@@ -18,6 +18,7 @@ import { useOrganizations } from '@/lib/api/organizations'
 import { useCurrentUser } from '@/lib/api/user'
 import { useSendableTemplates, previewBroadcast, useSendBroadcast, type BroadcastInput, type BroadcastPreview } from '@/lib/api/broadcast'
 import Spinner from '@/components/ui/Spinner'
+import { useQueryState } from '@/lib/useQueryState'
 
 const TOKENS_COURSE = ['{name}', '{course}']
 const TOKENS_SESSION = ['{name}', '{course}', '{class}', '{day}', '{time}', '{when}', '{mentor}']
@@ -33,7 +34,8 @@ const errorOf = (e: unknown) => (e as { response?: { data?: { error?: { message?
 function SendMessage() {
   const sp = useSearchParams()
   const liveClassId = sp.get('liveClassId') ?? ''
-  const [courseId, setCourseId] = useState(sp.get('courseId') ?? '')
+  /* The chosen course stays in ?courseId (it already arrives there) so a reload keeps it. */
+  const [courseId, setCourseId] = useQueryState('courseId', '', { history: 'replace' })
   const audience = liveClassId ? 'session' : 'course'
 
   const { data: me } = useCurrentUser()

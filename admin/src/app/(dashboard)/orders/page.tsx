@@ -7,6 +7,7 @@ import { useAdminOrders, useGatewayBreakdown, type AdminOrder } from '@/lib/api/
 import { api } from '@/lib/axios'
 import { useQueryClient } from '@tanstack/react-query'
 import Spinner from '@/components/ui/Spinner'
+import { useQueryState, setQueryParams } from '@/lib/useQueryState'
 import { CsTag } from '@/components/ui/CsTag'
 
 const STATUS_TABS = ['all', 'pending', 'paid', 'refunded', 'cancelled'] as const
@@ -37,9 +38,10 @@ const GATEWAY_LABEL: Record<string, { label: string; color: string }> = {
 const MANUAL_REFUND_GATEWAYS = new Set(['abzer', 'tamara', 'tabby'])
 
 export default function AdminOrdersPage() {
-  const [status,  setStatus]  = useState<StatusTab>('all')
-  const [gateway, setGateway] = useState<string>('all')
-  const [page,    setPage]    = useState(1)
+  /* Filters in the address bar (lib/useQueryState.ts): a reload keeps the view, the link can be shared. */
+  const [status]              = useQueryState<StatusTab>('status', 'all')
+  const [gateway]             = useQueryState<string>('gateway', 'all')
+  const [page,    setPage]    = useQueryState('page', 1)
   const [refunding, setRefunding] = useState<string | null>(null)
   const qc = useQueryClient()
 
@@ -86,7 +88,7 @@ export default function AdminOrdersPage() {
             const isOn = gateway === row.gateway
             return (
               <button key={row.gateway} type="button"
-                onClick={() => { setGateway(isOn ? 'all' : row.gateway); setPage(1) }}
+                onClick={() => setQueryParams({ gateway: isOn ? null : row.gateway, page: null })}
                 className="rounded-2xl p-3 text-left transition-colors"
                 style={{
                   background: isOn ? `${gw.color}1A` : 'rgba(255,255,255,0.025)',
@@ -114,7 +116,7 @@ export default function AdminOrdersPage() {
           <span className="text-[11px]" style={{ color: 'rgba(255,255,255,0.45)' }}>
             Showing {GATEWAY_LABEL[gateway]?.label ?? gateway} orders only
           </span>
-          <button type="button" onClick={() => { setGateway('all'); setPage(1) }}
+          <button type="button" onClick={() => setQueryParams({ gateway: null, page: null })}
             className="rounded-full px-2 py-0.5 text-[10px] font-semibold"
             style={{ background: 'rgba(0,87,184,0.18)', color: '#60A5FA' }}>
             Clear
@@ -125,7 +127,7 @@ export default function AdminOrdersPage() {
       {/* Status tabs */}
       <div className="flex items-center gap-1 rounded-2xl p-1 w-fit" style={{ background: 'rgba(255,255,255,0.06)' }}>
         {STATUS_TABS.map(tab => (
-          <button key={tab} onClick={() => { setStatus(tab); setPage(1) }}
+          <button key={tab} onClick={() => setQueryParams({ status: tab === 'all' ? null : tab, page: null })}
             className="relative rounded-xl px-4 py-2 text-xs font-semibold capitalize transition-colors"
             style={{
               background: status === tab ? 'rgba(255,255,255,0.12)' : 'transparent',

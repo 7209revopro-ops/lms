@@ -1,6 +1,5 @@
 'use client'
 
-import { useState } from 'react'
 import { motion } from 'framer-motion'
 import Link from 'next/link'
 import { Star, MessageSquare, ChevronLeft, ChevronRight, Trash2 } from 'lucide-react'
@@ -8,6 +7,7 @@ import { PageHeader } from '@/components/ui/PageHeader'
 import { useAdminReviews, useDeleteReview, type AdminReview } from '@/lib/api/reviews'
 import { useToast } from '@/store/ui.store'
 import Spinner from '@/components/ui/Spinner'
+import { useQueryState } from '@/lib/useQueryState'
 import { AvatarImg } from '@/components/ui/AvatarImg'
 import { CsTag } from '@/components/ui/CsTag'
 
@@ -23,7 +23,7 @@ function fmtDate(d: string) {
 }
 
 export default function ReviewsPage() {
-  const [page, setPage] = useState(1)
+  const [page, setPage] = useQueryState('page', 1)   // in the address bar: a reload keeps the page
   const { data, isLoading } = useAdminReviews({ page, per_page: 12 })
   const del   = useDeleteReview()
   const toast = useToast()
