@@ -6,7 +6,10 @@ import { PortalError } from '@/services/portal.service.ts'
    instructor and each day (Dubai time) — their live classes (held,
    cancelled), the students' bookings on them (cancelled, attended, missed),
    their 1:1 mentor meetings (booked, cancelled) and the reviews students
-   left that day. The portal shows a chief mentor their own team's, matched
+   left that day. A review is a mentor rating (the student's Reviews page) or,
+   since 2026-10-25, the feedback a student left after one of their classes
+   (the class page's Session feedback) — the user: "the comments aren't visible"
+   — one per student per class, the mentor rating's stars when there are both. The portal shows a chief mentor their own team's, matched
    by address. Read only; counts and names, never a student.
 ───────────────────────────────────────────────────────────── */
 
@@ -60,6 +63,8 @@ export async function mentorReportForPortal(q: { from?: unknown; to?: unknown; e
     { createdAt: { $gte: start, $lt: end }, ...(only ? { instructorId: only } : {}) },
     { instructorId: 1, rating: 1, createdAt: 1 },
   ).lean() as any[]
+  // Class feedback left in the dates, counted against the class's mentor — unless the same student rated that class.
+  for (const f of await classFeedbackAsReviews({ createdAt: { $gte: start, $lt: end } }, only)) reviews.push(f)
 
   const table = new Map<string, Map<string, Day>>()
   const cell = (who: unknown, at: Date) => {
@@ -114,4 +119,71 @@ export async function mentorReportForPortal(q: { from?: unknown; to?: unknown; e
       return { instructorId: String(u._id), name: u.name ?? '', email: String(u.email ?? '').toLowerCase(), total: finish(total), days: days.map(([day, d]) => ({ day, ...finish(d) })) }
     }),
   }
+}
+
+type ReviewItem = {
+  _id: string; kind: 'mentor_rating' | 'class_feedback'; rating: number; comment?: string
+  /** The same student's class feedback on that class, when it says something else (2026-10-25). */
+  classComment?: string
+  createdAt: Date; studentId: { name: string } | null; liveClassId: { title: string; scheduledStart?: Date } | null
+  instructorId?: unknown
+}
+
+/**
+ * Class feedback (ClassFeedback: rating + comment after a class) as reviews of the class's mentor, for `where` (a
+ * createdAt range, or class ids) — leaving out those whose student also rated the class (their mentor rating counts).
+ * `only`: these mentors.
+ */
+async function classFeedbackAsReviews(where: Record<string, unknown>, only?: unknown): Promise<ReviewItem[]> {
+  const { ClassFeedbackModel, InstructorReviewModel } = await import('@/models/schema.ts')
+  const feedback = await ClassFeedbackModel.find(where, { liveClassId: 1, userId: 1, rating: 1, comment: 1, createdAt: 1 })
+    .populate('userId', 'name').populate('liveClassId', 'title scheduledStart instructorId').lean() as any[]
+  const mine = feedback.filter(f => f.liveClassId && (!only || (only as { $in: unknown[] }).$in.some(id => String(id) === String(f.liveClassId.instructorId))))
+  if (!mine.length) return []
+  const rated = new Set((await InstructorReviewModel.find(
+    { liveClassId: { $in: mine.map(f => f.liveClassId._id) }, studentId: { $in: mine.map(f => f.userId?._id ?? f.userId) } },
+    { liveClassId: 1, studentId: 1 },
+  ).lean() as any[]).map(r => `${r.studentId}|${r.liveClassId}`))
+  return mine
+    .filter(f => !rated.has(`${f.userId?._id ?? f.userId}|${f.liveClassId._id}`))
+    .map(f => ({
+      _id: `cf:${f._id}`, kind: 'class_feedback' as const, rating: f.rating, ...(f.comment?.trim() ? { comment: f.comment.trim() } : {}),
+      createdAt: f.createdAt, studentId: f.userId ? { name: f.userId.name ?? '' } : null,
+      liveClassId: { title: f.liveClassId.title ?? '', scheduledStart: f.liveClassId.scheduledStart }, instructorId: f.liveClassId.instructorId,
+    }))
+}
+
+/**
+ * One mentor's reviews for the portal's Mentor Report (GET /service/instructor-reviews/:id, 2026-10-25): their mentor
+ * ratings and the class feedback on their classes, newest first, each saying which it is; a mentor rating carries the
+ * same student's class comment too when it says something else. In the dates when given (createdAt). The LMS admin's
+ * own Instructor Reviews page still reads mentor ratings only (InstructorReviewService.listForInstructor).
+ */
+export async function mentorReviewsForPortal(instructorId: string, page: number, perPage: number, range: { from?: Date; to?: Date }) {
+  if (!mongoose.isValidObjectId(instructorId)) throw fail('Invalid instructor id.')
+  const { LiveClassModel, InstructorReviewModel, ClassFeedbackModel } = await import('@/models/schema.ts')
+  const id = new mongoose.Types.ObjectId(instructorId)
+  const createdAt = range.from || range.to ? { createdAt: { ...(range.from ? { $gte: range.from } : {}), ...(range.to ? { $lt: range.to } : {}) } } : {}
+  const ratings = await InstructorReviewModel.find({ instructorId: id, ...createdAt }, { rating: 1, comment: 1, createdAt: 1, studentId: 1, liveClassId: 1 })
+    .populate('studentId', 'name').populate('liveClassId', 'title scheduledStart').sort({ createdAt: -1 }).limit(5000).lean() as any[]
+  const classIds = (await LiveClassModel.find({ instructorId: id }, { _id: 1 }).lean() as any[]).map(c => c._id)
+  const feedback = classIds.length ? await classFeedbackAsReviews({ liveClassId: { $in: classIds }, ...createdAt }) : []
+  // The class comment beside a mentor rating by the same student on the same class.
+  const said = ratings.length
+    ? new Map((await ClassFeedbackModel.find({ liveClassId: { $in: ratings.map(r => r.liveClassId?._id ?? r.liveClassId) }, comment: { $nin: [null, ''] } }, { liveClassId: 1, userId: 1, comment: 1 }).lean() as any[])
+      .map(f => [`${f.userId}|${f.liveClassId}`, String(f.comment).trim()]))
+    : new Map<string, string>()
+  const items: ReviewItem[] = [
+    ...ratings.map(r => {
+      const extra = said.get(`${r.studentId?._id ?? r.studentId}|${r.liveClassId?._id ?? r.liveClassId}`)
+      return {
+        _id: String(r._id), kind: 'mentor_rating' as const, rating: r.rating, ...(r.comment?.trim() ? { comment: r.comment.trim() } : {}),
+        ...(extra && extra !== r.comment?.trim() ? { classComment: extra } : {}),
+        createdAt: r.createdAt, studentId: r.studentId ? { name: r.studentId.name ?? '' } : null,
+        liveClassId: r.liveClassId ? { title: r.liveClassId.title ?? '', scheduledStart: r.liveClassId.scheduledStart } : null,
+      }
+    }),
+    ...feedback.map(({ instructorId: _drop, ...f }) => f),
+  ].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+  return { reviews: items.slice((page - 1) * perPage, page * perPage), total: items.length, page, perPage }
 }
