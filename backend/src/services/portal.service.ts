@@ -470,6 +470,8 @@ export interface PortalMentor {
     id: string
     title: string
     kind: string
+    /** course_pitch | overview | other, or '' (2026-10-25). */
+    category: string
     startsAt: string
     durationMins: number
     /* Names only in the listing. The calendar needs to say who, not how to
@@ -567,7 +569,7 @@ export async function listMentorsForPortal(input: {
       scheduledStart: { $gte: from, $lte: to },
       cancelledAt: null,
     })
-      .select('title kind mentorId scheduledStart durationMins attendees bookedByEmail isOnline location')
+      .select('title kind category mentorId scheduledStart durationMins attendees bookedByEmail isOnline location')
       .lean(),
     timeOffBetween(ids, from, to),
   ])
@@ -593,6 +595,7 @@ export async function listMentorsForPortal(input: {
       id: String(m._id),
       title: m.title ?? '',
       kind: String(m.kind ?? ''),
+      category: String((m as { category?: string }).category ?? ''),
       startsAt: new Date(m.scheduledStart).toISOString(),
       durationMins: m.durationMins ?? 0,
       attendeeNames: (m.attendees ?? []).map((a) => a.name).filter(Boolean),
@@ -671,6 +674,7 @@ export interface PortalMentorMeeting {
   id: string
   title: string
   kind: 'staff' | 'student' | 'client'
+  category: string
   startsAt: string
   durationMins: number
   attendees: { name: string; email?: string }[]
@@ -758,11 +762,20 @@ function placeOf(inPerson: boolean, location: unknown): string {
  * not be unbookable because nobody updated a form. The portal warns; this
  * records what was decided.
  */
+/** A meeting's category from the caller: one of MENTOR_MEETING_CATEGORIES, or '' for none; anything else refused. */
+function categoryOf(v: unknown): '' | 'course_pitch' | 'overview' | 'other' {
+  const c = String(v ?? '').trim()
+  if (!c) return ''
+  if (!['course_pitch', 'overview', 'other'].includes(c)) throw httpError('category must be course_pitch, overview or other', 400)
+  return c as 'course_pitch' | 'overview' | 'other'
+}
+
 export async function createMentorMeetingForPortal(input: {
   remoteOrgId?: string
   mentorEmail?: string
   title?: string
   kind?: string
+  category?: string
   scheduledStart?: string
   durationMins?: number
   meetingUrl?: string
@@ -785,6 +798,7 @@ export async function createMentorMeetingForPortal(input: {
   if (!['staff', 'student', 'client'].includes(kind)) {
     throw httpError('kind must be staff, student or client', 400)
   }
+  const category = categoryOf(input.category)
 
   /* At least one person, and only the ones actually named. A row somebody
      started and abandoned in the form should not become an attendee with an
@@ -875,6 +889,7 @@ export async function createMentorMeetingForPortal(input: {
     organizationId: org._id,
     title,
     kind,
+    category,
     scheduledStart: start,
     durationMins,
     meetingUrl,
@@ -927,6 +942,7 @@ export async function createMentorMeetingForPortal(input: {
       id: String(created._id),
       title,
       kind: kind as 'staff' | 'student' | 'client',
+      category,
       startsAt: start.toISOString(),
       durationMins,
       attendees,
@@ -981,6 +997,7 @@ export async function getMentorMeetingForPortal(input: {
     id: String(meeting._id),
     title: meeting.title,
     kind: meeting.kind,
+    category: String(meeting.category ?? ''),
     startsAt: new Date(meeting.scheduledStart).toISOString(),
     durationMins: meeting.durationMins,
     meetingUrl: meeting.meetingUrl ?? '',
@@ -1012,6 +1029,7 @@ export async function updateMentorMeetingForPortal(input: {
   actorIsRootAdmin?: boolean
   title?: string
   kind?: string
+  category?: string
   scheduledStart?: string
   durationMins?: number
   meetingUrl?: string
@@ -1042,6 +1060,7 @@ export async function updateMentorMeetingForPortal(input: {
   if (!['staff', 'student', 'client'].includes(kind)) {
     throw httpError('kind must be staff, student or client', 400)
   }
+  const category = input.category === undefined ? (meeting.category ?? '') : categoryOf(input.category)
 
   const start = input.scheduledStart === undefined
     ? new Date(meeting.scheduledStart)
@@ -1114,6 +1133,7 @@ export async function updateMentorMeetingForPortal(input: {
 
   meeting.title = title
   meeting.kind = kind as typeof meeting.kind
+  meeting.category = category
   meeting.scheduledStart = start
   meeting.durationMins = durationMins
   meeting.attendees = attendees

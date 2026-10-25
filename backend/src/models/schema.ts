@@ -3329,6 +3329,9 @@ export const ProgramGuestModel = mongoose.model<IProgramGuest>('ProgramGuest', P
    kind, who is coming, and where to join.
 ───────────────────────────────────────────────────── */
 export type MentorMeetingKind = 'staff' | 'student' | 'client'
+/** What a meeting is for (the portal's categories, 2026-10-25) — beside its kind; optional, '' for none. */
+export const MENTOR_MEETING_CATEGORIES = ['course_pitch', 'overview', 'other'] as const
+export type MentorMeetingCategory = (typeof MENTOR_MEETING_CATEGORIES)[number]
 
 export interface IMentorMeeting extends Document {
   id:             string
@@ -3336,6 +3339,7 @@ export interface IMentorMeeting extends Document {
   organizationId?: Types.ObjectId
   title:          string
   kind:           MentorMeetingKind
+  category?:      MentorMeetingCategory | ''
   scheduledStart: Date
   durationMins:   number
   /* Where to join. Pasted by whoever booked it, or minted as a Google Meet
@@ -3375,6 +3379,7 @@ const MentorMeetingSchema = new Schema<IMentorMeeting>(
     organizationId: { type: Schema.Types.ObjectId, ref: 'Organization' },
     title:          { type: String, required: true, trim: true, maxlength: 255 },
     kind:           { type: String, enum: ['staff', 'student', 'client'], required: true },
+    category:       { type: String, enum: ['', ...MENTOR_MEETING_CATEGORIES], default: '' },
     scheduledStart: { type: Date, required: true, index: true },
     durationMins:   { type: Number, required: true, min: 5, max: 600 },
     meetingUrl:     { type: String, default: '' },

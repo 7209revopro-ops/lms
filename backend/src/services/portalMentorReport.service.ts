@@ -21,11 +21,13 @@ type Day = {
   classes: number; held: number; classesCancelled: number
   bookings: number; bookingsCancelled: number; attended: number; missed: number
   meetings: number; meetingsCancelled: number
+  /** Meetings held or booked (not cancelled) by category (2026-10-25): course pitch, overview, other, none. */
+  mCoursePitch: number; mOverview: number; mOther: number; mNone: number
   reviews: number; ratingSum: number; lowRatings: number
   /** How many of each star, 1 … 5 (2026-10-23: the breakdown). */
   r1: number; r2: number; r3: number; r4: number; r5: number
 }
-const blank = (): Day => ({ classes: 0, held: 0, classesCancelled: 0, bookings: 0, bookingsCancelled: 0, attended: 0, missed: 0, meetings: 0, meetingsCancelled: 0, reviews: 0, ratingSum: 0, lowRatings: 0, r1: 0, r2: 0, r3: 0, r4: 0, r5: 0 })
+const blank = (): Day => ({ classes: 0, held: 0, classesCancelled: 0, bookings: 0, bookingsCancelled: 0, attended: 0, missed: 0, meetings: 0, meetingsCancelled: 0, mCoursePitch: 0, mOverview: 0, mOther: 0, mNone: 0, reviews: 0, ratingSum: 0, lowRatings: 0, r1: 0, r2: 0, r3: 0, r4: 0, r5: 0 })
 const dayOf = (d: Date) => new Date(d.getTime() + 4 * 3600_000).toISOString().slice(0, 10)
 
 export async function mentorReportForPortal(q: { from?: unknown; to?: unknown; emails?: unknown }) {
@@ -57,7 +59,7 @@ export async function mentorReportForPortal(q: { from?: unknown; to?: unknown; e
     : []
   const meetings = await MentorMeetingModel.find(
     { scheduledStart: { $gte: start, $lt: end }, ...(only ? { mentorId: only } : {}) },
-    { mentorId: 1, scheduledStart: 1, cancelledAt: 1 },
+    { mentorId: 1, scheduledStart: 1, cancelledAt: 1, category: 1 },
   ).lean() as any[]
   const reviews = await InstructorReviewModel.find(
     { createdAt: { $gte: start, $lt: end }, ...(only ? { instructorId: only } : {}) },
@@ -94,6 +96,10 @@ export async function mentorReportForPortal(q: { from?: unknown; to?: unknown; e
     const d = cell(m.mentorId, m.scheduledStart)
     d.meetings++
     if (m.cancelledAt) d.meetingsCancelled++
+    else if (m.category === 'course_pitch') d.mCoursePitch++
+    else if (m.category === 'overview') d.mOverview++
+    else if (m.category === 'other') d.mOther++
+    else d.mNone++
   }
   for (const r of reviews) {
     const d = cell(r.instructorId, r.createdAt)
