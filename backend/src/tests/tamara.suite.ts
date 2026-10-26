@@ -421,6 +421,22 @@ try {
     const fallback = await svc.registerWebhook('https://api.delta.test/api/v1/webhooks/tamara')
     check('a refused event set falls back to the documented enum', fallback === 'wh_2' && calls.length === 2
       && (calls[1]?.body?.events ?? []).length === 6 && !calls[1]!.body.events.includes('order_expired'))
+
+    /* Production, 2026-10-26: live Tamara names the event it will not take. */
+    const named = (e: string) => ({ status: 400, body: { message: `Invalid registered event ${e}`, errors: [{ error_code: '' }] } })
+    replies = [named('order_updated'), { status: 200, body: { webhook_id: 'wh_3' } }]
+    calls = []
+    const dropped = await svc.registerWebhook('https://api.delta.test/api/v1/webhooks/tamara')
+    check('"Invalid registered event order_updated": registered again without exactly that event',
+      dropped === 'wh_3' && calls.length === 2 && calls[1]!.body.events.length === 7 && !calls[1]!.body.events.includes('order_updated'),
+      JSON.stringify(calls[1]?.body?.events))
+
+    replies = [named('order_updated'), named('order_declined'), named('order_expired'), { status: 200, body: { webhook_id: 'wh_4' } }]
+    calls = []
+    const several = await svc.registerWebhook('https://api.delta.test/api/v1/webhooks/tamara')
+    check('several refused one at a time: each dropped, the rest registered',
+      several === 'wh_4' && calls.length === 4 && JSON.stringify(calls[3]!.body.events) === JSON.stringify(['order_approved', 'order_authorised', 'order_canceled', 'order_captured', 'order_refunded']),
+      JSON.stringify(calls[3]?.body?.events))
     restoreFetch()
   }
 

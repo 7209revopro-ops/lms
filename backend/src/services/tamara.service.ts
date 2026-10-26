@@ -680,10 +680,22 @@ export class TamaraService {
       timeoutMs: WRITE_TIMEOUT_MS,
       body: JSON.stringify({ type: 'order', url: clip(url, 255), events: [...list] }),
     })
-    let r = await register(events)
+    let list = [...events]
+    let r = await register(list)
+    /* Live Tamara names the event it will not take — "Invalid registered event
+       order_updated" (2026-10-26, production; the docs list it). Drop exactly
+       that one and ask again, rather than give up on the webhook entirely. */
+    for (let i = 0; !r.ok && r.status === 400 && i < events.length; i++) {
+      const bad = /Invalid registered event\s+([a-z_]+)/i.exec(r.text)?.[1]
+      if (!bad || !list.includes(bad)) break
+      list = list.filter(e => e !== bad)
+      logger.warn({ dropped: bad, remaining: list }, 'Tamara refused a webhook event — registering without it')
+      if (!list.length) break
+      r = await register(list)
+    }
     if (!r.ok && r.status >= 400 && r.status < 500 && events === TAMARA_WEBHOOK_EVENTS) {
       logger.warn({ status: r.status }, 'Tamara refused the checklist event set — registering the documented enum only')
-      r = await register(TAMARA_WEBHOOK_EVENTS_DOCUMENTED)
+      r = await register(TAMARA_WEBHOOK_EVENTS_DOCUMENTED.filter(e => list.includes(e)))
     }
     if (!r.ok) {
       /* ERROR, not warn: with no webhook a paid order is only ever confirmed
