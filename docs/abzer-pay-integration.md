@@ -336,3 +336,27 @@ router.post('/abzer/verify-return', authenticate, async (req, res, next) => {
 - **Sandbox webhooks are unreliable** — that's why the read-only return-URL poll exists as UX fallback. Fulfillment still only happens via the (verified) webhook.
 - **Amounts:** store money as integer minor units (fils) internally; send `amount` as decimal AED (`fils / 100`) to Abzer.
 - **`link-generate` can return an expired link** (`isLinkExpired: true`) — check it and surface a retry.
+
+---
+
+## 11. Verified against the sandbox (2026-10-26) — what the PDFs don't say
+
+Measured with the sandbox credentials; the LMS code follows these, not the older sections above
+where they differ.
+
+| Finding | What the code does |
+|---|---|
+| **`GET /direct-payment-request/{id}` exists** (not in v5.1). It returns the request with `status.code`: `CR_REQUESTED` → `CR_PAID` (adds `receiptId`, `receiptNumber`, `authCode`, `payReferenceNo`, `paymentDetails`) or `CR_FAILED` (no receipt). `referenceNumber` is echoed exactly. | `AbzerService.getPaymentRequest()`. `OrderService.fulfillAbzerVerified()` is now the trusted path: the request id WE stored, `referenceNumber === order id`, `CR_PAID` + receipt, exact amount and currency. Used by the return page, the webhook and the sweep. |
+| The return URL is **no longer read-only-and-wait**: it asks Abzer server-to-server, so a lost webhook no longer strands a paid buyer (five paid sandbox orders were still `pending` locally for exactly that reason). Nothing from the browser can make an order paid. | `verifyAbzerReturn()` → `{ paid, failed }`; the /explore return page shows "Payment not completed" for `CR_FAILED`. |
+| **Webhook bodies**: an object, an **array** (one payment settling several invoices), or form fields (`POST_PARAMS`). Events: `WH_RECEIPT_POSTING`, `WH_PAYMENT_FAILURE`, `WH_REFUND`, `WH_SUBSCRIPTION_CANCEL`. | Every array item is handled. A receipt is confirmed against Abzer's record before fulfilling (falls back to header + exact amount only when Abzer can't be reached). A full `WH_REFUND` marks the order refunded; a refunded order is never flipped back to paid. |
+| An **expired token answers 403** "Authentication failed. Token expired." (docs say 401). | One re-login and retry on 401, or on a 403 mentioning the token. All calls have timeouts (8 s read, 15 s write). |
+| **409 "conflicts with existing data" on create** — Abzer makes a NEW customer per request coded `yyyyMMddHHmm` + one random digit; a taken code refuses the request. Roughly **11 new requests per minute per merchant**; passing an existing customer doesn't avoid it. **Abzer defect — report it.** | Retries a 409 (3 quick jittered, then once into the next minute if ≤ 15 s away, then once more; ~22 s worst case). The /explore pay call allows 35 s. 6 simultaneous checkouts always succeed; 12 at once does not always fit. |
+| The hosted page appends `status=PAYMENT_GATEWAY_SUCCESS` / `PAYMENT_GATEWAY_CANCEL`, `docRefNumber`, `transactionId` to the return URL. The card processor behind it is N-Genius. | The /explore return page maps these to its own cancelled / failed messages (only the server decides "paid"). |
+| The hosted page starts with Terms and Conditions → "Accept and Continue". | — |
+
+**Stuck-order sweep** (`jobs/abzerSweep.job.ts`, every 10 min): pending Abzer orders 5 min – 7 days old go
+through `fulfillAbzerVerified()`.
+
+**Tests:** `bun run test:abzer` (66, stubbed Abzer, real DB, real HTTP) · `test:abzersandbox` (17, the real
+sandbox; refuses any other base URL; set `ABZER_SANDBOX_PAID_ID`/`_PAID_REF`/`_FAILED_ID` to old sandbox
+requests for the paid/failed checks, `ABZER_SANDBOX_STRESS=1` for the 12-at-once measurement).

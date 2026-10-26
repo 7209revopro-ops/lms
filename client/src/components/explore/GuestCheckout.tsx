@@ -28,7 +28,7 @@ interface Prepared {
   amount: number; currency: 'AED' | 'INR'
   methods: Array<{ id: MethodId; available: boolean; message?: string | null }>
 }
-export interface CompleteResult { paid: boolean; signIn?: string | null; emailed?: boolean }
+export interface CompleteResult { paid: boolean; signIn?: string | null; emailed?: boolean; /** Card (Abzer): the gateway says this attempt failed. */ failed?: boolean }
 
 const errText = (e: unknown, fallback: string) =>
   (e as { response?: { data?: { error?: { message?: string } } } })?.response?.data?.error?.message ?? fallback
@@ -91,7 +91,8 @@ export function GuestCheckout({ open, onClose, slug, academy }: { open: boolean;
     setErr(''); setBusy(true)
     try { sessionStorage.setItem(RETURN_KEY, prep.course.slug) } catch { /* private mode */ }
     try {
-      const r = await api.post<{ data: { kind: 'redirect'; url: string } | { kind: 'razorpay'; razorpay: any } }>('/public/checkout/pay', { method })
+      /* Longer than the usual 15 s: the server may ask a busy gateway again before giving up (Card: up to ~22 s). */
+      const r = await api.post<{ data: { kind: 'redirect'; url: string } | { kind: 'razorpay'; razorpay: any } }>('/public/checkout/pay', { method }, { timeout: 35_000 })
       const d = r.data.data
       if (d.kind === 'redirect') { window.location.assign(d.url); return }
       /* Razorpay opens over the page; its success is verified by our server, then the checkout is finished. */

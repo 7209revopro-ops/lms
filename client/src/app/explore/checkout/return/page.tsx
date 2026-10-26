@@ -22,10 +22,15 @@ const TABBY_FAILURE = 'Sorry, Tabby is unable to approve this purchase. Please u
 function ReturnInner() {
   const q = useSearchParams()
   const gateway = q.get('gateway') ?? ''
-  const status  = q.get('status')
+  /* BillXPro (Card) appends its own status to our return URL — PAYMENT_GATEWAY_SUCCESS / _CANCEL /
+     a failure — so read those as ours. Only the server decides "paid"; this only picks the message. */
+  const raw     = q.get('status')
+  const status  = raw && /^PAYMENT_GATEWAY_/i.test(raw)
+    ? (/CANCEL/i.test(raw) ? 'cancelled' : /FAIL|DECLIN|ERROR/i.test(raw) ? 'failed' : null)
+    : raw
   /* Tamara returns OUR order as lmsOrder (its own orderId rides alongside) — order.service returnUrls. */
   const orderId = q.get('lmsOrder') ?? q.get('orderId') ?? ''
-  const [state, setState] = useState<'working' | 'emailed' | 'pending' | 'error'>('working')
+  const [state, setState] = useState<'working' | 'emailed' | 'pending' | 'failed' | 'error'>('working')
   const [msg, setMsg] = useState('')
   const [slug, setSlug] = useState<string | null>(null)
   useEffect(() => { try { setSlug(sessionStorage.getItem(RETURN_KEY)) } catch { /* private mode */ } }, [])
@@ -47,6 +52,8 @@ function ReturnInner() {
             if (alive) setState('emailed')
             return
           }
+          /* Card: Abzer itself reports the attempt failed — say so now rather than wait. */
+          if (d.failed) { if (alive) setState('failed'); return }
         } catch (e) {
           const m = (e as { response?: { data?: { error?: { message?: string } } } })?.response?.data?.error?.message
           if (alive) { setMsg(m ?? 'We could not confirm this payment.'); setState('error') }
@@ -76,7 +83,7 @@ function ReturnInner() {
   if (status === 'cancelled') {
     return card(bad, 'Payment cancelled', gateway === 'tabby' ? TABBY_CANCEL : 'You cancelled the payment — no money was taken. You can try again or choose another payment method.', btn(back, 'Back to checkout'))
   }
-  if (status === 'failed') {
+  if (status === 'failed' || state === 'failed') {
     return card(bad, 'Payment not completed', gateway === 'tabby' ? TABBY_FAILURE : 'The payment did not go through and no money was taken. Please try again or choose another payment method.', btn(back, 'Back to checkout'))
   }
   if (!orderId) return card(bad, 'Nothing to confirm', 'This page is opened after a payment. Start from the course page.', btn('/explore', 'All courses'))

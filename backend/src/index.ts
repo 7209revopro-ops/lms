@@ -15,6 +15,7 @@ import { startWhatsAppOutboxJob } from '@/jobs/whatsappOutbox.job.ts'
 import { startCommissionStudentsJob } from '@/jobs/commissionStudents.job.ts'
 import { startClassPodsJob } from '@/jobs/classPods.job.ts'
 import { startTamaraSweepJob } from '@/jobs/tamaraSweep.job.ts'
+import { startAbzerSweepJob } from '@/jobs/abzerSweep.job.ts'
 import { TabbyService } from '@/services/tabby.service.ts'
 import { TamaraService } from '@/services/tamara.service.ts'
 import { seedDefaultRoles } from '@/utils/seedRoles.ts'
@@ -321,7 +322,8 @@ async function bootstrap() {
     startCommissionStudentsJob()
     startClassPodsJob()
     startTamaraSweepJob()
-    logger.info('⏰  Scheduler started (reminders, critical mail, chat emails, digests, instructor schedule, email outbox, whatsapp outbox, Tetra Commission students, Tamara stuck orders)')
+    startAbzerSweepJob()
+    logger.info('⏰  Scheduler started (reminders, critical mail, chat emails, digests, instructor schedule, email outbox, whatsapp outbox, Tetra Commission students, Tamara + Abzer stuck orders)')
   } else {
     /* WARN, not info. If this is true of every process the platform quietly
        sends no reminders and no class-change notices at all, and nothing else

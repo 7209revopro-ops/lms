@@ -101,8 +101,10 @@ export class OrderRepository {
 
   /* Abzer fulfillment */
   async fulfillAbzer(id: string, paymentId: string): Promise<boolean> {
+    /* Never from `refunded`: a redelivered receipt, or the sweep reading a
+       record Abzer still shows as paid, must not undo a refund. */
     const result = await OrderModel.updateOne(
-      { _id: id, status: { $ne: 'paid' } },
+      { _id: id, status: { $in: ['pending', 'cancelled'] } },
       { $set: { status: 'paid', abzerPaymentId: paymentId } },
     ).exec()
     return result.modifiedCount === 1

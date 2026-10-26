@@ -7,7 +7,7 @@ import {
   TabbyService, TabbyRejectedError, tabbySumFils,
   type TabbyEligibility, type TabbyOrderHistoryEntry, type TabbyShippingAddress,
 } from '@/services/tabby.service.ts'
-import { AbzerService } from '@/services/abzer.service.ts'
+import { AbzerService, ABZER_STATUS, isAbzerId } from '@/services/abzer.service.ts'
 import {
   TamaraService, isTamaraId, isTamaraStatus, tamaraStatusIsPaid, tamaraStatusIsDead,
   type TamaraEligibility,
@@ -27,6 +27,16 @@ import { logger } from '@/utils/logger.ts'
 export type TabbyFulfillOutcome =
   | 'fulfilled'
   | 'already-fulfilled'
+  | 'ignored'
+  | 'retry'
+
+/* What confirming an Abzer order against Abzer's own record found.
+   `failed` and `not-paid` are answers; `retry` means we could not ask. */
+export type AbzerFulfillOutcome =
+  | 'fulfilled'
+  | 'already-fulfilled'
+  | 'not-paid'
+  | 'failed'
   | 'ignored'
   | 'retry'
 
@@ -1047,12 +1057,20 @@ export class OrderService {
   }
 
   /* ─── Abzer webhook fulfillment (idempotent) ─────────── */
-  /* orderId = the invoiceNumber from the webhook payload, which Abzer sets to our referenceNumber */
+  /* orderId = the invoiceNumber from the webhook payload, which Abzer sets to our referenceNumber.
+
+     The webhook's only authentication is a shared header (Webhook Docs v1.0
+     offer nothing stronger). So when the order carries its Abzer request id,
+     the receipt is confirmed against Abzer's OWN record of that request
+     before anything is granted (2026-10-26) — a leaked header alone can no
+     longer enrol anyone. Only when Abzer cannot be asked does the receipt's
+     own amount and currency decide, as before; the sweep re-checks later. */
   async fulfillAbzerFromWebhook(
     orderId: string, receiptId: string,
     paid?: { amount?: unknown; currency?: unknown },
   ): Promise<void> {
-    const order = await this.orderRepo.findById(orderId)
+    /* invoiceNumber is whatever the payload says — not every one is ours. */
+    const order = Types.ObjectId.isValid(orderId) ? await this.orderRepo.findById(orderId) : null
     if (!order) {
       logger.warn({ orderId }, 'Abzer webhook: no matching order')
       return
@@ -1065,6 +1083,19 @@ export class OrderService {
       logger.error({ orderId: order.id, gateway: (order as { gateway?: string }).gateway }, 'Abzer webhook: order is not an Abzer order — NOT fulfilled')
       return
     }
+
+    if (isAbzerId((order as any).abzerOrderId) && this.abzerSvc.isConfigured) {
+      const outcome = await this.fulfillAbzerVerified(order.id)
+      if (outcome !== 'retry') {
+        if (outcome === 'not-paid' || outcome === 'failed') {
+          logger.error({ orderId: order.id, receiptId, outcome },
+            "Abzer webhook: receipt says paid but Abzer's record does not — NOT fulfilled (the sweep re-checks)")
+        }
+        return
+      }
+      logger.warn({ orderId: order.id }, 'Abzer webhook: could not reach Abzer to confirm — deciding on the receipt itself')
+    }
+
     /* What was actually paid must be what the order asked for (2026-10-18). The webhook's only
        authentication is a shared header, so it fulfilled whatever it was told — a partial or forged
        receipt enrolled the student all the same. A receipt that does not match is refused and logged
@@ -1075,17 +1106,100 @@ export class OrderService {
       return
     }
 
-    /* Conditional flip — the return-URL verify may have raced us */
+    await this.#completeAbzer(order, receiptId, 'webhook')
+  }
+
+  /* ─── Abzer: confirm against Abzer's own record, then fulfil ─────────
+     The one trusted way an Abzer order becomes paid without a webhook — used
+     by the return page, the webhook and the stuck-order sweep alike. Nothing
+     from the caller is trusted: the request id is the one WE stored when the
+     link was made, and the record must name THIS order, be CR_PAID with a
+     receipt, and carry exactly the order's amount and currency. */
+  async fulfillAbzerVerified(orderId: string): Promise<AbzerFulfillOutcome> {
+    const order = await this.orderRepo.findById(orderId)
+    if (!order) return 'ignored'
+    if (order.status === 'paid') return 'already-fulfilled'
+    if ((order as { gateway?: string }).gateway !== 'abzer') return 'ignored'
+    if (order.status === 'refunded') return 'ignored'
+
+    const requestId = (order as any).abzerOrderId as string | undefined
+    if (!isAbzerId(requestId)) {
+      logger.warn({ orderId: order.id }, 'Abzer: no request id stored on the order — cannot confirm with Abzer')
+      return 'ignored'
+    }
+
+    let remote: Awaited<ReturnType<AbzerService['getPaymentRequest']>>
+    try {
+      remote = await this.abzerSvc.getPaymentRequest(requestId)
+    } catch (err) {
+      logger.warn({ err, orderId: order.id }, 'Abzer: lookup failed — will try again')
+      return 'retry'
+    }
+
+    if ((remote.id && remote.id !== requestId) || remote.referenceNumber !== order.id) {
+      logger.error({ orderId: order.id, requestId, reportedRef: remote.referenceNumber },
+        'Abzer: payment request does not belong to this order — NOT fulfilled')
+      return 'ignored'
+    }
+    if (remote.status === ABZER_STATUS.failed) return 'failed'
+    if (remote.status !== ABZER_STATUS.paid) {
+      if (remote.status !== ABZER_STATUS.requested) {
+        logger.warn({ orderId: order.id, status: remote.status }, 'Abzer: unrecognised request status — not treating as paid')
+      }
+      return 'not-paid'
+    }
+    if (!remote.receiptId) {
+      logger.error({ orderId: order.id }, 'Abzer: CR_PAID without a receipt — NOT fulfilled')
+      return 'not-paid'
+    }
+    const mismatch = OrderService.abzerReceiptMismatch(order as { amount: number; currency?: string },
+      { amount: remote.amount, currency: remote.currency })
+    if (mismatch) {
+      logger.error({ orderId: order.id, receiptId: remote.receiptId, ...mismatch },
+        'Abzer: paid amount does not match the order — NOT fulfilled')
+      return 'ignored'
+    }
+
+    return this.#completeAbzer(order, remote.receiptId, 'verified')
+  }
+
+  /* The conditional flip and its side effects — exactly once per order. */
+  async #completeAbzer(order: IOrder, receiptId: string, via: 'webhook' | 'verified'): Promise<'fulfilled' | 'already-fulfilled'> {
     const fulfilled = await this.orderRepo.fulfillAbzer(order.id, receiptId)
     if (!fulfilled) {
-      logger.info({ orderId: order.id }, 'Abzer webhook: order fulfilled concurrently, skipping side effects')
-      return
+      logger.info({ orderId: order.id }, 'Abzer: order fulfilled concurrently, skipping side effects')
+      return 'already-fulfilled'
     }
 
     await this._createEnrollment(order.userId.toString(), order.courseId.toString())
     await this._autoApproveViaPayment(order.userId.toString(), order.courseId.toString())
     void this._sendPostPaymentNotifications(order.userId.toString(), order.courseId.toString(), order.id)
-    logger.info({ orderId, receiptId }, 'Abzer: order fulfilled via webhook')
+    logger.info({ orderId: order.id, receiptId, via }, 'Abzer: order fulfilled')
+    return 'fulfilled'
+  }
+
+  /* ─── Abzer refund reported by webhook (WH_REFUND) ──────────
+     Abzer refunds are made in the BillXPro console; this keeps our order in
+     step. The v1.0 docs name the event but give no example, so the amount is
+     read from the fields a receipt uses, and only a FULL refund of a paid
+     order marks it refunded — anything else is logged for a person. */
+  async refundAbzerFromWebhook(orderId: string, refunded?: { amount?: unknown; currency?: unknown }): Promise<void> {
+    if (!Types.ObjectId.isValid(orderId)) return
+    const order = await this.orderRepo.findById(orderId)
+    if (!order || (order as { gateway?: string }).gateway !== 'abzer') {
+      logger.warn({ orderId }, 'Abzer refund webhook: no matching Abzer order')
+      return
+    }
+    if (order.status !== 'paid') {
+      logger.info({ orderId, status: order.status }, 'Abzer refund webhook: order is not paid — nothing to do')
+      return
+    }
+    if (OrderService.abzerReceiptMismatch(order as { amount: number; currency?: string }, refunded)) {
+      logger.warn({ orderId, refunded }, 'Abzer refund webhook: not a full refund of this order — left as paid, check the BillXPro console')
+      return
+    }
+    await this.orderRepo.markRefunded(order.id)
+    logger.info({ orderId }, 'Abzer: order marked refunded from the gateway')
   }
 
   /** Why an Abzer receipt does not settle this order (amount in fils, currency), or null when it does. */
@@ -1115,7 +1229,7 @@ export class OrderService {
     userId:        string,
     orderId:       string,
     _transactionId: string,
-  ): Promise<{ needsRegistration: boolean; paid: boolean }> {
+  ): Promise<{ needsRegistration: boolean; paid: boolean; failed: boolean }> {
     const order = await this.orderRepo.findById(orderId)
     if (!order) throw new OrderError('ORDER_NOT_FOUND', 'Order not found', 404)
     if (order.userId.toString() !== userId) {
@@ -1136,23 +1250,31 @@ export class OrderService {
        returning "not paid yet" in that window would be a worse answer than the
        truth a moment later.
 
-       ⚠️ OPERATIONAL DEPENDENCY: ABZER_WEBHOOK_SECRET must be configured in
-       the Abzer console for production, or orders will never fulfil. */
+       2026-10-26: no longer webhook-only. The return page asks Abzer itself
+       (fulfillAbzerVerified) — server to server, with the request id WE
+       stored, so nothing the browser sends can make an order paid. Only when
+       Abzer cannot be asked does it fall back to waiting for the webhook. */
     let paid = order.status === 'paid'
-    if (!paid) {
-      paid = await this.#awaitGatewayFulfilment(orderId)
-    }
-    if (!paid) {
-      logger.warn(
-        { orderId },
-        'Abzer verify-return: order still pending after the webhook grace window — check ABZER_WEBHOOK_SECRET is registered with the gateway',
-      )
+    let failed = false
+    if (!paid && (order as { gateway?: string }).gateway === 'abzer') {
+      const outcome = await this.fulfillAbzerVerified(orderId)
+      paid   = outcome === 'fulfilled' || outcome === 'already-fulfilled'
+      failed = outcome === 'failed'
+      if (!paid && (outcome === 'retry' || outcome === 'ignored')) {
+        paid = await this.#awaitGatewayFulfilment(orderId)
+        if (!paid) {
+          logger.warn(
+            { orderId, outcome },
+            'Abzer verify-return: Abzer could not confirm and no webhook arrived in the grace window — the sweep re-checks',
+          )
+        }
+      }
     }
 
     const user = await UserModel.findById(userId).select('signupType').lean()
     const needsRegistration = (user as any)?.signupType === 'express'
 
-    return { needsRegistration, paid }
+    return { needsRegistration, paid, failed }
   }
 
   /* ─── Wait out the redirect/webhook race ────────────────

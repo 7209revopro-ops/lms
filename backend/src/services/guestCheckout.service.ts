@@ -175,6 +175,8 @@ export async function completeGuestCheckout(claims: GuestClaims, input: {
 }) {
   const { OrderModel, CourseModel, UserModel } = await import('@/models/schema.ts')
   let orderId = typeof input.orderId === 'string' ? input.orderId : ''
+  /* Abzer can say the attempt FAILED (CR_FAILED) — the page then says so instead of waiting. */
+  let failed = false
 
   switch (input.gateway) {
     case 'razorpay': {
@@ -185,7 +187,7 @@ export async function completeGuestCheckout(claims: GuestClaims, input: {
     }
     case 'tabby':  await orders.verifyTabbyReturn(claims.uid, orderId, typeof input.paymentId === 'string' ? input.paymentId : undefined); break
     case 'tamara': await orders.verifyTamaraReturn(claims.uid, orderId); break
-    case 'abzer':  await orders.verifyAbzerReturn(claims.uid, orderId, ''); break
+    case 'abzer':  failed = (await orders.verifyAbzerReturn(claims.uid, orderId, '')).failed; break
     default: throw new GuestCheckoutError('INVALID_METHOD', 'Unknown payment method')
   }
   if (!Types.ObjectId.isValid(orderId)) throw new GuestCheckoutError('ORDER_NOT_FOUND', 'Order not found', 404)
@@ -194,7 +196,7 @@ export async function completeGuestCheckout(claims: GuestClaims, input: {
   if (!order || String(order.userId) !== claims.uid || String(order.courseId) !== claims.cid) {
     throw new GuestCheckoutError('ORDER_NOT_FOUND', 'Order not found', 404)
   }
-  if (order.status !== 'paid') return { paid: false as const }
+  if (order.status !== 'paid') return { paid: false as const, ...(failed && { failed: true as const }) }
 
   const [course, user]: any[] = await Promise.all([
     CourseModel.findById(claims.cid).select('title slug').lean(),

@@ -26,7 +26,6 @@ const router      = Router()
 const orderSvc    = new OrderService()
 const stripeSvc   = new StripeService()
 const razorpaySvc = new RazorpayService()
-const abzerSvc    = new AbzerService()
 const tamaraSvc   = new TamaraService()
 
 /* ─────────────────────────────────────────────────────
@@ -307,11 +306,17 @@ router.post('/tabby', async (req: Request, res: Response) => {
 })
 
 /* ─────────────────────────────────────────────────────
-   Abzer (BillXPro) webhook
-   Event: WH_RECEIPT_POSTING — triggered on successful payment
+   Abzer (BillXPro) webhook — Webhook Docs v1.0
+   Events: WH_RECEIPT_POSTING (paid), WH_PAYMENT_FAILURE,
+   WH_REFUND, WH_SUBSCRIPTION_CANCEL (not used here).
+   Body: one JSON object, a JSON ARRAY when one payment
+   settles several invoices, or form fields (POST_PARAMS).
    Security: Abzer sends a custom header you configure in
    their admin console. Set X-Abzer-Secret to ABZER_WEBHOOK_SECRET.
-   Always responds 200 so Abzer doesn't retry on errors.
+   A receipt is then confirmed against Abzer's own record
+   of the request before anything is granted (order.service).
+   Always 200: the docs log anything else as a delivery
+   FAILURE, and the stuck-order sweep covers what we miss.
 ───────────────────────────────────────────────────── */
 router.post('/abzer', async (req: Request, res: Response) => {
   if (!requireWebhookSecret(res, env.ABZER_WEBHOOK_SECRET, 'Abzer', 'ABZER_WEBHOOK_SECRET')) return
@@ -327,38 +332,45 @@ router.post('/abzer', async (req: Request, res: Response) => {
     }
   }
 
-  let payload: any
-  try {
-    const raw = req.body
-    payload = Buffer.isBuffer(raw)
-      ? JSON.parse(raw.toString('utf8'))
-      : typeof raw === 'string' ? JSON.parse(raw) : raw
-  } catch {
+  const events = AbzerService.webhookEvents(req.body)
+  if (events.length === 0) {
+    logger.warn('Abzer webhook: body is not a JSON object or array — ignored')
     res.status(200).json({ received: true })
     return
   }
 
-  try {
-    /*
-     * WH_RECEIPT_POSTING payload fields (Abzer Webhook Docs v1.0):
-     *   type:          'WH_RECEIPT_POSTING'
-     *   paymentStatus: 'Success' | 'Pending Approval'
-     *   receiptId:     Abzer's receipt UUID
-     *   invoiceNumber: our referenceNumber (= our orderId)
-     */
-    const type          = asString(payload?.type)
-    const paymentStatus = asString(payload?.paymentStatus)
-    const orderId       = asString(payload?.invoiceNumber)   /* our referenceNumber */
-    const receiptId     = asString(payload?.receiptId)
+  for (const payload of events) {
+    try {
+      /*
+       * WH_RECEIPT_POSTING payload fields (Abzer Webhook Docs v1.0):
+       *   type:          'WH_RECEIPT_POSTING'
+       *   paymentStatus: 'Success' | 'Pending Approval'
+       *   receiptId:     Abzer's receipt UUID
+       *   invoiceNumber: our referenceNumber (= our orderId)
+       */
+      const type          = asString(payload?.type)
+      const paymentStatus = asString(payload?.paymentStatus)
+      const orderId       = asString(payload?.invoiceNumber)   /* our referenceNumber */
+      const receiptId     = asString(payload?.receiptId)
 
-    if (type === 'WH_RECEIPT_POSTING' && paymentStatus === 'Success' && orderId && receiptId) {
-      /* What was paid travels with it — fulfilment refuses a receipt that does not match the order. */
-      await orderSvc.fulfillAbzerFromWebhook(orderId, receiptId, { amount: payload?.receiptAmount, currency: payload?.collectedCurrency })
-    } else {
-      logger.debug({ type, paymentStatus, orderId }, 'Abzer webhook: ignored event')
+      if (type === 'WH_RECEIPT_POSTING' && paymentStatus === 'Success' && orderId && receiptId) {
+        /* What was paid travels with it — fulfilment refuses a receipt that does not match the order. */
+        await orderSvc.fulfillAbzerFromWebhook(orderId, receiptId, { amount: payload?.receiptAmount, currency: payload?.collectedCurrency })
+      } else if (type === 'WH_REFUND' && orderId) {
+        await orderSvc.refundAbzerFromWebhook(orderId, {
+          amount:   payload?.refundAmount ?? payload?.receiptAmount ?? payload?.amount,
+          currency: payload?.collectedCurrency ?? payload?.currency,
+        })
+      } else if (type === 'WH_PAYMENT_FAILURE') {
+        /* Nothing to undo — the order stays pending and the hosted link can be
+           paid again. The return page reads CR_FAILED from Abzer itself. */
+        logger.info({ orderId }, 'Abzer webhook: payment attempt failed')
+      } else {
+        logger.debug({ type, paymentStatus, orderId }, 'Abzer webhook: ignored event')
+      }
+    } catch (err) {
+      logger.error({ err, type: payload?.type, invoiceNumber: payload?.invoiceNumber }, 'Abzer webhook handler error')
     }
-  } catch (err) {
-    logger.error({ err, payload }, 'Abzer webhook handler error')
   }
 
   res.status(200).json({ received: true })
