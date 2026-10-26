@@ -320,6 +320,13 @@ try {
     check('clock drift inside a minute is tolerated',
       svc.verifyWebhookJwt(sign({ iss: 'Tamara', iat: now, exp: now - 30 }), SECRET).valid)
 
+    check('two minutes past expiry is refused (beyond the drift allowance)',
+      svc.verifyWebhookJwt(sign({ iss: 'Tamara', iat: now - 1020, exp: now - 120 }), SECRET).reason === 'expired')
+
+    /* A signed token with no exp used to pass — and never expire (2026-10-26). */
+    const noExp = svc.verifyWebhookJwt(sign({ iss: 'Tamara', iat: now }), SECRET)
+    check('a correctly signed token WITHOUT exp is refused (it would never expire)', !noExp.valid && noExp.reason === 'no-exp', String(noExp.reason))
+
     for (const junk of ['', 'not.a.jwt', 'only.two', 'a.b.c.d']) {
       check(`malformed token ${JSON.stringify(junk)} is refused`, !svc.verifyWebhookJwt(junk, SECRET).valid)
     }

@@ -32,8 +32,11 @@ export async function runTamaraSweep(now = Date.now()): Promise<{ checked: numbe
     status:        'pending',
     tamaraOrderId: { $exists: true, $ne: '' },
     createdAt:     { $gte: new Date(now - MAX_AGE_MS), $lte: new Date(now - MIN_AGE_MS) },
-  }).select('_id tamaraOrderId').sort({ createdAt: 1 }).limit(BATCH).lean() as { _id: unknown; tamaraOrderId: string }[]
+  }).select('_id tamaraOrderId').sort({ gatewayCheckedAt: 1, createdAt: -1 }).limit(BATCH).lean() as { _id: unknown; tamaraOrderId: string }[]
 
+  /* Least recently checked first (never-checked first of all), newest first among
+     equals — oldest-first re-read the same 50 abandoned checkouts every tick and
+     a newer, genuinely paid order behind them never got its turn (2026-10-26). */
   const svc = new OrderService()
   let fulfilled = 0
   for (const o of stuck) {
@@ -43,6 +46,8 @@ export async function runTamaraSweep(now = Date.now()): Promise<{ checked: numbe
     } catch (err) {
       logger.error({ err, orderId: String(o._id) }, 'Tamara sweep: could not check order')
     }
+    /* Its turn is taken: the next sweep starts with orders asked about least recently. */
+    await OrderModel.updateOne({ _id: o._id }, { $set: { gatewayCheckedAt: new Date() } }).catch(() => {})
   }
   return { checked: stuck.length, fulfilled }
 }

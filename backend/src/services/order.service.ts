@@ -187,6 +187,22 @@ export class OrderService {
 
      Only ever runs on a path that is already throwing: a successful checkout
      never enters the catch, so gateway behaviour is unchanged. */
+  /* A coupon worth the whole price leaves nothing to charge — and no gateway
+     should be asked for 0.00 (found 2026-10-26: Abzer issues a 0.00 payment
+     link; Tabby and Tamara refuse below their minimums, which the buyer saw
+     as "the payment provider could not be reached"). Refused before any
+     gateway is called, inside releasingOnFailure so the coupon's slot comes
+     back. Whether a 100% coupon should enrol for free is a business call. */
+  static assertSomethingToPay(amountMinor: number): void {
+    if (amountMinor <= 0) {
+      throw new OrderError(
+        'COUPON_COVERS_FULL_PRICE',
+        'This coupon covers the full price, so there is nothing to pay online. Please contact us and we will add the course to your account.',
+        400,
+      )
+    }
+  }
+
   private async releasingOnFailure<T>(
     couponId: string | undefined,
     work: () => Promise<T>,
@@ -246,6 +262,7 @@ export class OrderService {
     if (finalCents > 0 && finalCents < 50) finalCents = 50
 
     return this.releasingOnFailure(couponId, async () => {
+      OrderService.assertSomethingToPay(finalCents)
       const clientUrl  = env.CLIENT_URL
       const successUrl = `${clientUrl}/courses/${course.slug}?checkout=success&session_id={CHECKOUT_SESSION_ID}`
       const cancelUrl  = `${clientUrl}/courses/${course.slug}?checkout=cancel`
@@ -336,6 +353,7 @@ export class OrderService {
     if (finalPaise > 0 && finalPaise < 100) finalPaise = 100
 
     return this.releasingOnFailure(couponId, async () => {
+      OrderService.assertSomethingToPay(finalPaise)
       const order = await this.orderRepo.create({
         userId,
         courseId,
@@ -670,6 +688,7 @@ export class OrderService {
     const finalAED = finalFils / 100
 
     return this.releasingOnFailure(couponId, async () => {
+      OrderService.assertSomethingToPay(finalFils)
       const order = await this.orderRepo.create({
         userId,
         courseId,
@@ -1026,6 +1045,7 @@ export class OrderService {
     }
 
     return this.releasingOnFailure(couponId, async () => {
+      OrderService.assertSomethingToPay(finalFils)
       const order = await this.orderRepo.create({
         userId,
         courseId,
@@ -1340,6 +1360,7 @@ export class OrderService {
     }
 
     return this.releasingOnFailure(couponId, async () => {
+      OrderService.assertSomethingToPay(finalFils)
       const order = await this.orderRepo.create({
         userId,
         courseId,
@@ -1505,7 +1526,14 @@ export class OrderService {
       return 'ignored'
     }
     if (tamaraStatusIsDead(remote.status)) {
-      logger.info({ orderId: order.id, status: remote.status }, 'Tamara: order is terminal, not fulfilling')
+      /* Expired, declined or canceled at Tamara: this checkout can never be
+         paid now, so our pending order is closed too. Left pending, abandoned
+         checkouts piled up in front of the stuck-order sweep (2026-10-26). */
+      if (order.status === 'pending' && await this.orderRepo.markCancelled(order.id)) {
+        logger.info({ orderId: order.id, status: remote.status }, 'Tamara: order is terminal — our pending order cancelled')
+      } else {
+        logger.info({ orderId: order.id, status: remote.status }, 'Tamara: order is terminal, not fulfilling')
+      }
       return 'ignored'
     }
 

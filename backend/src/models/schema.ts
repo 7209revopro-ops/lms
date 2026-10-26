@@ -2249,6 +2249,8 @@ export interface IOrder extends Document {
   tabbyPaymentId?:          string
   abzerOrderId?:            string
   abzerPaymentId?:          string
+  /** Last time a stuck-order sweep asked the gateway about this order — the sweeps take the least recently checked first. */
+  gatewayCheckedAt?:        Date
   tamaraCheckoutId?:        string
   tamaraOrderId?:           string
   /** Guest checkout (/explore): when the buyer's access email went — once per order. */
@@ -2292,6 +2294,7 @@ const OrderSchema = new Schema<IOrder>(
     tabbyPaymentId:          { type: String },
     abzerOrderId:            { type: String },
     abzerPaymentId:          { type: String },
+    gatewayCheckedAt:        { type: Date },
     tamaraCheckoutId:        { type: String },
     tamaraOrderId:           { type: String },
     guestAccessSentAt:       { type: Date },

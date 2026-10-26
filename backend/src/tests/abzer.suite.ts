@@ -351,6 +351,22 @@ try {
     check('an order under 5 minutes old is left alone', !looked.has(young.requestId) && await statusOf(young.id) === 'pending')
     check('an order over 7 days old is left alone', !looked.has(old.requestId) && await statusOf(old.id) === 'pending')
   }
+
+  /* ─────────────────────────────────────────────────────── */
+  section('G · Sweep starvation — abandoned checkouts must not hide a paid one')
+  {
+    route = defaultRoute
+    await mongoose.connection.db!.collection('orders').updateMany({ status: 'pending' }, { $set: { status: 'cancelled' } })
+    /* Sixty abandoned card checkouts (CR_REQUESTED forever), older than the paid one. */
+    const abandoned = await Promise.all([...Array(60)].map((_, i) => mkOrder({ ageMs: (2 * 86_400_000) + i * 60_000 })))
+    for (const o of abandoned) remote.set(o.requestId, record(o.requestId, o.id, 'CR_REQUESTED'))
+    const paid = await mkOrder({ ageMs: 20 * 60_000 }); remote.set(paid.requestId, record(paid.requestId, paid.id, 'CR_PAID'))
+    const first = await runAbzerSweep()
+    check('one sweep (batch 50) still recovers the newer paid order', await statusOf(paid.id) === 'paid', JSON.stringify(first))
+    await runAbzerSweep()
+    const checked = await mongoose.connection.db!.collection('orders').countDocuments({ _id: { $in: abandoned.map(o => new mongoose.Types.ObjectId(o.id)) }, gatewayCheckedAt: { $exists: true } })
+    check('two sweeps reach every abandoned order at least once (round-robin)', checked === 60, `${checked}/60`)
+  }
   await settle()
 } catch (err) {
   fail++; lines.push(`  FAIL  suite threw — ${(err as Error).message}\n${(err as Error).stack}`)

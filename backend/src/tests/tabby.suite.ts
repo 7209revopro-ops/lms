@@ -49,8 +49,10 @@ function section(n: string) { lines.push(`\n${n}`) }
 
 const {
   TabbyService, TabbyRejectedError, TABBY_REJECTION_MESSAGES,
-  tabbyRejectionMessage, tabbySumFils, tabbyField, tabbyWebhookEndpoint, isTabbyId,
+  tabbyRejectionMessage, tabbySumFils, tabbyField, tabbyWebhookEndpoint, isTabbyId, setTabbyThrottleDelay, setTabbyPacing,
 } = await import('@/services/tabby.service.ts')
+/* Pacing is tested in its own section; everywhere else it would only slow a stubbed suite down. */
+setTabbyPacing(Infinity)
 
 /* ── fetch stub ──────────────────────────────────────────────
    Records every call and answers from a queue of canned replies. */
@@ -367,6 +369,48 @@ try {
       const decl = at === -1 ? '' : routes.slice(at, routes.indexOf('async', at))
       check(`${r} is rate limited`, decl.includes('checkoutRateLimit'), decl.slice(0, 90))
     }
+  }
+
+  /* ─────────────────────────────────────────────────────── */
+  section('Throttling — Tabby answers a burst with 429 (measured 2026-10-26)')
+  {
+    setTabbyThrottleDelay(() => 0)
+    const payment = { id: PAY, status: 'AUTHORIZED', amount: '100.00', currency: 'AED', captures: [], refunds: [] }
+
+    stubFetch()
+    replies = [{ status: 429, body: '<html>Too Many Requests</html>' }, { status: 429, body: '' }, { status: 200, body: payment }]
+    let got: any = null, threw = false
+    try { got = await svc.getPayment(PAY) } catch { threw = true }
+    check('two 429s, then the answer: the call succeeds', !threw && got?.status === 'AUTHORIZED' && calls.length === 3, `threw=${threw} calls=${calls.length}`)
+
+    stubFetch()
+    replies = [{ status: 429, body: '' }, { status: 429, body: '' }, { status: 429, body: '' }, { status: 429, body: '' }, { status: 200, body: payment }]
+    threw = false
+    try { await svc.getPayment(PAY) } catch { threw = true }
+    check('four 429s: gives up after four calls (no endless loop)', threw && calls.length === 4, `threw=${threw} calls=${calls.length}`)
+
+    stubFetch()
+    replies = [{ status: 500, body: {} }, { status: 200, body: payment }]
+    threw = false
+    try { await svc.getPayment(PAY) } catch { threw = true }
+    check('a 500 is not retried — only throttling is', threw && calls.length === 1, `calls=${calls.length}`)
+
+    /* Pacing: 10+ requests in a second trips Tabby's edge block for the NEXT several seconds. */
+    setTabbyPacing(6)
+    stubFetch()
+    replies = []
+    const elig = await Promise.all([...Array(10)].map((_, i) => svc.checkEligibility({ amountAED: 100, buyerEmail: `p${i}@x.ae`, buyerPhone: '+971500000001' })))
+    check('ten pre-scores in one second: six reach Tabby', calls.length === 6, `calls=${calls.length}`)
+    check('…the other four fail safe (Tabby stays offered)', elig.every(e => e.available === true))
+    setTabbyPacing(6)
+    stubFetch()
+    replies = [...Array(8)].map(() => ({ status: 200, body: payment }))
+    const t0 = Date.now()
+    const stamps = await Promise.all([...Array(8)].map(async () => { await svc.getPayment(PAY); return Date.now() - t0 }))
+    stamps.sort((a, b) => a - b)
+    check('eight real calls at once: all eight answered', calls.length === 8 && stamps.length === 8)
+    check('…six at once, the last two wait for the next second', stamps[5]! < 500 && stamps[6]! >= 900, stamps.join(','))
+    setTabbyPacing(Infinity)
   }
 
 } catch (err) {

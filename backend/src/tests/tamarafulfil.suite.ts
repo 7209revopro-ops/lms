@@ -143,6 +143,36 @@ try {
   }
 
   /* ─────────────────────────────────────────────────────── */
+  section('Sweep — expired at Tamara closes our order; round-robin, never starved')
+  {
+    await mongoose.connection.db!.collection('orders').updateMany({ status: 'pending' }, { $set: { status: 'cancelled' } })
+    const s = await mkStudent('sweep2')
+    const expiredId = '77777777-7777-4777-8777-777777777777'
+    const exp = await mkOrder(s._id, expiredId, 40 * 60_000)
+    const stale = await Promise.all([...Array(55)].map((_, i) => mkOrder(s._id, `88888888-8888-4888-8888-${String(i).padStart(12, '0')}`, 50 * 60_000 + i * 60_000)))
+    const paidId = '99999999-9999-4999-8999-999999999999'
+    const paid = await mkOrder(s._id, paidId, 20 * 60_000)
+    route = (url, method) => {
+      const id = url.split('/').filter(Boolean).slice(-1)[0]!
+      if (url.endsWith(`/orders/${expiredId}`) && method === 'GET') return { status: 200, body: tamaraOrder(expiredId, exp, 'expired') }
+      if (url.endsWith(`/orders/${paidId}`) && method === 'GET') return { status: 200, body: tamaraOrder(paidId, paid, 'approved') }
+      if (url.endsWith(`/orders/${paidId}/authorise`)) return { status: 200, body: { status: 'authorised' } }
+      if (url.endsWith('/payments/capture')) return { status: 200, body: { capture_id: 'cap_x' } }
+      if (/\/orders\/[0-9a-f-]+$/.test(url) && method === 'GET') {
+        const ref = stale[Number(id.slice(-12))]
+        return { status: 200, body: tamaraOrder(id, ref ?? '', 'new') }
+      }
+      return { status: 200, body: {} }
+    }
+    await runTamaraSweep()
+    check('an order Tamara has EXPIRED is cancelled on our side', (await M.OrderModel.findById(exp).lean() as any)?.status === 'cancelled')
+    check('the newer paid order is recovered despite 55 older pending ones', (await M.OrderModel.findById(paid).lean() as any)?.status === 'paid')
+    await runTamaraSweep()
+    const reached = await mongoose.connection.db!.collection('orders').countDocuments({ _id: { $in: stale.map(id => new mongoose.Types.ObjectId(id)) }, gatewayCheckedAt: { $exists: true } })
+    check('two sweeps reach every pending order (round-robin)', reached === 55, `${reached}/55`)
+  }
+
+  /* ─────────────────────────────────────────────────────── */
   section('Checkout payload — Tamara education risk block')
   {
     const s = await mkStudent('payload')

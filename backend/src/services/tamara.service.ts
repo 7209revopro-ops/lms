@@ -733,8 +733,14 @@ export class TamaraService {
         exp?: number; iat?: number; iss?: string
       }
       const nowSec = Math.floor(Date.now() / 1000)
+      /* Tamara's tokens always carry `exp` (15 minutes). A signed token WITHOUT
+         one used to pass — and never expire, so one lifted from a log or a
+         proxy replays forever (found 2026-10-26). No exp, no entry. */
+      if (typeof claims.exp !== 'number') {
+        return { valid: false, reason: 'no-exp' }
+      }
       /* 60s of slack for clock drift between us and Tamara. */
-      if (typeof claims.exp === 'number' && claims.exp + 60 < nowSec) {
+      if (claims.exp + 60 < nowSec) {
         return { valid: false, reason: 'expired' }
       }
       if (claims.iss && claims.iss !== 'Tamara') {

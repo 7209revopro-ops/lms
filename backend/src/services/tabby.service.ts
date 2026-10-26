@@ -264,8 +264,66 @@ function assertTabbyId(value: string, what: string): void {
 const TABBY_READ_TIMEOUT_MS  = 15_000
 const TABBY_WRITE_TIMEOUT_MS = 25_000
 
-function tabbyFetch(url: string, init: RequestInit = {}, timeoutMs = TABBY_READ_TIMEOUT_MS): Promise<Response> {
+/* ─── Tabby's edge throttle ───────────────────────────────────────────────
+   api.tabby.ai sits behind a Cloudflare rate-limit rule (a 429 "Access
+   denied … rate limited" HTML page). Measured on the sandbox 2026-10-26: a
+   burst of 6 requests in a second passes clean; 10+ passes, but every
+   request for the NEXT ~3–15 s is refused — and in production every buyer
+   shares our server's address. Sixteen UAE buyers opening /explore checkout
+   at once (one pre-score each) blocked the Tabby checkouts that followed.
+
+   So, two guards:
+   1. Pacing: at most TABBY_MAX_PER_SECOND requests per rolling second from
+      this process. Real calls (checkout, capture, refund, close) wait for a
+      slot; a pre-score that finds no slot is skipped — it fails safe anyway.
+   2. Retry: a 429 is refused BEFORE it is processed, so asking again is safe
+      for every call, money-moving ones included. Three times, waiting the
+      longer of Retry-After and our backoff (Tabby sends `Retry-After: 0`,
+      which taken literally just asks again into the same block). ~12 s in
+      all — the /explore pay call allows 35 s. */
+const TABBY_MAX_PER_SECOND   = 6
+const TABBY_THROTTLE_RETRIES = 3
+let tabbyThrottleDelayMs = (retry: number, retryAfter: string | null): number => {
+  const backoff = 2_000 * retry * (0.75 + Math.random() / 2)
+  const s = Number(retryAfter)
+  const asked = retryAfter && Number.isFinite(s) && s > 0 ? s * 1000 : 0
+  return Math.min(Math.max(asked, backoff), 8_000)
+}
+let tabbyPerSecond = TABBY_MAX_PER_SECOND
+/** Test hooks — retry a throttled call without waiting; change or lift the pacing. */
+export function setTabbyThrottleDelay(fn: (retry: number, retryAfter: string | null) => number): void { tabbyThrottleDelayMs = fn }
+export function setTabbyPacing(perSecond: number): void { tabbyPerSecond = perSecond; tabbySent.length = 0 }
+
+const tabbySent: number[] = []
+/** Take a slot in the rolling second, or say there is none. */
+function tryTabbySlot(now = Date.now()): boolean {
+  while (tabbySent.length && now - tabbySent[0]! >= 1_000) tabbySent.shift()
+  if (tabbySent.length >= tabbyPerSecond) return false
+  tabbySent.push(now)
+  return true
+}
+async function waitTabbySlot(): Promise<void> {
+  while (!tryTabbySlot()) {
+    const wait = Math.max(25, 1_000 - (Date.now() - tabbySent[0]!) + 5)
+    await new Promise(r => setTimeout(r, wait))
+  }
+}
+
+/* The pre-score has already taken its slot (tryTabbySlot) and is never retried. */
+function tabbyFetchNoPacing(url: string, init: RequestInit = {}, timeoutMs = TABBY_READ_TIMEOUT_MS): Promise<Response> {
   return fetch(url, { ...init, signal: AbortSignal.timeout(timeoutMs) })
+}
+
+async function tabbyFetch(url: string, init: RequestInit = {}, timeoutMs = TABBY_READ_TIMEOUT_MS): Promise<Response> {
+  for (let retry = 0; ; retry++) {
+    await waitTabbySlot()
+    const resp = await fetch(url, { ...init, signal: AbortSignal.timeout(timeoutMs) })
+    if (resp.status !== 429 || retry >= TABBY_THROTTLE_RETRIES) return resp
+    const wait = tabbyThrottleDelayMs(retry + 1, resp.headers?.get?.('retry-after') ?? null)
+    logger.warn({ retry: retry + 1, waitMs: Math.round(wait), path: new URL(url).pathname }, 'Tabby: throttled (429) — asking again')
+    await resp.text().catch(() => '')
+    await new Promise(r => setTimeout(r, wait))
+  }
 }
 
 /* ─── TabbyService ────────────────────────────────────────────────────────── */
@@ -392,8 +450,15 @@ export class TabbyService {
     if (!this.isConfigured) {
       return { available: false, rejectionReason: null, message: null }
     }
+    /* No slot this second: skip the pre-score rather than queue behind it or
+       spend the edge's budget — failing safe keeps Tabby on the page, and the
+       checkout itself is still scored by Tabby. */
+    if (!tryTabbySlot()) {
+      logger.info("Tabby pre-scoring skipped — pacing calls to stay under Tabby's rate limit (failing safe: available)")
+      return { available: true, rejectionReason: null, message: null }
+    }
     try {
-      const resp = await tabbyFetch(`${this.baseUrl}/checkout`, {
+      const resp = await tabbyFetchNoPacing(`${this.baseUrl}/checkout`, {
         method:  'POST',
         headers: this.authHeaders,
         body: JSON.stringify({
@@ -405,7 +470,10 @@ export class TabbyService {
           lang:          opts.lang ?? 'en',
           merchant_code: env.TABBY_MERCHANT_CODE,
         }),
-      })
+      /* Not retried when throttled: a refused pre-score already fails safe, and
+         waiting here would slow every buyer's first step while spending the
+         throttle budget the real checkout call needs a moment later. */
+      }, TABBY_READ_TIMEOUT_MS)
       if (!resp.ok) {
         logger.warn({ status: resp.status }, 'Tabby pre-scoring call failed — failing safe (available)')
         return { available: true, rejectionReason: null, message: null }
