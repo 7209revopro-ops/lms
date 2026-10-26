@@ -12,6 +12,7 @@ import Spinner from '@/components/ui/Spinner'
 import { useVerifyAbzerReturn } from '@/lib/api/user'
 import { useVerifyTamaraReturn, useVerifyTabbyReturn } from '@/lib/api/checkout'
 import { useCartStore } from '@/store/cart.store'
+import { readPendingOrder, forgetPendingOrder } from '@/lib/pendingOrder'
 
 /* ── helpers ─────────────────────────────────────────── */
 function fmt(amount: string | null, currency: string | null) {
@@ -406,6 +407,151 @@ function ReturnContent() {
   )
 }
 
+/* ── Card (Abzer / BillXPro) ─────────────────────────────
+   2026-10-26: a PAID card payment came back here reading "Payment Failed — no
+   charge was made". BillXPro returns the buyer to the URL set in its merchant
+   console, with its own query string, and the old branch decided paid /
+   failed from that string alone — anything but PAYMENT_GATEWAY_SUCCESS read
+   as a failure, without asking anyone.
+
+   Now the URL decides nothing. The order comes from the address when it
+   names one of ours, else from the tab that sent the buyer to pay
+   (lib/pendingOrder); the SERVER says paid / failed, having asked Abzer
+   (order.service verifyAbzerReturn). "Not charged" is only ever said when
+   Abzer itself reports the attempt failed. A buyer from the public /explore
+   checkout goes on to its own return page, which signs them in. */
+const OBJECT_ID = /^[a-f0-9]{24}$/i
+
+function Panel({ tone, title, body, children }: { tone: 'ok' | 'bad' | 'wait'; title: string; body: React.ReactNode; children?: React.ReactNode }) {
+  const look = {
+    ok:   { bg: 'linear-gradient(135deg,#F0FDF4,#DCFCE7)', border: '#86EFAC', icon: <CheckCircle2 size={44} style={{ color: 'var(--color-success)' }} strokeWidth={1.8} /> },
+    bad:  { bg: '#FEF2F2', border: '#FECACA', icon: <XCircle size={44} style={{ color: 'var(--color-danger)' }} strokeWidth={1.8} /> },
+    wait: { bg: 'var(--color-primary-light)', border: '#FCD34D', icon: <AlertCircle size={44} style={{ color: '#D97706' }} strokeWidth={1.8} /> },
+  }[tone]
+  return (
+    <div className="flex flex-col items-center text-center gap-6 max-w-md mx-auto">
+      <div className="w-24 h-24 rounded-full flex items-center justify-center" style={{ background: look.bg, border: `2px solid ${look.border}` }}>{look.icon}</div>
+      <div>
+        <h1 className="text-2xl font-bold mb-2" style={{ color: 'var(--color-text-primary)', fontFamily: 'Bricolage Grotesque, sans-serif' }}>{title}</h1>
+        <div className="text-sm leading-relaxed" style={{ color: 'var(--color-text-muted)' }}>{body}</div>
+      </div>
+      <div className="flex flex-col gap-3 w-full">{children}</div>
+    </div>
+  )
+}
+const Primary = ({ href, children }: { href: string; children: React.ReactNode }) => (
+  <Link href={href} className="flex items-center justify-center gap-2 rounded-2xl py-3 text-sm font-semibold text-white" style={{ background: 'var(--color-primary)' }}>{children}</Link>
+)
+const Secondary = ({ href, children }: { href: string; children: React.ReactNode }) => (
+  <Link href={href} className="flex items-center justify-center gap-2 rounded-2xl py-3 text-sm font-semibold" style={{ border: '1.5px solid var(--color-border)', color: 'var(--color-text-primary)' }}>{children}</Link>
+)
+
+function AbzerReturn() {
+  const params = useSearchParams()
+  const router = useRouter()
+  const clearCart = useCartStore(st => st.clearCart)
+  const raw = params.get('status')
+  const urlSaysCancelled = !!raw && /CANCEL/i.test(raw)
+  const [orderId, setOrderId] = useState<string | null | undefined>(undefined)
+  const verify = useVerifyAbzerReturn()
+  const asked = useRef(false)
+
+  /* Which order? Ours in the address, else the one this tab went to pay for. */
+  useEffect(() => {
+    const fromUrl = [params.get('lmsOrder'), params.get('orderId'), params.get('docRefNumber'), params.get('referenceNumber'), params.get('invoiceNumber')]
+      .find(v => !!v && OBJECT_ID.test(v)) ?? null
+    const pending = readPendingOrder('abzer')
+    const id = fromUrl ?? pending?.orderId ?? null
+    if (id && pending?.orderId === id && pending.source === 'explore') {
+      router.replace(`/explore/checkout/return?gateway=abzer&orderId=${id}${raw ? `&status=${encodeURIComponent(raw)}` : ''}`)
+      return
+    }
+    setOrderId(id)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  useEffect(() => {
+    if (!orderId || asked.current) return
+    asked.current = true
+    verify.mutate({ orderId, transactionId: params.get('transactionId') ?? undefined }, {
+      onSuccess: d => {
+        if (d?.paid) { clearCart(); forgetPendingOrder() }
+        if (d?.paid && d.needsRegistration) router.replace('/complete-registration?from=payment')
+      },
+    })
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [orderId])
+
+  if (orderId === undefined || (orderId && !verify.isSuccess && !verify.isError)) {
+    return (
+      <div className="flex flex-col items-center gap-4">
+        <Spinner size={32} />
+        <p className="text-sm" style={{ color: 'var(--color-text-muted)' }}>Confirming your payment with the card provider…</p>
+      </div>
+    )
+  }
+
+  const notCharged = 'If your card was charged, the course is added to your account automatically within a few minutes and you will get an email — please do not pay again.'
+  if (orderId === null) {
+    return (
+      <Panel tone="wait" title="Checking your payment" body={<>We could not match this page to an order. {notCharged}</>}>
+        <Primary href="/my-learning"><BookOpen size={15} />Go to My Learning</Primary>
+        <Secondary href="/support">Contact support</Secondary>
+      </Panel>
+    )
+  }
+  if (verify.isError) {
+    const code = (verify.error as { response?: { status?: number } } | null)?.response?.status
+    return code && code >= 400 && code < 500
+      ? (
+        <Panel tone="wait" title="We could not check this order" body="This order is not on the account you are signed in with. Sign in with the account you paid with, or contact support with the time of the payment.">
+          <Secondary href="/support">Contact support</Secondary>
+        </Panel>
+      )
+      : (
+        <Panel tone="wait" title="Payment being confirmed" body={<>We could not reach the card provider just now. {notCharged}</>}>
+          <Primary href="/my-learning"><BookOpen size={15} />Go to My Learning</Primary>
+          <Secondary href="/support">Contact support</Secondary>
+        </Panel>
+      )
+  }
+  const d = verify.data
+  if (d?.paid) {
+    return (
+      <Panel tone="ok" title="Payment Successful!" body="Your payment has been received and your course enrollment is ready.">
+        <Primary href="/my-learning"><BookOpen size={15} />Go to My Learning<ArrowRight size={14} /></Primary>
+      </Panel>
+    )
+  }
+  if (d?.failed) {
+    return (
+      <Panel tone="bad" title="Payment Failed" body="The card provider declined this payment, so your card was not charged. Please check your card details and try again, or use another card.">
+        <Primary href="/courses"><RotateCcw size={14} />Try Again</Primary>
+        <Secondary href="/support">Contact support</Secondary>
+      </Panel>
+    )
+  }
+  if (urlSaysCancelled) {
+    return (
+      <Panel tone="bad" title="Payment Cancelled" body="You cancelled the payment. No charge was made. You can try again whenever you are ready.">
+        <Primary href="/courses"><RotateCcw size={14} />Back to courses</Primary>
+      </Panel>
+    )
+  }
+  return (
+    <Panel tone="wait" title="Payment being confirmed" body={<>We have not had the confirmation from the card provider yet. {notCharged}</>}>
+      <Primary href="/my-learning"><BookOpen size={15} />Go to My Learning</Primary>
+      <Secondary href="/support">Contact support</Secondary>
+    </Panel>
+  )
+}
+
+/* Card returns get the Abzer flow above; Tabby and Tamara keep ReturnContent. */
+function ReturnRouter() {
+  const gateway = useSearchParams().get('gateway')
+  return !gateway || gateway === 'abzer' ? <AbzerReturn /> : <ReturnContent />
+}
+
 /* ── Page wrapper ─────────────────────────────────── */
 export default function PaymentReturnPage() {
   return (
@@ -416,7 +562,7 @@ export default function PaymentReturnPage() {
           <p className="text-sm" style={{ color: 'var(--color-text-muted)' }}>Loading payment status…</p>
         </div>
       }>
-        <ReturnContent />
+        <ReturnRouter />
       </Suspense>
     </div>
   )

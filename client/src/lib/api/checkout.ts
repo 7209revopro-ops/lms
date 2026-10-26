@@ -1,6 +1,7 @@
 'use client'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { apiPost, apiGet } from '@/lib/axios'
+import { rememberPendingOrder } from '@/lib/pendingOrder'
 
 /* ─── Razorpay types ────────────────────────────────── */
 
@@ -245,6 +246,7 @@ export function useTabbyCheckout(opts: UseTabbyCheckoutOptions = {}) {
 interface AbzerCreateOrderResult {
   checkoutUrl:  string
   abzerOrderId: string
+  orderId?:     string
 }
 
 interface UseAbzerCheckoutOptions {
@@ -260,6 +262,8 @@ export function useAbzerCheckout(opts: UseAbzerCheckoutOptions = {}) {
         '/checkout/abzer/create-order',
         { courseId, slug, couponCode },
       )
+      /* BillXPro may return the buyer to an address that names no order (lib/pendingOrder). */
+      rememberPendingOrder(result.orderId, 'abzer', 'app')
       window.location.href = result.checkoutUrl
     },
     onError: (err: Error) => {

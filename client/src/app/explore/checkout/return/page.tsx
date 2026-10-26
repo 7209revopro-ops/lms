@@ -15,6 +15,7 @@ import { useSearchParams } from 'next/navigation'
 import { AlertCircle, Check, Loader2, Mail } from 'lucide-react'
 import { api } from '@/lib/axios'
 import { RETURN_KEY, type CompleteResult } from '@/components/explore/GuestCheckout'
+import { readPendingOrder } from '@/lib/pendingOrder'
 
 const TABBY_CANCEL  = 'You aborted the payment. Please retry or choose another payment method.'
 const TABBY_FAILURE = 'Sorry, Tabby is unable to approve this purchase. Please use an alternative payment method for your order'
@@ -28,20 +29,30 @@ function ReturnInner() {
   const status  = raw && /^PAYMENT_GATEWAY_/i.test(raw)
     ? (/CANCEL/i.test(raw) ? 'cancelled' : /FAIL|DECLIN|ERROR/i.test(raw) ? 'failed' : null)
     : raw
-  /* Tamara returns OUR order as lmsOrder (its own orderId rides alongside) — order.service returnUrls. */
-  const orderId = q.get('lmsOrder') ?? q.get('orderId') ?? ''
-  const [state, setState] = useState<'working' | 'emailed' | 'pending' | 'failed' | 'error'>('working')
+  /* Card: a cancel / failure in BillXPro's URL is only a hint — a PAID payment once came back reading
+     "failed" (2026-10-26). The server asks Abzer first; the URL only picks the message when unpaid. */
+  const isCard = gateway === 'abzer'
+  const urlStopped = status === 'cancelled' || status === 'failed'
+  /* Tamara returns OUR order as lmsOrder (its own orderId rides alongside) — order.service returnUrls.
+     BillXPro may name no order of ours at all — then the one this tab went to pay for (lib/pendingOrder). */
+  const urlOrderId = q.get('lmsOrder') ?? q.get('orderId') ?? ''
+  const [rememberedId, setRememberedId] = useState<string | null | undefined>(urlOrderId || !isCard ? null : undefined)
+  useEffect(() => { if (!urlOrderId && isCard) setRememberedId(readPendingOrder('abzer')?.orderId ?? null) }, [urlOrderId, isCard])
+  const orderId = urlOrderId || rememberedId || ''
+  const [state, setState] = useState<'working' | 'emailed' | 'pending' | 'failed' | 'cancelled' | 'error'>('working')
   const [msg, setMsg] = useState('')
   const [slug, setSlug] = useState<string | null>(null)
   useEffect(() => { try { setSlug(sessionStorage.getItem(RETURN_KEY)) } catch { /* private mode */ } }, [])
 
-  const stopped = status === 'cancelled' || status === 'failed'
+  const stopped = urlStopped && !isCard
   useEffect(() => {
     if (stopped || !orderId) return
     let alive = true
     ;(async () => {
-      /* The redirect often arrives before the gateway's webhook — ask a few times before saying "pending". */
-      for (let i = 0; i < 6 && alive; i++) {
+      /* The redirect often arrives before the gateway's webhook — ask a few times before saying "pending".
+         A card the URL says was cancelled / declined is asked once: paid wins, else the URL's message. */
+      const tries = isCard && urlStopped ? 1 : 6
+      for (let i = 0; i < tries && alive; i++) {
         try {
           const r = await api.post<{ data: CompleteResult }>('/public/checkout/complete', {
             gateway, orderId, paymentId: q.get('payment_id') ?? undefined,
@@ -59,12 +70,12 @@ function ReturnInner() {
           if (alive) { setMsg(m ?? 'We could not confirm this payment.'); setState('error') }
           return
         }
-        await new Promise(r => setTimeout(r, 2500))
+        if (i < tries - 1) await new Promise(r => setTimeout(r, 2500))
       }
-      if (alive) setState('pending')
+      if (alive) setState(isCard && urlStopped ? (status === 'cancelled' ? 'cancelled' : 'failed') : 'pending')
     })()
     return () => { alive = false }
-  }, [gateway, orderId, stopped, q])
+  }, [gateway, orderId, stopped, isCard, urlStopped, status, q])
 
   const back = slug ? `/explore/${slug}?buy=1` : '/explore'
   const card = (icon: React.ReactNode, title: string, body: React.ReactNode, cta?: React.ReactNode) => (
@@ -80,12 +91,13 @@ function ReturnInner() {
   )
   const bad = <span className="flex h-14 w-14 items-center justify-center rounded-full" style={{ background: '#fdecec', color: '#b42318' }}><AlertCircle size={26} /></span>
 
-  if (status === 'cancelled') {
+  if ((status === 'cancelled' && !isCard) || state === 'cancelled') {
     return card(bad, 'Payment cancelled', gateway === 'tabby' ? TABBY_CANCEL : 'You cancelled the payment — no money was taken. You can try again or choose another payment method.', btn(back, 'Back to checkout'))
   }
-  if (status === 'failed' || state === 'failed') {
+  if ((status === 'failed' && !isCard) || state === 'failed') {
     return card(bad, 'Payment not completed', gateway === 'tabby' ? TABBY_FAILURE : 'The payment did not go through and no money was taken. Please try again or choose another payment method.', btn(back, 'Back to checkout'))
   }
+  if (!orderId && rememberedId === undefined) return card(<Loader2 size={34} className="animate-spin" style={{ color: 'var(--xp-blue)' }} />, 'Confirming your payment…', 'This takes a few seconds. Please keep this page open.')
   if (!orderId) return card(bad, 'Nothing to confirm', 'This page is opened after a payment. Start from the course page.', btn('/explore', 'All courses'))
   if (state === 'working') return card(<Loader2 size={34} className="animate-spin" style={{ color: 'var(--xp-blue)' }} />, 'Confirming your payment…', 'This takes a few seconds. Please keep this page open.')
   if (state === 'emailed') {

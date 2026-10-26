@@ -58,6 +58,20 @@ export function middleware(req: NextRequest) {
     return NextResponse.redirect(url)
   }
 
+  /* BillXPro (Card) returns every buyer to the address set in its merchant
+     console — /payment-return — including signed-out /explore buyers. Bounced
+     to /login, the payment's query string was lost; the public /explore
+     return page confirms it with Abzer through the checkout cookie instead. */
+  if (pathname === '/payment-return' && !authed) {
+    const gateway = req.nextUrl.searchParams.get('gateway')
+    if (!gateway || gateway === 'abzer') {
+      const url = req.nextUrl.clone()
+      url.pathname = '/explore/checkout/return'
+      url.searchParams.set('gateway', 'abzer')
+      return NextResponse.redirect(url)
+    }
+  }
+
   // Everything else requires auth
   if (!isGuestOnly && !authed) {
     const url = req.nextUrl.clone()

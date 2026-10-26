@@ -118,7 +118,8 @@ export function useCompleteRegistration() {
 export function useVerifyAbzerReturn() {
   return useMutation({
     mutationFn: async (input: { orderId: string; transactionId?: string }) => {
-      const res = await api.post<{ success: boolean; data: { needsRegistration: boolean } }>(
+      /* `paid` and `failed` come from Abzer's own record of the payment (order.service verifyAbzerReturn). */
+      const res = await api.post<{ success: boolean; data: { needsRegistration: boolean; paid?: boolean; failed?: boolean } }>(
         '/checkout/abzer/verify-return',
         input,
       )

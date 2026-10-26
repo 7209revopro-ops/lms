@@ -16,6 +16,7 @@ import { motion, AnimatePresence } from 'framer-motion'
 import { ArrowLeft, Check, CreditCard, Loader2, Lock, Mail, X } from 'lucide-react'
 import { api } from '@/lib/axios'
 import { loadRazorpayScript } from '@/lib/api/checkout'
+import { rememberPendingOrder } from '@/lib/pendingOrder'
 import { COUNTRIES } from '@/lib/countries'
 import { formatPrice } from '@/lib/formatPrice'
 import { TabbyCheckoutCard } from '@/components/payments/TabbyPromo'
@@ -92,9 +93,14 @@ export function GuestCheckout({ open, onClose, slug, academy }: { open: boolean;
     try { sessionStorage.setItem(RETURN_KEY, prep.course.slug) } catch { /* private mode */ }
     try {
       /* Longer than the usual 15 s: the server may ask a busy gateway again before giving up (Card: up to ~22 s). */
-      const r = await api.post<{ data: { kind: 'redirect'; url: string } | { kind: 'razorpay'; razorpay: any } }>('/public/checkout/pay', { method }, { timeout: 35_000 })
+      const r = await api.post<{ data: { kind: 'redirect'; url: string; orderId?: string } | { kind: 'razorpay'; razorpay: any } }>('/public/checkout/pay', { method }, { timeout: 35_000 })
       const d = r.data.data
-      if (d.kind === 'redirect') { window.location.assign(d.url); return }
+      if (d.kind === 'redirect') {
+        /* BillXPro may return the buyer to an address that names no order (lib/pendingOrder). */
+        rememberPendingOrder(d.orderId, method === 'tabby' || method === 'tamara' ? method : 'abzer', 'explore')
+        window.location.assign(d.url)
+        return
+      }
       /* Razorpay opens over the page; its success is verified by our server, then the checkout is finished. */
       await loadRazorpayScript()
       const o = d.razorpay
