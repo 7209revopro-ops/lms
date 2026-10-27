@@ -54,7 +54,7 @@ export async function mentorReportForPortal(q: { from?: unknown; to?: unknown; e
   const bookings = classes.length
     ? await ClassBookingModel.aggregate([
         { $match: { liveClassId: { $in: classes.map(c => c._id) } } },
-        { $group: { _id: { c: '$liveClassId', s: '$status' }, n: { $sum: 1 } } },
+        { $group: { _id: { c: '$liveClassId', s: '$status', u: '$userId' }, n: { $sum: 1 } } },
       ])
     : []
   const meetings = await MentorMeetingModel.find(
@@ -83,9 +83,16 @@ export async function mentorReportForPortal(q: { from?: unknown; to?: unknown; e
     d.classes++
     if (c.status === 'ended' || c.status === 'live' || c.startedAt) d.held++
   }
+  // Different students who booked and who came (2026-10-27): each mentor's, and the whole list's — a student once.
+  const studentsOf = new Map<string, { booked: Set<string>; attended: Set<string> }>()
+  const everyone = { booked: new Set<string>(), attended: new Set<string>() }
   for (const b of bookings as any[]) {
     const c = classById.get(String(b._id.c))
     if (!c) continue
+    const s = studentsOf.get(String(c.instructorId)) ?? { booked: new Set<string>(), attended: new Set<string>() }
+    if (b._id.s !== 'cancelled') { s.booked.add(String(b._id.u)); everyone.booked.add(String(b._id.u)) }
+    if (b._id.s === 'attended') { s.attended.add(String(b._id.u)); everyone.attended.add(String(b._id.u)) }
+    studentsOf.set(String(c.instructorId), s)
     const d = cell(c.instructorId, c.scheduledStart)
     d.bookings += b.n
     if (b._id.s === 'cancelled') d.bookingsCancelled += b.n
@@ -122,8 +129,14 @@ export async function mentorReportForPortal(q: { from?: unknown; to?: unknown; e
         for (const k of Object.keys(t) as (keyof Day)[]) t[k] += d[k]
         return t
       }, blank())
-      return { instructorId: String(u._id), name: u.name ?? '', email: String(u.email ?? '').toLowerCase(), total: finish(total), days: days.map(([day, d]) => ({ day, ...finish(d) })) }
+      const s = studentsOf.get(String(u._id))
+      return {
+        instructorId: String(u._id), name: u.name ?? '', email: String(u.email ?? '').toLowerCase(),
+        total: { ...finish(total), students: s?.booked.size ?? 0, studentsAttended: s?.attended.size ?? 0 },
+        days: days.map(([day, d]) => ({ day, ...finish(d) })),
+      }
     }),
+    students: { booked: everyone.booked.size, attended: everyone.attended.size },
   }
 }
 
@@ -133,6 +146,8 @@ type ReviewItem = {
   classComment?: string
   createdAt: Date; studentId: { name: string } | null; liveClassId: { title: string; scheduledStart?: Date } | null
   instructorId?: unknown
+  /** The class's id — for the Mentor Report's breakdown (2026-10-27); never sent on. */
+  classId?: string
 }
 
 /**
@@ -140,7 +155,7 @@ type ReviewItem = {
  * createdAt range, or class ids) — leaving out those whose student also rated the class (their mentor rating counts).
  * `only`: these mentors.
  */
-async function classFeedbackAsReviews(where: Record<string, unknown>, only?: unknown): Promise<ReviewItem[]> {
+export async function classFeedbackAsReviews(where: Record<string, unknown>, only?: unknown): Promise<ReviewItem[]> {
   const { ClassFeedbackModel, InstructorReviewModel } = await import('@/models/schema.ts')
   const feedback = await ClassFeedbackModel.find(where, { liveClassId: 1, userId: 1, rating: 1, comment: 1, createdAt: 1 })
     .populate('userId', 'name').populate('liveClassId', 'title scheduledStart instructorId').lean() as any[]
@@ -156,6 +171,7 @@ async function classFeedbackAsReviews(where: Record<string, unknown>, only?: unk
       _id: `cf:${f._id}`, kind: 'class_feedback' as const, rating: f.rating, ...(f.comment?.trim() ? { comment: f.comment.trim() } : {}),
       createdAt: f.createdAt, studentId: f.userId ? { name: f.userId.name ?? '' } : null,
       liveClassId: { title: f.liveClassId.title ?? '', scheduledStart: f.liveClassId.scheduledStart }, instructorId: f.liveClassId.instructorId,
+      classId: String(f.liveClassId._id),
     }))
 }
 
@@ -189,7 +205,7 @@ export async function mentorReviewsForPortal(instructorId: string, page: number,
         liveClassId: r.liveClassId ? { title: r.liveClassId.title ?? '', scheduledStart: r.liveClassId.scheduledStart } : null,
       }
     }),
-    ...feedback.map(({ instructorId: _drop, ...f }) => f),
+    ...feedback.map(({ instructorId: _drop, classId: _id, ...f }) => f),
   ].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
   return { reviews: items.slice((page - 1) * perPage, page * perPage), total: items.length, page, perPage }
 }

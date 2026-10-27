@@ -341,6 +341,14 @@ router.get('/mentor-report', wrap(async (req, res) => {
   sendSuccess(res, await mentorReportForPortal(req.query), 'Mentor report')
 }))
 
+/* What is behind each number of the mentors' report (2026-10-27, portalMentorDetail.service.ts): the classes, the
+   bookings and their students, the meetings and the Programs — ?kind=&from=&to=, &emails= (a chief's team),
+   &instructorId= (one mentor), &programId= (one Program). Read only. */
+router.get('/mentor-report/details', wrap(async (req, res) => {
+  const { mentorReportDetailForPortal } = await import('@/services/portalMentorDetail.service.ts')
+  sendSuccess(res, await mentorReportDetailForPortal(req.query as Record<string, unknown>), 'Mentor report details')
+}))
+
 /* Programs a student completed (2026-10-25, portalProgramCompletions.service.ts): ended programs, each student who
    attended any of them with attended / held — completed when every held class. ?since=YYYY-MM-DD (end date). Read only. */
 router.get('/program-completions', wrap(async (req, res) => {
