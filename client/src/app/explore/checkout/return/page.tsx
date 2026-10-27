@@ -49,10 +49,14 @@ function ReturnInner() {
     if (stopped || !orderId) return
     let alive = true
     ;(async () => {
-      /* The redirect often arrives before the gateway's webhook — ask a few times before saying "pending".
-         A card the URL says was cancelled / declined is asked once: paid wins, else the URL's message. */
-      const tries = isCard && urlStopped ? 1 : 6
-      for (let i = 0; i < tries && alive; i++) {
+      /* The redirect often arrives before the gateway confirms. Ask every 3 s for ~45 s, then say
+         "being confirmed" and keep asking every 10 s for up to 10 minutes — the stuck-order sweep's
+         window — so a payment confirmed late flips this page to success by itself (2026-10-27: a live
+         buyer was told "failed" and enrolled minutes later). A card the URL says was cancelled /
+         declined is asked once: paid wins, else the URL's message. */
+      const once = isCard && urlStopped
+      const started = Date.now(), FAST_MS = 45_000, MAX_MS = 10 * 60_000
+      for (let i = 0; alive; i++) {
         try {
           const r = await api.post<{ data: CompleteResult }>('/public/checkout/complete', {
             gateway, orderId, paymentId: q.get('payment_id') ?? undefined,
@@ -66,13 +70,22 @@ function ReturnInner() {
           /* Card: Abzer itself reports the attempt failed — say so now rather than wait. */
           if (d.failed) { if (alive) setState('failed'); return }
         } catch (e) {
-          const m = (e as { response?: { data?: { error?: { message?: string } } } })?.response?.data?.error?.message
-          if (alive) { setMsg(m ?? 'We could not confirm this payment.'); setState('error') }
-          return
+          const err = e as { response?: { status?: number; data?: { error?: { message?: string } } } }
+          const code = err?.response?.status
+          /* A refusal (expired checkout, not this buyer's order) will not change by asking again;
+             a network blip or a 5xx might — keep going. */
+          if (code && code >= 400 && code < 500) {
+            if (alive) { setMsg(err.response?.data?.error?.message ?? 'We could not confirm this payment.'); setState('error') }
+            return
+          }
         }
-        if (i < tries - 1) await new Promise(r => setTimeout(r, 2500))
+        if (once) break
+        const elapsed = Date.now() - started
+        if (elapsed >= MAX_MS) break
+        if (elapsed >= FAST_MS && alive) setState('pending')
+        await new Promise(r => setTimeout(r, elapsed < FAST_MS ? 3_000 : 10_000))
       }
-      if (alive) setState(isCard && urlStopped ? (status === 'cancelled' ? 'cancelled' : 'failed') : 'pending')
+      if (alive) setState(once ? (status === 'cancelled' ? 'cancelled' : 'failed') : 'pending')
     })()
     return () => { alive = false }
   }, [gateway, orderId, stopped, isCard, urlStopped, status, q])
@@ -105,8 +118,10 @@ function ReturnInner() {
       'You’re enrolled', <>Payment received — the course has been added to your Delta account. <span className="mt-3 flex items-center justify-center gap-2 font-semibold" style={{ color: 'var(--xp-text)' }}><Mail size={16} />Check your email for the link to open it.</span></>)
   }
   if (state === 'pending') {
-    return card(<Loader2 size={34} style={{ color: 'var(--xp-muted)' }} />, 'Payment being confirmed',
-      'We have not had the confirmation from the payment provider yet. If your payment went through, you will receive an email within a few minutes with your access.', btn('/explore', 'All courses'))
+    return card(<Loader2 size={34} className="animate-spin" style={{ color: 'var(--xp-muted)' }} />, 'Payment being confirmed',
+      <>The payment provider has not confirmed this payment yet. If it went through, your course is added automatically within a few minutes and you will get an email — please do not pay again.
+        <span className="mt-3 block text-[13px]" style={{ color: 'var(--xp-muted)' }}>This page updates by itself.</span></>,
+      btn('/explore', 'All courses'))
   }
   return card(bad, 'Something went wrong', msg || 'We could not confirm this payment.', btn(back, 'Back to checkout'))
 }

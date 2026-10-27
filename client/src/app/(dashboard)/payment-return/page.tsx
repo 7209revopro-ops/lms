@@ -454,7 +454,6 @@ function AbzerReturn() {
   const urlSaysCancelled = !!raw && /CANCEL/i.test(raw)
   const [orderId, setOrderId] = useState<string | null | undefined>(undefined)
   const verify = useVerifyAbzerReturn()
-  const asked = useRef(false)
 
   /* Which order? Ours in the address, else the one this tab went to pay for. */
   useEffect(() => {
@@ -470,23 +469,60 @@ function AbzerReturn() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
+  /* Ask, and keep asking (2026-10-27). A live buyer read "Payment Failed"
+     while Abzer still had the payment as in progress; minutes later the
+     stuck-order sweep enrolled them. The answer is not "failed" and it is not
+     final: check every 3 s for the first ~45 s ("Confirming…"), then say
+     "being confirmed" and keep checking every 10 s for up to 10 minutes — the
+     sweep's own window — flipping to success by itself the moment Abzer says
+     paid. Only Abzer's own CR_FAILED ends it as a failure. */
+  const [outcome, setOutcome] = useState<'checking' | 'paid' | 'failed' | 'cancelled' | 'pending' | 'notyours'>('checking')
+  const [reachable, setReachable] = useState(true)
+  /* No run-once guard: each run owns its `alive` switch, so a re-mount (React
+     strict mode runs effects twice in development) stops the old loop and
+     starts a fresh one instead of leaving the page on "Confirming…". */
   useEffect(() => {
-    if (!orderId || asked.current) return
-    asked.current = true
-    verify.mutate({ orderId, transactionId: params.get('transactionId') ?? undefined }, {
-      onSuccess: d => {
-        if (d?.paid) { clearCart(); forgetPendingOrder() }
-        if (d?.paid && d.needsRegistration) router.replace('/complete-registration?from=payment')
-      },
-    })
+    if (!orderId) return
+    let alive = true
+    const FAST_MS = 45_000, MAX_MS = 10 * 60_000
+    ;(async () => {
+      const started = Date.now()
+      for (;;) {
+        if (!alive) return
+        try {
+          const d = await verify.mutateAsync({ orderId, transactionId: params.get('transactionId') ?? undefined })
+          if (!alive) return
+          setReachable(true)
+          if (d?.paid) {
+            clearCart(); forgetPendingOrder()
+            if (d.needsRegistration) { router.replace('/complete-registration?from=payment'); return }
+            setOutcome('paid'); return
+          }
+          if (d?.failed) { setOutcome('failed'); return }
+          if (urlSaysCancelled) { setOutcome('cancelled'); return }
+        } catch (err) {
+          if (!alive) return
+          const code = (err as { response?: { status?: number } } | null)?.response?.status
+          /* 4xx: not this account's order (or not an order) — asking again will not change that. */
+          if (code && code >= 400 && code < 500) { setOutcome('notyours'); return }
+          setReachable(false)
+        }
+        const elapsed = Date.now() - started
+        if (elapsed >= MAX_MS) return
+        if (elapsed >= FAST_MS) setOutcome('pending')
+        await new Promise(r => setTimeout(r, elapsed < FAST_MS ? 3_000 : 10_000))
+      }
+    })()
+    return () => { alive = false }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [orderId])
 
-  if (orderId === undefined || (orderId && !verify.isSuccess && !verify.isError)) {
+  if (orderId === undefined || (orderId && outcome === 'checking')) {
     return (
-      <div className="flex flex-col items-center gap-4">
+      <div className="flex flex-col items-center gap-4 text-center">
         <Spinner size={32} />
-        <p className="text-sm" style={{ color: 'var(--color-text-muted)' }}>Confirming your payment with the card provider…</p>
+        <p className="text-sm font-semibold" style={{ color: 'var(--color-text-primary)' }}>Confirming your payment with the card provider…</p>
+        <p className="text-xs" style={{ color: 'var(--color-text-muted)' }}>This usually takes a few seconds. Please keep this page open.</p>
       </div>
     )
   }
@@ -500,30 +536,21 @@ function AbzerReturn() {
       </Panel>
     )
   }
-  if (verify.isError) {
-    const code = (verify.error as { response?: { status?: number } } | null)?.response?.status
-    return code && code >= 400 && code < 500
-      ? (
-        <Panel tone="wait" title="We could not check this order" body="This order is not on the account you are signed in with. Sign in with the account you paid with, or contact support with the time of the payment.">
-          <Secondary href="/support">Contact support</Secondary>
-        </Panel>
-      )
-      : (
-        <Panel tone="wait" title="Payment being confirmed" body={<>We could not reach the card provider just now. {notCharged}</>}>
-          <Primary href="/my-learning"><BookOpen size={15} />Go to My Learning</Primary>
-          <Secondary href="/support">Contact support</Secondary>
-        </Panel>
-      )
+  if (outcome === 'notyours') {
+    return (
+      <Panel tone="wait" title="We could not check this order" body="This order is not on the account you are signed in with. Sign in with the account you paid with, or contact support with the time of the payment.">
+        <Secondary href="/support">Contact support</Secondary>
+      </Panel>
+    )
   }
-  const d = verify.data
-  if (d?.paid) {
+  if (outcome === 'paid') {
     return (
       <Panel tone="ok" title="Payment Successful!" body="Your payment has been received and your course enrollment is ready.">
         <Primary href="/my-learning"><BookOpen size={15} />Go to My Learning<ArrowRight size={14} /></Primary>
       </Panel>
     )
   }
-  if (d?.failed) {
+  if (outcome === 'failed') {
     return (
       <Panel tone="bad" title="Payment Failed" body="The card provider declined this payment, so your card was not charged. Please check your card details and try again, or use another card.">
         <Primary href="/courses"><RotateCcw size={14} />Try Again</Primary>
@@ -531,7 +558,7 @@ function AbzerReturn() {
       </Panel>
     )
   }
-  if (urlSaysCancelled) {
+  if (outcome === 'cancelled') {
     return (
       <Panel tone="bad" title="Payment Cancelled" body="You cancelled the payment. No charge was made. You can try again whenever you are ready.">
         <Primary href="/courses"><RotateCcw size={14} />Back to courses</Primary>
@@ -539,7 +566,11 @@ function AbzerReturn() {
     )
   }
   return (
-    <Panel tone="wait" title="Payment being confirmed" body={<>We have not had the confirmation from the card provider yet. {notCharged}</>}>
+    <Panel tone="wait" title="Payment being confirmed"
+      body={<>
+        {reachable ? 'The card provider has not confirmed this payment yet.' : 'We could not reach the card provider just now.'} {notCharged}
+        <span className="mt-3 flex items-center justify-center gap-2 text-xs"><Spinner size={12} />This page updates by itself.</span>
+      </>}>
       <Primary href="/my-learning"><BookOpen size={15} />Go to My Learning</Primary>
       <Secondary href="/support">Contact support</Secondary>
     </Panel>
