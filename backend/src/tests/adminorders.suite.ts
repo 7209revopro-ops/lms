@@ -208,7 +208,7 @@ try {
     const rt = await call('POST', `/admin/orders/${oTamara._id}/refund`, rootJar)
     const tCall = gw.find(c => c.path.startsWith('/payments/simplified-refund/'))
     check('Tamara: refund succeeds', rt.status === 200, `${rt.status} ${JSON.stringify(rt.body?.error)}`)
-    check('…Tamara was asked to refund AED 183.46 for that order', tCall?.path.endsWith(tamId) && tCall?.body?.total_amount?.amount === 183.46, JSON.stringify(tCall?.body))
+    check('…Tamara was asked to refund AED 183.46 for that order', !!tCall?.path.endsWith(tamId) && tCall?.body?.total_amount?.amount === 183.46, JSON.stringify(tCall?.body))
     const tAfter: any = await M.OrderModel.findById(oTamara._id).lean()
     check('…the order reads refunded, with the time', tAfter?.status === 'refunded' && !!tAfter?.refundedAt)
     const again = await call('POST', `/admin/orders/${oTamara._id}/refund`, rootJar)
