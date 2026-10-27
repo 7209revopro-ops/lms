@@ -1274,92 +1274,107 @@ export async function runMentorVerification(): Promise<void> {
 }
 
 /* ── Instructor-review request dispatch ──────────────────────────────────
-   Runs strictly downstream of runAttendanceFinalization: it only considers
-   classes whose attendance has ALREADY been decided (attendanceFinalized),
-   so it never has to guess who attended — it reads the same 'attended'
-   status the finalization job just wrote. A class with zero attended seats
-   (everyone missed it) is still marked reviewRequestSent — there is nobody
-   to ask, and the alternative is rescanning the same empty class forever.
+   10 minutes after a class ends (2026-10-27), each student who was there is
+   asked to rate it: in-app, email and WhatsApp (a Program's class: in-app only).
 
-   One request per (class, attended student), fire-and-forget per channel —
-   same shape as SupportService#notifyStaffOfNewTicket: a mail/WhatsApp
-   outage must never block the next recipient, let alone the class being
-   marked done. WhatsApp only fires for a student with a phone number on
-   file; email and the in-app notification always fire. */
-export async function runReviewRequestDispatch(): Promise<void> {
+   "Was there" is read per seat, not from attendanceFinalized — that is decided
+   only once the student join door shuts (~20 min after the end), too late.
+   So a seat counts once it is 'attended', or still 'booked' with attendedAt
+   (they joined; finalization will make it 'attended'). A late joiner, or a
+   register an admin ticks afterwards (in-person classes too), is asked on the
+   next run — for up to 48 hours after the start. Never asked: missed,
+   cancelled, a cancelled class.
+
+   Once per seat: ClassBooking.reviewRequestedAt, claimed atomically before
+   anything is sent. Classes the old class-level dispatch already handled
+   (reviewRequestSent) are skipped, so the switch-over re-asks nobody.
+
+   Fire-and-forget per channel — a mail/WhatsApp outage must never block the
+   next recipient. */
+export const REVIEW_REQUEST_AFTER_END_MS = 10 * 60_000
+
+export async function runReviewRequestDispatch(now: Date = new Date()): Promise<void> {
   try {
     const { LiveClassModel, ClassBookingModel, UserModel } = await import('@/models/schema.ts')
-    const now      = new Date()
     const earliest = new Date(now.getTime() - 48 * 60 * 60 * 1000)   // don't rescan classes older than 48h
 
-    const candidates = await LiveClassModel.find({
+    const started = await LiveClassModel.find({
       status: { $ne: 'cancelled' },
-      attendanceFinalized: true,
-      /* $ne: true, not `false` — see the identical guard on attendanceFinalized
-         above; a class from before this field existed must still match. */
+      /* $ne: true, not `false` — a class from before this field existed must still match. */
       reviewRequestSent: { $ne: true },
       scheduledStart: { $gte: earliest, $lt: now },
-    }).select('_id title instructorId courseId programId').lean()
+    }).select('_id title instructorId courseId programId scheduledStart durationMins').lean()
+    const ended = started.filter(c =>
+      new Date(c.scheduledStart).getTime() + (c.durationMins ?? 0) * 60_000 + REVIEW_REQUEST_AFTER_END_MS <= now.getTime())
+    if (ended.length === 0) return
+    const byId = new Map(ended.map(c => [String(c._id), c]))
 
-    if (candidates.length === 0) return
+    const seats = await ClassBookingModel.find({
+      liveClassId: { $in: ended.map(c => c._id) },
+      reviewRequestedAt: { $exists: false },
+      $or: [{ status: 'attended' }, { status: 'booked', attendedAt: { $exists: true } }],
+    }).select('_id userId liveClassId').lean()
+    if (seats.length === 0) return
 
+    const instructorNames = new Map<string, string>()
     let requestedCount = 0
-    for (const cls of candidates) {
+    for (const b of seats) {
+      const cls = byId.get(String(b.liveClassId))
+      if (!cls) continue
       try {
-        const attended = await ClassBookingModel.find({
-          liveClassId: cls._id, status: 'attended',
-        }).select('userId').lean()
+        /* Claim the seat first: two overlapping runs, or a crash mid-send,
+           can never ask the same student twice. */
+        const claimed = await ClassBookingModel.updateOne(
+          { _id: b._id, reviewRequestedAt: { $exists: false } },
+          { $set: { reviewRequestedAt: now } },
+        )
+        if (claimed.modifiedCount !== 1) continue
 
-        if (attended.length > 0) {
+        const student = await UserModel.findById(b.userId).select('name email phone').lean() as
+          { name?: string; email?: string; phone?: string } | null
+        if (!student) continue
+        const studentName = student.name ?? 'there'
+        const iid = String(cls.instructorId ?? '')
+        if (!instructorNames.has(iid)) {
           const instructor = await UserModel.findById(cls.instructorId).select('name').lean()
-          const instructorName = (instructor as { name?: string } | null)?.name ?? 'the instructor'
+          instructorNames.set(iid, (instructor as { name?: string } | null)?.name ?? 'the instructor')
+        }
+        const instructorName = instructorNames.get(iid)!
 
-          for (const b of attended) {
-            const student = await UserModel.findById(b.userId).select('name email phone').lean() as
-              { name?: string; email?: string; phone?: string } | null
-            if (!student) continue
-            const studentName = student.name ?? 'there'
-
-            try {
-              await notifSvc.create(String(b.userId), {
-                kind:  'instructor-review-requested',
-                title: `How was "${cls.title}"?`,
-                body:  `Rate your class with ${instructorName}`,
-                link:  '/reviews',
-              })
-            } catch (err) {
-              logger.error({ err, userId: b.userId, classId: cls._id }, 'in-app review-request notification failed')
-            }
-
-            /* A Program's class: the in-app request only. */
-            if (student.email && !isProgramClass(cls)) {
-              try {
-                await sendInstructorReviewRequestEmail(student.email, studentName, instructorName, cls.title)
-              } catch (err) {
-                logger.error({ err, userId: b.userId, classId: cls._id }, 'review-request email failed')
-              }
-            }
-
-            if (student.phone && !isProgramClass(cls)) {
-              try {
-                await sendInstructorReviewRequestWhatsApp(student.phone, studentName, cls.title)
-              } catch (err) {
-                logger.error({ err, userId: b.userId, classId: cls._id }, 'review-request WhatsApp failed')
-              }
-            }
-          }
-          requestedCount += attended.length
+        try {
+          await notifSvc.create(String(b.userId), {
+            kind:  'instructor-review-requested',
+            title: `How was "${cls.title}"?`,
+            body:  `Rate your class with ${instructorName}`,
+            link:  '/reviews',
+          })
+        } catch (err) {
+          logger.error({ err, userId: b.userId, classId: cls._id }, 'in-app review-request notification failed')
         }
 
-        await LiveClassModel.findByIdAndUpdate(cls._id, { reviewRequestSent: true })
+        /* A Program's class: the in-app request only. */
+        if (student.email && !isProgramClass(cls)) {
+          try {
+            await sendInstructorReviewRequestEmail(student.email, studentName, instructorName, cls.title)
+          } catch (err) {
+            logger.error({ err, userId: b.userId, classId: cls._id }, 'review-request email failed')
+          }
+        }
+
+        if (student.phone && !isProgramClass(cls)) {
+          try {
+            await sendInstructorReviewRequestWhatsApp(student.phone, studentName, cls.title)
+          } catch (err) {
+            logger.error({ err, userId: b.userId, classId: cls._id }, 'review-request WhatsApp failed')
+          }
+        }
+        requestedCount++
       } catch (err) {
-        logger.error({ err, classId: cls._id }, '[ReviewRequest] Dispatch failed for one class')
+        logger.error({ err, bookingId: b._id, classId: cls._id }, '[ReviewRequest] Dispatch failed for one seat')
       }
     }
 
-    if (candidates.length) {
-      logger.info(`[ReviewRequest] Processed ${candidates.length} classes — ${requestedCount} students asked to rate`)
-    }
+    if (requestedCount) logger.info(`[ReviewRequest] ${requestedCount} students asked to rate their class`)
   } catch (err) {
     logger.error({ err }, '[ReviewRequest] Dispatch job error')
   }
@@ -1445,10 +1460,8 @@ export function startReminderJobs(): void {
 
   // Every 15 min — finalize attendance (booked -> attended/missed) for online classes ended 15+ min ago
   cron.schedule('*/15 * * * *', exclusive('attendance-finalization', runAttendanceFinalization))
-  /* Downstream of attendance-finalization — same tick rate is fine since it
-     only picks up classes the OTHER job already finalized; it is never the
-     bottleneck. */
-  cron.schedule('*/15 * * * *', exclusive('review-request-dispatch', runReviewRequestDispatch))
+  // Every minute — "rate your class" 10 min after each class ends (not waiting for attendance-finalization)
+  cron.schedule('* * * * *', exclusive('review-request-dispatch', () => runReviewRequestDispatch()))
 
   // Every 15 min — ask each class's mentor to verify attendance + review it; remind at +2 h and 9 AM next day
   cron.schedule('*/15 * * * *', exclusive('mentor-verification', runMentorVerification))

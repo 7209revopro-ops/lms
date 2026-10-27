@@ -1,8 +1,10 @@
 /* ─────────────────────────────────────────────────────────────
    The instructor-review request dispatch — reminders.job.ts's
-   runReviewRequestDispatch. Fires once a class's attendance has already
-   finalized, only for seats that finalized to 'attended', never twice for
-   the same class.
+   runReviewRequestDispatch. Since 2026-10-27: 10 minutes after the class
+   ends, to every seat that joined (attendedAt) or is 'attended' — not
+   waiting for attendance to be finalized — once per seat; a seat marked
+   present later is asked on a later run; a class handled the old way
+   (reviewRequestSent) is never re-asked.
 
    Run: bun run test:reviewrequest
 ───────────────────────────────────────────────────────────── */
@@ -102,37 +104,40 @@ try {
   const attendee2 = await UserModel.create({ name: 'Attendee Two', email: email('a2'), passwordHash: hash, role: 'student', isActive: true, organizationId: org._id })  // no phone
   const noShow    = await UserModel.create({ name: 'No Show', email: email('ns'), passwordHash: hash, role: 'student', isActive: true, organizationId: org._id, phone: '+15550002222' })
 
-  const mkClass = (extra: Record<string, unknown> = {}) => LiveClassModel.create({
+  const MIN = 60_000
+  /* A 60-minute class that ended `endedAgoMin` minutes ago. */
+  const mkClass = (endedAgoMin: number, extra: Record<string, unknown> = {}) => LiveClassModel.create({
     title: 'Finished Session', courseId: course._id, instructorId: instructor._id, organizationId: org._id,
-    scheduledStart: new Date(Date.now() - 2 * 3_600_000), durationMins: 60, type: 'external', isOnline: true,
+    scheduledStart: new Date(Date.now() - (60 + endedAgoMin) * MIN), durationMins: 60, type: 'external', isOnline: true,
     ...extra,
   })
+  const seat = (u: { _id: unknown }, c: { _id: unknown }, status: string, extra: Record<string, unknown> = {}) =>
+    ClassBookingModel.create({ userId: u._id, liveClassId: c._id, status, bookedAt: new Date(), ...extra })
+  const askedFor = async (classId: unknown) =>
+    (await ClassBookingModel.find({ liveClassId: classId, reviewRequestedAt: { $exists: true } }).select('userId').lean()).map(x => String(x.userId))
+  const count = () => NotificationModel.countDocuments({ kind: 'instructor-review-requested' })
 
   /* ═══════════════════════════════════════════════ */
-  section('A · only attendance-finalized classes are considered, only attended seats asked')
+  section('A · 10 minutes after the end, before attendance is finalized — joined seats only')
   {
-    const notFinalized = await mkClass({ attendanceFinalized: false })
-    await ClassBookingModel.create({ userId: attendee1._id, liveClassId: notFinalized._id, status: 'attended', bookedAt: new Date() })
+    const early = await mkClass(8)
+    await seat(attendee1, early, 'booked', { attendedAt: new Date() })
+    await runReviewRequestDispatch()
+    check('8 minutes after the end: nobody is asked yet', (await count()) === 0)
 
-    const cls = await mkClass({ attendanceFinalized: true })
-    await ClassBookingModel.create({ userId: attendee1._id, liveClassId: cls._id, status: 'attended', bookedAt: new Date() })
-    await ClassBookingModel.create({ userId: attendee2._id, liveClassId: cls._id, status: 'attended', bookedAt: new Date() })
-    await ClassBookingModel.create({ userId: noShow._id,    liveClassId: cls._id, status: 'missed',   bookedAt: new Date() })
-
+    const cls = await mkClass(10, { attendanceFinalized: false })
+    await seat(attendee1, cls, 'booked', { attendedAt: new Date() })   // joined, not yet finalized
+    await seat(attendee2, cls, 'attended')                              // marked present
+    await seat(noShow,    cls, 'booked')                                // never joined
     await runReviewRequestDispatch()
 
     const notifs = await NotificationModel.find({ kind: 'instructor-review-requested' }).lean()
     const recipientIds = new Set(notifs.map(n => String(n.userId)))
-    check('attendee1 (finalized class) is asked', recipientIds.has(String(attendee1._id)))
-    check('attendee2 (finalized class) is asked', recipientIds.has(String(attendee2._id)))
-    check('the no-show is NOT asked', !recipientIds.has(String(noShow._id)))
-
-    const notFinalizedCls = await LiveClassModel.findById(notFinalized._id).select('reviewRequestSent').lean()
-    check('the NOT-yet-finalized class is left alone — not marked sent', notFinalizedCls?.reviewRequestSent !== true,
-      String(notFinalizedCls?.reviewRequestSent))
-
-    const finalizedCls = await LiveClassModel.findById(cls._id).select('reviewRequestSent').lean()
-    check('the finalized class is marked sent', finalizedCls?.reviewRequestSent === true, String(finalizedCls?.reviewRequestSent))
+    check('10 minutes after the end: the student who joined is asked (attendance not finalized)', recipientIds.has(String(attendee1._id)))
+    check('...and the one marked present', recipientIds.has(String(attendee2._id)))
+    check('the student who never joined is NOT asked', !recipientIds.has(String(noShow._id)))
+    check('...the 8-minute class is still waiting', !(await askedFor(early._id)).length)
+    check('the asked seats are stamped', (await askedFor(cls._id)).length === 2)
 
     const mail = await mailbox()
     check('attendee1 got an email', mail.some(m => m.to.includes(attendee1.email)))
@@ -141,46 +146,54 @@ try {
 
     const wa = await waOutbox()
     check('attendee1 (has a phone) got a WhatsApp message', wa.some(w => w.to === '15550001111'))
-    check('attendee2 (NO phone on file) got none — per-recipient, not all-or-nothing',
-      !wa.some(w => w.to === attendee2.email))
-    check('the no-show (has a phone, but never attended) got NO WhatsApp message either',
+    check('the no-show (has a phone, but never joined) got NO WhatsApp message',
       !wa.some(w => w.to === '15550002222'))
     check('the WhatsApp template carries the student name and session title',
-      wa.some(w => w.templateName === 'instructor_review_request_v1' && w.params?.[0] === 'Attendee One'),
+      wa.some(w => w.templateName === 'instructor_review_request_v1' && w.params?.[0] === 'Attendee One' && w.params?.[1] === 'Finished Session'),
       JSON.stringify(wa.map(w => w.params)))
+
+    /* ═══════════════════════════════════════════════ */
+    section('B · never twice per seat — but a seat marked present later is asked')
+    const before = await count()
+    await runReviewRequestDispatch()
+    await runReviewRequestDispatch()
+    check('running the dispatch again creates nothing new', (await count()) === before, `${before} -> ${await count()}`)
+
+    await ClassBookingModel.updateOne({ liveClassId: cls._id, userId: noShow._id }, { $set: { status: 'attended' } })
+    await runReviewRequestDispatch()
+    check('a student marked present afterwards is asked on the next run', (await askedFor(cls._id)).includes(String(noShow._id)))
+    check('...only them', (await count()) === before + 1, `${before} -> ${await count()}`)
   }
 
   /* ═══════════════════════════════════════════════ */
-  section('B · a second pass never re-sends for the same class')
+  section('C · missed seats, cancelled classes and old-style classes')
   {
-    const before = await NotificationModel.countDocuments({ kind: 'instructor-review-requested' })
+    const before = await count()
+    const missed = await mkClass(30, { attendanceFinalized: true })
+    await seat(attendee1, missed, 'missed')
+    await seat(attendee2, missed, 'cancelled')
+    const cancelled = await mkClass(30, { status: 'cancelled' })
+    await seat(attendee1, cancelled, 'attended')
+    const oldStyle = await mkClass(30, { attendanceFinalized: true, reviewRequestSent: true })
+    await seat(attendee1, oldStyle, 'attended')
+    const stale = await mkClass(48 * 60, { attendanceFinalized: true })
+    await seat(attendee1, stale, 'attended')
     await runReviewRequestDispatch()
-    await runReviewRequestDispatch()
-    const after = await NotificationModel.countDocuments({ kind: 'instructor-review-requested' })
-    check('running the dispatch again creates nothing new', after === before, `${before} -> ${after}`)
+    check('missed and cancelled seats, a cancelled class, a class already asked the old way and one older than 48h: nobody asked',
+      (await count()) === before, `${before} -> ${await count()}`)
   }
 
   /* ═══════════════════════════════════════════════ */
-  section('C · a class with zero attended seats is still marked done, never rescanned forever')
+  section('D · an in-person class: asked once the register says present')
   {
-    const allMissed = await mkClass({ attendanceFinalized: true })
-    await ClassBookingModel.create({ userId: noShow._id, liveClassId: allMissed._id, status: 'missed', bookedAt: new Date() })
-
+    const before = await count()
+    const room = await mkClass(15, { isOnline: false, location: 'Campus', room: 'A1' })
+    await seat(attendee2, room, 'booked')
     await runReviewRequestDispatch()
-    const row = await LiveClassModel.findById(allMissed._id).select('reviewRequestSent').lean()
-    check('marked sent even with nobody to ask', row?.reviewRequestSent === true, String(row?.reviewRequestSent))
-  }
-
-  /* ═══════════════════════════════════════════════ */
-  section('D · a cancelled class is never dispatched')
-  {
-    const cancelled = await mkClass({ attendanceFinalized: true, status: 'cancelled' })
-    await ClassBookingModel.create({ userId: attendee1._id, liveClassId: cancelled._id, status: 'attended', bookedAt: new Date() })
-
-    const before = await NotificationModel.countDocuments({ kind: 'instructor-review-requested' })
+    check('not before the register is taken', (await count()) === before)
+    await ClassBookingModel.updateOne({ liveClassId: room._id }, { $set: { status: 'attended' } })
     await runReviewRequestDispatch()
-    const after = await NotificationModel.countDocuments({ kind: 'instructor-review-requested' })
-    check('a cancelled class dispatches nothing', after === before, `${before} -> ${after}`)
+    check('asked once marked present', (await count()) === before + 1, `${before} -> ${await count()}`)
   }
 
 } catch (err) {

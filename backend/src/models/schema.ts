@@ -1419,7 +1419,9 @@ export interface ILiveClass extends Document {
      deliberately runs AFTER it rather than off the same pass: it needs
      attendance already decided, because only a student whose seat finalized
      to 'attended' gets asked to rate the class — set once per class so the
-     job never re-sends it. */
+     job never re-sends it. Since 2026-10-27 the request is per seat
+     (ClassBooking.reviewRequestedAt) and nothing sets this; a class it is
+     true on was handled the old way and is skipped. */
   reviewRequestSent: boolean
 
   /* Multi-org */
@@ -3443,6 +3445,9 @@ export interface IClassBooking extends Document {
   /* The mentor's note on this student, from Class Verification. */
   mentorNote?: string
   attendanceSource?: 'livekit' | 'click'
+  /* When this student was asked to rate the class (reminders.job.ts
+     runReviewRequestDispatch) — once per seat. */
+  reviewRequestedAt?: Date
 
   /* WHICH DOOR THIS SEAT CAME THROUGH.
 
@@ -3493,6 +3498,7 @@ const ClassBookingSchema = new Schema<IClassBooking>(
     attendedAt:       { type: Date },
     attendanceSource: { type: String, enum: ['livekit', 'click'] },
     mentorNote:       { type: String, maxlength: 500 },
+    reviewRequestedAt: { type: Date },
     cancelledAt: { type: Date },
     seatPoolKind:       { type: String, enum: ['flat', 'host', 'guest', 'overflow'] },
     seatOrganizationId: { type: Schema.Types.ObjectId, ref: 'Organization', index: true },
