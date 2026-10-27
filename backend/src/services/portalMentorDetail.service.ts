@@ -1,6 +1,6 @@
 import mongoose from 'mongoose'
 import { PortalError } from '@/services/portal.service.ts'
-import { classFeedbackAsReviews } from '@/services/portalMentorReport.service.ts'
+import { classFeedbackAsReviews, joinOf } from '@/services/portalMentorReport.service.ts'
 
 /* ─────────────────────────────────────────────────────────────
    What is behind each number of the portal's Mentor Report (Tetra
@@ -14,13 +14,14 @@ import { classFeedbackAsReviews } from '@/services/portalMentorReport.service.ts
    GET /service/mentor-report/details?kind=&from=&to=&emails=&instructorId=&programId=
      kind: classes | cancelled_classes | bookings | cancelled_bookings | attended
          | missed | students | meetings | cancelled_meetings | programs
+         | late_joins | not_joined (2026-10-27: the classes a mentor joined late, or with no join recorded)
 ───────────────────────────────────────────────────────────── */
 
 const fail = (message: string) => new PortalError('VALIDATION_ERROR', message, 400)
 const DAY_MS = 86_400_000
 const TZ = '+04:00'
 const MAX_ROWS = 3000
-export const DETAIL_KINDS = ['classes', 'cancelled_classes', 'bookings', 'cancelled_bookings', 'attended', 'missed', 'students', 'meetings', 'cancelled_meetings', 'programs'] as const
+export const DETAIL_KINDS = ['classes', 'cancelled_classes', 'bookings', 'cancelled_bookings', 'attended', 'missed', 'students', 'meetings', 'cancelled_meetings', 'programs', 'late_joins', 'not_joined'] as const
 type Kind = (typeof DETAIL_KINDS)[number]
 const BOOKING_KINDS: Partial<Record<Kind, string | null>> = { bookings: null, cancelled_bookings: 'cancelled', attended: 'attended', missed: 'missed' }
 
@@ -74,7 +75,7 @@ export async function mentorReportDetailForPortal(q: Record<string, unknown>) {
   // ── Classes in the dates (a Program's when asked), with their bookings ──
   const classes = await LiveClassModel.find(
     { scheduledStart: { $gte: start, $lt: end }, ...(only ? { instructorId: only } : {}), ...(q.programId ? { programId: oid(q.programId) } : {}) },
-    { instructorId: 1, title: 1, scheduledStart: 1, durationMins: 1, status: 1, startedAt: 1, courseId: 1, programId: 1 },
+    { instructorId: 1, title: 1, scheduledStart: 1, durationMins: 1, status: 1, startedAt: 1, courseId: 1, programId: 1, instructorJoinedAt: 1 },
   ).sort({ scheduledStart: -1 }).lean() as any[]
   const classById = new Map(classes.map(c => [String(c._id), c]))
   const bookings = classes.length
@@ -149,14 +150,19 @@ export async function mentorReportDetailForPortal(q: Record<string, unknown>) {
     return t
   }
 
-  if (kind === 'classes' || kind === 'cancelled_classes') {
-    const rows = classes.filter(c => (kind === 'cancelled_classes') === (c.status === 'cancelled')).map(c => {
+  if (kind === 'classes' || kind === 'cancelled_classes' || kind === 'late_joins' || kind === 'not_joined') {
+    const pick = kind === 'late_joins' ? (c: any) => joinOf(c).state === 'late'
+      : kind === 'not_joined' ? (c: any) => joinOf(c).state === 'none'
+        : (c: any) => (kind === 'cancelled_classes') === (c.status === 'cancelled')
+    const rows = classes.filter(pick).map(c => {
       const s = stars.get(String(c._id))
+      const join = joinOf(c)
       return {
         id: String(c._id), title: c.title ?? '', start: c.scheduledStart, durationMins: c.durationMins ?? 0,
         status: c.status, held: held(c), mentor: who.get(String(c.instructorId))?.name ?? '', mentorEmail: who.get(String(c.instructorId))?.email ?? '',
         course: courseOf.get(String(c.courseId)) ?? '', program: programOf.get(String(c.programId)) ?? '', programId: c.programId ? String(c.programId) : '',
         ...tally(String(c._id)), reviews: s?.n ?? 0, avgRating: avg(s?.sum ?? 0, s?.n ?? 0),
+        joinedAt: c.instructorJoinedAt ?? null, join: join.state, lateMins: join.lateMins,
       }
     })
     return { kind, total: rows.length, rows: rows.slice(0, MAX_ROWS) }

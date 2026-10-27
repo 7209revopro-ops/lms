@@ -11,11 +11,25 @@ import { PortalError } from '@/services/portal.service.ts'
    (the class page's Session feedback) — the user: "the comments aren't visible"
    — one per student per class, the mentor rating's stars when there are both. The portal shows a chief mentor their own team's, matched
    by address. Read only; counts and names, never a student.
+
+   Late to class (2026-10-27): a class not cancelled whose start has passed is
+   a late join when its mentor joined more than LATE_JOIN_MINS after the start
+   (instructorJoinedAt — for Meet / Zoom the moment they pressed Join in the
+   LMS, as the no-show alerts read it), and "no join recorded" with none.
 ───────────────────────────────────────────────────────────── */
 
 const fail = (message: string) => new PortalError('VALIDATION_ERROR', message, 400)
 const DAY_MS = 86_400_000
 const TZ = '+04:00' // the academy's day (Dubai)
+/** Joined more than this many minutes after the start: late — the line the mentor no-show alert (start + 5) uses. */
+export const LATE_JOIN_MINS = 5
+/** A class's mentor joining: late (minutes after the start), on time, not recorded — or not due yet (cancelled, still ahead). */
+export function joinOf(c: { status?: string; scheduledStart?: Date; instructorJoinedAt?: Date | null }, now = Date.now()): { state: 'late' | 'on_time' | 'none' | 'n/a'; lateMins: number } {
+  if (c.status === 'cancelled' || !c.scheduledStart || new Date(c.scheduledStart).getTime() > now) return { state: 'n/a', lateMins: 0 }
+  if (!c.instructorJoinedAt) return { state: 'none', lateMins: 0 }
+  const mins = Math.round((new Date(c.instructorJoinedAt).getTime() - new Date(c.scheduledStart).getTime()) / 60_000)
+  return mins > LATE_JOIN_MINS ? { state: 'late', lateMins: mins } : { state: 'on_time', lateMins: 0 }
+}
 
 type Day = {
   classes: number; held: number; classesCancelled: number
@@ -23,11 +37,13 @@ type Day = {
   meetings: number; meetingsCancelled: number
   /** Meetings held or booked (not cancelled) by category (2026-10-25): course pitch, overview, other, none. */
   mCoursePitch: number; mOverview: number; mOther: number; mNone: number
+  /** Classes joined late, the minutes late added up, and classes with no join recorded (2026-10-27). */
+  lateJoins: number; lateMinutes: number; notJoined: number
   reviews: number; ratingSum: number; lowRatings: number
   /** How many of each star, 1 … 5 (2026-10-23: the breakdown). */
   r1: number; r2: number; r3: number; r4: number; r5: number
 }
-const blank = (): Day => ({ classes: 0, held: 0, classesCancelled: 0, bookings: 0, bookingsCancelled: 0, attended: 0, missed: 0, meetings: 0, meetingsCancelled: 0, mCoursePitch: 0, mOverview: 0, mOther: 0, mNone: 0, reviews: 0, ratingSum: 0, lowRatings: 0, r1: 0, r2: 0, r3: 0, r4: 0, r5: 0 })
+const blank = (): Day => ({ classes: 0, held: 0, classesCancelled: 0, bookings: 0, bookingsCancelled: 0, attended: 0, missed: 0, meetings: 0, meetingsCancelled: 0, mCoursePitch: 0, mOverview: 0, mOther: 0, mNone: 0, lateJoins: 0, lateMinutes: 0, notJoined: 0, reviews: 0, ratingSum: 0, lowRatings: 0, r1: 0, r2: 0, r3: 0, r4: 0, r5: 0 })
 const dayOf = (d: Date) => new Date(d.getTime() + 4 * 3600_000).toISOString().slice(0, 10)
 
 export async function mentorReportForPortal(q: { from?: unknown; to?: unknown; emails?: unknown }) {
@@ -48,7 +64,7 @@ export async function mentorReportForPortal(q: { from?: unknown; to?: unknown; e
 
   const classes = await LiveClassModel.find(
     { scheduledStart: { $gte: start, $lt: end }, ...(only ? { instructorId: only } : {}) },
-    { instructorId: 1, scheduledStart: 1, status: 1, startedAt: 1 },
+    { instructorId: 1, scheduledStart: 1, status: 1, startedAt: 1, instructorJoinedAt: 1 },
   ).lean() as any[]
   const classById = new Map(classes.map(c => [String(c._id), c]))
   const bookings = classes.length
@@ -82,6 +98,9 @@ export async function mentorReportForPortal(q: { from?: unknown; to?: unknown; e
     if (c.status === 'cancelled') { d.classesCancelled++; continue }
     d.classes++
     if (c.status === 'ended' || c.status === 'live' || c.startedAt) d.held++
+    const join = joinOf(c)
+    if (join.state === 'late') { d.lateJoins++; d.lateMinutes += join.lateMins }
+    else if (join.state === 'none') d.notJoined++
   }
   // Different students who booked and who came (2026-10-27): each mentor's, and the whole list's — a student once.
   const studentsOf = new Map<string, { booked: Set<string>; attended: Set<string> }>()
