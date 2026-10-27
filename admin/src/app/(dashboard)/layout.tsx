@@ -10,6 +10,7 @@ import { ChatNotifier } from '@/components/chat/ChatNotifier'
 import { InstallPopup } from '@/components/pwa/InstallPopup'
 import { AdminGuard } from '@/components/auth/AdminGuard'
 import { RootPortalHistoryBridge } from '@/components/RootPortalHistoryBridge'
+import { MeetingOutcomeGate } from '@/components/meetings/MeetingOutcomeGate'
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   const { sidebarCollapsed } = useUIStore()
@@ -50,6 +51,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         <DeleteModal />
         <Toaster />
         <InstallPopup />
+        <MeetingOutcomeGate />
       </div>
     </AdminGuard>
   )

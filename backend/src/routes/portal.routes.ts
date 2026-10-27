@@ -238,6 +238,32 @@ router.post('/mentor-meetings/:id/cancel', wrap(async (req, res) => {
   }), 'Meeting cancelled')
 }))
 
+/* How a student meeting went (2026-10-27, meetingOutcome.service.ts) — Tetra Commission asking for its mentors.
+   ?mentorEmail= — the meetings waiting on that mentor (none for anybody who isn't one). */
+router.get('/meeting-outcomes/pending', wrap(async (req, res) => {
+  const { pendingOutcomesForEmail } = await import('@/services/meetingOutcome.service.ts')
+  sendSuccess(res, { meetings: await pendingOutcomesForEmail(req.query['mentorEmail']) }, 'Meetings waiting')
+}))
+
+/* The form's lists: stages, payment modes, courses with their modules, mentors. */
+router.get('/meeting-outcomes/options', wrap(async (_req, res) => {
+  const { outcomeOptions } = await import('@/services/meetingOutcome.service.ts')
+  sendSuccess(res, await outcomeOptions(), 'Outcome options')
+}))
+
+/* The outcomes filled from ?since= on, oldest first — for Tetra Commission to put on its students. */
+router.get('/meeting-outcomes', wrap(async (req, res) => {
+  const { outcomesSince } = await import('@/services/meetingOutcome.service.ts')
+  sendSuccess(res, await outcomesSince(req.query['since'], Number(req.query['limit'] ?? 200) || 200), 'Meeting outcomes')
+}))
+
+/* The mentor (mentorEmail) says how it went — once; the first to fill it, here or in LMS admin, counts. */
+router.post('/mentor-meetings/:id/outcome', wrap(async (req, res) => {
+  const { saveOutcomeForEmail } = await import('@/services/meetingOutcome.service.ts')
+  const body = (req.body ?? {}) as Record<string, unknown>
+  sendSuccess(res, await saveOutcomeForEmail(body.mentorEmail, req.params['id'], body), 'Outcome saved')
+}))
+
 /* One live class in full, for the portal's calendar. This academy's own only:
    the other one's classes appear there as taken time without a subject, and an
    endpoint that opened them would undo that. */

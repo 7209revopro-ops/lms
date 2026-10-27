@@ -3385,10 +3385,73 @@ export interface IMentorMeeting extends Document {
   /** Where it was booked (2026-10-24): the commission portal, or LMS admin's Mentor Calendar. Absent on
       meetings booked before this was kept — the Bookings page infers it from who booked them. */
   bookedVia?:     'portal' | 'lms'
+  /** A student meeting whose mentor fills in how it went once it is over (2026-10-27, meetingOutcome.service.ts):
+      set by Tetra Commission's bookings, so the sales CRMs' and older meetings ask nothing. */
+  askOutcome?:    boolean
+  outcome?:       IMeetingOutcome | null
   cancelledAt?:   Date
   createdAt:      Date
   updatedAt:      Date
 }
+
+/** Where the client stands after the meeting, as the mentor said (2026-10-27). */
+export const MEETING_OUTCOME_STAGES = ['interested', 'follow_up', 'meeting_with', 'revision', 'not_interested'] as const
+export type MeetingOutcomeStage = (typeof MEETING_OUTCOME_STAGES)[number]
+export const MEETING_FOLLOW_UP_KINDS = ['cse_follow_up', 'revision_needed'] as const
+/** How an interested client means to pay — the sales CRMs' methods. */
+export const MEETING_PAYMENT_MODES = ['Cash', 'Card', 'Bank Transfer', 'Tabby', 'Tamara', 'INR Transfer', 'Payment link'] as const
+export const MEETING_NOT_INTERESTED_REASONS = ['Price', 'Time', 'Not convinced', 'Joined elsewhere', 'Other'] as const
+
+export interface IMeetingOutcome {
+  stage:         MeetingOutcomeStage
+  /** Interested in / to revise (a course here). */
+  courseId?:     Types.ObjectId | null
+  courseTitle?:  string
+  /** Interested: when and how they mean to pay. */
+  paymentDate?:  string
+  paymentMode?:  string
+  /** Follow-up: the CSE's follow-up or a revision, and when. */
+  followUpKind?: string
+  followUpDate?: string
+  /** Meeting with — which mentor; revision — the mentor they would like. */
+  withMentorId?:    Types.ObjectId | null
+  withMentorName?:  string
+  withMentorEmail?: string
+  /** Revision: which module (a section of the course). */
+  moduleId?:     Types.ObjectId | null
+  moduleTitle?:  string
+  /** Not interested: why. */
+  reason?:       string
+  remark:        string
+  filledById?:   Types.ObjectId | null
+  filledByName:  string
+  filledByEmail: string
+  /** Where it was filled: LMS admin, or Tetra Commission. */
+  filledVia:     'lms' | 'portal'
+  filledAt:      Date
+}
+
+const MeetingOutcomeSchema = new Schema<IMeetingOutcome>({
+  stage:           { type: String, enum: MEETING_OUTCOME_STAGES, required: true },
+  courseId:        { type: Schema.Types.ObjectId, ref: 'Course', default: null },
+  courseTitle:     { type: String, default: '' },
+  paymentDate:     { type: String, default: '' },
+  paymentMode:     { type: String, default: '' },
+  followUpKind:    { type: String, default: '' },
+  followUpDate:    { type: String, default: '' },
+  withMentorId:    { type: Schema.Types.ObjectId, ref: 'User', default: null },
+  withMentorName:  { type: String, default: '' },
+  withMentorEmail: { type: String, default: '' },
+  moduleId:        { type: Schema.Types.ObjectId, ref: 'Section', default: null },
+  moduleTitle:     { type: String, default: '' },
+  reason:          { type: String, default: '' },
+  remark:          { type: String, required: true, maxlength: 2000 },
+  filledById:      { type: Schema.Types.ObjectId, ref: 'User', default: null },
+  filledByName:    { type: String, default: '' },
+  filledByEmail:   { type: String, default: '' },
+  filledVia:       { type: String, enum: ['lms', 'portal'], required: true },
+  filledAt:        { type: Date, required: true },
+}, { _id: false })
 
 const MentorMeetingSchema = new Schema<IMentorMeeting>(
   {
@@ -3416,6 +3479,8 @@ const MentorMeetingSchema = new Schema<IMentorMeeting>(
     notes:          { type: String, default: '', maxlength: 2000 },
     bookedByEmail:  { type: String, required: true, lowercase: true, trim: true },
     bookedVia:      { type: String, enum: ['portal', 'lms'] },
+    askOutcome:     { type: Boolean, default: undefined },
+    outcome:        { type: MeetingOutcomeSchema, default: null },
     cancelledAt:    { type: Date, default: null },
   },
   baseSchemaOptions,
@@ -3424,6 +3489,8 @@ const MentorMeetingSchema = new Schema<IMentorMeeting>(
 /* The query this collection exists to answer: what is in front of this mentor
    between two dates. */
 MentorMeetingSchema.index({ mentorId: 1, scheduledStart: 1 })
+/* Tetra Commission reading the outcomes filled since it last looked. */
+MentorMeetingSchema.index({ 'outcome.filledAt': 1 }, { partialFilterExpression: { askOutcome: true } })
 
 export const MentorMeetingModel = mongoose.model<IMentorMeeting>(
   'MentorMeeting',

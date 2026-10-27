@@ -788,6 +788,8 @@ export async function createMentorMeetingForPortal(input: {
   bookedVia?: 'portal' | 'lms'
   /** Any academy's mentor — the portal's calendar lists both academies' (listMentorsForPortal allAcademies). */
   allAcademies?: boolean
+  /** Tetra Commission's (2026-10-27): the mentor says how a student meeting went once it is over (meetingOutcome.service.ts). */
+  askOutcome?: boolean
 }): Promise<{ meeting: PortalMentorMeeting; mentorEmail: string; linkNote: string | null }> {
   const org = await resolveOrg(input.remoteOrgId)
 
@@ -899,6 +901,7 @@ export async function createMentorMeetingForPortal(input: {
     notes: String(input.notes ?? '').trim(),
     bookedByEmail,
     bookedVia: input.bookedVia === 'lms' ? 'lms' : 'portal',
+    ...(input.askOutcome === true ? { askOutcome: true } : {}),
   })
 
   /* Told, not just recorded. A booking the mentor has to go looking for is a

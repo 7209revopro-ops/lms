@@ -2008,6 +2008,29 @@ router.post('/mentor-calendar/meetings/:id/cancel', requireInstructor, async (re
   } catch (err) { next(err) }
 })
 
+/* How a student meeting went (2026-10-27, meetingOutcome.service.ts): the signed-in mentor's meetings waiting for it,
+   the form's lists, and filling one. The pop-up on every page (MeetingOutcomeGate) asks until each is filled. */
+router.get('/meeting-outcomes/pending', requireInstructor, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { pendingOutcomesForUser } = await import('@/services/meetingOutcome.service.ts')
+    sendSuccess(res, { meetings: await pendingOutcomesForUser(String(req.user?.id ?? '')) })
+  } catch (err) { next(err) }
+})
+
+router.get('/meeting-outcomes/options', requireInstructor, async (_req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { outcomeOptions } = await import('@/services/meetingOutcome.service.ts')
+    sendSuccess(res, await outcomeOptions())
+  } catch (err) { next(err) }
+})
+
+router.post('/meeting-outcomes/:id', requireInstructor, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { saveOutcomeForUser } = await import('@/services/meetingOutcome.service.ts')
+    sendSuccess(res, await saveOutcomeForUser({ id: String(req.user?.id ?? ''), email: String(req.user?.email ?? '') }, req.params['id'], (req.body ?? {}) as Record<string, unknown>), 'Outcome saved')
+  } catch (err) { next(err) }
+})
+
 /* ── Programs (Tetra Commission's user, 2026-10-09) ──────────────────────────────────────────────────────
    A live class that repeats weekly or monthly until an end date, for the students picked for it only
    (services/program.service.ts). Instructors make and manage their own; admins any in their academy. */
