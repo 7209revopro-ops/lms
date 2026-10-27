@@ -148,7 +148,7 @@ try {
   section('G · a change')
   await M.EmailOutboxModel.deleteMany({}); await M.WhatsAppOutboxModel.deleteMany({}); await M.NotificationModel.deleteMany({})
   const second = await M.LiveClassModel.findOne({ programId: prog.id, _id: { $ne: first!._id } })
-  const cancel = await call('PATCH', `/admin/live-classes/${second!._id}`, admin, { status: 'cancelled' })
+  const cancel = await call('PATCH', `/admin/live-classes/${second!._id}`, admin, { status: 'cancelled', cancelReason: 'Mentor unwell' })
   check('cancelled', cancel.status === 200, why(cancel))
   await settle()
   check('in-app', (await M.NotificationModel.countDocuments({ userId: stu._id, title: /cancelled/i })) >= 1)

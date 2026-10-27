@@ -113,6 +113,10 @@ export interface LiveClass {
   /** The HRMS meeting pod held for an online class (2026-10-18): which, or why none. */
   pod?:               ClassPod
   rescheduledReason?: string
+  /* Cancelled classes (2026-10-27): why — students see it — and, for staff, who and when. */
+  cancelReason?:      string
+  cancelledAt?:       string
+  cancelledByName?:   string
 
   /* Weekly-repeat grouping tag — shared by every class generated from
      the same "repeat weekly" action. Absent on one-off classes. */
@@ -273,6 +277,8 @@ export interface UpdateLiveClassInput {
   location?:         string
   room?:             string
   rescheduleReason?: string
+  /* Required by the server when this update cancels the class. */
+  cancelReason?:     string
 }
 
 /* ── Availability types ─────────────────────── */

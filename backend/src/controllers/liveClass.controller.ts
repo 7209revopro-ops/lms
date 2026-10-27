@@ -358,6 +358,10 @@ function toDTO(doc: any, entitled = true, staff = true, door?: LabelledDoor | un
     /* The HRMS meeting pod held for an online class (services/classPod.service.ts): which, or why none. */
     pod:               j.pod?.state ? { state: j.pod.state, roomName: j.pod.roomName, note: j.pod.state === 'booked' ? undefined : j.pod.note } : undefined,
     rescheduledReason: j.rescheduledReason,
+    /* Students see why; who and when are for staff. */
+    cancelReason:      j.status === 'cancelled' ? j.cancelReason : undefined,
+    cancelledAt:       staff && j.status === 'cancelled' ? j.cancelledAt : undefined,
+    cancelledByName:   staff && j.status === 'cancelled' ? j.cancelledByName : undefined,
 
     seriesId:       j.seriesId ? String(j.seriesId) : undefined,
     /* Hybrid class: the in-person class and its online twin share it (plan.md §12). */
@@ -455,6 +459,8 @@ export interface BookingChangeNotice {
   instructorChanged: boolean
   oldInstructorId?:  string
   newInstructorId?:  string
+  /* Why it was cancelled — shown to the student. */
+  cancelReason?:     string
 }
 
 /* ─────────────────────────────────────────────────────────────────────────
@@ -703,7 +709,7 @@ export async function notifyBookedStudents(notice: BookingChangeNotice): Promise
     if (notice.wasCancelled) {
       messages.push({
         title: `Class cancelled: ${notice.title}`,
-        body:  'The session you booked has been cancelled.',
+        body:  `The session you booked has been cancelled.${notice.cancelReason ? ` Reason: ${notice.cancelReason}` : ''}`,
         kind:  'cancelled',
       })
     } else {
@@ -777,7 +783,7 @@ export async function notifyBookedStudents(notice: BookingChangeNotice): Promise
     const readerSlug = orgSlugFor(u.organizationId)
     const was = academyClock(oldStart, readerSlug).full
     const kinds: Array<{ kind: CriticalKind; title: string; body: string }> = notice.wasCancelled
-      ? [{ kind: 'cancelled', title: `Class cancelled: ${notice.title}`, body: `This class in your course on ${was} has been cancelled.` }]
+      ? [{ kind: 'cancelled', title: `Class cancelled: ${notice.title}`, body: `This class in your course on ${was} has been cancelled.${notice.cancelReason ? ` Reason: ${notice.cancelReason}` : ''}` }]
       : [
           ...(notice.wasRescheduled ? [{ kind: 'rescheduled' as const, title: `Class time changed: ${notice.title}`,
               body: `This class in your course has moved from ${was} to ${academyClock(newStart, readerSlug).full}.` }] : []),
@@ -1926,6 +1932,24 @@ export class LiveClassController {
       const { LiveClassModel } = await import('@/models/schema.ts')
       const oldSession = await LiveClassModel.findById(id).lean()
 
+      /* Cancelling needs a reason (2026-10-27): students are told it, and
+         staff see who cancelled and when. Only on the change to cancelled —
+         re-saving a class that is already cancelled asks for nothing. */
+      if (data.status === 'cancelled' && oldSession && oldSession.status !== 'cancelled') {
+        const reason = typeof dto['cancelReason'] === 'string' ? dto['cancelReason'].trim() : ''
+        if (reason.length < 3) {
+          throw new LiveClassError('CANCEL_REASON_REQUIRED', 'Please say why this class is cancelled — students will see it.', 400)
+        }
+        const { UserModel } = await import('@/models/schema.ts')
+        const actor = await UserModel.findById(req.user!.id).select('name email').lean<{ name?: string; email?: string }>()
+        Object.assign(data, {
+          cancelReason:    reason,
+          cancelledAt:     new Date(),
+          cancelledBy:     req.user!.id,
+          cancelledByName: actor?.name ?? actor?.email ?? req.user!.email,
+        })
+      }
+
       const live = await this.service.update(id, data)
 
       const wasCancelled   = oldSession?.status !== 'cancelled' && data.status === 'cancelled'
@@ -1981,6 +2005,7 @@ export class LiveClassController {
           instructorChanged,
           oldInstructorId,
           newInstructorId: instructorChanged ? String(data.instructorId) : undefined,
+          cancelReason:    wasCancelled ? (data as { cancelReason?: string }).cancelReason : undefined,
         }).catch(err => logger.error({ err, liveClassId: id }, 'live class change notification failed'))
       }
 

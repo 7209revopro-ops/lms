@@ -40,6 +40,16 @@ import { useToast } from '@/store/ui.store'
 import { shareOrCopyLink } from '@/lib/shareLink'
 import { categoryScopeOf } from '@/lib/programScope'
 import { AvatarImg } from '@/components/ui/AvatarImg'
+
+/* Hover text on a cancelled class: why, who and when (2026-10-27). */
+function cancelledTitle(live: LiveClass): string {
+  if (!live.cancelReason && !live.cancelledByName) return 'Cancelled'
+  const when = live.cancelledAt
+    ? new Date(live.cancelledAt).toLocaleString('en-GB', { timeZone: getActiveTimeZone(), day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })
+    : ''
+  const by = [live.cancelledByName, when].filter(Boolean).join(', ')
+  return `Cancelled${by ? ` (${by})` : ''}${live.cancelReason ? `: ${live.cancelReason}` : ''}`
+}
 import { useBackdropClose } from '@/hooks/useBackdropClose'
 import {
   IN_APP_RGB, MEET_RGB, ROOM_RGB, BROADCAST_RGB,
@@ -650,8 +660,14 @@ function TableRow({ live, index, showInstructor, onBackup }: { live: LiveClass; 
               )}
               {isCancelled && (
                 <span className="rounded-md px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-widest"
+                  title={cancelledTitle(live)}
                   style={{ background: 'rgba(255,255,255,0.06)', color: 'rgba(255,255,255,0.3)' }}>
                   Cancelled
+                </span>
+              )}
+              {isCancelled && live.cancelReason && (
+                <span className="max-w-[260px] truncate text-[10px]" title={cancelledTitle(live)} style={{ color: 'rgba(255,255,255,0.4)' }}>
+                  {live.cancelReason}
                 </span>
               )}
               {isScheduled && (
@@ -1798,8 +1814,14 @@ function GridCalendarView({ items, onEditClick }: { items: LiveClass[]; onEditCl
                       )}
                       {isCancelled && (
                         <span className="rounded-md px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-widest"
+                          title={cancelledTitle(live)}
                           style={{ background: 'rgba(255,255,255,0.06)', color: 'rgba(255,255,255,0.3)' }}>
                           Cancelled
+                        </span>
+                      )}
+                      {isCancelled && live.cancelReason && (
+                        <span className="max-w-[260px] truncate text-[10px]" title={cancelledTitle(live)} style={{ color: 'rgba(255,255,255,0.4)' }}>
+                          {live.cancelReason}
                         </span>
                       )}
                       {(live as any).isOnline === false ? (

@@ -205,7 +205,7 @@ export function isUrgent(scheduledStart?: Date | string | null, now = new Date()
    including a guest academy's students on a shared class — has been reading
    these in the host academy's clock. */
 export type CriticalSenders = {
-  cancelled:    (to: string, name: string, title: string, when: Date, slug?: string | null) => Promise<void>
+  cancelled:    (to: string, name: string, title: string, when: Date, slug?: string | null, reason?: string) => Promise<void>
   rescheduled:  (to: string, name: string, title: string, from: Date, to_: Date, slug?: string | null) => Promise<void>
   delayed:      (to: string, name: string, title: string, when: Date, slug?: string | null) => Promise<void>
   instructor:   (to: string, name: string, title: string, oldN: string, newN: string, when: Date, slug?: string | null) => Promise<void>
@@ -518,7 +518,11 @@ async function sendOne(row: any, senders: CriticalSenders, academySlug?: string 
   }
 
   if (row.kind === 'cancelled') {
-    return senders.cancelled(row.email, row.name ?? '', row.title, oldStart, academySlug)
+    /* The reason as the class holds it when the mail goes — read here, not
+       parked with the row, so a merged or delayed mail still says it. */
+    const { LiveClassModel } = await import('@/models/schema.ts')
+    const cls = await LiveClassModel.findById(row.liveClassId).select('cancelReason').lean<{ cancelReason?: string }>()
+    return senders.cancelled(row.email, row.name ?? '', row.title, oldStart, academySlug, cls?.cancelReason)
   }
   if (row.kind === 'rescheduled') {
     return isSameDay(oldStart, newStart)

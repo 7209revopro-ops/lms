@@ -1374,6 +1374,14 @@ export interface ILiveClass extends Document {
   /* Reschedule tracking */
   rescheduledReason?: string          // admin-provided reason when class is rescheduled
 
+  /* Why the class was cancelled (2026-10-27) — required when staff cancel it,
+     shown to students in the notice, the email and on the class. Who and when
+     are for staff. */
+  cancelReason?:    string
+  cancelledAt?:     Date
+  cancelledBy?:     Types.ObjectId
+  cancelledByName?: string
+
   /* Instructor reminder tracking */
   reminderInstructor15MinSent: boolean
   /* The mentor's 10-minute WhatsApp (mentor_class_in_10_min) — once per class. */
@@ -1565,6 +1573,10 @@ const LiveClassSchema = new Schema<ILiveClass>(
       default: undefined,
     },
     rescheduledReason:           { type: String, maxlength: 2000 },
+    cancelReason:                { type: String, maxlength: 500 },
+    cancelledAt:                 { type: Date },
+    cancelledBy:                 { type: Schema.Types.ObjectId, ref: 'User' },
+    cancelledByName:             { type: String, maxlength: 200 },
     reminderInstructor15MinSent: { type: Boolean, default: false },
     mentorWhatsApp10MinSent:     { type: Boolean, default: false },
     verifyRequestedAt:           { type: Date },

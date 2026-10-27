@@ -15,6 +15,8 @@ export interface MyBooking {
     scheduledStart: string
     durationMins:   number
     status:         string
+    /* Why the academy cancelled it — set when status is 'cancelled'. */
+    cancelReason?:  string
     muxPlaybackId?: string
     type:           string
     isOnline?:      boolean

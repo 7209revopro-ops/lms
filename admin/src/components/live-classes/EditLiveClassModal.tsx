@@ -86,6 +86,9 @@ export function EditLiveClassModal({ live, onClose, onSuccess }: Props) {
   const [room,             setRoom]             = useState<string>((live as any).room ?? '')
   const [rescheduleReason, setRescheduleReason] = useState<string>('')
   const [status,           setStatus]           = useState<LiveClassStatus>(live.status)
+  /* Cancelling here asks why (2026-10-27) — students are told the reason. */
+  const [cancelReason,     setCancelReason]     = useState<string>('')
+  const cancelling = status === 'cancelled' && live.status !== 'cancelled'
   const originalInstructorId =
     typeof live.instructor === 'object' ? (live.instructor?.id ?? '') : (live.instructorId ?? '')
   const [instructorId,     setInstructorId]     = useState(originalInstructorId)
@@ -175,6 +178,10 @@ export function EditLiveClassModal({ live, onClose, onSuccess }: Props) {
     e.preventDefault()
     setError(null)
 
+    if (cancelling && cancelReason.trim().length < 3) {
+      setError('Please say why this class is cancelled — students will see it.')
+      return
+    }
     if (timeChanged && !rescheduleReason.trim()) {
       setError('Please provide a reason for rescheduling this class.')
       return
@@ -209,6 +216,7 @@ export function EditLiveClassModal({ live, onClose, onSuccess }: Props) {
           // "" = any free room: the LMS picks one (2026-10-19), so an emptied room is sent, not dropped.
           room:             !isOnline ? room.trim() : undefined,
           rescheduleReason: timeChanged ? rescheduleReason.trim() : undefined,
+          cancelReason:     cancelling ? cancelReason.trim() : undefined,
           recordingUrl:     recordingUrl.trim() || undefined,
           status,
           instructorId:     instructorId || undefined,
@@ -602,6 +610,24 @@ export function EditLiveClassModal({ live, onClose, onSuccess }: Props) {
               <option value="ended">Ended</option>
               <option value="cancelled">Cancelled</option>
             </select>
+            {cancelling && (
+              <div className="mt-2" style={{ background: 'rgba(239,68,68,0.07)', border: '1px solid rgba(239,68,68,0.25)', borderRadius: 12, padding: '12px 14px' }}>
+                <span className="mb-2 block text-[10px] font-bold uppercase tracking-widest" style={{ color: '#F87171' }}>
+                  Why is this class cancelled? <span style={{ color: '#EF4444' }}>*</span>
+                </span>
+                <textarea value={cancelReason} onChange={e => setCancelReason(e.target.value)} rows={2} maxLength={500}
+                  placeholder="e.g. Mentor is unwell — a replacement class will be scheduled"
+                  className={base} style={{ ...iStyle, resize: 'none' }} />
+                <p className="mt-1 text-[10px]" style={{ color: 'rgba(255,255,255,0.28)' }}>
+                  Students who booked or are enrolled will see this reason in their notice and email.
+                </p>
+              </div>
+            )}
+            {live.status === 'cancelled' && live.cancelReason && (
+              <p className="mt-2 text-[11px]" style={{ color: 'rgba(255,255,255,0.45)' }}>
+                Cancelled{live.cancelledByName ? ` by ${live.cancelledByName}` : ''}: {live.cancelReason}
+              </p>
+            )}
           </div>
 
           {/* Module */}

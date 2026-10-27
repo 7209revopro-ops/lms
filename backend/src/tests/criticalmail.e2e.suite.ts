@@ -208,7 +208,7 @@ section('B. A cancellation for a class starting in five minutes is mailed from t
 {
   const { student, lc } = await seat(5 * 60_000)
 
-  const r = await call('PATCH', `/admin/live-classes/${lc._id}`, adminJar, { status: 'cancelled' })
+  const r = await call('PATCH', `/admin/live-classes/${lc._id}`, adminJar, { status: 'cancelled', cancelReason: 'Mentor unwell' })
   check('B1 the cancellation is accepted', r.status === 200, String(r.status))
 
   /* No flush is called here on purpose. A ten-minute buffer on a class that
@@ -231,7 +231,7 @@ section('C. A reschedule then a cancellation: only the cancellation is mailed')
     scheduledStart: new Date(Date.now() + 120 * HOUR).toISOString(),
   })
   await waitFor(() => notes(student), 1)
-  await call('PATCH', `/admin/live-classes/${lc._id}`, adminJar, { status: 'cancelled' })
+  await call('PATCH', `/admin/live-classes/${lc._id}`, adminJar, { status: 'cancelled', cancelReason: 'Mentor unwell' })
   await waitFor(() => notes(student), 2)
 
   const flushed = await flushCriticalMail({ now: new Date(Date.now() + 20 * 60_000) })
@@ -269,7 +269,7 @@ section('D. Past the daily cap, the API’s own notices fold into the digest')
   }
 
   for (const lc of classes) {
-    await call('PATCH', `/admin/live-classes/${lc._id}`, adminJar, { status: 'cancelled' })
+    await call('PATCH', `/admin/live-classes/${lc._id}`, adminJar, { status: 'cancelled', cancelReason: 'Mentor unwell' })
   }
   check('D1 all three cancellations are in the bell',
     (await waitFor(() => notes(student), 3)) === 3, String(await notes(student)))

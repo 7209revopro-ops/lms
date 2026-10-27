@@ -283,7 +283,7 @@ async function cancelUpcoming(programId: Types.ObjectId, reason: string): Promis
   const { LiveClassService } = await import('@/services/liveClass.service.ts')
   const svc = new LiveClassService()
   const ids = await upcomingClassIds(programId)
-  for (const id of ids) await svc.update(String(id), { status: 'cancelled', rescheduledReason: reason })
+  for (const id of ids) await svc.update(String(id), { status: 'cancelled', rescheduledReason: reason, cancelReason: reason, cancelledAt: new Date() })
   return ids.length
 }
 

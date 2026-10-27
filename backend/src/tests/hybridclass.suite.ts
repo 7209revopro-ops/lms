@@ -287,7 +287,7 @@ try {
     const C = await studentLogin(students[1]!)
     const b1 = await call('POST', '/bookings', { jar: C, body: { liveClassId: pair.body?.data?.id } })
     check('(booked in person)', b1.status === 201, why(b1))
-    const cx = await call('PATCH', `/admin/live-classes/${pair.body?.data?.id}`, { jar: ADMIN, body: { status: 'cancelled' } })
+    const cx = await call('PATCH', `/admin/live-classes/${pair.body?.data?.id}`, { jar: ADMIN, body: { status: 'cancelled', cancelReason: 'Mentor unwell' } })
     check('(the in-person class is cancelled)', cx.status === 200, why(cx))
     const b2 = await call('POST', '/bookings', { jar: C, body: { liveClassId: pair.body?.data?.twin?.id } })
     check('N1 the online twin can now be booked', b2.status === 201, why(b2))

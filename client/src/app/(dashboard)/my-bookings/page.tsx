@@ -288,7 +288,7 @@ function classify(r: Row, now: number): Verdict {
     return {
       kind: 'called-off', lane: 'past', label: 'Class cancelled', rgb: '245,158,11',
       ink: 'var(--color-warning)', Icon: CalendarX2,
-      note: 'This class was cancelled by the academy. Your seat was released automatically.',
+      note: `This class was cancelled by the academy${lc.cancelReason ? ` — ${lc.cancelReason}` : ''}. Your seat was released automatically.`,
     }
   /* 'live' is the server's word and it owns it: a class can be live a little
      before or after its printed slot. */

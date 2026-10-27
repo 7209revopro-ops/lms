@@ -1900,19 +1900,22 @@ export async function sendCancelledNotification(
   sessionTitle: string,
   sessionStart: Date | string,
   academySlug?: string | null,
+  reason?: string,
 ): Promise<void> {
   const d = new Date(sessionStart)
   const { date: dateStr, time: timeStr } = academyClock(d, academySlug)
   const subject = `❗ Class Cancellation Notice`
+  const why = reason?.trim()
   const html = wrap(subject, `
     <h2 style="margin:0 0 16px;font-size:20px;font-weight:700;color:#0D0F1A">❗ Class Cancellation Notice</h2>
     <p style="margin:0 0 16px;color:#374151">Dear <strong>${escapeHtml(name)}</strong>,</p>
     <p style="margin:0 0 20px;color:#374151">We regret to inform you that your scheduled class on <strong>${dateStr} at ${timeStr}</strong> has been cancelled.</p>
+    ${why ? `<p style="margin:0 0 20px;color:#374151"><strong>Reason:</strong> ${escapeHtml(why)}</p>` : ''}
     <p style="margin:0 0 20px;color:#374151">We apologize for the inconvenience. A replacement session will be scheduled, and you will be notified once it is available.</p>
     <p style="margin:0 0 24px;color:#374151">Thank you for your understanding.</p>
     <p style="margin:0;color:#374151"><strong>Delta Academy</strong></p>
   `)
-  await sender.send({ to, subject, html, text: `Dear ${name},\n\nWe regret to inform you that your scheduled class on ${dateStr} at ${timeStr} has been cancelled.\n\nWe apologize for the inconvenience. A replacement session will be scheduled, and you will be notified once it is available.\n\nThank you for your understanding.\n\nDelta Academy` })
+  await sender.send({ to, subject, html, text: `Dear ${name},\n\nWe regret to inform you that your scheduled class on ${dateStr} at ${timeStr} has been cancelled.\n\n${why ? `Reason: ${why}\n\n` : ''}We apologize for the inconvenience. A replacement session will be scheduled, and you will be notified once it is available.\n\nThank you for your understanding.\n\nDelta Academy` })
 }
 
 /* A program (services/program.service.ts) was made with this student on it:

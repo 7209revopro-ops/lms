@@ -146,6 +146,7 @@ function LiveRow({
 }) {
   const router          = useRouter()
   const [confirming,    setConfirming]    = useState<'cancel' | 'delete' | null>(null)
+  const [cancelReason,  setCancelReason]  = useState('')
   const [showCreds,     setShowCreds]     = useState(false)
   const [startError,    setStartError]    = useState<string | null>(null)
   const [editOpen,      setEditOpen]      = useState(false)
@@ -381,10 +382,18 @@ function LiveRow({
           {/* Cancel session (scheduled only) — sets status to cancelled */}
           {isHost && isScheduled && (
             confirming === 'cancel' ? (
-              <button
-                onClick={() => { updateMutation.mutate({ id: live.id, data: { status: 'cancelled' } }); setConfirming(null) }}
-                className="rounded-lg px-2 py-1 text-[10px] font-semibold text-white"
-                style={{ background: '#F59E0B' }}>Confirm cancel</button>
+              /* Why — required, and students are told it (2026-10-27). */
+              <span className="flex items-center gap-1">
+                <input autoFocus value={cancelReason} onChange={e => setCancelReason(e.target.value)} maxLength={500}
+                  placeholder="Why? Students will see this"
+                  className="w-44 rounded-lg px-2 py-1 text-[10px] outline-none"
+                  style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(245,158,11,0.4)', color: '#fff' }} />
+                <button
+                  disabled={cancelReason.trim().length < 3}
+                  onClick={() => { updateMutation.mutate({ id: live.id, data: { status: 'cancelled', cancelReason: cancelReason.trim() } }); setConfirming(null); setCancelReason('') }}
+                  className="rounded-lg px-2 py-1 text-[10px] font-semibold text-white disabled:opacity-40"
+                  style={{ background: '#F59E0B' }}>Confirm cancel</button>
+              </span>
             ) : (
               <button onClick={() => setConfirming('cancel')}
                 className="rounded-lg px-2 py-1 text-[10px] font-semibold transition-colors hover:bg-white/10"

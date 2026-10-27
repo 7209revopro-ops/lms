@@ -831,7 +831,9 @@ export class LiveClassService {
     }
 
     if (live.status === 'cancelled') {
-      throw new LiveClassError('SESSION_CANCELLED', 'This session was cancelled', 410)
+      /* The reason rides in the message — the watch page shows it (2026-10-27). */
+      const why = (live as { cancelReason?: string }).cancelReason?.trim()
+      throw new LiveClassError('SESSION_CANCELLED', why ? `This session was cancelled. Reason: ${why}` : 'This session was cancelled', 410)
     }
 
     if (live.type === 'external') {
@@ -1011,6 +1013,10 @@ export class LiveClassService {
     location:          string
     room:              string
     rescheduledReason: string
+    cancelReason:      string
+    cancelledAt:       Date
+    cancelledBy:       string
+    cancelledByName:   string
     guestCohorts:      Array<{ organizationId: string; courseId: string; sectionId?: string; seatFloor: number }>
     overflowSeats:     number
   }>): Promise<ILiveClass> {

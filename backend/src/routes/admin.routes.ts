@@ -1926,6 +1926,8 @@ const liveUpdateSchema = withCohortRules(z.object({
   location:          z.string().max(500).optional(),
   room:              z.string().max(100).optional(),
   rescheduleReason:  z.string().max(2000).optional(),
+  /* Required by the controller when this edit cancels the class. */
+  cancelReason:      z.string().trim().max(500).optional(),
   guestCohorts:      cohortsField,
   overflowSeats:     overflowField,
   bothAcademies:     z.boolean().optional(),
@@ -2283,7 +2285,8 @@ const liveRepeatSchema = z.object({ weeks: z.coerce.number().int().min(1).max(52
    matrix guard, so a custom role explicitly DENIED live-class creation could
    still produce up to 52 of them by repeating one it was allowed to see. */
 router.post  ('/live-classes/:id/repeat',                 requireDepartmentLiveClass('id'), requirePermission('live-classes','create'), validate(liveRepeatSchema), audit('liveclass.repeat', 'LiveClass', r => String(r.params['id'] ?? ''), r => ({ weeks: r.body.weeks })), live.adminRepeat)
-router.patch ('/live-classes/:id', requirePermission('live-classes','update'),                        validate(liveUpdateSchema), audit('liveclass.update', 'LiveClass', r => String(r.params['id'] ?? '')), live.adminUpdate)
+router.patch ('/live-classes/:id', requirePermission('live-classes','update'),                        validate(liveUpdateSchema), audit('liveclass.update', 'LiveClass', r => String(r.params['id'] ?? ''),
+  r => r.body?.status === 'cancelled' && r.body?.cancelReason ? { cancelled: true, reason: String(r.body.cancelReason).slice(0, 500) } : {}), live.adminUpdate)
 router.delete('/live-classes/:id', requirePermission('live-classes','delete'),                        audit('liveclass.delete', 'LiveClass', r => String(r.params['id'] ?? '')), live.adminDelete)
 /* Backup link — the instructor cannot get into the class's room: swap in a
    fresh Google Meet (instructor co-host) or a pasted link. Same permission as

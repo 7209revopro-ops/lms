@@ -131,6 +131,8 @@ export default function WatchPage({ params }: { params: Promise<{ id: string }> 
     const errCode = (error as any)?.response?.data?.error?.code
     const isNotEnrolled = errCode === 'NOT_ENROLLED'
     const isCancelled   = errCode === 'SESSION_CANCELLED'
+    /* The server's message carries the academy's reason, when there is one. */
+    const errMessage: string | undefined = (error as any)?.response?.data?.error?.message
 
     return (
       <div className="mx-auto max-w-xl py-20 text-center">
@@ -145,7 +147,7 @@ export default function WatchPage({ params }: { params: Promise<{ id: string }> 
         </p>
         <p className="mt-2 text-sm" style={{ color: 'var(--color-text-muted)' }}>
           {isNotEnrolled ? 'You must be enrolled in this course to watch the live class.'
-           : isCancelled  ? 'This session was cancelled by the instructor.'
+           : isCancelled  ? (errMessage?.includes('Reason:') ? errMessage : 'This session was cancelled by the instructor.')
            : 'We couldn\'t load the stream. Please try again.'}
         </p>
         <Link href="/live-classes"

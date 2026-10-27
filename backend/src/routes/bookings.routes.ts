@@ -476,7 +476,7 @@ router.get('/me', authenticate, validate(bookingQuerySchema, 'query'), async (re
              the cohort array names another academy's course and module ids,
              which is staff-only (see STAFF_ONLY_FIELDS in the live-class
              controller), so both are stripped off the row before it ships. */
-          select: 'id title scheduledStart durationMins status muxPlaybackId type isOnline language location room courseId sectionId instructorId organizationId guestCohorts',
+          select: 'id title scheduledStart durationMins status cancelReason muxPlaybackId type isOnline language location room courseId sectionId instructorId organizationId guestCohorts',
           populate: [
             { path: 'courseId',     select: 'id title slug thumbnailUrl' },
             { path: 'sectionId',    select: 'id title order' },
