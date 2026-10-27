@@ -1,14 +1,14 @@
 /* Where to go after signing in or signing up: the ?from= of this page, only if it is a path on
-   this site (an open redirect otherwise), else My Learning. Shared by sign-in and sign-up — the
+   this site (an open redirect otherwise), else the Class Schedule. Shared by sign-in and sign-up — the
    public /explore pages send buyers through either and back to the course's checkout. */
 export function safeRedirect(raw: string | null): string {
-  if (!raw) return '/my-learning'
+  if (!raw) return '/class-bookings'
   try {
     const url = new URL(raw, window.location.origin)
-    if (url.origin !== window.location.origin) return '/my-learning'
+    if (url.origin !== window.location.origin) return '/class-bookings'
     return url.pathname.replace(/^\/+/, '/') + url.search + url.hash
   } catch {
-    return '/my-learning'
+    return '/class-bookings'
   }
 }
 

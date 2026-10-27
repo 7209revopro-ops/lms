@@ -52,14 +52,14 @@ function Redeemer() {
            so every React Query cache entry belongs to the wrong account and
            must not survive. It also guarantees the middleware re-runs with the
            new cookie already in the jar. */
-        window.location.replace('/my-learning')
+        window.location.replace('/class-bookings')
       } catch (err: any) {
         /* A spent code is the expected result of reloading this page after a
            successful redemption — the cookie is already set, so reporting
            "invalid link" would contradict the live banner above the message.
            The flag cookie answers that without a request. */
         if (document.cookie.split('; ').some(c => c === 'lms_imp=1')) {
-          window.location.replace('/my-learning')
+          window.location.replace('/class-bookings')
           return
         }
 

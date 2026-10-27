@@ -29,8 +29,8 @@ import { AvatarImg } from '@/components/ui/AvatarImg'
 
 /* Nav tabs shown when sidebar layout is active (minimal — sidebar handles main nav) */
 const SIDEBAR_TABS = [
-  { label: 'My Learning', href: '/my-learning',    icon: GraduationCap },
   { label: 'Schedule',    href: '/class-bookings', icon: CalendarDays },
+  { label: 'My Learning', href: '/my-learning',    icon: GraduationCap },
   { label: 'My Bookings', href: '/my-bookings',    icon: Ticket },
   { label: 'Rate Classes', href: '/reviews',       icon: Star },
   { label: 'Messages',     href: '/messages',      icon: MessageCircle },
@@ -42,9 +42,10 @@ const SIDEBAR_TABS = [
 ]
 
 /* Nav tabs shown when topbar-only layout is active (full navigation) */
+/* Class Schedule first — it is where a student lands (2026-10-27). */
 const TOPBAR_TABS = [
-  { label: 'My Learning',    href: '/my-learning',    icon: GraduationCap },
   { label: 'Class Schedule', href: '/class-bookings', icon: CalendarDays },
+  { label: 'My Learning',    href: '/my-learning',    icon: GraduationCap },
   /* The seats you hold, next to the place you take them. This row is the ONLY
      navigation a desktop window gets - the hamburger that opens the drawer is
      `lg:hidden` - so a page missing from here is a page reachable only by

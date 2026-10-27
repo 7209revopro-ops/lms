@@ -11,7 +11,7 @@ import Spinner from '@/components/ui/Spinner'
 /* Only allow same-origin internal paths as the post-login destination — never
    an absolute URL an attacker could put in the link (open-redirect guard). */
 function safeNext(raw: string | null): string {
-  if (!raw || !raw.startsWith('/') || raw.startsWith('//')) return '/my-learning'
+  if (!raw || !raw.startsWith('/') || raw.startsWith('//')) return '/class-bookings'
   return raw
 }
 

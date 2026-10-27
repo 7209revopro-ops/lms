@@ -1154,7 +1154,7 @@ export class AuthService {
     if (!user.isActive) throw new AuthError('ACCOUNT_DISABLED', 'This account is disabled.', 403)
 
     const raw  = await this.#issueLoginLink(user.id)
-    const next = opts.next && opts.next.startsWith('/') ? opts.next : '/my-learning'
+    const next = opts.next && opts.next.startsWith('/') ? opts.next : '/class-bookings'
     const link = `${env.CLIENT_URL}/continue?token=${raw}&next=${encodeURIComponent(next)}`
     await sendCourseInvite(user.email, user.name, link, opts.courseName ?? 'Delta AI Academy')
     logger.info({ userId: user.id, created }, 'course invite / login link sent')

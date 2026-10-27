@@ -21,8 +21,8 @@ const navItems = [
   /* Search and the cart lived only in the top header, which phones no longer show. */
   { label: 'Search',         href: '/search',         icon: Search },
   { label: 'Cart',           href: '/cart',           icon: ShoppingCart },
-  { label: 'My Learning',    href: '/my-learning',    icon: GraduationCap },
   { label: 'Class Schedule', href: '/class-bookings', icon: CalendarDays },
+  { label: 'My Learning',    href: '/my-learning',    icon: GraduationCap },
   { label: 'My Bookings',    href: '/my-bookings',    icon: Ticket },
   { label: 'Rate Classes',   href: '/reviews',        icon: Star },
   { label: 'Messages',       href: '/messages',       icon: MessageCircle },

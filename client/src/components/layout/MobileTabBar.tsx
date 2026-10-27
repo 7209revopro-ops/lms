@@ -17,8 +17,8 @@ import { useSheets } from '@/store/sheets.store'
 import { useUnreadCount, useNewClassesCount } from '@/lib/api/notifications'
 
 const LINKS = [
-  { label: 'Home',     href: '/my-learning',    icon: Home },
   { label: 'Schedule', href: '/class-bookings', icon: CalendarDays },
+  { label: 'Home',     href: '/my-learning',    icon: Home },
   { label: 'Support',  href: '/support',        icon: LifeBuoy },
 ] as const
 
