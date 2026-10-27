@@ -21,6 +21,7 @@
     "test:abzer": "bun --no-env-file src/tests/abzer.suite.ts",
     "test:abzersandbox": "bun --no-env-file src/tests/abzersandbox.suite.ts",
     "test:paymentamounts": "bun --no-env-file src/tests/paymentamounts.suite.ts",
+    "test:adminorders": "bun --no-env-file src/tests/adminorders.suite.ts",
     "test:paymentaccess": "bun --no-env-file src/tests/paymentaccess.suite.ts",
     "test:commissionstudents": "bun --no-env-file src/tests/commissionstudents.suite.ts",
     "test:portalactivity": "bun --no-env-file src/tests/portalactivity.suite.ts",

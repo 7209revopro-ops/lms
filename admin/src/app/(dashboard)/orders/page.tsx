@@ -1,8 +1,8 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { motion } from 'framer-motion'
-import { ShoppingBag, RotateCcw, ChevronLeft, ChevronRight, ExternalLink } from 'lucide-react'
+import { ShoppingBag, RotateCcw, ChevronLeft, ChevronRight, ExternalLink, Search, Copy, Check } from 'lucide-react'
 import { useAdminOrders, useGatewayBreakdown, type AdminOrder } from '@/lib/api/stats'
 import { api } from '@/lib/axios'
 import { useQueryClient } from '@tanstack/react-query'
@@ -35,17 +35,70 @@ const GATEWAY_LABEL: Record<string, { label: string; color: string }> = {
   tabby:    { label: 'Tabby',    color: '#3D1D8E' },
 }
 
-const MANUAL_REFUND_GATEWAYS = new Set(['abzer', 'tamara', 'tabby'])
+/* Tabby and Tamara refund through their APIs from here (order.service refund →
+   _refundTabby / _refundTamara). BillXPro has no refund API: Abzer refunds are
+   made in its console, and its WH_REFUND webhook marks the order refunded here. */
+const MANUAL_REFUND_GATEWAYS = new Set(['abzer'])
+const MANUAL_REFUND_HINT: Record<string, string> = {
+  abzer: 'Refund in the BillXPro console — this order is marked refunded here automatically when BillXPro reports it',
+}
+
+/* The gateway's own id for an order — what an admin types into the Tamara /
+   Tabby / BillXPro portal to find the same payment. */
+function gatewayRef(o: AdminOrder): { label: string; value: string } | null {
+  switch (o.gateway) {
+    case 'tamara':   return o.tamaraOrderId ? { label: 'Tamara order', value: o.tamaraOrderId } : null
+    case 'tabby':    return o.tabbyPaymentId ? { label: 'Tabby payment', value: o.tabbyPaymentId } : null
+    case 'abzer':    return o.abzerPaymentId ? { label: 'BillXPro receipt', value: o.abzerPaymentId }
+                          : o.abzerOrderId   ? { label: 'BillXPro request', value: o.abzerOrderId } : null
+    case 'razorpay': return o.razorpayPaymentId ? { label: 'Razorpay payment', value: o.razorpayPaymentId } : null
+    case 'stripe':   return o.stripePaymentIntentId ? { label: 'Stripe payment', value: o.stripePaymentIntentId } : null
+    default:         return null
+  }
+}
+
+function RefCell({ order }: { order: AdminOrder }) {
+  const [copied, setCopied] = useState('')
+  const ref = gatewayRef(order)
+  const copy = (v: string) => {
+    void navigator.clipboard?.writeText(v).then(() => { setCopied(v); setTimeout(() => setCopied(''), 1200) }).catch(() => {})
+  }
+  const line = (label: string, value: string) => (
+    <button type="button" onClick={() => copy(value)} title={`${label}: ${value} — click to copy`}
+      className="flex items-center gap-1 rounded px-1 -mx-1 text-left hover:bg-white/[0.05]">
+      <span className="font-mono text-[10px]" style={{ color: 'rgba(255,255,255,0.55)' }}>
+        {value.length > 14 ? `${value.slice(0, 8)}…${value.slice(-4)}` : value}
+      </span>
+      {copied === value ? <Check size={10} style={{ color: '#4ADE80' }} /> : <Copy size={10} style={{ color: 'rgba(255,255,255,0.3)' }} />}
+    </button>
+  )
+  return (
+    <div className="space-y-0.5">
+      {ref ? line(ref.label, ref.value) : <span style={{ color: 'rgba(255,255,255,0.25)' }}>—</span>}
+      {line('Order id', order.id)}
+    </div>
+  )
+}
 
 export default function AdminOrdersPage() {
   /* Filters in the address bar (lib/useQueryState.ts): a reload keeps the view, the link can be shared. */
   const [status]              = useQueryState<StatusTab>('status', 'all')
   const [gateway]             = useQueryState<string>('gateway', 'all')
   const [page,    setPage]    = useQueryState('page', 1)
+  const [q]                   = useQueryState<string>('q', '')
   const [refunding, setRefunding] = useState<string | null>(null)
   const qc = useQueryClient()
 
-  const { data, isLoading, isError, refetch } = useAdminOrders(page, status, gateway)
+  /* Typed here, written to the address bar a moment later — one fetch per pause, not per key. */
+  const [term, setTerm] = useState(q)
+  useEffect(() => { setTerm(q) }, [q])
+  useEffect(() => {
+    if (term.trim() === q.trim()) return
+    const t = setTimeout(() => setQueryParams({ q: term.trim() || null, page: null }), 400)
+    return () => clearTimeout(t)
+  }, [term, q])
+
+  const { data, isLoading, isError, refetch } = useAdminOrders(page, status, gateway, q)
   const breakdown = useGatewayBreakdown()
 
   const handleRefund = async (orderId: string) => {
@@ -124,6 +177,17 @@ export default function AdminOrdersPage() {
         </div>
       )}
 
+      {/* Search — student, order id, or a gateway's reference */}
+      <div className="relative max-w-md">
+        <Search size={14} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2" style={{ color: 'rgba(255,255,255,0.35)' }} />
+        <input
+          type="search" value={term} onChange={e => setTerm(e.target.value)}
+          placeholder="Search student name or email, order id, or Tamara / Tabby / BillXPro reference"
+          aria-label="Search orders"
+          className="w-full rounded-xl py-2.5 pl-9 pr-3 text-xs text-white outline-none placeholder:text-white/30"
+          style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.08)' }} />
+      </div>
+
       {/* Status tabs */}
       <div className="flex items-center gap-1 rounded-2xl p-1 w-fit" style={{ background: 'rgba(255,255,255,0.06)' }}>
         {STATUS_TABS.map(tab => (
@@ -144,7 +208,7 @@ export default function AdminOrdersPage() {
           <table className="w-full text-xs">
             <thead>
               <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
-                {['Date', 'Student', 'Course', 'Gateway', 'Amount', 'Discount', 'Status', ''].map(h => (
+                {['Date', 'Student', 'Course', 'Gateway', 'Reference', 'Amount', 'Discount', 'Status', ''].map(h => (
                   <th key={h} className="px-4 py-3 text-left font-semibold" style={{ color: 'rgba(255,255,255,0.4)' }}>
                     {h}
                   </th>
@@ -154,7 +218,7 @@ export default function AdminOrdersPage() {
             <tbody>
               {isLoading ? (
                 <tr>
-                  <td colSpan={8} className="py-16 text-center">
+                  <td colSpan={9} className="py-16 text-center">
                     <Spinner size={18} variant="muted" />
                   </td>
                 </tr>
@@ -164,7 +228,7 @@ export default function AdminOrdersPage() {
                    The gateway cards above read zero at the same time, so the
                    whole screen agreed on a number nobody had counted. */
                 <tr>
-                  <td colSpan={8} className="py-16 text-center text-sm">
+                  <td colSpan={9} className="py-16 text-center text-sm">
                     <p className="font-semibold text-white">Could not load orders</p>
                     <p className="mt-1 text-xs" style={{ color: 'rgba(255,255,255,0.4)' }}>
                       This is not an empty ledger - the request failed.
@@ -178,7 +242,7 @@ export default function AdminOrdersPage() {
                 </tr>
               ) : !data?.orders.length ? (
                 <tr>
-                  <td colSpan={8} className="py-16 text-center text-sm" style={{ color: 'rgba(255,255,255,0.3)' }}>
+                  <td colSpan={9} className="py-16 text-center text-sm" style={{ color: 'rgba(255,255,255,0.3)' }}>
                     No orders found.
                   </td>
                 </tr>
@@ -191,7 +255,16 @@ export default function AdminOrdersPage() {
                     transition={{ delay: i * 0.03 }}
                     style={{ borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
                     <td className="px-4 py-3" style={{ color: 'rgba(255,255,255,0.6)' }}>
-                      {new Date(order.createdAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                      {/* The academy's own clock (lib/timezone installs it on toLocale*). */}
+                      <p>{new Date(order.createdAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</p>
+                      <p className="text-[10px]" style={{ color: 'rgba(255,255,255,0.35)' }}>
+                        {new Date(order.createdAt).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}
+                      </p>
+                      {order.status === 'refunded' && order.refundedAt && (
+                        <p className="text-[10px]" style={{ color: 'rgba(255,255,255,0.35)' }}>
+                          refunded {new Date(order.refundedAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                        </p>
+                      )}
                     </td>
                     <td className="px-4 py-3">
                       <div>
@@ -214,6 +287,7 @@ export default function AdminOrdersPage() {
                         )
                       })()}
                     </td>
+                    <td className="px-4 py-3"><RefCell order={order} /></td>
                     <td className="px-4 py-3 font-bold text-white tabular-nums">
                       {formatUSD(order.amount, order.currency)}
                     </td>
@@ -241,7 +315,7 @@ export default function AdminOrdersPage() {
                         {order.status === 'paid' && (
                           MANUAL_REFUND_GATEWAYS.has(order.gateway) ? (
                             <span
-                              title={`Refund ${GATEWAY_LABEL[order.gateway]?.label ?? order.gateway} orders via the gateway dashboard`}
+                              title={MANUAL_REFUND_HINT[order.gateway] ?? `Refund ${GATEWAY_LABEL[order.gateway]?.label ?? order.gateway} orders via the gateway dashboard`}
                               className="rounded-lg px-2.5 py-1 text-[11px] font-semibold cursor-help"
                               style={{ color: 'rgba(255,255,255,0.3)' }}>
                               Manual refund

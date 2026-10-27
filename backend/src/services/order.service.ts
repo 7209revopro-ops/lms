@@ -1889,9 +1889,9 @@ export class OrderService {
 
   /* ─── Admin list + analytics ──────────────────────── */
   async adminList(
-    page = 1, perPage = 20, status?: string, organizationId?: string, gateway?: string,
+    page = 1, perPage = 20, status?: string, organizationId?: string, gateway?: string, q?: string,
   ) {
-    return this.orderRepo.listAll(page, perPage, status, organizationId, gateway)
+    return this.orderRepo.listAll(page, perPage, status, organizationId, gateway, q)
   }
 
   async gatewayBreakdown(organizationId?: string) {

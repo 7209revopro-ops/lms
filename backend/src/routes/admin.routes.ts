@@ -2760,14 +2760,16 @@ const ordersQuerySchema = z.object({
      rather than quietly matching nothing and reading as "this gateway has
      recorded no orders" — the exact wrong answer for this screen. */
   gateway:  z.enum(['stripe', 'razorpay', 'tabby', 'abzer', 'tamara', 'all']).default('all'),
+  /* Student name / email, order id, or a gateway reference (order.repository scopeFilter). */
+  q:        z.string().trim().max(120).optional(),
 })
 
 router.get('/orders', requireAdmin, requirePermission('orders','list'), validate(ordersQuerySchema, 'query'), async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { page, per_page, status, gateway } = req.query as any
+    const { page, per_page, status, gateway, q } = req.query as any
     const { docs, totalCount } = await orderSvc.adminList(
       Number(page ?? 1), Number(per_page ?? 20), String(status ?? 'all'),
-      req.user!.organizationId, String(gateway ?? 'all'),
+      req.user!.organizationId, String(gateway ?? 'all'), q ? String(q) : undefined,
     )
     sendSuccess(res, docs, undefined, 200, buildPaginationMeta(totalCount, Number(page ?? 1), Number(per_page ?? 20)))
   } catch (err) { next(err) }

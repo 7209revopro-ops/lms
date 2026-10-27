@@ -111,16 +111,24 @@ export interface AdminOrder {
   discountAmount:          number
   stripePaymentIntentId?:  string
   stripeInvoiceUrl?:       string
+  /* Each gateway's own reference — what matches a row to its portal. */
+  razorpayPaymentId?:      string
+  tabbyPaymentId?:         string
+  tamaraOrderId?:          string
+  abzerOrderId?:           string   // BillXPro payment request
+  abzerPaymentId?:         string   // BillXPro receipt (set when paid)
   refundedAt?:             string
+  cancelledAt?:            string
   createdAt:               string
+  updatedAt?:              string
 }
 
-export function useAdminOrders(page = 1, status = 'all', gateway = 'all') {
+export function useAdminOrders(page = 1, status = 'all', gateway = 'all', q = '') {
   return useQuery({
-    queryKey: ['admin', 'orders', page, status, gateway],
+    queryKey: ['admin', 'orders', page, status, gateway, q],
     queryFn: async () => {
       const res = await api.get<{ success: true; data: AdminOrder[]; meta: any }>(
-        '/admin/orders', { params: { page, per_page: 20, status, gateway } },
+        '/admin/orders', { params: { page, per_page: 20, status, gateway, ...(q.trim() && { q: q.trim() }) } },
       )
       return { orders: res.data.data, meta: res.data.meta }
     },

@@ -1,4 +1,4 @@
-import { OrderModel, type IOrder, type OrderGateway } from '@/models/schema.ts'
+import { OrderModel, UserModel, type IOrder, type OrderGateway } from '@/models/schema.ts'
 
 export class OrderRepository {
 
@@ -148,13 +148,29 @@ export class OrderRepository {
   /* The scope both the list and the breakdown read, so a row counted in one
      is always openable in the other. */
   private async scopeFilter(
-    status?: string, organizationId?: string, gateway?: string,
+    status?: string, organizationId?: string, gateway?: string, q?: string,
   ): Promise<Record<string, unknown>> {
+    const { Types } = await import('mongoose')
     const filter: Record<string, unknown> = status && status !== 'all' ? { status } : {}
     if (gateway && gateway !== 'all') filter['gateway'] = gateway
     if (organizationId) {
-      const { Types } = await import('mongoose')
       if (Types.ObjectId.isValid(organizationId)) filter['organizationId'] = new Types.ObjectId(organizationId)
+    }
+    /* Search (2026-10-27): a student's name or email, our order id, or any
+       gateway's own reference — what an admin holds when a buyer writes in,
+       or when matching a row against the Tamara / Tabby / BillXPro portal.
+       Escaped and case-blind; the academy scope above still applies. */
+    const term = q?.trim()
+    if (term) {
+      const rx = new RegExp(term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i')
+      const users = await UserModel.find({ $or: [{ email: rx }, { name: rx }] }).select('_id').limit(500).lean()
+      const or: Record<string, unknown>[] = [
+        { userId: { $in: users.map(u => u._id) } },
+        { tamaraOrderId: term }, { tabbyPaymentId: term }, { abzerOrderId: term }, { abzerPaymentId: term },
+        { razorpayPaymentId: term }, { razorpayOrderId: term }, { stripePaymentIntentId: term },
+      ]
+      if (Types.ObjectId.isValid(term) && /^[a-f0-9]{24}$/i.test(term)) or.push({ _id: new Types.ObjectId(term) })
+      filter['$or'] = or
     }
     return filter
   }
@@ -201,9 +217,9 @@ export class OrderRepository {
   }
 
   async listAll(
-    page = 1, perPage = 20, status?: string, organizationId?: string, gateway?: string,
+    page = 1, perPage = 20, status?: string, organizationId?: string, gateway?: string, q?: string,
   ): Promise<{ docs: IOrder[]; totalCount: number }> {
-    const filter = await this.scopeFilter(status, organizationId, gateway)
+    const filter = await this.scopeFilter(status, organizationId, gateway, q)
     const [docs, totalCount] = await Promise.all([
       OrderModel
         .find(filter)
