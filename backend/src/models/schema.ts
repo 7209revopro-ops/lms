@@ -3401,6 +3401,37 @@ export const MEETING_FOLLOW_UP_KINDS = ['cse_follow_up', 'revision_needed'] as c
 /** How an interested client means to pay — the sales CRMs' methods. */
 export const MEETING_PAYMENT_MODES = ['Cash', 'Card', 'Bank Transfer', 'Tabby', 'Tamara', 'INR Transfer', 'Payment link'] as const
 export const MEETING_NOT_INTERESTED_REASONS = ['Price', 'Time', 'Not convinced', 'Joined elsewhere', 'Other'] as const
+/** The second step, about the client (2026-10-27). */
+export const MEETING_EXPERIENCE = ['fresher', 'beginner', 'expert'] as const
+export const MEETING_LOSS_WAYS = ['scammed', 'self_trading', 'money_management'] as const
+export const MEETING_LOSS_CURRENCIES = ['AED', 'USD', 'INR'] as const
+
+/** Who the client is, as the mentor learned it — the form's second step; the next meeting's starts from it. */
+export interface IClientProfile {
+  experience:    (typeof MEETING_EXPERIENCE)[number]
+  /** Years trading — none for a fresher. */
+  years?:        number | null
+  hadLosses:     boolean
+  lossAmount?:   number | null
+  lossCurrency?: string
+  /** How it was lost — any of MEETING_LOSS_WAYS. */
+  lossHow?:      string[]
+  country:       string
+  familyInDubai: boolean
+  occupation:    string
+}
+
+const ClientProfileSchema = new Schema<IClientProfile>({
+  experience:    { type: String, enum: MEETING_EXPERIENCE, required: true },
+  years:         { type: Number, default: null },
+  hadLosses:     { type: Boolean, required: true },
+  lossAmount:    { type: Number, default: null },
+  lossCurrency:  { type: String, default: '' },
+  lossHow:       { type: [String], default: [] },
+  country:       { type: String, required: true, maxlength: 80 },
+  familyInDubai: { type: Boolean, required: true },
+  occupation:    { type: String, required: true, maxlength: 200 },
+}, { _id: false })
 
 export interface IMeetingOutcome {
   stage:         MeetingOutcomeStage
@@ -3422,7 +3453,11 @@ export interface IMeetingOutcome {
   moduleTitle?:  string
   /** Not interested: why. */
   reason?:       string
+  /** What is holding the client back (2026-10-27). Absent on the first outcomes. */
+  concern?:      string
   remark:        string
+  /** The second step: who the client is (2026-10-27). Absent on the first outcomes. */
+  profile?:      IClientProfile | null
   filledById?:   Types.ObjectId | null
   filledByName:  string
   filledByEmail: string
@@ -3445,7 +3480,9 @@ const MeetingOutcomeSchema = new Schema<IMeetingOutcome>({
   moduleId:        { type: Schema.Types.ObjectId, ref: 'Section', default: null },
   moduleTitle:     { type: String, default: '' },
   reason:          { type: String, default: '' },
+  concern:         { type: String, default: '', maxlength: 2000 },
   remark:          { type: String, required: true, maxlength: 2000 },
+  profile:         { type: ClientProfileSchema, default: null },
   filledById:      { type: Schema.Types.ObjectId, ref: 'User', default: null },
   filledByName:    { type: String, default: '' },
   filledByEmail:   { type: String, default: '' },

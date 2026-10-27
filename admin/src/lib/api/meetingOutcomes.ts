@@ -9,14 +9,22 @@ export type OutcomeStage = 'interested' | 'follow_up' | 'meeting_with' | 'revisi
 export interface PendingMeeting {
   id: string; title: string; category: string; startsAt: string; endsAt: string; durationMins: number
   inPerson: boolean; location: string; attendees: { name: string; email: string }[]; bookedByEmail: string
+  /** What the last meeting with them said about the client — step 2 starts from it. */
+  lastProfile: ClientProfile | null
+}
+export interface ClientProfile {
+  experience: 'fresher' | 'beginner' | 'expert' | ''; years: number | string | null
+  hadLosses: boolean | null; lossAmount: number | string | null; lossCurrency: string; lossHow: string[]
+  country: string; familyInDubai: boolean | null; occupation: string
 }
 export interface OutcomeOptions {
   stages: OutcomeStage[]; followUpKinds: string[]; paymentModes: string[]; notInterestedReasons: string[]
+  experience: string[]; lossWays: string[]; lossCurrencies: string[]
   courses: { id: string; title: string; modules: { id: string; title: string }[] }[]
   mentors: { id: string; name: string; email: string }[]
 }
 export interface OutcomeInput {
-  stage: OutcomeStage; remark: string
+  stage: OutcomeStage; remark: string; concern: string; profile?: ClientProfile
   courseId?: string; paymentDate?: string; paymentMode?: string
   followUpKind?: string; followUpDate?: string
   withMentorEmail?: string; moduleId?: string; reason?: string

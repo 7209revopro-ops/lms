@@ -64,7 +64,10 @@ try {
   check('the five stages and the payment modes', opts.stages.length === 5 && opts.paymentModes.includes('Tabby'))
 
   console.log('\nRefused')
-  const fill = (meetingId: unknown, body: Record<string, unknown>, who = 'ann@d.local') => S.saveOutcomeForEmail(who, String(meetingId), body, now)
+  const profile = { experience: 'beginner', years: 2, hadLosses: true, lossAmount: 5000, lossCurrency: 'AED', lossHow: ['scammed', 'self_trading'], country: 'UAE', familyInDubai: true, occupation: 'Engineer' }
+  const base = { concern: 'Afraid of losing again', profile }
+  const fill = (meetingId: unknown, body: Record<string, unknown>, who = 'ann@d.local') => S.saveOutcomeForEmail(who, String(meetingId), { ...base, ...body }, now)
+  const P = (patch: Record<string, unknown>) => ({ stage: 'not_interested', reason: 'Price', remark: 'x', profile: { ...profile, ...patch } })
   check('no remark', await refused(fill(done1._id, { stage: 'not_interested', reason: 'Price' }), 400, 'remark') === true)
   check('no stage', await refused(fill(done1._id, { remark: 'x' }), 400, 'client stands') === true)
   check('interested without a course', await refused(fill(done1._id, { stage: 'interested', remark: 'x', paymentDate: '2026-10-30', paymentMode: 'Card' }), 400, 'course') === true)
@@ -75,6 +78,16 @@ try {
   check('meeting with nobody', await refused(fill(done1._id, { stage: 'meeting_with', remark: 'x' }), 400, 'mentor') === true)
   check('meeting with somebody who is not a mentor', await refused(fill(done1._id, { stage: 'meeting_with', remark: 'x', withMentorEmail: 'admin@d.local' }), 400, 'mentor') === true)
   check('revision with a module of another course', await refused(fill(done1._id, { stage: 'revision', remark: 'x', courseId: String(course._id), moduleId: String(modOther._id) }), 400, 'module') === true)
+  check('no concern', await refused(fill(done1._id, { stage: 'not_interested', reason: 'Price', remark: 'x', concern: ' ' }), 400, 'concern') === true)
+  check('no second step', await refused(fill(done1._id, { stage: 'not_interested', reason: 'Price', remark: 'x', profile: undefined }), 400, 'experience') === true)
+  check('a beginner with no years', await refused(fill(done1._id, P({ years: '' })), 400, 'years') === true)
+  check('losses with no amount', await refused(fill(done1._id, P({ lossAmount: 0 })), 400, 'how much') === true)
+  check('losses with no way', await refused(fill(done1._id, P({ lossHow: [] })), 400, 'how it was lost') === true)
+  check('losses a made-up way', await refused(fill(done1._id, P({ lossHow: ['gambling'] })), 400, 'how it was lost') === true)
+  check('losses not said', await refused(fill(done1._id, P({ hadLosses: 'yes' })), 400, 'losses') === true)
+  check('no country', await refused(fill(done1._id, P({ country: '' })), 400, 'country') === true)
+  check('family in Dubai not said', await refused(fill(done1._id, P({ familyInDubai: undefined })), 400, 'family') === true)
+  check('no occupation', await refused(fill(done1._id, P({ occupation: '' })), 400, 'occupation') === true)
   check('not interested without why', await refused(fill(done1._id, { stage: 'not_interested', remark: 'x' }), 400, 'why') === true)
   check('somebody else\'s meeting', await refused(fill(bobs._id, { stage: 'not_interested', reason: 'Price', remark: 'x' }), 404) === true)
   check('a meeting not over yet', await refused(fill(live._id, { stage: 'not_interested', reason: 'Price', remark: 'x' }), 409, 'not over') === true)
@@ -85,18 +98,31 @@ try {
 
   console.log('\nFilled')
   const r1: any = await fill(done1._id, { stage: 'interested', remark: '  Will pay after salary ', courseId: String(course._id), paymentDate: '2026-11-02', paymentMode: 'Tabby' })
+  check('…the concern and the client: experience, years, losses (how much, how), country, family, occupation', r1.outcome.concern === 'Afraid of losing again'
+    && r1.outcome.profile?.experience === 'beginner' && r1.outcome.profile.years === 2 && r1.outcome.profile.lossAmount === 5000 && r1.outcome.profile.lossCurrency === 'AED'
+    && j(r1.outcome.profile.lossHow) === j(['scammed', 'self_trading']) && r1.outcome.profile.country === 'UAE' && r1.outcome.profile.familyInDubai === true && r1.outcome.profile.occupation === 'Engineer', j(r1.outcome))
   check('interested: course, date, mode, remark, who, where', r1.outcome.stage === 'interested' && r1.outcome.courseTitle === 'Market Breakout' && r1.outcome.paymentDate === '2026-11-02'
     && r1.outcome.paymentMode === 'Tabby' && r1.outcome.remark === 'Will pay after salary' && r1.outcome.filledByName === 'ANN' && r1.outcome.filledVia === 'portal', j(r1))
-  check('a second fill (LMS admin, the same mentor) is told it was filled', await refused(S.saveOutcomeForUser({ id: String(ann._id), email: 'ann@d.local' }, String(done1._id), { stage: 'not_interested', reason: 'Price', remark: 'x' }, now), 409, 'Already filled by ANN') === true)
-  const r2: any = await S.saveOutcomeForUser({ id: String(ann._id), email: 'ann@d.local' }, String(done2._id), { stage: 'revision', remark: 'Lost on entries', courseId: String(course._id), moduleId: String(mod1._id), withMentorEmail: 'bob@d.local' }, new Date(now.getTime() + 1000))
+  check('a second fill (LMS admin, the same mentor) is told it was filled', await refused(S.saveOutcomeForUser({ id: String(ann._id), email: 'ann@d.local' }, String(done1._id), { ...base, stage: 'not_interested', reason: 'Price', remark: 'x' }, now), 409, 'Already filled by ANN') === true)
+  const r2: any = await S.saveOutcomeForUser({ id: String(ann._id), email: 'ann@d.local' }, String(done2._id), { ...base, stage: 'revision', remark: 'Lost on entries', courseId: String(course._id), moduleId: String(mod1._id), withMentorEmail: 'bob@d.local', profile: { experience: 'fresher', years: 7, hadLosses: false, lossAmount: 900, lossHow: ['scammed'], country: 'India', familyInDubai: false, occupation: 'Student' } }, new Date(now.getTime() + 1000))
   check('revision from LMS admin: course, module, preferred mentor', r2.outcome.moduleTitle === 'Price action' && r2.outcome.withMentorName === 'BOB' && r2.outcome.filledVia === 'lms', j(r2))
+  check('…a fresher keeps no years; no losses keeps no amount or way', r2.outcome.profile.years === null && r2.outcome.profile.lossAmount === null && r2.outcome.profile.lossHow.length === 0 && r2.outcome.profile.lossCurrency === '', j(r2.outcome.profile))
   check('nothing waits on Ann now', (await S.pendingOutcomesForUser(String(ann._id), now)).length === 0)
   const r3: any = await fill(bobs._id, { stage: 'meeting_with', remark: 'Wants the chief', withMentorEmail: 'ann@d.local' }, 'bob@d.local')
   check('meeting with: the mentor', r3.outcome.withMentorEmail === 'ann@d.local', j(r3))
 
+  console.log('\nThe second step starts from the last answers')
+  const again = mt('Second pitch Saif', bob, 50, { attendees: [{ name: 'Saif', email: 'S1@d.local' }] }), stranger = mt('Somebody new', bob, 50, { attendees: [{ name: 'New', email: 'new@d.local' }] })
+  await M.MentorMeetingModel.collection.insertMany([again, stranger] as any)
+  const bobPending = await S.pendingOutcomesForEmail('bob@d.local', now)
+  const pre = bobPending.find((m) => m.title === 'Second pitch Saif')?.lastProfile
+  check('a client met before: their last profile (Saif\'s, filled by Ann)', pre?.occupation === 'Engineer' && pre?.years === 2 && j(pre?.lossHow) === j(['scammed', 'self_trading']), j(pre))
+  check('somebody new: none', bobPending.find((m) => m.title === 'Somebody new')?.lastProfile === null)
+  check('the options carry the second step\'s lists', j((await S.outcomeOptions() as any).lossWays) === j(['scammed', 'self_trading', 'money_management']))
+
   console.log('\nThe feed Tetra Commission reads')
   const all: any = await S.outcomesSince(undefined)
-  check('every outcome, oldest first, with the attendees and the mentor', j(all.meetings.map((m: any) => m.title)) === j(['Pitch Saif', 'Bob pitch', 'Overview Hamda']) && all.meetings[0].mentor.email === 'ann@d.local' && all.meetings[0].attendees[0].email === 's1@d.local', j(all))
+  check('every outcome, oldest first, with the attendees and the mentor', j(all.meetings.map((m: any) => m.title)) === j(['Pitch Saif', 'Bob pitch', 'Overview Hamda']) && all.meetings[0].outcome.profile?.country === 'UAE' && all.meetings[0].mentor.email === 'ann@d.local' && all.meetings[0].attendees[0].email === 's1@d.local', j(all))
   const later: any = await S.outcomesSince(new Date(now.getTime() + 500).toISOString())
   check('from a time on: only the later one', j(later.meetings.map((m: any) => m.title)) === j(['Overview Hamda']), j(later))
   check('next = the last one\'s time', later.next === new Date(now.getTime() + 1000).toISOString(), later.next)
