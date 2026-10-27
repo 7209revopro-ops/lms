@@ -274,17 +274,31 @@ try {
     const anon = await call('GET', '/class-assignments/submittable')
     check('...and it is not readable without a session', anon.status === 401, why(anon))
 
-    /* A seat for a class that has not run yet is not one to hand work in for
-       — the picker says "a class you attended". Made and removed here so no
-       later section counts it. */
-    const ahead = await mkClass('Next Week Session', teacherA, -3)
-    const seat = await ClassBookingModel.create({ userId: attendee._id, liveClassId: ahead._id, status: 'booked' })
+    /* Since 2026-10-27 work can be handed in for ANY booked class — one that
+       has not run yet, and one the student was marked missing from. A
+       cancelled class still is not. Made and removed here so no later section
+       counts them. */
+    const ahead  = await mkClass('Next Week Session', teacherA, -3)
+    const missed = await mkClass('Missed Session',    teacherA, 5)
+    const off    = await mkClass('Called Off',        teacherA, 1)
+    await LiveClassModel.updateOne({ _id: off._id }, { status: 'cancelled' })
+    const seats = await ClassBookingModel.create([
+      { userId: attendee._id, liveClassId: ahead._id,  status: 'booked' },
+      { userId: attendee._id, liveClassId: missed._id, status: 'missed' },
+      { userId: attendee._id, liveClassId: off._id,    status: 'booked' },
+    ])
     const f = await call('GET', '/class-assignments/submittable', { jar: attendeeJar })
     const fIds = (f.body?.data ?? []).map((c: any) => String(c._id ?? c.id))
-    check('a booked class that has NOT started yet is not offered', ok(f) && !fIds.includes(String(ahead._id)) && fIds.length === 2,
-      `${fIds.length}: ${fIds.join(',')}`)
-    await ClassBookingModel.deleteOne({ _id: seat._id })
-    await LiveClassModel.deleteOne({ _id: ahead._id })
+    check('a booked class that has NOT started yet is offered', ok(f) && fIds.includes(String(ahead._id)), fIds.join(','))
+    check('a class the student MISSED is offered', fIds.includes(String(missed._id)), fIds.join(','))
+    check('a CANCELLED class is not', !fIds.includes(String(off._id)) && fIds.length === 4, `${fIds.length}: ${fIds.join(',')}`)
+    const early = await call('POST', '/class-assignments', { jar: attendeeJar, body: { liveClassId: String(ahead._id), title: 'Before class work', files: [upload('e.png')] } })
+    check('...and work can be sent before the class', early.status === 201, why(early))
+    const late = await call('POST', '/class-assignments', { jar: attendeeJar, body: { liveClassId: String(missed._id), title: 'Missed class work', files: [upload('m.png')] } })
+    check('...and for a class they missed', late.status === 201, why(late))
+    await ClassAssignmentModel.deleteMany({ liveClassId: { $in: [ahead._id, missed._id] } })
+    await ClassBookingModel.deleteMany({ _id: { $in: seats.map(x => x._id) } })
+    await LiveClassModel.deleteMany({ _id: { $in: [ahead._id, missed._id, off._id] } })
   }
 
   /* ══════════ 1b. WHO SEES WHAT ══════════

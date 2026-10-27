@@ -190,8 +190,8 @@ function SubmitCard() {
         </p>
         <p className="mt-1 text-xs" style={{ color: 'var(--color-text-muted)' }}>
           {(sessions ?? []).length === 0
-            ? 'Book and attend a live class, then send your work to the instructor here.'
-            : 'You have already sent work for every class you attended.'}
+            ? 'Book a live class, then send your work to the instructor here.'
+            : 'You have already sent work for every class you booked.'}
         </p>
       </div>
     )
@@ -207,7 +207,7 @@ function SubmitCard() {
       <select value={classId} onChange={e => setClassId(e.target.value)}
         className="w-full rounded-xl px-3 py-2.5 text-sm outline-none"
         style={{ border: '1px solid var(--color-border)', background: 'var(--color-bg-inset)', color: 'var(--color-text-primary)' }}>
-        <option value="">Select a class you attended…</option>
+        <option value="">Select a class you booked…</option>
         {available.map(s => (
           <option key={s.id} value={s.id}>{titleCase(s.title)} — {fmtDate(s.scheduledStart)}</option>
         ))}

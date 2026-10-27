@@ -18,6 +18,8 @@ export class ClassAssignmentError extends Error {
 }
 
 const MAX_FILES = 10
+/* Seats that may hand in work: kept, attended or missed — not cancelled. */
+const SUBMITTABLE_SEATS = ['booked', 'attended', 'missed']
 const notifications = new NotificationService()
 
 /** Roles that may review anyone's submission within their own reach. */
@@ -51,16 +53,16 @@ export class ClassAssignmentService {
   async submittableSessions(studentId: string): Promise<unknown[]> {
     if (!Types.ObjectId.isValid(studentId)) return []
     const bookings = await ClassBookingModel
-      .find({ userId: studentId, status: { $in: ['booked', 'attended'] } })
+      .find({ userId: studentId, status: { $in: SUBMITTABLE_SEATS } })
       .select('liveClassId')
       .lean()
     if (bookings.length === 0) return []
 
-    /* Only classes that have STARTED. Work is handed in after a class ("a
-       class you attended" on both the website and the app), so tonight's and
-       next week's seats are not offered in the picker. */
+    /* Any booked class, whenever it is (2026-10-27): before it, during it,
+       after it — attended or missed. Only a cancelled class or a seat the
+       student gave up is left out. */
     return LiveClassModel
-      .find({ _id: { $in: bookings.map(b => b.liveClassId) }, status: { $ne: 'cancelled' }, scheduledStart: { $lte: new Date() } })
+      .find({ _id: { $in: bookings.map(b => b.liveClassId) }, status: { $ne: 'cancelled' } })
       .select('title scheduledStart courseId sectionId instructorId')
       .populate('courseId', 'title slug')
       .populate('sectionId', 'title')
@@ -87,13 +89,13 @@ export class ClassAssignmentService {
     }
 
     /* Entitlement: the session must be one this student booked. Checked
-       against the booking, not the enrolment — attending is what earns the
-       right to submit, and it is also what makes the instructor the right
-       recipient. */
+       against the booking, not the enrolment — the seat is what earns the
+       right to submit (attended or not, since 2026-10-27), and it is also
+       what makes the instructor the right recipient. */
     const booking = await ClassBookingModel.findOne({
       userId:      caller.id,
       liveClassId: input.liveClassId,
-      status:      { $in: ['booked', 'attended'] },
+      status:      { $in: SUBMITTABLE_SEATS },
     }).select('seatOrganizationId seatCourseId seatSectionId').lean() as {
       seatOrganizationId?: unknown; seatCourseId?: unknown; seatSectionId?: unknown
     } | null
