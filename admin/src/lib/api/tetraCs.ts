@@ -1,5 +1,5 @@
 /* ─────────────────────────────────────────────────────
-   Who looks after a student in Tetra Commission (the commission portal): their
+   Who looks after a student in CS Portal (the CS Portal): their
    CS and CS team, as the portal says now — it sends them here every few
    minutes for whoever changed (backend services/portalStudentCs.service.ts).
    On every admin list that carries a student; absent on a student the portal
@@ -9,7 +9,7 @@ export interface TetraCs {
   /** Their CS; "" while they wait in Delta Open Students (`open`). */
   name?: string
   team?: string
-  /** Their student code in Tetra Commission. */
+  /** Their student code in CS Portal. */
   code?: string
   /** Waiting in Delta Open Students — no CS yet. */
   open?: boolean

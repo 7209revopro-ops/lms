@@ -1,7 +1,7 @@
 /* ─────────────────────────────────────────────────────
-   Students' LMS courses, for the commission portal
+   Students' LMS courses, for the CS Portal
    ─────────────────────────────────────────────────────
-   Tetra Commission (the commission portal) shows which LMS courses a student
+   CS Portal (the CS Portal) shows which LMS courses a student
    is on — under the Enrolled switch in its Students table and on the
    student's page — and how far along they are. It asks; nothing here changes.
 

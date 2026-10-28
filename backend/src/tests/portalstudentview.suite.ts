@@ -1,5 +1,5 @@
 /* ─────────────────────────────────────────────────────────────
-   "View as student", for the commission portal
+   "View as student", for the CS Portal
    (services/portalStudentView.service.ts, routes/portalActivity.routes.ts).
 
    Pinned here, against a real database and the real app:
@@ -117,7 +117,7 @@ check("from the CS's own LMS account, their address on it",
   idOf(session?.actorId) === idOf(ownCs) && session?.actorEmail === 'cara.cs@portal.test' && first.from === 'own', JSON.stringify(session))
 check("...on the student, in the student's academy",
   idOf(session?.targetId) === idOf(sam) && session?.targetEmail === 'sam@lms.test' && idOf(session?.organizationId) === idOf(dubai._id))
-check('...saying it came from Tetra Commission, and who', session?.userAgent === 'Tetra Commission — Cara CS', session?.userAgent)
+check('...saying it came from CS Portal, and who', session?.userAgent === 'CS Portal — Cara CS', session?.userAgent)
 const audit = await AuditLogModel.findOne({ 'meta.sessionId': idOf(session?._id) }).lean() as Record<string, any> | null
 check("audited as the admin's view is: user.impersonate.client, on the student, in their academy",
   audit?.action === 'user.impersonate.client' && audit?.entity === 'User' && audit?.entityId === idOf(sam)
@@ -131,7 +131,7 @@ const viaShared = await studentViewForPortal({ email: 'bea@lms.test', byName: 'N
 const sharedSession = await ImpersonationSessionModel.findOne({ targetEmail: 'bea@lms.test' }).lean()
 check('a CS with no LMS account: from the shared one — their own address still on the session',
   viaShared.from === 'shared' && idOf(sharedSession?.actorId) === idOf(desk) && sharedSession?.actorEmail === 'nina.cs@portal.test'
-    && sharedSession?.userAgent === 'Tetra Commission — Nina CS', JSON.stringify(sharedSession))
+    && sharedSession?.userAgent === 'CS Portal — Nina CS', JSON.stringify(sharedSession))
 check("...in that student's academy, the other one", idOf(sharedSession?.organizationId) === idOf(blr._id))
 const sharedAudit = await AuditLogModel.findOne({ 'meta.sessionId': idOf(sharedSession?._id) }).lean() as Record<string, any> | null
 check('...audited from the shared account, with their name', idOf(sharedAudit?.actorId) === idOf(desk) && sharedAudit?.actorRole === 'support'

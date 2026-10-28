@@ -262,7 +262,7 @@ function TimeOffSection() {
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
         <div>
           <p className="text-sm font-semibold" style={{ color: '#E8EAF2' }}>Not available</p>
-          <p className="text-xs" style={{ color: '#9CA3AF' }}>Leave, an appointment, a day off — nobody can book you then, from the LMS, the commission portal or the CRMs. Times Dubai.</p>
+          <p className="text-xs" style={{ color: '#9CA3AF' }}>Leave, an appointment, a day off — nobody can book you then, from the LMS, the CS Portal or the CRMs. Times Dubai.</p>
         </div>
         <button onClick={() => setOpen(true)} className="flex items-center gap-1 rounded-lg px-3 py-1.5 text-xs font-semibold"
           style={{ color: '#FBBF24', border: '1px solid rgba(251,191,36,0.35)' }}>

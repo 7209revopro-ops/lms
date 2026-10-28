@@ -85,7 +85,7 @@ router.get('/ready', async (_req: Request, res: Response) => {
 router.use('/auth',        authRoutes)
 /* Server-to-server, from the Root portal. A shared secret, not a session. */
 router.use('/service',     portalRoutes)
-/* The help desk and class assignments, for the commission portal — after
+/* The help desk and class assignments, for the CS Portal — after
    portalRoutes, whose secret check has already let the caller in. */
 router.use('/service',     portalActivityRoutes)
 router.use('/courses',     courseRoutes)

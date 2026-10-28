@@ -3,8 +3,8 @@ import { PortalError } from '@/services/portal.service.ts'
 import { classFeedbackAsReviews, joinOf } from '@/services/portalMentorReport.service.ts'
 
 /* ─────────────────────────────────────────────────────────────
-   What is behind each number of the portal's Mentor Report (Tetra
-   Commission's user, 2026-10-27: "each count we can break down … the
+   What is behind each number of the portal's Mentor Report (CS
+   Portal's user, 2026-10-27: "each count we can break down … the
    mentors' classes and bookings, students count, reviews of the class,
    cancellations — which ones; a programs report and a meeting report"):
    the classes, the bookings (and which students), the students, the

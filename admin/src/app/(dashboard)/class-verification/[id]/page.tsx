@@ -2,7 +2,7 @@
 
 /* ─────────────────────────────────────────────────────────────
    One class's verification: every booked student — phone, their CS from the
-   commission portal, how the LMS saw them join — with Present / Absent for
+   CS Portal, how the LMS saw them join — with Present / Absent for
    the mentor to confirm or correct and an optional note, then a short review
    of the class. Submit saves the marks and the review and verifies the class
    (POST /admin/class-verification/:id). Re-submitting edits it.
@@ -119,7 +119,7 @@ export default function VerifyClassPage({ params }: { params: Promise<{ id: stri
                 <tr className="text-[11px] uppercase tracking-wide" style={muted}>
                   <th className="px-4 py-2.5 font-semibold">Student</th>
                   <th className="px-4 py-2.5 font-semibold">Phone</th>
-                  <th className="px-4 py-2.5 font-semibold">CS (commission portal)</th>
+                  <th className="px-4 py-2.5 font-semibold">CS (CS Portal)</th>
                   <th className="px-4 py-2.5 font-semibold">LMS saw</th>
                   <th className="px-4 py-2.5 font-semibold">Attendance</th>
                   <th className="px-4 py-2.5 font-semibold">Note</th>

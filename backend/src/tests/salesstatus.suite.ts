@@ -1,5 +1,5 @@
 /* ─────────────────────────────────────────────────────────────
-   Where a student stands in sales, and whether Tetra Commission onboarded
+   Where a student stands in sales, and whether CS Portal onboarded
    them (the user, 2026-10-13: "in students request area show … which sales
    crm … if the finance request raised or pending or rejected or approved …
    in the students section the onboarded or not").
@@ -7,7 +7,7 @@
    Pinned here, against a real database, a stand-in Root portal and a
    stand-in finance:
 
-     A. Tetra Commission's push and recheck keep onboarded / onboardedAt on
+     A. CS Portal's push and recheck keep onboarded / onboardedAt on
         tetraCs — told, kept when a portal from before says nothing, a change
         of onboarding alone written;
      B. the Students list's ?onboarded=yes|no|none;
@@ -47,7 +47,7 @@ function check(label: string, ok: boolean, detail = '') {
 }
 const step = (s: string) => console.log(`\n\x1b[1m${s}\x1b[0m`)
 
-/* ── Stand-ins: Root (CRM leads), finance (enrolments), Tetra Commission (recheck) ── */
+/* ── Stand-ins: Root (CRM leads), finance (enrolments), CS Portal (recheck) ── */
 const leads = new Map<string, unknown[]>()          // by email or last-9 phone digits
 const enrolments = new Map<string, unknown[]>()     // by email
 const inFinance = new Set<string>()
@@ -137,7 +137,7 @@ try {
   const cara = await student('Cara', 'cara@ss.local')
   const get = async (id: unknown) => (await M.UserModel.findById(id).lean() as any)?.tetraCs
 
-  step('A · Onboarded, from Tetra Commission')
+  step('A · Onboarded, from CS Portal')
   let told = await studentCsFromPortal({ students: [
     { email: 'ana@ss.local', code: 'STU-1', cs: 'CS 1', team: 'Falcons', open: false, onboarded: true, onboardedAt: '2026-10-12T08:00:00.000Z' },
     { email: 'ben@ss.local', code: 'STU-2', cs: 'CS 1', team: 'Falcons', open: false, onboarded: false, onboardedAt: null },
@@ -171,9 +171,9 @@ try {
   r = await call('GET', '/admin/users?role=student&per_page=50&onboarded=yes', jar)
   check('yes: Ana and Ben', names(r) === 'Ana,Ben', names(r))
   r = await call('GET', '/admin/users?role=student&per_page=50&onboarded=no', jar)
-  check('no: in Tetra Commission, not onboarded — Cara', names(r) === 'Cara', names(r))
+  check('no: in CS Portal, not onboarded — Cara', names(r) === 'Cara', names(r))
   r = await call('GET', '/admin/users?role=student&per_page=50&onboarded=none', jar)
-  check('none: not in Tetra Commission — Dan', names(r) === 'Dan', names(r))
+  check('none: not in CS Portal — Dan', names(r) === 'Dan', names(r))
   check('…the list carries tetraCs.onboarded', (r = await call('GET', '/admin/users?role=student&per_page=50&onboarded=yes', jar)).body?.data?.[0]?.tetraCs?.onboarded === true)
   check('a value it does not know: refused (422, as every validated query here)', (await call('GET', '/admin/users?role=student&onboarded=maybe', jar)).status === 422)
 

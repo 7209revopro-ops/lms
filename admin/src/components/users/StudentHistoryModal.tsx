@@ -134,7 +134,7 @@ export function StudentHistoryModal({ user, onClose }: Props) {
                     {user.isActive ? <CheckCircle2 size={10} /> : <XCircle size={10} />}
                     {user.isActive ? 'Active' : 'Inactive'}
                   </span>
-                  {/* Who looks after them in Tetra Commission. */}
+                  {/* Who looks after them in CS Portal. */}
                   <CsTag cs={user.tetraCs} variant="chip" />
                 </div>
               </div>

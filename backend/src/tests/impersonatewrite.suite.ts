@@ -5,7 +5,7 @@
      B. a read & write session started by an admin changes things for the student, and each change is
         audited as user.impersonate.write naming the admin; /auth/me says read & write
      C. even then: password, email, 2FA, sessions, deleting the account, checkout/orders, ID uploads refused
-     D. the commission portal's "Act as student" (/service/students/view { mode: 'write' }) does the same,
+     D. the CS Portal's "Act as student" (/service/students/view { mode: 'write' }) does the same,
         naming the CS
    Run: bun --no-env-file src/tests/impersonatewrite.suite.ts
 ───────────────────────────────────────────────────────────── */
@@ -120,7 +120,7 @@ try {
   }
   check('…the password is unchanged', (await call('POST', '/auth/login', new Map(), { email: 'sam@lms.test', password: PW })).status === 200)
 
-  section('D · "Act as student" from the commission portal')
+  section('D · "Act as student" from the CS Portal')
   const p1 = await call('POST', '/service/students/view', null, { email: 'sam@lms.test', byName: 'Cara CS', byEmail: 'cara@portal.test', mode: 'write' }, { 'x-portal-secret': SECRET })
   check('started read & write', p1.status === 200 && p1.body?.data?.mode === 'write')
   const csB = await enter(p1.body?.data?.url)

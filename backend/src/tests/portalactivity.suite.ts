@@ -281,7 +281,7 @@ const sinceQ = `?since=${encodeURIComponent(iso(at(2 * HOUR)))}`
 check('no secret: refused', (await ask(live.url, `/service/student-activity${sinceQ}`)).status === 401)
 check('a wrong secret: refused', (await ask(live.url, `/service/student-activity${sinceQ}`, 'guess')).status === 401)
 const viaHttp = await ask(live.url, `/service/student-activity${sinceQ}`, CRM_SECRET)
-check('the sales CRM\'s secret, as the commission portal sends it: answered', viaHttp.status === 200 && viaHttp.body.data?.events?.length === 6, JSON.stringify(viaHttp.body).slice(0, 200))
+check('the sales CRM\'s secret, as the CS Portal sends it: answered', viaHttp.status === 200 && viaHttp.body.data?.events?.length === 6, JSON.stringify(viaHttp.body).slice(0, 200))
 const noSince = await ask(live.url, '/service/student-activity', CRM_SECRET)
 check('no `since`: a 400 with the reason, not a server fault', noSince.status === 400 && noSince.body.error?.code === 'VALIDATION_ERROR', JSON.stringify(noSince.body))
 const tix = await ask(live.url, '/service/support-tickets', CRM_SECRET, { email: 'learner@lms.test' })

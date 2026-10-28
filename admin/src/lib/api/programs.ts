@@ -31,7 +31,7 @@ export const useProgramStudentSearch = (q: string) => useQuery({
   queryFn: () => apiGet<ProgramPerson[]>(`/admin/programs/students?q=${encodeURIComponent(q.trim())}`),
 })
 
-/* The commission portal's teams and CS (each student's User.tetraCs), with counts — and a whole group's students. */
+/* The CS Portal's teams and CS (each student's User.tetraCs), with counts — and a whole group's students. */
 export interface ProgramAudiences { total: number; teams: { team: string; count: number }[]; cs: { name: string; team: string; count: number }[] }
 export const useProgramAudiences = (enabled = true) => useQuery({
   queryKey: [...KEY, 'audiences'], enabled, staleTime: 60_000,

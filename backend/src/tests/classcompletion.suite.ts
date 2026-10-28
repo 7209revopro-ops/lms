@@ -1,5 +1,5 @@
 /* ─────────────────────────────────────────────────────────────
-   A class a student attended, once it is over — for the commission portal —
+   A class a student attended, once it is over — for the CS Portal —
    and when a Google Meet class really ended
    (services/portalActivity.service.ts classAttendedEvents,
    jobs/reminders.job.ts runMeetClassEnd).

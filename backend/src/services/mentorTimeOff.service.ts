@@ -3,11 +3,11 @@ import { Types } from 'mongoose'
 /* ────────────────────────────────────────────────────────────────────────────
    A mentor's time off (the user, 2026-10-23): "they can mention they're not available at that time … and at that
    time no one can book him, like in every portal". Marked in the LMS admin (the mentor's own Availability page, or an
-   admin for any mentor they reach) and from the commission portal (/service/mentor-time-off — the portal decides who
+   admin for any mentor they reach) and from the CS Portal (/service/mentor-time-off — the portal decides who
    may); read by every Mentor Calendar through listMentorsForPortal.
 
    Everything that puts a mentor's hour in the diary goes through here first and is refused over it:
-     a 1:1 meeting booked or moved (portal.service.ts — the LMS admin, the commission portal and the CRMs alike),
+     a 1:1 meeting booked or moved (portal.service.ts — the LMS admin, the CS Portal and the CRMs alike),
      a live class created, repeated or moved, or handed to the mentor (liveClass.service.ts, the repeat route),
      a programme made or rescheduled, co-mentors included (program.service.ts),
      a timetable import (classImport.service.ts — those dates come back as clashes).

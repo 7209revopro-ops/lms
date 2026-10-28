@@ -788,7 +788,7 @@ export async function createMentorMeetingForPortal(input: {
   bookedVia?: 'portal' | 'lms'
   /** Any academy's mentor — the portal's calendar lists both academies' (listMentorsForPortal allAcademies). */
   allAcademies?: boolean
-  /** Tetra Commission's (2026-10-27): the mentor says how a student meeting went once it is over (meetingOutcome.service.ts). */
+  /** CS Portal's (2026-10-27): the mentor says how a student meeting went once it is over (meetingOutcome.service.ts). */
   askOutcome?: boolean
 }): Promise<{ meeting: PortalMentorMeeting; mentorEmail: string; linkNote: string | null }> {
   const org = await resolveOrg(input.remoteOrgId)
@@ -1388,7 +1388,7 @@ async function classInfoOf(live: ClassInfoSource, mentorName: string) {
   return { students, timeline }
 }
 
-/* ─── Classes for the Tetra Commission portal ──────────────────────────────── */
+/* ─── Classes for the CS Portal portal ──────────────────────────────── */
 
 export type PortalClassStatus = 'attended' | 'missed' | 'upcoming' | 'booked' | 'cancelled'
 
@@ -1420,7 +1420,7 @@ export interface PortalStudentClasses {
 /**
  * Which live classes these students booked, and whether they came.
  *
- * Asked by the commission portal: its Students table wants the counts for
+ * Asked by the CS Portal: its Students table wants the counts for
  * everybody (at most MAX_EMAILS a call, like /accounts), and a student's page
  * the classes themselves (`detail`). By email, and across both academies — a
  * student can book the other academy's shared classes, and the portal wants
@@ -1557,7 +1557,7 @@ export async function classAttendanceForPortal(input: {
   return { students: [...byEmail.values()] }
 }
 
-/* ── A mentor's time off, from the commission portal (2026-10-23) ─────────────────────────────────────────────────
+/* ── A mentor's time off, from the CS Portal (2026-10-23) ─────────────────────────────────────────────────
    The portal marks it for the mentor it says — the mentor themselves, their chief, an admin: who may is the portal's
    rule, as booking is — by the mentor's email, any academy's (the portal's calendar lists both). */
 async function mentorByEmail(email: unknown) {

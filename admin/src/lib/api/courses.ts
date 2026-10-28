@@ -159,7 +159,7 @@ export interface CourseStudentRow {
   student: {
     id: string; name: string; email: string; phone?: string; avatarUrl?: string
     enrollmentStatus?: string; isActive?: boolean
-    /** Their CS and CS team in Tetra Commission, where it has said. */
+    /** Their CS and CS team in CS Portal, where it has said. */
     tetraCs?: TetraCs | null
   }
 }

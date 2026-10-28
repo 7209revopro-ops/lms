@@ -61,7 +61,7 @@ export function TimeOffDialog({ mentorId, mentorName, tz, onClose }: {
         ) : (
           <>
             <p className="text-lg font-semibold">{mentorId === 'me' ? 'Mark yourself not available' : `Mark ${mentorName} not available`}</p>
-            <p className="text-xs opacity-60">Nobody can book {mentorId === 'me' ? 'you' : 'them'} in this time — no class, programme or session, from the LMS, the commission portal or the CRMs. Times {tz.replace('_', ' ')}.</p>
+            <p className="text-xs opacity-60">Nobody can book {mentorId === 'me' ? 'you' : 'them'} in this time — no class, programme or session, from the LMS, the CS Portal or the CRMs. Times {tz.replace('_', ' ')}.</p>
             <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={f.allDay} onChange={e => set('allDay', e.target.checked)} />Whole day(s)</label>
             {f.allDay ? (
               <div className="grid grid-cols-2 gap-2">

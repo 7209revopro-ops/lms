@@ -406,7 +406,7 @@ function BookingRow({ booking, index, selectable, selected, onToggle }: {
         </div>
       </td>
 
-      {/* CS · Team — who looks after them in Tetra Commission */}
+      {/* CS · Team — who looks after them in CS Portal */}
       <td className="py-3 px-3 max-w-[200px]">
         <CsTag cs={student.tetraCs} variant="cell" />
       </td>
@@ -851,7 +851,7 @@ export default function BookingsPage() {
 
   const TH_COLS = [
     { label: 'Student',    icon: <User size={10} />          },
-    /* Who looks after the student in Tetra Commission. */
+    /* Who looks after the student in CS Portal. */
     { label: 'CS · Team',  icon: <Headset size={10} />       },
     { label: 'Session',    icon: <Clock size={10} />         },
     { label: 'Course',     icon: <BookOpen size={10} />      },

@@ -1,10 +1,10 @@
 /* ─────────────────────────────────────────────────────
-   Students' CS and CS team, from the commission portal
+   Students' CS and CS team, from the CS Portal
    ─────────────────────────────────────────────────────
-   Tetra Commission knows who looks after each of its students — their CS (the
+   CS Portal knows who looks after each of its students — their CS (the
    primary mentor) and the CS team — and the admin shows it beside the student
    wherever a student is shown (the user, 2026-10-07: "show the cs name and
-   team name … every student showing area"). The commission portal sends it
+   team name … every student showing area"). The CS Portal sends it
    here every few minutes, for the students whose CS or team changed — every
    one of them the first time:
 
@@ -17,7 +17,7 @@
    Students only: a staff account is never written from here. A student whose
    CS and team are as they were is left alone.
 
-   And whether Tetra Commission onboarded them (2026-10-13) — `onboarded`, with
+   And whether CS Portal onboarded them (2026-10-13) — `onboarded`, with
    `onboardedAt` — for the Students table's Onboarded column and the Requests
    page. A portal from before that sends neither, and what was said before is
    kept rather than forgotten.

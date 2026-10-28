@@ -4,7 +4,7 @@
      A. levels in programOrder: completed / current / up next / locked;
         only the student's programme (no Digital Marketing for a Forex student);
      B. a held course's modules: open / locked, and why (payment);
-     C. the advisor from Tetra Commission;
+     C. the advisor from CS Portal;
      D. ?mine=1 lists only classes of courses the student holds.
    Run: bun --no-env-file src/tests/journey.suite.ts
 ───────────────────────────────────────────────────────────── */

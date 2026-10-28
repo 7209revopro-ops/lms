@@ -1,7 +1,7 @@
 /* ─────────────────────────────────────────────────────
-   The help desk and class assignments, for the commission portal
+   The help desk and class assignments, for the CS Portal
    ─────────────────────────────────────────────────────
-   Tetra Commission (the commission portal) tells each student's CS when the
+   CS Portal (the CS Portal) tells each student's CS when the
    student opens a Help & Support ticket or writes on one, sends a class
    assignment, or has one approved or rejected, or attended a live class that
    is now over (for the CS to call them) — and shows the student's
@@ -486,7 +486,7 @@ export async function replyToTicketForPortal(input: { ticketId: unknown; email: 
   const body = account.own ? text : `${text}\n\n— ${by.name || 'Delta Institutions'}${by.name ? ', Delta Institutions' : ''}`
   if (body.length > MAX_ANSWER) throw bad(`An answer can be at most about ${MAX_ANSWER - 100} characters`)
   await asDesk(() => new SupportService().addMessage(idOf(ticket._id), account, body))
-  logger.info({ ticketId: idOf(ticket._id), by, from: account.own ? 'their own account' : 'the shared account' }, '[support] answered from the commission portal')
+  logger.info({ ticketId: idOf(ticket._id), by, from: account.own ? 'their own account' : 'the shared account' }, '[support] answered from the CS Portal')
   const fresh = await SupportTicketModel.findById(ticket._id).select(TICKET_FIELDS).lean() as unknown as TicketRow
   return { ticket: ticketForPortal(fresh), from: account.own ? 'own' : 'shared' }
 }
@@ -499,7 +499,7 @@ export async function resolveTicketForPortal(input: { ticketId: unknown; email: 
     const by = actorOf(input.byName, input.byEmail)
     const account = await deskAccountFor(by.email)
     await asDesk(() => new SupportService().setStatus(idOf(ticket._id), 'resolved', account))
-    logger.info({ ticketId: idOf(ticket._id), by, from: account.own ? 'their own account' : 'the shared account' }, '[support] resolved from the commission portal')
+    logger.info({ ticketId: idOf(ticket._id), by, from: account.own ? 'their own account' : 'the shared account' }, '[support] resolved from the CS Portal')
   }
   const fresh = await SupportTicketModel.findById(ticket._id).select(TICKET_FIELDS).lean() as unknown as TicketRow
   return { ticket: ticketForPortal(fresh) }

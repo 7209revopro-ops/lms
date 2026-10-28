@@ -14,7 +14,7 @@ export interface ChatMessage {
   /** Client-only: a refusal no retry can fix (403/404/409/422) — no "tap to retry". */
   fatal?: boolean
 }
-/** Staff also get a student's CS and CS team in Tetra Commission. */
+/** Staff also get a student's CS and CS team in CS Portal. */
 export interface ChatPerson { id: string; name: string; avatarUrl?: string; email?: string; tetraCs?: TetraCs | null }
 export interface ChatConversation {
   id: string; student: ChatPerson | null; instructor: ChatPerson | null

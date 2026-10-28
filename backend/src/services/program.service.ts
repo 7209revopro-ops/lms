@@ -4,7 +4,7 @@ import { logger } from '@/utils/logger.ts'
 import { academyClock } from '@/utils/academyClock.ts'
 
 /* ─────────────────────────────────────────────────────────────────────────────
-   Programs (Tetra Commission's user, 2026-10-09) — a live class that repeats
+   Programs (CS Portal's user, 2026-10-09) — a live class that repeats
    weekly on chosen days, or monthly on a date, until an end date, for the
    students picked for it and nobody else.
 
@@ -290,7 +290,7 @@ async function cancelUpcoming(programId: Types.ObjectId, reason: string): Promis
 /* ── The answer ────────────────────────────────────────────────────────── */
 /* ── The shareable link (2026-10-17) ───────────────────────────────────────
    {CLIENT_URL}/p/{joinCode}: an LMS student on it signs in and joins as usual; anyone else fills in a short form
-   (name, email, phone) and gets the class's Join button. Copied from the LMS admin's and the commission portal's
+   (name, email, phone) and gets the class's Join button. Copied from the LMS admin's and the CS Portal's
    programme lists. */
 const JOIN_ALPHABET = 'abcdefghjkmnpqrstuvwxyz23456789'
 const newJoinCode = () => Array.from(crypto.randomBytes(8), b => JOIN_ALPHABET[b % JOIN_ALPHABET.length]).join('')
@@ -621,7 +621,7 @@ export async function stopProgram(id: string, actor: Actor) {
 }
 
 /* ── Picking students by commission team, by CS, or all ────────────────────
-   Tetra Commission (the commission portal) gives every Forex student a team and
+   CS Portal (the CS Portal) gives every Forex student a team and
    a CS, and the LMS keeps both on the student (User.tetraCs). The program form
    picks from those the way the portal groups its students. Approved, active
    students of the academy only. */

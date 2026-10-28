@@ -51,7 +51,7 @@ const envSchema = z.object({
      cannot reach these endpoints at all; it does not fall back to anything. */
   SALES_CRM_SECRET: z.string().default(''),
 
-  /* An answer on a Help & Support ticket from the commission portal comes
+  /* An answer on a Help & Support ticket from the CS Portal comes
      from the answering CS's own LMS account — staff (role support, admin,
      sub_admin or super_admin) under the address they use in the portal — so
      the student sees their name. A CS with no such account answers from this

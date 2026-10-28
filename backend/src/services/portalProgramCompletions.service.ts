@@ -1,7 +1,7 @@
 import { PortalError } from '@/services/portal.service.ts'
 
 /* ─────────────────────────────────────────────────────────────
-   Programs a student completed (Tetra Commission's user, 2026-10-25: the
+   Programs a student completed (CS Portal's user, 2026-10-25: the
    portal's "Program Completion Students"): a program that has ended — its end
    date passed, not stopped — whose every class that was held (not cancelled)
    the student attended. With how many they attended of how many, for each of

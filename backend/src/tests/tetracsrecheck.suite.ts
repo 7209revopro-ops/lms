@@ -1,13 +1,13 @@
 /* ─────────────────────────────────────────────────────────────
-   Recheck the commission portal, and the Students table's phone (the user,
-   2026-10-10: "add option here to recheck the commission portal … show the
+   Recheck the CS Portal, and the Students table's phone (the user,
+   2026-10-10: "add option here to recheck the CS Portal … show the
    phone number … filter non phone numbers").
 
-   Pinned here, against a real database and a stand-in Tetra Commission:
+   Pinned here, against a real database and a stand-in CS Portal:
 
-     A. POST /admin/users/:id/recheck-cs asks Tetra Commission now, with this
+     A. POST /admin/users/:id/recheck-cs asks CS Portal now, with this
         LMS's secret, and keeps what it says as tetraCs — found, the open pool,
-        not there (left as it was), Tetra Commission down or refusing, not set
+        not there (left as it was), CS Portal down or refusing, not set
         up, not a student, nobody signed in;
      B. a student edited or created here is asked about by itself, after the
         save has answered;
@@ -38,7 +38,7 @@ function check(label: string, ok: boolean, detail = '') {
 const step = (s: string) => console.log(`\n\x1b[1m${s}\x1b[0m`)
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms))
 
-/* ── A stand-in Tetra Commission: who looks after whom, by LMS id or email ── */
+/* ── A stand-in CS Portal: who looks after whom, by LMS id or email ── */
 type Cs = { cs: string; team: string; code: string; open: boolean }
 const tetra = new Map<string, Cs>()
 const asked: { lmsUserId?: string; email?: string }[] = []
@@ -50,7 +50,7 @@ const stand = createServer((req, res) => {
     const send = (status: number, body: unknown) => { res.writeHead(status, { 'content-type': 'application/json' }); res.end(JSON.stringify(body)) }
     if (req.url !== '/api/v1/integrations/lms/student-cs') return send(404, {})
     if (req.headers['x-lms-secret'] !== SECRET) return send(401, { success: false, error: { code: 'UNAUTHORISED', message: 'Bad secret' } })
-    if (tetraDown) return send(500, { success: false, error: { code: 'DOWN', message: 'Tetra Commission is down' } })
+    if (tetraDown) return send(500, { success: false, error: { code: 'DOWN', message: 'CS Portal is down' } })
     const body = JSON.parse(raw || '{}') as { lmsUserId?: string; email?: string }
     asked.push(body)
     const hit = (body.lmsUserId && tetra.get(body.lmsUserId)) || (body.email && tetra.get(body.email))
@@ -111,7 +111,7 @@ try {
   const login = await call('POST', '/admin/auth/login', jar, { email: 'admin@rc.local', password: PW })
   check('(the admin signs in)', login.status === 200, why(login))
 
-  step('A · Recheck the commission portal')
+  step('A · Recheck the CS Portal')
   tetra.set(String(shanu._id), { cs: 'CS 2- AB', team: 'Gladiators', code: 'STU-2876', open: false })
   let r = await call('POST', `/admin/users/${shanu._id}/recheck-cs`, jar)
   check('found: CS, team and student code answered', r.status === 200 && r.body?.data?.found === true && r.body.data.cs === 'CS 2- AB'
@@ -124,14 +124,14 @@ try {
   const o1 = await get(omar._id)
   check('found by email, waiting in the open pool: no CS, its team', r.body?.data?.open === true && o1?.name === '' && o1?.team === 'Delta Open Students' && o1?.open === true, JSON.stringify(o1))
   r = await call('POST', `/admin/users/${nadia._id}/recheck-cs`, jar)
-  check('not in Tetra Commission: found false, and what was there stays', r.status === 200 && r.body?.data?.found === false && (await get(nadia._id))?.team === 'Old Team', why(r))
+  check('not in CS Portal: found false, and what was there stays', r.status === 200 && r.body?.data?.found === false && (await get(nadia._id))?.team === 'Old Team', why(r))
   tetraDown = true
   r = await call('POST', `/admin/users/${shanu._id}/recheck-cs`, jar)
-  check('Tetra Commission down: 503 saying why, nothing changed', r.status === 503 && /down/i.test(r.body?.error?.message ?? '') && (await get(shanu._id))?.team === 'Gladiators', why(r))
+  check('CS Portal down: 503 saying why, nothing changed', r.status === 503 && /down/i.test(r.body?.error?.message ?? '') && (await get(shanu._id))?.team === 'Gladiators', why(r))
   tetraDown = false
   process.env.COMMISSION_S2S_SECRET = 'wrong-secret'
   r = await call('POST', `/admin/users/${shanu._id}/recheck-cs`, jar)
-  check('a secret Tetra Commission refuses: 503 with its answer', r.status === 503 && /Bad secret/.test(r.body?.error?.message ?? ''), why(r))
+  check('a secret CS Portal refuses: 503 with its answer', r.status === 503 && /Bad secret/.test(r.body?.error?.message ?? ''), why(r))
   process.env.COMMISSION_S2S_SECRET = ''
   r = await call('POST', `/admin/users/${shanu._id}/recheck-cs`, jar)
   check('not set up: 503 naming the settings', r.status === 503 && /COMMISSION_API_URL/.test(r.body?.error?.message ?? ''), why(r))
@@ -145,7 +145,7 @@ try {
   tetra.set(String(nadia._id), { cs: 'CS 7- NEW', team: 'New Team', code: 'STU-7', open: false })
   r = await call('PATCH', `/admin/users/${nadia._id}`, jar, { name: 'Nadia K' })
   check('an edit saves', r.status === 200, why(r))
-  check('…then the commission portal is asked, and its answer kept', await until(async () => (await get(nadia._id))?.team === 'New Team'), JSON.stringify(await get(nadia._id)))
+  check('…then the CS Portal is asked, and its answer kept', await until(async () => (await get(nadia._id))?.team === 'New Team'), JSON.stringify(await get(nadia._id)))
   const before = asked.length
   r = await call('POST', '/admin/users', jar, { name: 'New Student', email: 'new@rc.local', password: 'CorrectHorse1!x', role: 'student', category: '4x-trading' })
   const newId = r.body?.data?._id ?? r.body?.data?.id

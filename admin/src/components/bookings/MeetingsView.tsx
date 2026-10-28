@@ -1,7 +1,7 @@
 'use client'
 /* ─────────────────────────────────────────────────────────────
    The Bookings page's "Meetings" tab (2026-10-24): every 1:1 / group meeting
-   booked with a mentor — from the commission portal or LMS admin's Mentor
+   booked with a mentor — from the CS Portal or LMS admin's Mentor
    Calendar — with its participants and who booked it. Stat cards on top;
    clicking one shows just those meetings. A row opens the meeting in full.
    Shares the page's date range; an admin can pick one mentor.
@@ -188,7 +188,7 @@ export function MeetingsView({ dateFrom, dateTo, isInstructor, mentors }: {
                 ))}
               </ul>
               <p className="mt-5 text-xs" style={{ color: muted }}>
-                Booked by <b className="text-white/80">{open.bookedByEmail}</b> · {open.bookedVia === 'portal' ? 'from the commission portal' : 'in LMS admin'}
+                Booked by <b className="text-white/80">{open.bookedByEmail}</b> · {open.bookedVia === 'portal' ? 'from the CS Portal' : 'in LMS admin'}
               </p>
               {open.notes && <p className="mt-3 whitespace-pre-wrap rounded-xl p-3 text-sm" style={{ background: 'rgba(255,255,255,0.04)', color: 'rgba(255,255,255,0.75)' }}>{open.notes}</p>}
             </motion.div>

@@ -14,13 +14,13 @@ import {
 
 /* ─────────────────────────────────────────────────────
    How a student meeting went (the user, 2026-10-27: "after the meeting completes … a popup form, it closes only
-   after it is filled"). A meeting Tetra Commission booked (askOutcome) with a student, over and not cancelled, waits
+   after it is filled"). A meeting CS Portal booked (askOutcome) with a student, over and not cancelled, waits
    on its mentor until they say where the client stands — interested (course, payment date and mode), follow-up (the
    CSE's or a revision, and when), a meeting with another mentor, a revision (course, module, preferred mentor) or not
    interested (why) — with the client's concern and a remark; then, a second step, who the client is (trading
    experience and years, losses — how much and how — country, family in Dubai, occupation), started from what the
-   last meeting with them said. The mentor fills it in LMS admin or in Tetra Commission (the same email), the
-   first one counts, and Tetra Commission reads what was filled to put it on the student.
+   last meeting with them said. The mentor fills it in LMS admin or in CS Portal (the same email), the
+   first one counts, and CS Portal reads what was filled to put it on the student.
 ───────────────────────────────────────────────────── */
 
 const httpError = (message: string, statusCode: number) =>
@@ -92,7 +92,7 @@ async function mentorByEmail(email: unknown) {
 export const pendingOutcomesForUser = (userId: string, now = new Date()) =>
   Types.ObjectId.isValid(userId) ? pendingOf(new Types.ObjectId(userId), now) : Promise.resolve([])
 
-/** Tetra Commission: the mentor with this address's — none for anybody who isn't one. */
+/** CS Portal: the mentor with this address's — none for anybody who isn't one. */
 export async function pendingOutcomesForEmail(email: unknown, now = new Date()): Promise<PendingMeeting[]> {
   const mentor = await mentorByEmail(email)
   return mentor ? pendingOf(mentor._id as Types.ObjectId, now) : []
@@ -243,7 +243,7 @@ async function outcomeFrom(body: Record<string, unknown>): Promise<Omit<IMeeting
 }
 
 /**
- * The mentor says how it went — once: the first to fill it (LMS admin or Tetra Commission) counts, a second is told it
+ * The mentor says how it went — once: the first to fill it (LMS admin or CS Portal) counts, a second is told it
  * was filled. Only their own meeting, and only once it is over.
  */
 async function save(input: {
@@ -283,7 +283,7 @@ export async function saveOutcomeForUser(user: { id: string; email: string }, me
   return save({ meetingId, mentorId, by: { id: mentorId, name: me?.name ?? user.email, email: me?.email ?? user.email }, via: 'lms', body, now })
 }
 
-/** Tetra Commission: the mentor with this address fills it. */
+/** CS Portal: the mentor with this address fills it. */
 export async function saveOutcomeForEmail(email: unknown, meetingId: unknown, body: Record<string, unknown>, now?: Date) {
   const mentor = await mentorByEmail(email)
   if (!mentor) throw httpError('No such meeting of yours', 404)
@@ -292,8 +292,8 @@ export async function saveOutcomeForEmail(email: unknown, meetingId: unknown, bo
 }
 
 /**
- * The outcomes filled from `since` on (inclusive — the caller keeps each once by its id), oldest first: for Tetra
- * Commission to put on its students. `next` is where to read from next time.
+ * The outcomes filled from `since` on (inclusive — the caller keeps each once by its id), oldest first: for CS
+ * Portal to put on its students. `next` is where to read from next time.
  */
 export async function outcomesSince(since: unknown, limit = 200) {
   const { MentorMeetingModel, UserModel } = await import('@/models/schema.ts')
@@ -318,7 +318,7 @@ export async function outcomesSince(since: unknown, limit = 200) {
   return { meetings, next: meetings.length ? meetings[meetings.length - 1]!.outcome!.filledAt : (Number.isNaN(from.getTime()) ? null : from.toISOString()) }
 }
 
-/* ── The meetings themselves, for Tetra Commission's pages ─────────────── */
+/* ── The meetings themselves, for CS Portal's pages ─────────────── */
 
 export type PortalMeetingStatus = 'upcoming' | 'waiting' | 'done' | 'cancelled'
 const DAY_MS = 86_400_000
@@ -327,7 +327,7 @@ const dubaiDay = (v: unknown, add = 0) =>
   typeof v === 'string' && DATE.test(v) ? new Date(new Date(`${v}T00:00:00+04:00`).getTime() + add * DAY_MS) : undefined
 
 /**
- * Tetra Commission's student meetings (askOutcome) with where each stands — upcoming, waiting for the mentor's outcome,
+ * CS Portal's student meetings (askOutcome) with where each stands — upcoming, waiting for the mentor's outcome,
  * done (with it), or cancelled (2026-10-28: its Meetings tab, Meetings done page and report). ?from=&to= (Dubai days,
  * `to` included) by when they started, and/or ?emails= (any attendee, comma-separated). Read only; newest first.
  */

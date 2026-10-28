@@ -23,13 +23,13 @@ import { studentCsFromPortal } from '@/services/portalStudentCs.service.ts'
 /* ─────────────────────────────────────────────────────
    /service — the help desk, class assignments, students' courses,
    enrolment requests, "view as student" and course access, for the
-   commission portal (services/portalActivity.service.ts,
+   CS Portal (services/portalActivity.service.ts,
    services/portalEnrolments.service.ts, services/portalEnrolmentRequests.service.ts,
    services/portalStudentView.service.ts, services/portalCourseAccess.service.ts).
 
    Mounted at /service after portal.routes.ts, whose secret check runs first for
    every /service request and lets through only a caller it knows — the Root
-   portal's secret or the sales CRM's (the commission portal calls with the
+   portal's secret or the sales CRM's (the CS Portal calls with the
    CRM's) — marking which on req.caller. A request without that mark never got
    past it, so one arriving here anyway, because the mounts were reordered, is
    refused rather than answered.
@@ -176,14 +176,14 @@ router.post('/students/course-access/:enrolmentId', checkedCaller, wrap(async (r
 }))
 
 /**
- * Who looks after each student in Tetra Commission — their CS and CS team —
+ * Who looks after each student in CS Portal — their CS and CS team —
  * for the admin to show beside them (services/portalStudentCs.service.ts).
- * Written by the commission portal only, which calls with the CRM's secret:
+ * Written by the CS Portal only, which calls with the CRM's secret:
  * the Root portal's is refused.
  */
 router.post('/student-cs', checkedCaller, wrap(async (req, res) => {
   if (req.caller !== 'crm') {
-    sendError(res, 'FORBIDDEN', 'Only the commission portal says who looks after a student', 403)
+    sendError(res, 'FORBIDDEN', 'Only the CS Portal says who looks after a student', 403)
     return
   }
   const { students } = (req.body ?? {}) as { students?: unknown }

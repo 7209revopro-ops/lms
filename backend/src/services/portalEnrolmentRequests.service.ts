@@ -1,9 +1,9 @@
 /* ─────────────────────────────────────────────────────
-   Enrolment requests, for the commission portal
+   Enrolment requests, for the CS Portal
    ─────────────────────────────────────────────────────
    The admin's Requests page (admin.controller.ts listEnrollmentRequests,
    approveEnrollment, rejectEnrollment) — somebody signs up and waits to be
-   let in — in Tetra Commission too (the user, 2026-10-06): a CS sees and
+   let in — in CS Portal too (the user, 2026-10-06): a CS sees and
    decides their own students' requests, the portal naming them by address,
    and a Super Admin every Forex applicant's.
 
@@ -248,7 +248,7 @@ const actorOf = (byName: unknown, byEmail: unknown) => ({
 async function deciderFor(byName: unknown, byEmail: unknown) {
   const by = actorOf(byName, byEmail)
   const account = await deskAccountFor(by.email)
-  const label = account.own ? (account.name || by.name) : `${by.name || 'Tetra Commission'} (Tetra Commission)`
+  const label = account.own ? (account.name || by.name) : `${by.name || 'CS Portal'} (CS Portal)`
   return { by, account, name: label, email: account.own ? account.email : (by.email || account.email) }
 }
 
@@ -266,7 +266,7 @@ export async function requestDocumentForPortal(input: { userId: unknown; email: 
   const key = stored ? keyFromUrl(stored) : null
   if (!key) throw new PortalError('NOT_FOUND', 'They have not sent this document', 404)
   const by = actorOf(input.byName, input.byEmail)
-  logger.info({ userId: idOf(user._id), field, by }, '[enrolment] identity document opened from the commission portal')
+  logger.info({ userId: idOf(user._id), field, by }, '[enrolment] identity document opened from the CS Portal')
   if (!key.startsWith(KYC_PREFIX)) return { url: stored, expiresIn: null }
   if (!isR2Configured()) throw new PortalError('NOT_AVAILABLE', 'This document is kept where only the LMS admin can open it', 404)
   return { url: await generatePresignedGetUrl(key, SIGNED_URL_TTL_SECONDS), expiresIn: SIGNED_URL_TTL_SECONDS }
@@ -321,7 +321,7 @@ export async function approveEnrolmentForPortal(input: { userId: unknown; email:
   })
   void sendEnrollmentApproved(email, user.name ?? '', categories.join(', ')).catch(() => {})
   void sendEnrollmentApprovedWhatsApp(user.enrollmentApplication?.phone, user.name ?? '', categories.join(', '), env.CLIENT_URL).catch(() => {})
-  logger.info({ userId: idOf(user._id), by: decider.by, from: decider.account.own ? 'their own account' : 'the shared account' }, '[enrolment] approved from the commission portal')
+  logger.info({ userId: idOf(user._id), by: decider.by, from: decider.account.own ? 'their own account' : 'the shared account' }, '[enrolment] approved from the CS Portal')
   const courses = giver ? await giveCourses(user, plan, giver) : undefined
 
   const fresh = await UserModel.findById(user._id).select(FIELDS).lean() as unknown as UserRow
@@ -365,7 +365,7 @@ export async function rejectEnrolmentForPortal(input: { userId: unknown; email: 
     )
   }
   void sendEnrollmentCancelled(String(user.email ?? ''), user.name ?? '', '', reason).catch(() => {})
-  logger.info({ userId: idOf(user._id), by: decider.by, from: decider.account.own ? 'their own account' : 'the shared account' }, '[enrolment] rejected from the commission portal')
+  logger.info({ userId: idOf(user._id), by: decider.by, from: decider.account.own ? 'their own account' : 'the shared account' }, '[enrolment] rejected from the CS Portal')
 
   const fresh = await UserModel.findById(user._id).select(FIELDS).lean() as unknown as UserRow
   return { request: requestOf(fresh, await academiesOf([fresh])), from: decider.account.own ? 'own' : 'shared' }

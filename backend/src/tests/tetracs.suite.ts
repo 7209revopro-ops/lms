@@ -1,5 +1,5 @@
 /* ─────────────────────────────────────────────────────────────
-   Students' CS and CS team from the commission portal, and the admin lists
+   Students' CS and CS team from the CS Portal, and the admin lists
    that show them (services/portalStudentCs.service.ts, POST /service/student-cs;
    the user, 2026-10-07: "show the cs name and team name … every student
    showing area").
@@ -12,7 +12,7 @@
         not written; told again unchanged, nothing written; a change written;
         the same student twice in a call — the first stands; not a list, or
         more than 500 — refused;
-     B. over HTTP, only with the commission portal's secret (the CRM's): none
+     B. over HTTP, only with the CS Portal's secret (the CRM's): none
         or a wrong one 401, the Root portal's 403;
      C. the admin's student lists carry it — Students, Bookings, class
         verification (as the portal says now, else the snapshot from when this
@@ -121,14 +121,14 @@ try {
   ] })
   check('the same student twice in a call: the first stands', r.updated === 1 && (await get(aisha._id))?.name === 'CS 4- NN', JSON.stringify(await get(aisha._id)))
 
-  step('B · over HTTP, only from the commission portal')
+  step('B · over HTTP, only from the CS Portal')
   const tell = { students: [{ email: 'aisha@tc.local', cs: 'CS 2- AB', team: 'Falcons', code: 'STU-10' }] }
   check('no secret: 401', (await call('POST', '/service/student-cs', undefined, tell)).status === 401)
   check('a wrong secret: 401', (await call('POST', '/service/student-cs', undefined, tell, { 'x-portal-secret': 'guess' })).status === 401)
   const root = await call('POST', '/service/student-cs', undefined, tell, { 'x-portal-secret': ROOT_SECRET })
-  check("the Root portal's secret: 403 — only the commission portal says who looks after a student", root.status === 403, why(root))
+  check("the Root portal's secret: 403 — only the CS Portal says who looks after a student", root.status === 403, why(root))
   const crm = await call('POST', '/service/student-cs', undefined, tell, { 'x-portal-secret': CRM_SECRET })
-  check("the commission portal's: written", crm.status === 200 && crm.body?.data?.updated === 1 && (await get(aisha._id))?.name === 'CS 2- AB', why(crm))
+  check("the CS Portal's: written", crm.status === 200 && crm.body?.data?.updated === 1 && (await get(aisha._id))?.name === 'CS 2- AB', why(crm))
 
   step('C · the admin lists carry it')
   const course = await M.CourseModel.create({ title: 'MBT', slug: 'mbt-' + Date.now(), description: 'd', instructorId: mentor._id, price: 0, isFree: true, status: 'published', language: 'English', organizationId: org._id, program: '4x-trading' })

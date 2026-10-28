@@ -1,9 +1,9 @@
 'use client'
 /* ─────────────────────────────────────────────────────
-   A student's CS and CS team in Tetra Commission — "CS 2- AB · Falcons" —
+   A student's CS and CS team in CS Portal — "CS 2- AB · Falcons" —
    shown wherever the admin shows a student (the user, 2026-10-07: "show the cs
    name and team name … every student showing area"). "No CS yet" while they
-   wait in Delta Open Students. Nothing for a student the commission portal
+   wait in Delta Open Students. Nothing for a student the CS Portal
    has not told us about; a table cell says "—" instead.
 
    TEAL, which no other badge here uses: violet is a cross-academy row, amber
@@ -34,8 +34,8 @@ export function CsTag({ cs, variant = 'line', className = '' }: {
 }) {
   const label = csLabel(cs)
   const title = label
-    ? `CS in Tetra Commission: ${label}${cs?.code ? ` (${cs.code})` : ''}`
-    : 'Not in Tetra Commission'
+    ? `CS in CS Portal: ${label}${cs?.code ? ` (${cs.code})` : ''}`
+    : 'Not in CS Portal'
   if (!label) {
     return variant === 'cell'
       ? <span className={`text-xs ${className}`} style={{ color: 'rgba(255,255,255,0.25)' }} title={title}>—</span>

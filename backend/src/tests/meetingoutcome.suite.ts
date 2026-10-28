@@ -1,5 +1,5 @@
 /* How a student meeting went (2026-10-27, meetingOutcome.service.ts): what waits on a mentor, the form's rules, the
-   first to fill it counts, and the feed Tetra Commission reads.
+   first to fill it counts, and the feed CS Portal reads.
    Run: bun --no-env-file src/tests/meetingoutcome.suite.ts */
 process.env.DATABASE_URL = process.env.MEETINGOUTCOME_DB_URL || 'mongodb://localhost:27017/lms_meetingoutcome'
 process.env.NODE_ENV = 'test'
@@ -120,7 +120,7 @@ try {
   check('somebody new: none', bobPending.find((m) => m.title === 'Somebody new')?.lastProfile === null)
   check('the options carry the second step\'s lists', j((await S.outcomeOptions() as any).lossWays) === j(['scammed', 'self_trading', 'money_management']))
 
-  console.log('\nThe feed Tetra Commission reads')
+  console.log('\nThe feed CS Portal reads')
   const all: any = await S.outcomesSince(undefined)
   check('every outcome, oldest first, with the attendees and the mentor', j(all.meetings.map((m: any) => m.title)) === j(['Pitch Saif', 'Bob pitch', 'Overview Hamda']) && all.meetings[0].outcome.profile?.country === 'UAE' && all.meetings[0].mentor.email === 'ann@d.local' && all.meetings[0].attendees[0].email === 's1@d.local', j(all))
   const later: any = await S.outcomesSince(new Date(now.getTime() + 500).toISOString())
@@ -129,10 +129,10 @@ try {
   const none: any = await S.outcomesSince(new Date(now.getTime() + 5000).toISOString())
   check('nothing new: next stays where it was', none.meetings.length === 0 && none.next === new Date(now.getTime() + 5000).toISOString(), j(none))
 
-  console.log('\nThe meetings, for Tetra Commission\'s pages')
+  console.log('\nThe meetings, for CS Portal\'s pages')
   const listed: any = await S.meetingsForPortal({ from: '2026-10-26', to: '2026-10-28' }, now)
   const byTitle = new Map(listed.meetings.map((m: any) => [m.title, m]))
-  check('Tetra Commission\'s student meetings only (not staff, not a sales CRM\'s)', !byTitle.has('Staff sync') && !byTitle.has('Booked by a sales CRM'), j([...byTitle.keys()]))
+  check('CS Portal\'s student meetings only (not staff, not a sales CRM\'s)', !byTitle.has('Staff sync') && !byTitle.has('Booked by a sales CRM'), j([...byTitle.keys()]))
   check('each with where it stands: done (with its outcome), waiting, upcoming, cancelled', (byTitle.get('Pitch Saif') as any)?.status === 'done' && (byTitle.get('Pitch Saif') as any).outcome?.stage === 'interested'
     && (byTitle.get('Still on') as any)?.status === 'upcoming' && (byTitle.get('Called off') as any)?.status === 'cancelled' && (byTitle.get('Second pitch Saif') as any)?.status === 'waiting', j(listed.meetings.map((m: any) => [m.title, m.status])))
   check('…with the mentor and the attendees, newest first', (byTitle.get('Bob pitch') as any)?.mentor?.email === 'bob@d.local' && listed.meetings[0].startsAt >= listed.meetings.at(-1).startsAt)
@@ -141,7 +141,7 @@ try {
   check('a day outside: none', (await S.meetingsForPortal({ from: '2026-09-01', to: '2026-09-02' }, now) as any).meetings.length === 0)
   check('neither days nor whose: refused', await refused(S.meetingsForPortal({}, now), 400) === true)
 
-  console.log('\nBooking asks for it only when Tetra Commission says so')
+  console.log('\nBooking asks for it only when CS Portal says so')
   const at = new Date(now.getTime() + 3 * 86_400_000).toISOString()
   const asked: any = await createMentorMeetingForPortal({ remoteOrgId: String(org), mentorEmail: 'bob@d.local', title: 'Asked', kind: 'student', scheduledStart: at, durationMins: 30, attendees: [{ name: 'Saif', email: 's1@d.local' }], bookedByEmail: 'cs@portal.local', askOutcome: true, meetingUrl: 'https://meet.example/x' })
   const plain: any = await createMentorMeetingForPortal({ remoteOrgId: String(org), mentorEmail: 'bob@d.local', title: 'Plain', kind: 'student', scheduledStart: new Date(now.getTime() + 4 * 86_400_000).toISOString(), durationMins: 30, attendees: [{ name: 'Saif', email: 's1@d.local' }], bookedByEmail: 'sales@crm.local', meetingUrl: 'https://meet.example/y' })

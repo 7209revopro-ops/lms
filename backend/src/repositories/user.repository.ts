@@ -165,7 +165,7 @@ export class UserRepository extends BaseRepository<IUser> {
       excludeStudents?:  boolean
       /** Only those with no phone number — on the account or the application. */
       noPhone?:          boolean
-      /** Onboarded in Tetra Commission: yes, no (in Tetra, not yet), none (not in Tetra at all). */
+      /** Onboarded in CS Portal: yes, no (in Tetra, not yet), none (not in Tetra at all). */
       onboarded?:        'yes' | 'no' | 'none'
       organizationId?:   string
     },
@@ -245,7 +245,7 @@ export class UserRepository extends BaseRepository<IUser> {
       andFilter(filter, { $and: [blank('phone'), blank('enrollmentApplication.phone')] })
     }
 
-    /* Onboarded in Tetra Commission (2026-10-13), as its push last said. "In
+    /* Onboarded in CS Portal (2026-10-13), as its push last said. "In
        Tetra" is having a student code there; "not yet" is in Tetra without
        onboarded — including from before the portal said, which reads as not
        yet until it does. */

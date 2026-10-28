@@ -2197,7 +2197,7 @@ export class OrderService {
     alreadyProcessed: boolean
     courseSlug: string
     courseTitle: string
-    /** The course's programme. Finance sends only FOREX Trading (`4x-trading`) students on to Tetra Commission. */
+    /** The course's programme. Finance sends only FOREX Trading (`4x-trading`) students on to CS Portal. */
     courseProgram: string | null
     organizationSlug: string | null
     access?: AccessSummary

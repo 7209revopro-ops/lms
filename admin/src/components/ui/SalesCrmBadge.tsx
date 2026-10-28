@@ -4,7 +4,7 @@
 
    Finance enrols the students four CRMs sell — Delta's Sales CRM, the Remote
    CRM, Draw and the Banglore CRM — and says which, so staff here see the same tag finance and
-   Tetra Commission show. A fact about the sale, not about how the student got
+   CS Portal show. A fact about the sale, not about how the student got
    in: that is the enrolment's `source`, and these are all 'purchase'.
 
    THE COLOURS avoid the ones this panel already gives a meaning: violet is a

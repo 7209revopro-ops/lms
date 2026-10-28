@@ -133,7 +133,7 @@ try {
   const d = await call('GET', `/admin/class-verification/${cls._id}`, mJar)
   const aisha = d.body?.data?.students?.find((x: any) => x.name === 'Aisha')
   check('two live seats listed (the cancelled one is not)', d.status === 200 && d.body?.data?.students?.length === 2, why(d))
-  check("the commission portal's CS, team and phone", aisha?.cs === 'CS 1- MH' && aisha?.team === 'Hawks' && aisha?.phone === '+971501112222', JSON.stringify(aisha))
+  check("the CS Portal's CS, team and phone", aisha?.cs === 'CS 1- MH' && aisha?.team === 'Hawks' && aisha?.phone === '+971501112222', JSON.stringify(aisha))
   check('and how they joined', !!aisha?.joinedAt && aisha?.joinedVia === 'click')
   check('no CS on file: null, not a guess', d.body?.data?.students?.find((x: any) => x.name === 'Bilal')?.cs === null)
   const od = await call('GET', `/admin/class-verification/${cls._id}`, oJar)

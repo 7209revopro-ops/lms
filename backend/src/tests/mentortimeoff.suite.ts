@@ -7,7 +7,7 @@
      C. a 1:1 meeting over it is refused, and moving one into it; one beside it is fine
      D. a programme with a date in it is refused (the mentor's, or a co-mentor's); a repeat that runs into it adds none;
         a class moved into it is refused; a class already inside it can still be renamed
-     E. the commission portal marks it by email, is told what was already booked, and takes it away again
+     E. the CS Portal marks it by email, is told what was already booked, and takes it away again
      F. taken away — the time can be booked again
    Run: bun --no-env-file src/tests/mentortimeoff.suite.ts
 ───────────────────────────────────────────────────────────── */
@@ -101,7 +101,7 @@ try {
   r = await call('GET', `/service/mentors?remoteOrgId=${dubai._id}&${win}`, null, undefined, P)
   check('the CRMs\' listing: "Not available", no reason', rowOf(r, 'haf@to.local')?.timeOff?.[0]?.reason === null && !!rowOf(r, 'haf@to.local')?.timeOff?.[0]?.startsAt, JSON.stringify(rowOf(r, 'haf@to.local')?.timeOff))
   r = await call('GET', `/service/mentors?remoteOrgId=${dubai._id}&${win}&timeOffReasons=all`, null, undefined, P)
-  check('the commission portal asks for the reasons and gets them', rowOf(r, 'haf@to.local')?.timeOff?.[0]?.reason === 'Doctor')
+  check('the CS Portal asks for the reasons and gets them', rowOf(r, 'haf@to.local')?.timeOff?.[0]?.reason === 'Doctor')
 
   section('C · 1:1 meetings')
   const book = (start: Date, mins = 30) => call('POST', '/admin/mentor-calendar/meetings', moizJ, { mentorEmail: 'haf@to.local', title: 'Strategy review', kind: 'staff', scheduledStart: start.toISOString(), durationMins: mins, attendees: [{ name: 'Moiz', email: 'moiz@to.local' }], inPerson: true, location: 'Room 2' })
@@ -148,7 +148,7 @@ try {
   r = await call('PATCH', `/admin/live-classes/${day2.id}`, adminJ, { title: 'Weekly review (renamed)' })
   check('…it can still be renamed', r.status === 200, `${r.status} ${msg(r)}`)
 
-  section('E · the commission portal')
+  section('E · the CS Portal')
   r = await call('POST', '/service/mentor-time-off', null, { mentorEmail: 'HAF@to.local', startsAt: dubaiAt(3, '12:00').toISOString(), endsAt: dubaiAt(3, '14:30').toISOString(), reason: 'Training', byEmail: 'chief@portal.test', byName: 'Chief' }, P)
   const portalOffId = r.body?.data?.timeOff?.id
   check('marked by email, whatever its case', r.status === 200 && !!portalOffId && r.body?.data?.timeOff?.createdByName === 'Chief', `${r.status} ${JSON.stringify(r.body).slice(0, 200)}`)

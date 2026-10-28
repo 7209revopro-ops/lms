@@ -107,7 +107,7 @@ export interface AdminUser {
   createdAt:        string
   updatedAt:        string
   customRoleId?:    string | { id: string; name: string }
-  /** Their CS and CS team in Tetra Commission, where it has said. */
+  /** Their CS and CS team in CS Portal, where it has said. */
   tetraCs?:         TetraCs | null
 }
 
@@ -119,7 +119,7 @@ export function useUsers(role: AdminUserRole | undefined, params: {
   page?: number; per_page?: number; search?: string; category?: string; status?: 'active' | 'inactive'; exclude_students?: boolean; enrollmentStatus?: 'pending' | 'approved' | 'rejected' | 'cancelled'
   /** Only students with no phone number, on the account or the application. */
   no_phone?: 'true'
-  /** Onboarded in Tetra Commission: yes, no (there, not yet), none (not there). */
+  /** Onboarded in CS Portal: yes, no (there, not yet), none (not there). */
   onboarded?: 'yes' | 'no' | 'none'
 } = {}) {
   return useQuery({
@@ -287,7 +287,7 @@ export function useDeleteUser() {
   })
 }
 
-/* ─── Recheck the commission portal: who looks after this student, asked now ─── */
+/* ─── Recheck the CS Portal: who looks after this student, asked now ─── */
 export interface TetraCsRecheck { found: boolean; cs: string; team: string; code: string; open: boolean }
 export function useRecheckCs() {
   const qc = useQueryClient()

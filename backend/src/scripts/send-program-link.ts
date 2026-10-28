@@ -1,6 +1,6 @@
 /* ─────────────────────────────────────────────────────────────
-   WhatsApp a program's Google Meet link to the commission portal's students —
-   every approved, active student Tetra Commission has given a team (User.tetraCs)
+   WhatsApp a program's Google Meet link to the CS Portal's students —
+   every approved, active student CS Portal has given a team (User.tetraCs)
    — through the approved class_update_v1 template:
 
      "Hi {name}, there's an update about your class {program} on {day, time}:

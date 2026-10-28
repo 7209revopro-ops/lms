@@ -181,7 +181,7 @@ export async function adminListDevices(opts: {
     name:       r.user?.name ?? null,
     email:      r.user?.email ?? '(unknown account)',
     phone:      r.user?.enrollmentApplication?.phone ?? r.user?.phone ?? null,
-    /* Their CS and CS team in Tetra Commission. */
+    /* Their CS and CS team in CS Portal. */
     tetraCs:    r.user?.tetraCs ?? null,
     status:     r.status,
     isMain:     Boolean(r.isMain),

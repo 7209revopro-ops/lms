@@ -130,7 +130,7 @@ export function UserTable({ role, label }: Props) {
           </button>
         )}
 
-        {/* Onboarded in Tetra Commission (2026-10-13), within the programme chosen */}
+        {/* Onboarded in CS Portal (2026-10-13), within the programme chosen */}
         {role === 'student' && (
           <div className="flex items-center gap-1.5">
             {([['', 'Any'], ['yes', 'Onboarded'], ['no', 'Not onboarded'], ['none', 'Not in Tetra']] as const).map(([v, text]) => (
@@ -158,7 +158,7 @@ export function UserTable({ role, label }: Props) {
         <table className={`w-full border-collapse ${role === 'student' ? 'min-w-[1140px]' : 'min-w-[720px]'}`}>
           <thead>
             <tr style={{ background: 'rgba(255,255,255,0.03)', borderBottom: '1px solid rgba(255,255,255,0.07)' }}>
-              {/* Students: who looks after them in Tetra Commission, beside their email. */}
+              {/* Students: who looks after them in CS Portal, beside their email. */}
               {(role === 'student'
                 ? ['Name', 'Email', 'Phone', 'CS · Team', 'Onboarded', 'Category', 'Status', 'Joined', '']
                 : ['Name', 'Email', 'Category', 'Status', 'Joined', '']).map(h => (
@@ -269,15 +269,15 @@ function UserRow({ user, index, onEdit, onViewHistory }: {
      drawn there. */
   const isLent = user.role === 'instructor' && !!user.sharedAcrossOrgs
 
-  /* Asks Tetra Commission now who looks after them, and keeps the answer. */
+  /* Asks CS Portal now who looks after them, and keeps the answer. */
   const recheckCs = async () => {
     setMenuOpen(false)
     try {
       const a = await recheck.mutateAsync(user.id)
-      if (!a.found) toast.error('Not in the commission portal yet', `${user.email} is not a student there`)
+      if (!a.found) toast.error('Not in the CS Portal yet', `${user.email} is not a student there`)
       else toast.success(`${a.open || !a.cs ? 'No CS yet' : a.cs}${a.team ? ` · ${a.team}` : ''}${a.code ? ` · ${a.code}` : ''}`)
     } catch (err: any) {
-      toast.error('Could not ask the commission portal', err?.response?.data?.error?.message)
+      toast.error('Could not ask the CS Portal', err?.response?.data?.error?.message)
     }
   }
 
@@ -535,7 +535,7 @@ function UserRow({ user, index, onEdit, onViewHistory }: {
                     className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-xs font-semibold transition-colors hover:bg-white/[0.05] disabled:opacity-40"
                     style={{ color: '#2DD4BF' }}>
                     {recheck.isPending ? <Spinner size={12} /> : <RefreshCw size={12} />}
-                    Recheck commission portal
+                    Recheck CS Portal
                   </button>
                 )}
                 <button onClick={() => setActive(!user.isActive)}

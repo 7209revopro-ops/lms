@@ -1061,7 +1061,7 @@ async function runRecordingPoller(): Promise<void> {
    timetable end) is the class's; once Google says that one ended, the class
    is 'ended' then (endSource 'meet') and started when it began. Still going
    → asked again next time. None at all (nobody joined), a room this LMS
-   can't see, or Google not answering → left as it is: the commission portal
+   can't see, or Google not answering → left as it is: the CS Portal
    then goes by the timetable. */
 const MEET_END_WINDOW_MS = 12 * 60 * 60 * 1000
 

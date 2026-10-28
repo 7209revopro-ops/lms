@@ -58,7 +58,7 @@ export interface EnrollmentRequest {
   isActive:               boolean
   createdAt:              string
   enrollmentApplication?: EnrollmentApplication
-  /** Their CS and CS team in Tetra Commission, where it has said. */
+  /** Their CS and CS team in CS Portal, where it has said. */
   tetraCs?:               TetraCs | null
 }
 

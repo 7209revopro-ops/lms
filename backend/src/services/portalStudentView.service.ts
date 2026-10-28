@@ -1,7 +1,7 @@
 /* ─────────────────────────────────────────────────────
-   "View as student", for the commission portal
+   "View as student", for the CS Portal
    ─────────────────────────────────────────────────────
-   A CS — or the Super Admin — opens a student's own LMS from Tetra Commission
+   A CS — or the Super Admin — opens a student's own LMS from CS Portal
    and sees what the student sees (the user, 2026-10-06): the admin's
    client-portal impersonation (admin.controller.ts impersonateClient), started
    from the portal, which says whose student it is.
@@ -65,7 +65,7 @@ export async function studentViewForPortal(input: { email: unknown; byName: unkn
     targetEmail: student.email,
     organizationId: student.organizationId,
     expiresAt: new Date(Date.now() + toSeconds(ttl) * 1000),
-    userAgent: `Tetra Commission — ${by.name || actorEmail}`.slice(0, 300),
+    userAgent: `CS Portal — ${by.name || actorEmail}`.slice(0, 300),
     mode,
   })
 
@@ -85,10 +85,10 @@ export async function studentViewForPortal(input: { email: unknown; byName: unkn
     entity: 'User',
     entityId: String(student._id),
     meta: { via: 'tetra-commission', byName: by.name, byEmail: by.email, from: account.own ? 'own' : 'shared', sessionId: String(session._id), mode },
-    userAgent: 'Tetra Commission',
+    userAgent: 'CS Portal',
     organizationId: student.organizationId,
   })
-  logger.info({ studentId: String(student._id), by, from: account.own ? 'their own account' : 'the shared account' }, '[impersonation] student view started from the commission portal')
+  logger.info({ studentId: String(student._id), by, from: account.own ? 'their own account' : 'the shared account' }, '[impersonation] student view started from the CS Portal')
 
   return {
     url: `${env.CLIENT_URL.replace(/\/+$/, '')}/imp/enter?code=${code}`,

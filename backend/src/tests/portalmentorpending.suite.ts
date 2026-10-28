@@ -1,4 +1,4 @@
-/* What waits on each mentor, for Tetra Commission's Dashboard (2026-10-28): meeting outcome forms (over, not filled),
+/* What waits on each mentor, for CS Portal's Dashboard (2026-10-28): meeting outcome forms (over, not filled),
    classes to verify (overdue after the 9 AM reminder), students' unread messages — per mentor, with the rows.
    Run: bun --no-env-file src/tests/portalmentorpending.suite.ts */
 process.env.DATABASE_URL = process.env.PORTALMENTORPENDING_DB_URL || 'mongodb://localhost:27017/lms_portalmentorpending'

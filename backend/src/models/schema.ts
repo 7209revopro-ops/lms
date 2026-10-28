@@ -185,7 +185,7 @@ export interface IUser extends Document {
   fullRegistrationSubmittedAt?: Date
   /* Enrollment application form data */
   enrollmentApplication?: IEnrollmentApplication
-  /* Sent on to Tetra Commission — see services/commissionStudents.service.ts */
+  /* Sent on to CS Portal — see services/commissionStudents.service.ts */
   commissionSync?: {
     state?:         'pending' | 'sent' | 'failed' | 'skipped'
     attempts?:      number
@@ -199,7 +199,7 @@ export interface IUser extends Document {
     sentAt?:        Date
     course?:        string
   }
-  /* Who looks after them in Tetra Commission, kept current by it — see
+  /* Who looks after them in CS Portal, kept current by it — see
      services/portalStudentCs.service.ts */
   tetraCs?: {
     /** Their CS (the primary mentor); "" while they wait in Delta Open Students. */
@@ -209,9 +209,9 @@ export interface IUser extends Document {
     code?:  string
     /** Waiting in Delta Open Students — no CS yet. */
     open?:  boolean
-    /** When the commission portal last said so. */
+    /** When the CS Portal last said so. */
     at?:    Date
-    /** Onboarded in Tetra Commission (their welcome went), and when; unset until it says. */
+    /** Onboarded in CS Portal (their welcome went), and when; unset until it says. */
     onboarded?:   boolean
     onboardedAt?: Date | null
   }
@@ -325,7 +325,7 @@ const UserSchema = new Schema<IUser>(
       }, { _id: false }),
       default: undefined,
     },
-    /* Where this student stands with Tetra Commission, the commission portal.
+    /* Where this student stands with CS Portal, the CS Portal.
        Written only by the job that sends Forex students there; `skipped` is a
        student finance enrolled, whom finance sends itself. `course` is the
        Forex course they were sent with — absent on a student the job sent
@@ -344,9 +344,9 @@ const UserSchema = new Schema<IUser>(
       sentAt:        { type: Date },
       course:        { type: String },
     },
-    /* Who looks after this student in Tetra Commission — their CS and CS team —
+    /* Who looks after this student in CS Portal — their CS and CS team —
        as it says now (the user, 2026-10-07: "show the cs name and team name …
-       every student showing area"). Written only by the commission portal,
+       every student showing area"). Written only by the CS Portal,
        through POST /service/student-cs, every few minutes for whoever changed.
        Unlike commissionSync's mentorName and team, which are what it answered
        once, when this LMS first sent the student there. */
@@ -356,7 +356,7 @@ const UserSchema = new Schema<IUser>(
       code: { type: String },
       open: { type: Boolean },
       at:   { type: Date },
-      /* Whether Tetra Commission onboarded them, and when (2026-10-13) —
+      /* Whether CS Portal onboarded them, and when (2026-10-13) —
          unset until a portal that says so has. */
       onboarded:   { type: Boolean },
       onboardedAt: { type: Date },
@@ -2620,7 +2620,7 @@ export interface IImpersonationSession extends Document {
      'write': changes are allowed — except the account's own security, deleting it, payments and ID documents
      (auth.middleware.ts IMPERSONATION_WRITE_BLOCKED) — and each one is audited as user.impersonate.write,
      naming the operator. Started as 'write' only on purpose (admin Users → View as student → Read & write, or
-     the commission portal's "Act as student"). */
+     the CS Portal's "Act as student"). */
   mode?:          'read' | 'write'
   createdAt:      Date
   updatedAt:      Date
@@ -3189,7 +3189,7 @@ export const MentorAvailabilityModel = mongoose.model<IMentorAvailability>(
 
 /* ─────────────────────────────────────────────────────
    MENTOR TIME OFF — "not available" from one moment to another (the user, 2026-10-23: mentors in the LMS and the
-   commission portal mark when they can't be booked, and no portal books them then). One-off, unlike the weekly slots
+   CS Portal mark when they can't be booked, and no portal books them then). One-off, unlike the weekly slots
    above; nothing — a class, a programme, an import, a 1:1 meeting — is booked with the mentor inside one
    (services/mentorTimeOff.service.ts). Removed outright when the mentor is free again.
 ───────────────────────────────────────────────────── */
@@ -3224,9 +3224,9 @@ MentorTimeOffSchema.index({ mentorId: 1, startsAt: 1, endsAt: 1 })
 
 export const MentorTimeOffModel = mongoose.model<IMentorTimeOff>('MentorTimeOff', MentorTimeOffSchema)
 
-/* ── Program (Tetra Commission's user, 2026-10-09) ───────────────────────────
+/* ── Program (CS Portal's user, 2026-10-09) ───────────────────────────
    A live class that repeats — weekly on chosen days, or monthly on a date — until an end date, for the students picked
-   for it and nobody else. Made in the LMS admin (Programs) or from the commission portal for a CS's students.
+   for it and nobody else. Made in the LMS admin (Programs) or from the CS Portal for a CS's students.
    Behind it: a hidden course (CourseModel.programId) the students are enrolled in, so every class of it admits them
    through the usual door; each occurrence is an ordinary LiveClass (programId) with a seat booked for each student.
    services/program.service.ts. */
@@ -3382,11 +3382,11 @@ export interface IMentorMeeting extends Document {
   /* Who booked it, in the portal. Kept as an address rather than a reference
      because they are an account in another system entirely. */
   bookedByEmail:  string
-  /** Where it was booked (2026-10-24): the commission portal, or LMS admin's Mentor Calendar. Absent on
+  /** Where it was booked (2026-10-24): the CS Portal, or LMS admin's Mentor Calendar. Absent on
       meetings booked before this was kept — the Bookings page infers it from who booked them. */
   bookedVia?:     'portal' | 'lms'
   /** A student meeting whose mentor fills in how it went once it is over (2026-10-27, meetingOutcome.service.ts):
-      set by Tetra Commission's bookings, so the sales CRMs' and older meetings ask nothing. */
+      set by CS Portal's bookings, so the sales CRMs' and older meetings ask nothing. */
   askOutcome?:    boolean
   outcome?:       IMeetingOutcome | null
   cancelledAt?:   Date
@@ -3461,7 +3461,7 @@ export interface IMeetingOutcome {
   filledById?:   Types.ObjectId | null
   filledByName:  string
   filledByEmail: string
-  /** Where it was filled: LMS admin, or Tetra Commission. */
+  /** Where it was filled: LMS admin, or CS Portal. */
   filledVia:     'lms' | 'portal'
   filledAt:      Date
 }
@@ -3526,7 +3526,7 @@ const MentorMeetingSchema = new Schema<IMentorMeeting>(
 /* The query this collection exists to answer: what is in front of this mentor
    between two dates. */
 MentorMeetingSchema.index({ mentorId: 1, scheduledStart: 1 })
-/* Tetra Commission reading the outcomes filled since it last looked. */
+/* CS Portal reading the outcomes filled since it last looked. */
 MentorMeetingSchema.index({ 'outcome.filledAt': 1 }, { partialFilterExpression: { askOutcome: true } })
 
 export const MentorMeetingModel = mongoose.model<IMentorMeeting>(

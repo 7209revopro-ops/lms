@@ -134,7 +134,7 @@ const READ_METHODS = new Set(['GET', 'HEAD', 'OPTIONS'])
 
 /* ── READ & WRITE sessions (the user, 2026-10-09) ─────────────────────
    A session started in 'write' mode (admin Users → View as student → Read &
-   write; the commission portal's "Act as student") may change things for the
+   write; the CS Portal's "Act as student") may change things for the
    student — book a seat, submit work, send a message — with two guards:
 
      · these stay refused even then: the account's own security (password,

@@ -5,7 +5,7 @@ import { mintSigninCode } from '@/services/signinLink.service.ts'
 import { PortalError } from '@/services/portal.service.ts'
 
 /* ─────────────────────────────────────────────────────────────
-   Exams for the commission portal (2026-10-10) — read only.
+   Exams for the CS Portal (2026-10-10) — read only.
 
    GET /service/exams?academy=dubai|bangalore
      The published exams of that academy's courses (and of courses shared with

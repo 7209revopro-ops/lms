@@ -1,15 +1,15 @@
 /* ─────────────────────────────────────────────────────────────
    Meeting outcomes — a test meeting (the user, 2026-10-27: "a test meeting, so
-   when Amjad sir opens the LMS or the commission portal the pop-up shows").
+   when Amjad sir opens the LMS or the CS Portal the pop-up shows").
 
    Makes one student meeting with a mentor that is already over and asks for an
-   outcome (askOutcome, as a Tetra Commission booking does) — so their next look
-   at LMS admin or Tetra Commission shows the pop-up (services/meetingOutcome.service.ts).
+   outcome (askOutcome, as a CS Portal booking does) — so their next look
+   at LMS admin or CS Portal shows the pop-up (services/meetingOutcome.service.ts).
    Put straight in the database: no invitation is mailed to anybody. Its only
    attendee is a made-up address no student has, so when the form is filled
    nothing lands on a real student and no CS is told.
 
-   Needs the meeting-outcome code deployed (LMS backend + admin, Tetra Commission).
+   Needs the meeting-outcome code deployed (LMS backend + admin, CS Portal).
 
    Usage (from backend/, on the server):
      bun src/scripts/meeting-outcome-test.ts                      dry run: the mentor it finds, what it would make, the test meetings already there
@@ -89,7 +89,7 @@ const doc = {
 
 console.log(`\nMentor: ${mentor.name} <${mentor.email}>`)
 console.log(`${write ? "Making" : "Would make"}: "${TITLE}" — ${when(start)}, 30 minutes (over), with "Test student (ignore)" <${TEST_EMAIL}>, asking for an outcome.`)
-console.log(`They see the pop-up in LMS admin (signed in as ${mentor.email}) and in Tetra Commission (signed in with the same email), within a minute or two.`)
+console.log(`They see the pop-up in LMS admin (signed in as ${mentor.email}) and in CS Portal (signed in with the same email), within a minute or two.`)
 
 if (!write) {
   console.log('\nDry run — nothing made. Run again with --write to make it.')

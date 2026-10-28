@@ -1,5 +1,5 @@
 /* ─────────────────────────────────────────────────────────────
-   Course access, for the commission portal
+   Course access, for the CS Portal
    (services/portalCourseAccess.service.ts, the approve in
    services/portalEnrolmentRequests.service.ts, routes/portalActivity.routes.ts).
 

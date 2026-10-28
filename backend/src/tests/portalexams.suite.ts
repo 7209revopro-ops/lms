@@ -1,5 +1,5 @@
 /* ─────────────────────────────────────────────────────────────
-   Exams, for the commission portal (services/portalExams.service.ts).
+   Exams, for the CS Portal (services/portalExams.service.ts).
 
    Pinned here, against a real database:
 

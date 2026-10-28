@@ -1,5 +1,5 @@
 /* ─────────────────────────────────────────────────────────────
-   Enrolment requests, for the commission portal
+   Enrolment requests, for the CS Portal
    (services/portalEnrolmentRequests.service.ts, routes/portalActivity.routes.ts).
 
    Pinned here, against a real database:
@@ -214,7 +214,7 @@ check('twice is once: nothing changes', again.already === true && String(row.app
 const shared = await approveEnrolmentForPortal({ userId: idOf(mo), email: 'mo@lms.test', byName: 'Nadia CS', byEmail: 'nadia@portal.test' })
 row = await UserModel.findById(mo).lean()
 check('a CS with no LMS account: from the shared one, with their name on it', shared.from === 'shared' && idOf(row.approvedBy) === idOf(desk)
-  && row.approvedByName === 'Nadia CS (Tetra Commission)' && row.approvedByEmail === 'nadia@portal.test' && row.approvedByRole === 'support',
+  && row.approvedByName === 'Nadia CS (CS Portal)' && row.approvedByEmail === 'nadia@portal.test' && row.approvedByRole === 'support',
   JSON.stringify({ n: row.approvedByName, e: row.approvedByEmail, r: row.approvedByRole }))
 check('their other programme kept, Forex added', JSON.stringify(row.categories) === '["ai","4x-trading"]', JSON.stringify(row.categories))
 

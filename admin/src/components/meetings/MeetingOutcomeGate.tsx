@@ -14,7 +14,7 @@ import {
 /* After a student meeting is over, its mentor says how it went (the user, 2026-10-27: "a popup form … it closes only
    after it is filled"). On every page, for mentors: the meetings waiting, oldest first, one at a time — no close,
    no click-away; only Save takes one off. Two steps (2026-10-27): how it went, with the client's concern; then who
-   the client is — started from what the last meeting with them said. The same meeting may be filled in Tetra Commission: the first counts, and
+   the client is — started from what the last meeting with them said. The same meeting may be filled in CS Portal: the first counts, and
    this one then drops out (told so). */
 
 const STAGE_LABEL: Record<OutcomeStage, string> = {
@@ -134,7 +134,7 @@ export function MeetingOutcomeGate() {
     } catch (err: any) {
       const status = err?.response?.status
       const msg = err?.response?.data?.error?.message ?? 'Could not save'
-      // Filled already (Tetra Commission) or no longer this mentor's: it drops out on the refetch.
+      // Filled already (CS Portal) or no longer this mentor's: it drops out on the refetch.
       if (status === 409 || status === 404) toast.info('Already taken care of', msg)
       else setProblem(msg)
     }
@@ -332,7 +332,7 @@ export function MeetingOutcomeGate() {
               Next — about the client
             </button>
             <p className="text-center text-xs" style={{ color: 'rgba(255,255,255,0.35)' }}>
-              This stays open until it is filled. It goes to the student&apos;s CS in Tetra Commission.
+              This stays open until it is filled. It goes to the student&apos;s CS in CS Portal.
             </p>
           </div>
         )}

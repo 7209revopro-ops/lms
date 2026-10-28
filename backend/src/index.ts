@@ -323,7 +323,7 @@ async function bootstrap() {
     startClassPodsJob()
     startTamaraSweepJob()
     startAbzerSweepJob()
-    logger.info('⏰  Scheduler started (reminders, critical mail, chat emails, digests, instructor schedule, email outbox, whatsapp outbox, Tetra Commission students, Tamara + Abzer stuck orders)')
+    logger.info('⏰  Scheduler started (reminders, critical mail, chat emails, digests, instructor schedule, email outbox, whatsapp outbox, CS Portal students, Tamara + Abzer stuck orders)')
   } else {
     /* WARN, not info. If this is true of every process the platform quietly
        sends no reminders and no class-change notices at all, and nothing else

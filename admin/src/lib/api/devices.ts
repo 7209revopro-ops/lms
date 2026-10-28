@@ -11,7 +11,7 @@ export interface DeviceView {
   name:       string | null
   email:      string
   phone:      string | null
-  /** Their CS and CS team in Tetra Commission, where it has said. */
+  /** Their CS and CS team in CS Portal, where it has said. */
   tetraCs?:   TetraCs | null
   status:     DeviceStatus
   isMain:     boolean

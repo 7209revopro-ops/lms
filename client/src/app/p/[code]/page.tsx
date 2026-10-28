@@ -2,7 +2,7 @@
 
 /* ─────────────────────────────────────────────────────────────
    /p/<code> — a programme's shareable link (2026-10-17). Copied from the LMS
-   admin's or the commission portal's programme list and sent to anyone.
+   admin's or the CS Portal's programme list and sent to anyone.
      · an LMS student on it: "Sign in" → their Class Schedule (Join is there)
      · anyone else: name, email, phone → the class's Join now button when it
        can be joined (15 minutes before it starts until it ends)

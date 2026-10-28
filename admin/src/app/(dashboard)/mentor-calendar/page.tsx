@@ -10,7 +10,7 @@ import { useQueryState, setQueryParams } from '@/lib/useQueryState'
 import { useMentorCalendar, useBookMeeting, useCancelMeeting, useMentorClass, useRemoveTimeOff, wallInZone, timeOffLabel, refusal, type CalendarMentor, type MentorTimeOff } from '@/lib/api/mentorCalendar'
 import { TimeOffDialog } from '@/components/live-classes/TimeOffDialog'
 
-/* Mentor Calendar (Tetra Commission's user, 2026-10-08): every mentor's week — the hours they set as free,
+/* Mentor Calendar (CS Portal's user, 2026-10-08): every mentor's week — the hours they set as free,
    their classes and the sessions booked with them — for instructors as well as admins, and a session booked
    with any mentor from here. The LMS checks clashes and sends the emails, as from the portals; an instructor
    cancels only what they booked. Sessions can be searched by title (a booked session by who is on it too) and

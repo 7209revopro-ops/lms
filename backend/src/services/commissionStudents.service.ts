@@ -1,7 +1,7 @@
 /* ─────────────────────────────────────────────────────
-   Forex students → Tetra Commission
+   Forex students → CS Portal
    ─────────────────────────────────────────────────────
-   Tetra Commission (the commission portal) keeps its own list of Delta's
+   CS Portal (the CS Portal) keeps its own list of Delta's
    Forex students, each given to one of its teams in turn. Only Forex students
    go there: somebody put on a course whose programme is FOREX Trading
    (`program: '4x-trading'`, the FOREX Trading filter on the admin Courses
@@ -17,8 +17,8 @@
    This job used to send every new student once approved, most of them before
    they had any course. A student it sent then counts as sent here only once
    they have been sent with a Forex course — so one sent with none, and taken
-   out of Tetra Commission since, goes back when they are given one. Tetra
-   Commission is idempotent on the LMS user id and leaves an email it already
+   out of CS Portal since, goes back when they are given one. CS
+   Portal is idempotent on the LMS user id and leaves an email it already
    has alone, so sending somebody it still has changes nothing there, and a
    retry never makes a second student.
 
@@ -31,13 +31,13 @@
    come right (a bad secret, a malformed student) stops.
 
    Off unless COMMISSION_API_URL and COMMISSION_S2S_SECRET are set (the secret
-   equals LMS_S2S_SECRET on the Tetra Commission server).
+   equals LMS_S2S_SECRET on the CS Portal server).
 ───────────────────────────────────────────────────── */
 import { EnrollmentModel, UserModel, OrganizationModel, CourseModel, OrderModel, SystemSettingModel } from '@/models/schema.ts'
 import { logger } from '@/utils/logger.ts'
 import { recheckTetraCsLater } from '@/services/tetraCsRecheck.service.ts'
 
-/* The programme Tetra Commission is for — "FOREX Trading" in the admin. */
+/* The programme CS Portal is for — "FOREX Trading" in the admin. */
 export const FOREX_PROGRAMME = '4x-trading'
 
 const BATCH = 20
@@ -87,12 +87,12 @@ export async function sendToCommission(input: {
   })
   const body = await res.json().catch(() => ({})) as { data?: CommissionAnswer; error?: { message?: string } | string }
   if (!res.ok) {
-    const message = (typeof body.error === 'object' ? body.error?.message : body.error) ?? `Tetra Commission refused with ${res.status}`
+    const message = (typeof body.error === 'object' ? body.error?.message : body.error) ?? `CS Portal refused with ${res.status}`
     if (res.status === 404 || res.status === 503) throw new CommissionNotReadyError(message)
     if (res.status >= 400 && res.status < 500 && res.status !== 429) throw new CommissionPermanentError(message)
     throw new Error(message)
   }
-  if (!body.data) throw new Error('Tetra Commission returned no result')
+  if (!body.data) throw new Error('CS Portal returned no result')
   return body.data
 }
 
@@ -195,7 +195,7 @@ export async function drainCommissionStudentsOnce(now = new Date()): Promise<{ s
       // Their CS and team, now that they are there — not in up to ten minutes.
       recheckTetraCsLater(String(student._id))
       logger.info({ userId: String(student._id), course, student: answer.studentCode, team: answer.teamName, existing: answer.existing },
-        answer.existing ? 'Forex student already in Tetra Commission — left as they are' : 'Forex student sent to Tetra Commission')
+        answer.existing ? 'Forex student already in CS Portal — left as they are' : 'Forex student sent to CS Portal')
     } catch (err) {
       const permanent = err instanceof CommissionPermanentError
       const notReady  = err instanceof CommissionNotReadyError
@@ -212,7 +212,7 @@ export async function drainCommissionStudentsOnce(now = new Date()): Promise<{ s
         },
       })
       tally[giveUp ? 'failed' : 'retry']++
-      logger.warn({ userId: String(student._id), attempts, permanent, notReady, err: message }, 'Could not send a student to Tetra Commission')
+      logger.warn({ userId: String(student._id), attempts, permanent, notReady, err: message }, 'Could not send a student to CS Portal')
     }
   }
   return tally

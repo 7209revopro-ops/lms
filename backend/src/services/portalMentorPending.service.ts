@@ -1,7 +1,7 @@
 import mongoose from 'mongoose'
 
 /* ─────────────────────────────────────────────────────────────
-   What is waiting on each mentor, for Tetra Commission's Dashboard (the
+   What is waiting on each mentor, for CS Portal's Dashboard (the
    user, 2026-10-28: "the mentors' pending on the dashboard for the chiefs
    and the super admin"). Read only.
 

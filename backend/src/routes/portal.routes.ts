@@ -140,7 +140,7 @@ router.post('/accounts', wrap(async (req, res) => {
 
 /**
  * Which live classes students booked and whether they came — for the Tetra
- * Commission portal, by email, at most 500 at a time: only the counts, or the
+ * CS Portal, by email, at most 500 at a time: only the counts, or the
  * classes themselves with `detail: true`; only classes of courses they are
  * enrolled in unless `allCourses: true`. POST for the same reason as
  * /accounts: addresses do not belong in a query string.
@@ -162,12 +162,12 @@ router.get('/mentors', wrap(async (req, res) => {
   // ?allAcademies=1 — both academies' mentors (the portal's Mentor Calendar, 2026-10-15).
   const allAcademies = req.query.allAcademies === '1' || req.query.allAcademies === 'true'
   /* ?timeOffReasons=all — each time off with its reason, for a caller that shows it only to whom it should (the
-     commission portal: the mentor, their chief, admins). Without it every time off is "Not available" alone. */
+     CS Portal: the mentor, their chief, admins). Without it every time off is "Not available" alone. */
   const timeOffReasonsFor = req.query.timeOffReasons === 'all' ? 'all' : undefined
   sendSuccess(res, await listMentorsForPortal({ remoteOrgId: orgOf(req), from, to, allAcademies, timeOffReasonsFor }), 'Mentors')
 }))
 
-/* A mentor's time off (2026-10-23): marked from the commission portal — for the mentor it names, by email; who may
+/* A mentor's time off (2026-10-23): marked from the CS Portal — for the mentor it names, by email; who may
    is the portal's rule. Every booking over it, from any portal, is refused from then on. What was already booked
    inside it comes back as alreadyBooked: told, never cancelled. */
 router.post('/mentor-time-off', wrap(async (req, res) => {
@@ -238,7 +238,7 @@ router.post('/mentor-meetings/:id/cancel', wrap(async (req, res) => {
   }), 'Meeting cancelled')
 }))
 
-/* How a student meeting went (2026-10-27, meetingOutcome.service.ts) — Tetra Commission asking for its mentors.
+/* How a student meeting went (2026-10-27, meetingOutcome.service.ts) — CS Portal asking for its mentors.
    ?mentorEmail= — the meetings waiting on that mentor (none for anybody who isn't one). */
 router.get('/meeting-outcomes/pending', wrap(async (req, res) => {
   const { pendingOutcomesForEmail } = await import('@/services/meetingOutcome.service.ts')
@@ -251,8 +251,8 @@ router.get('/meeting-outcomes/options', wrap(async (_req, res) => {
   sendSuccess(res, await outcomeOptions(), 'Outcome options')
 }))
 
-/* The outcomes filled from ?since= on, oldest first — for Tetra Commission to put on its students. */
-/* The student meetings booked from Tetra Commission, with where each stands and its outcome — ?from=&to= (Dubai days)
+/* The outcomes filled from ?since= on, oldest first — for CS Portal to put on its students. */
+/* The student meetings booked from CS Portal, with where each stands and its outcome — ?from=&to= (Dubai days)
    and/or ?emails= (2026-10-28: its Meetings tab, Meetings done page and report). Read only. */
 router.get('/meeting-outcomes/meetings', wrap(async (req, res) => {
   const { meetingsForPortal } = await import('@/services/meetingOutcome.service.ts')
@@ -281,7 +281,7 @@ router.get('/classes/:id', wrap(async (req, res) => {
   }), 'Class')
 }))
 
-/* ── Programs (Tetra Commission's user, 2026-10-09) ─────────────────────────────────────────────────────
+/* ── Programs (CS Portal's user, 2026-10-09) ─────────────────────────────────────────────────────
    Repeating live classes for chosen students, made from the portal for a CS's students
    (services/program.service.ts). The portal decides who may; here the portal is the actor, and the
    person behind it is recorded by name and email. */
@@ -383,7 +383,7 @@ router.get('/mentor-report/details', wrap(async (req, res) => {
 }))
 
 /* What waits on each mentor (2026-10-28, portalMentorPending.service.ts): meeting outcome forms, classes to verify,
-   students' unread messages — every instructor, or ?emails=. Tetra Commission's Dashboard. Read only. */
+   students' unread messages — every instructor, or ?emails=. CS Portal's Dashboard. Read only. */
 router.get('/mentor-pending', wrap(async (req, res) => {
   const { mentorPendingForPortal } = await import('@/services/portalMentorPending.service.ts')
   sendSuccess(res, await mentorPendingForPortal(req.query), 'Mentor pending')

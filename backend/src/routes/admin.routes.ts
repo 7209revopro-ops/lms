@@ -196,7 +196,7 @@ const categoryCreateSchema = z.object({
 
 const categoryUpdateSchema = categoryCreateSchema.partial()
 
-/* After a student is created or edited here, ask the commission portal who
+/* After a student is created or edited here, ask the CS Portal who
    looks after them — in the background, once the save has answered. The id is
    the route's (an edit) or the one the save answers with (a create). */
 function recheckCsAfter(idOf?: (r: Request) => string) {
@@ -233,7 +233,7 @@ const usersQuerySchema = z.object({
   enrollmentStatus:  z.enum(['pending', 'approved', 'rejected', 'cancelled']).optional(),
   /* Only students with no phone number, on their account or their application. */
   no_phone:          z.enum(['true', 'false']).optional(),
-  /* Onboarded in Tetra Commission: yes, no (there but not yet), none (not there). */
+  /* Onboarded in CS Portal: yes, no (there but not yet), none (not there). */
   onboarded:         z.enum(['yes', 'no', 'none']).optional(),
 })
 
@@ -665,8 +665,8 @@ router.patch ('/users/:id', requirePermission('users','update'),
   ctrl.updateUser,
 )
 
-/* Recheck the commission portal — the Students table's "…" menu: asks Tetra
-   Commission now who looks after this student, and keeps the answer
+/* Recheck the CS Portal — the Students table's "…" menu: asks CS
+   Portal now who looks after this student, and keeps the answer
    (services/tetraCsRecheck.service.ts). Anyone who may edit the student. */
 router.post('/users/:id/recheck-cs', requirePermission('users','update'), requireSameOrgUser('id'),
   async (req: Request, res: Response, next: NextFunction) => {
@@ -1367,7 +1367,7 @@ router.get('/courses/:id/students', requireAnyAdmin,
                 id: '$student._id', name: '$student.name', email: '$student.email',
                 phone: '$student.phone', avatarUrl: '$student.avatarUrl',
                 enrollmentStatus: '$student.enrollmentStatus', isActive: '$student.isActive',
-                /* Their CS and CS team in Tetra Commission. */
+                /* Their CS and CS team in CS Portal. */
                 tetraCs: '$student.tetraCs',
               },
             } },
@@ -1941,7 +1941,7 @@ router.get   ('/live-classes',                            live.adminListAll)
    meeting or backup link, a stream key, or a student. The caller's academy;
    cancelled classes left out. ?from=&to= (YYYY-MM-DD), default 5 weeks back
    to 10 weeks ahead. */
-/* ── Mentor Calendar, for instructors too (Tetra Commission's user, 2026-10-08) ──────────────────────
+/* ── Mentor Calendar, for instructors too (CS Portal's user, 2026-10-08) ──────────────────────
    Every mentor's free hours, classes and booked sessions — the same answer the portals' Mentor Calendar
    reads (/service/mentors) — and sessions booked here by whoever is signed in. Booking, clashes, Meet
    links and the emails are the portal path's own (services/portal.service.ts); the caller's academy is
@@ -2031,7 +2031,7 @@ router.post('/meeting-outcomes/:id', requireInstructor, async (req: Request, res
   } catch (err) { next(err) }
 })
 
-/* ── Programs (Tetra Commission's user, 2026-10-09) ──────────────────────────────────────────────────────
+/* ── Programs (CS Portal's user, 2026-10-09) ──────────────────────────────────────────────────────
    A live class that repeats weekly or monthly until an end date, for the students picked for it only
    (services/program.service.ts). Instructors make and manage their own; admins any in their academy. */
 const programActor = async (req: Request) => ({
@@ -3692,7 +3692,7 @@ router.get('/bookings', requireInstructor, requirePermission('bookings','list'),
    read. This returns the real figures for the whole filtered set in one $group,
    using the SAME scope builder as the list so the two can never disagree. */
 /* ── Mentor meetings on the Bookings page (2026-10-24) ────────────────────────
-   GET /admin/meetings — the 1:1 / group meetings booked with mentors (from the commission portal, or LMS
+   GET /admin/meetings — the 1:1 / group meetings booked with mentors (from the CS Portal, or LMS
    admin's Mentor Calendar): who is in each, who booked it and from where, the link or place. Read only.
    A mentor sees their own; anyone else their academy's (the Bookings page's own rule), optionally one
    mentor. ?dateFrom&dateTo (days, as the Bookings page sends), ?bucket=upcoming|today|portal|completed|
@@ -4227,7 +4227,7 @@ router.get('/class-verification/:id', requireInstructor, requireDepartmentLiveCl
           bookingId: String(b._id),
           name: b.userId?.name ?? '(deleted student)', email: b.userId?.email ?? null,
           phone: b.userId?.enrollmentApplication?.phone ?? null,
-          /* As Tetra Commission says now (tetraCs, kept current by it), else what it
+          /* As CS Portal says now (tetraCs, kept current by it), else what it
              answered when this LMS first sent them — before it has said. */
           cs: (b.userId?.tetraCs ? b.userId.tetraCs.name : b.userId?.commissionSync?.mentorName) || null,
           team: (b.userId?.tetraCs ? b.userId.tetraCs.team : b.userId?.commissionSync?.team) || null,

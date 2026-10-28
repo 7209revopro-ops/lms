@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from '@/lib/axios'
 
 /* How a student meeting went (2026-10-27) — the signed-in mentor's meetings waiting for it, the form's lists, and
-   filling one (backend meetingOutcome.service.ts). The same meeting may be filled in Tetra Commission: the first counts. */
+   filling one (backend meetingOutcome.service.ts). The same meeting may be filled in CS Portal: the first counts. */
 
 export type OutcomeStage = 'interested' | 'follow_up' | 'meeting_with' | 'revision' | 'not_interested'
 export interface PendingMeeting {

@@ -13,7 +13,7 @@ import {
   type Program, type ProgramPerson,
 } from '@/lib/api/programs'
 
-/* Programs (Tetra Commission's user, 2026-10-09): a live class that repeats weekly or monthly until an end date, for
+/* Programs (CS Portal's user, 2026-10-09): a live class that repeats weekly or monthly until an end date, for
    the students picked for it and nobody else. Each date becomes an ordinary class with a seat booked for every student,
    so reminders, the join button and attendance work as for any class. Instructors see and change their own; admins all. */
 
@@ -263,8 +263,8 @@ function AddStudentsLocal({ onPick }: { onPick: (s: ProgramPerson) => void }) {
   )
 }
 
-/* Who the program is for — the commission portal's way of grouping students (each student's team and CS, kept on
-   the LMS from Tetra Commission), everyone, or one by one. A group adds its students to the list; anyone can still
+/* Who the program is for — the CS Portal's way of grouping students (each student's team and CS, kept on
+   the LMS from CS Portal), everyone, or one by one. A group adds its students to the list; anyone can still
    be taken off before the program is made. */
 function PickStudents({ students, setStudents }: { students: ProgramPerson[]; setStudents: (f: (xs: ProgramPerson[]) => ProgramPerson[]) => void }) {
   const { data: aud } = useProgramAudiences()

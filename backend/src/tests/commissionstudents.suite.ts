@@ -1,7 +1,7 @@
 /* ─────────────────────────────────────────────────────────────
-   Forex students → Tetra Commission: who is sent, when, and what is kept.
+   Forex students → CS Portal: who is sent, when, and what is kept.
 
-   Pinned here, against a real database and a stand-in Tetra Commission:
+   Pinned here, against a real database and a stand-in CS Portal:
 
      A. switched off, nothing happens — not even the go-live mark;
      B. only Forex students: put on a FOREX Trading course since it was
@@ -18,12 +18,12 @@
      F. what comes back is kept, the course with it, and a sent student is
         never sent again;
      G. sent before this was Forex only, with no course: sent again once given
-        a Forex course — the same student where Tetra Commission still has
+        a Forex course — the same student where CS Portal still has
         them, made again where they were taken out;
      H. not deployed, not configured there, or down: waited out, never given
         up; a bad secret: stopped.
 
-   The Tetra Commission half is proven on its side
+   The CS Portal half is proven on its side
    (tetracapitals backend/test-lms-students.sh).
 
    Run: bun --no-env-file src/tests/commissionstudents.suite.ts
@@ -52,7 +52,7 @@ function check(label: string, ok: boolean, detail = '') {
 }
 const step = (s: string) => console.log(`\n\x1b[1m${s}\x1b[0m`)
 
-/* ── A stand-in Tetra Commission ── */
+/* ── A stand-in CS Portal ── */
 const SECRET = 'commissionstudents-suite-shared-secret'
 let mode: 'ok' | 'notDeployed' | 'notConfigured' = 'ok'
 const received: Record<string, unknown>[] = []
@@ -162,7 +162,7 @@ const handAdded  = await person('hand.added@commission.test', { createdAgo: 30 *
 await enrol(handAdded, mbt, 30 * MIN, { source: 'admin' })
 
 t = await drainCommissionStudentsOnce()
-check('sent: the website buyer, the one an admin gave a Forex course, the older account a script gave one, and one Tetra Commission already has',
+check('sent: the website buyer, the one an admin gave a Forex course, the older account a script gave one, and one CS Portal already has',
   sentEmails() === 'admingiven@lms.test,buyer@lms.test,hand.added@commission.test,scripted@lms.test', sentEmails())
 check('not sent: an approved sign-up with no course', !sentTo('signup@lms.test').length && !(await sync(signup)))
 check('not sent: a student only on another programme\'s course', !sentTo('dmonly@lms.test').length && !(await sync(dmOnly)))
@@ -195,7 +195,7 @@ const bs = await sync(buyer)
 check('the student code, team, mentor and course', bs?.state === 'sent' && /^STU-0\d+$/.test(String(bs?.studentCode)) && !!bs?.team &&
   bs?.mentorName === `${bs?.team} Lead` && bs?.alreadyThere === false && bs?.course === 'Market Break-Out Trading', JSON.stringify(bs))
 const hs = await sync(handAdded)
-check('somebody Tetra Commission already had: recorded as such', hs?.state === 'sent' && hs?.alreadyThere === true && hs?.studentCode === 'STU-0042', JSON.stringify(hs))
+check('somebody CS Portal already had: recorded as such', hs?.state === 'sent' && hs?.alreadyThere === true && hs?.studentCode === 'STU-0042', JSON.stringify(hs))
 let before = received.length
 await enrol(buyer, dwt, 2 * MIN)                           // a second Forex course
 await drainCommissionStudentsOnce()
@@ -218,7 +218,7 @@ await enrol(takenOut, dwt, 2 * MIN, { source: 'admin' })
 const made = code
 await drainCommissionStudentsOnce()
 const st = await sync(stillThere), to = await sync(takenOut)
-check('given a Forex course, and still in Tetra Commission: sent again, the same student, nothing new made there',
+check('given a Forex course, and still in CS Portal: sent again, the same student, nothing new made there',
   sentTo('stillthere@lms.test').length === 1 && st?.state === 'sent' && st?.studentCode === 'STU-0900' && st?.course === 'Market Break-Out Trading', JSON.stringify(st))
 check('given a Forex course after being taken out: made there again, and given a team',
   sentTo('takenout@lms.test').length === 1 && to?.state === 'sent' && to?.studentCode !== 'STU-0901' && code === made + 1 &&
@@ -227,7 +227,7 @@ before = received.length
 await drainCommissionStudentsOnce()
 check('...and neither is sent a third time', received.length === before)
 
-step('H. Tetra Commission not ready, refusing, or down')
+step('H. CS Portal not ready, refusing, or down')
 const late = await person('late@lms.test', { createdAgo: 20 * MIN, status: 'approved' })
 await enrol(late, dwt, 20 * MIN)
 mode = 'notDeployed'

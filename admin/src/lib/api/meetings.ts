@@ -3,7 +3,7 @@ import { keepPreviousData, useQuery } from '@tanstack/react-query'
 import { api } from '@/lib/axios'
 
 /* Mentor meetings on the Bookings page (2026-10-24) — GET /admin/meetings. The 1:1 / group meetings
-   booked with mentors from the commission portal or LMS admin's Mentor Calendar: participants, who
+   booked with mentors from the CS Portal or LMS admin's Mentor Calendar: participants, who
    booked them and from where. A mentor gets their own; anyone else their academy's. */
 
 export type MeetingBucket = 'all' | 'upcoming' | 'today' | 'portal' | 'completed' | 'cancelled'

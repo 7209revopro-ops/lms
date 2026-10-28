@@ -1,9 +1,9 @@
 /* ─────────────────────────────────────────────────────
-   Course access, for the commission portal
+   Course access, for the CS Portal
    ─────────────────────────────────────────────────────
    The admin's Edit Student → Course Access (admin/src/components/users/
    EditStudentModal.tsx; routes/admin.routes.ts POST /users/:id/enrollments
-   and PATCH /enrollments/:id) in Tetra Commission too (the user, 2026-10-06):
+   and PATCH /enrollments/:id) in CS Portal too (the user, 2026-10-06):
    a CS puts their student on a Forex course and opens or locks its modules
    one by one — when approving their request (portalEnrolmentRequests.service.ts)
    or any time after. Which students somebody may do this for is the portal's
@@ -165,7 +165,7 @@ async function audit(actor: Actor, student: CourseStudent, action: string, entit
     entity: 'Enrollment',
     entityId,
     meta: { via: 'tetra-commission', byName: actor.by.name, byEmail: actor.by.email, from: actor.from, studentId: idOf(student._id), ...meta },
-    userAgent: 'Tetra Commission',
+    userAgent: 'CS Portal',
     organizationId: student.organizationId,
   })
 }
@@ -231,7 +231,7 @@ export async function giveCourses(student: CourseStudent, plan: CoursePlan[], ac
     given.push(p.title)
   }
   if (given.length) {
-    logger.info({ studentId: idOf(student._id), given, by: actor.by, from: actor.from }, '[course access] courses given from the commission portal')
+    logger.info({ studentId: idOf(student._id), given, by: actor.by, from: actor.from }, '[course access] courses given from the CS Portal')
   }
   return { given, already }
 }
@@ -277,7 +277,7 @@ export async function setModuleAccessForPortal(input: { email: unknown; enrolmen
       courseId: idOf(course._id), course: course.title ?? '', opened: opened.map(m => m.title), locked: locked.map(m => m.title),
     })
     logger.info({ studentId: idOf(student._id), course: course.title, opened: opened.length, locked: locked.length, by: actor.by, from: actor.from },
-      '[course access] modules changed from the commission portal')
+      '[course access] modules changed from the CS Portal')
   }
   return {
     changed: opened.length + locked.length > 0,

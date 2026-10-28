@@ -2,7 +2,7 @@ import mongoose from 'mongoose'
 import { PortalError } from '@/services/portal.service.ts'
 
 /* ─────────────────────────────────────────────────────────────
-   The mentors' report (Tetra Commission's user, 2026-10-23): for each
+   The mentors' report (CS Portal's user, 2026-10-23): for each
    instructor and each day (Dubai time) — their live classes (held,
    cancelled), the students' bookings on them (cancelled, attended, missed),
    their 1:1 mentor meetings (booked, cancelled) and the reviews students
