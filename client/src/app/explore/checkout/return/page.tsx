@@ -35,7 +35,9 @@ function ReturnInner() {
   const urlStopped = status === 'cancelled' || status === 'failed'
   /* Tamara returns OUR order as lmsOrder (its own orderId rides alongside) — order.service returnUrls.
      BillXPro may name no order of ours at all — then the one this tab went to pay for (lib/pendingOrder). */
-  const urlOrderId = q.get('lmsOrder') ?? q.get('orderId') ?? ''
+  /* Only OUR id counts: BillXPro adds its own `orderId` to the return URL, and sending that to the
+     server read back as "No record matches that _id" on production (2026-10-28). */
+  const urlOrderId = [q.get('lmsOrder'), q.get('orderId')].find(v => !!v && /^[a-f0-9]{24}$/i.test(v)) ?? ''
   const [rememberedId, setRememberedId] = useState<string | null | undefined>(urlOrderId || !isCard ? null : undefined)
   useEffect(() => { if (!urlOrderId && isCard) setRememberedId(readPendingOrder('abzer')?.orderId ?? null) }, [urlOrderId, isCard])
   const orderId = urlOrderId || rememberedId || ''
@@ -111,6 +113,12 @@ function ReturnInner() {
     return card(bad, 'Payment not completed', gateway === 'tabby' ? TABBY_FAILURE : 'The payment did not go through and no money was taken. Please try again or choose another payment method.', btn(back, 'Back to checkout'))
   }
   if (!orderId && rememberedId === undefined) return card(<Loader2 size={34} className="animate-spin" style={{ color: 'var(--xp-blue)' }} />, 'Confirming your payment…', 'This takes a few seconds. Please keep this page open.')
+  if (!orderId && isCard) {
+    /* Card, and no order of ours to ask about (another tab or device): never a dead end, never "no charge". */
+    return card(<Loader2 size={34} style={{ color: 'var(--xp-muted)' }} />, 'Checking your payment',
+      'We could not match this page to your order. If your card was charged, your course is added automatically within a few minutes and you will get an email — please do not pay again.',
+      btn('/explore', 'All courses'))
+  }
   if (!orderId) return card(bad, 'Nothing to confirm', 'This page is opened after a payment. Start from the course page.', btn('/explore', 'All courses'))
   if (state === 'working') return card(<Loader2 size={34} className="animate-spin" style={{ color: 'var(--xp-blue)' }} />, 'Confirming your payment…', 'This takes a few seconds. Please keep this page open.')
   if (state === 'emailed') {

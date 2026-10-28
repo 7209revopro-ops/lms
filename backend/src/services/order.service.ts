@@ -975,7 +975,10 @@ export class OrderService {
   async verifyTabbyReturn(
     userId: string, orderId: string, paymentId?: string,
   ): Promise<{ needsRegistration: boolean; paid: boolean }> {
-    const order = await this.orderRepo.findById(orderId)
+    /* The id arrives from a return URL, which a gateway can append its OWN orderId to (2026-10-28:
+       BillXPro's reached the database as a CastError, read back as "No record matches that _id").
+       Not one of ours → not found, cleanly. */
+    const order = /^[a-f0-9]{24}$/i.test(orderId) ? await this.orderRepo.findById(orderId) : null
     if (!order) throw new OrderError('ORDER_NOT_FOUND', 'Order not found', 404)
     if (order.userId.toString() !== userId) {
       throw new OrderError('FORBIDDEN', 'Order does not belong to you', 403)
@@ -1250,7 +1253,10 @@ export class OrderService {
     orderId:       string,
     _transactionId: string,
   ): Promise<{ needsRegistration: boolean; paid: boolean; failed: boolean }> {
-    const order = await this.orderRepo.findById(orderId)
+    /* The id arrives from a return URL, which a gateway can append its OWN orderId to (2026-10-28:
+       BillXPro's reached the database as a CastError, read back as "No record matches that _id").
+       Not one of ours → not found, cleanly. */
+    const order = /^[a-f0-9]{24}$/i.test(orderId) ? await this.orderRepo.findById(orderId) : null
     if (!order) throw new OrderError('ORDER_NOT_FOUND', 'Order not found', 404)
     if (order.userId.toString() !== userId) {
       throw new OrderError('FORBIDDEN', 'Order does not belong to you', 403)
@@ -1699,7 +1705,10 @@ export class OrderService {
     userId:  string,
     orderId: string,
   ): Promise<{ needsRegistration: boolean; paid: boolean }> {
-    const order = await this.orderRepo.findById(orderId)
+    /* The id arrives from a return URL, which a gateway can append its OWN orderId to (2026-10-28:
+       BillXPro's reached the database as a CastError, read back as "No record matches that _id").
+       Not one of ours → not found, cleanly. */
+    const order = /^[a-f0-9]{24}$/i.test(orderId) ? await this.orderRepo.findById(orderId) : null
     if (!order) throw new OrderError('ORDER_NOT_FOUND', 'Order not found', 404)
     if (order.userId.toString() !== userId) {
       throw new OrderError('FORBIDDEN', 'Order does not belong to you', 403)

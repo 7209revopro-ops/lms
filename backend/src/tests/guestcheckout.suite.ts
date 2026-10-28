@@ -147,6 +147,29 @@ try {
   check('a Tabby order named in an Abzer receipt: not fulfilled', (await M.OrderModel.findById(o4._id).lean() as any)?.status === 'pending')
   check('the rule itself: exact fils, case-blind currency', OrderService.abzerReceiptMismatch({ amount: 123450, currency: 'AED' }, { amount: 1234.5, currency: 'aed' }) === null
     && OrderService.abzerReceiptMismatch({ amount: 123450, currency: 'AED' }, { amount: 1234.49, currency: 'AED' }) !== null)
+
+  /* Production, 2026-10-28: BillXPro appends its OWN orderId to the return URL; the /explore return
+     page sent it here and the buyer read "No record matches that _id" (a raw CastError). An id that is
+     not one of ours must be a clean ORDER_NOT_FOUND, for every gateway, whatever its shape. */
+  section('F · ids that are not ours — a clean not-found, never a database error')
+  const foreignIds: [string, unknown][] = [
+    ['abzer', 'DI20261027101933063267'],               // BillXPro document number
+    ['abzer', '0a2a0036-a163-1a5c-81a1-7cdf52ca3e24'],  // BillXPro request id (UUID)
+    ['abzer', 'DI2026102710'],                          // 12 chars — passes ObjectId.isValid, still not ours
+    ['abzer', `${String(order._id)}x`],                 // ours plus one character
+    ['abzer', String(order._id).slice(0, 23)],          // ours minus one
+    ['abzer', '../../etc/passwd'],
+    ['abzer', ''],
+    ['abzer', { $ne: null }],                           // an operator object
+    ['tamara', '5f7f5036-5914-4a7c-8dbe-afce293295f7'], // Tamara's own order id
+    ['tabby', 'not-a-tabby-or-order-id'],
+  ]
+  for (const [gateway, orderId] of foreignIds) {
+    const r = await call('POST', '/public/checkout/complete', j1, { gateway, orderId })
+    check(`${gateway} ${JSON.stringify(orderId).slice(0, 40)} → 404 ORDER_NOT_FOUND`, r.status === 404 && r.body?.error?.code === 'ORDER_NOT_FOUND', why(r))
+  }
+  const ours = await call('POST', '/public/checkout/complete', j1, { gateway: 'abzer', orderId: String(order._id).toUpperCase() })
+  check('our own id in capitals is still ours (Mongo ids are case-blind hex)', ours.status === 200 && ours.body?.data?.paid === true, why(ours))
 } catch (err) {
   fail++; lines.push(`  FAIL  suite threw — ${(err as Error).message}\n${(err as Error).stack}`)
 } finally {

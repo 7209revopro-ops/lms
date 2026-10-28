@@ -177,6 +177,8 @@ export async function completeGuestCheckout(claims: GuestClaims, input: {
   let orderId = typeof input.orderId === 'string' ? input.orderId : ''
   /* Abzer can say the attempt FAILED (CR_FAILED) — the page then says so instead of waiting. */
   let failed = false
+  /* Ours, or nothing: a gateway's own reference in the return URL is not an order id here. */
+  if (input.gateway !== 'razorpay' && !/^[a-f0-9]{24}$/i.test(orderId)) throw new GuestCheckoutError('ORDER_NOT_FOUND', 'Order not found', 404)
 
   switch (input.gateway) {
     case 'razorpay': {

@@ -340,6 +340,18 @@ try {
     let forbidden = false; try { await svc.verifyAbzerReturn(String(new mongoose.Types.ObjectId()), p.id, '') } catch (e) { forbidden = (e as any).statusCode === 403 || /belong/.test((e as Error).message) }
     check('someone else\'s order: refused', forbidden)
 
+    /* BillXPro appends its own orderId to the return URL (production, 2026-10-28). Each verify-return
+       must answer a clean ORDER_NOT_FOUND for an id that is not ours — never a database CastError. */
+    const codeOf = async (fn: () => Promise<unknown>) => { try { await fn(); return 'ok' } catch (e) { return String((e as any).code ?? (e as Error).name) } }
+    const uid = String(p.userId)
+    const foreign = ['DI20261027101933063267', '0a2a0036-a163-1a5c-81a1-7cdf52ca3e24', 'DI2026102710', '', `${p.id}0`]
+    const codes = [
+      ...await Promise.all(foreign.map(id => codeOf(() => svc.verifyAbzerReturn(uid, id, '')))),
+      ...await Promise.all(foreign.map(id => codeOf(() => svc.verifyTamaraReturn(uid, id)))),
+      ...await Promise.all(foreign.map(id => codeOf(() => svc.verifyTabbyReturn(uid, id)))),
+    ]
+    check('Abzer / Tamara / Tabby verify-return: a foreign id is ORDER_NOT_FOUND every time (15 cases)', codes.every(c => c === 'ORDER_NOT_FOUND'), codes.join(','))
+
     /* Sweep: only pending Abzer orders 5 min – 7 days old. */
     await mongoose.connection.db!.collection('orders').updateMany({ status: 'pending' }, { $set: { status: 'cancelled' } })
     const due = await mkOrder({ ageMs: 30 * 60_000 }), young = await mkOrder({ ageMs: 60_000 }), old = await mkOrder({ ageMs: 8 * 86_400_000 })
