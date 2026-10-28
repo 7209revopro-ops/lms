@@ -389,6 +389,13 @@ router.get('/mentor-pending', wrap(async (req, res) => {
   sendSuccess(res, await mentorPendingForPortal(req.query), 'Mentor pending')
 }))
 
+/* Booked but not joined (2026-10-28, portalLiveNotJoined.service.ts): today's online classes that have started, each
+   with the booked students who have not joined — live ones while they run. CS Portal's popup and page. Read only. */
+router.get('/live-not-joined', wrap(async (req, res) => {
+  const { liveNotJoinedForPortal } = await import('@/services/portalLiveNotJoined.service.ts')
+  sendSuccess(res, await liveNotJoinedForPortal(req.query), 'Live not joined')
+}))
+
 /* Programs a student completed (2026-10-25, portalProgramCompletions.service.ts): ended programs, each student who
    attended any of them with attended / held — completed when every held class. ?since=YYYY-MM-DD (end date). Read only. */
 router.get('/program-completions', wrap(async (req, res) => {
