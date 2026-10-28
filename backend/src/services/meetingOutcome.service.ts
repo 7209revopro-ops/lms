@@ -317,3 +317,46 @@ export async function outcomesSince(since: unknown, limit = 200) {
   }))
   return { meetings, next: meetings.length ? meetings[meetings.length - 1]!.outcome!.filledAt : (Number.isNaN(from.getTime()) ? null : from.toISOString()) }
 }
+
+/* ── The meetings themselves, for Tetra Commission's pages ─────────────── */
+
+export type PortalMeetingStatus = 'upcoming' | 'waiting' | 'done' | 'cancelled'
+const DAY_MS = 86_400_000
+/** A day (YYYY-MM-DD) in Dubai as its first instant; `add` days on. */
+const dubaiDay = (v: unknown, add = 0) =>
+  typeof v === 'string' && DATE.test(v) ? new Date(new Date(`${v}T00:00:00+04:00`).getTime() + add * DAY_MS) : undefined
+
+/**
+ * Tetra Commission's student meetings (askOutcome) with where each stands — upcoming, waiting for the mentor's outcome,
+ * done (with it), or cancelled (2026-10-28: its Meetings tab, Meetings done page and report). ?from=&to= (Dubai days,
+ * `to` included) by when they started, and/or ?emails= (any attendee, comma-separated). Read only; newest first.
+ */
+export async function meetingsForPortal(query: Record<string, unknown>, now = new Date()) {
+  const { MentorMeetingModel, UserModel } = await import('@/models/schema.ts')
+  const filter: Record<string, unknown> = { askOutcome: true, kind: 'student' }
+  const from = dubaiDay(query.from), to = dubaiDay(query.to, 1)
+  if (from || to) filter.scheduledStart = { ...(from ? { $gte: from } : {}), ...(to ? { $lt: to } : {}) }
+  const emails = String(query.emails ?? '').split(',').map((e) => e.trim().toLowerCase()).filter((e) => e.includes('@')).slice(0, 200)
+  if (emails.length) filter['attendees.email'] = { $in: emails }
+  if (!from && !to && !emails.length) throw httpError('Say which days (from, to) or whose (emails)', 400)
+  const rows = await MentorMeetingModel.find(filter).sort({ scheduledStart: -1 }).limit(3000).lean()
+  const mentors = await UserModel.find({ _id: { $in: [...new Set(rows.map((r) => String(r.mentorId)))] } }).select('name email').lean()
+  const mentorOf = new Map(mentors.map((m) => [String(m._id), m]))
+  return {
+    meetings: rows.map((m) => {
+      const ends = endOf(m)
+      const status: PortalMeetingStatus = m.cancelledAt ? 'cancelled' : m.outcome ? 'done' : ends.getTime() <= now.getTime() ? 'waiting' : 'upcoming'
+      const mentor = mentorOf.get(String(m.mentorId))
+      return {
+        id: String(m._id), title: m.title, category: String(m.category ?? ''),
+        startsAt: new Date(m.scheduledStart).toISOString(), endsAt: ends.toISOString(), durationMins: m.durationMins,
+        inPerson: m.isOnline === false, location: m.location ?? '',
+        attendees: (m.attendees ?? []).map((a) => ({ name: a.name, email: a.email ?? '' })),
+        bookedByEmail: m.bookedByEmail,
+        mentor: { name: mentor?.name ?? '', email: mentor?.email ?? '' },
+        status, cancelledAt: m.cancelledAt ? new Date(m.cancelledAt).toISOString() : null,
+        outcome: outcomeOut(m.outcome),
+      }
+    }),
+  }
+}

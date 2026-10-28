@@ -129,6 +129,18 @@ try {
   const none: any = await S.outcomesSince(new Date(now.getTime() + 5000).toISOString())
   check('nothing new: next stays where it was', none.meetings.length === 0 && none.next === new Date(now.getTime() + 5000).toISOString(), j(none))
 
+  console.log('\nThe meetings, for Tetra Commission\'s pages')
+  const listed: any = await S.meetingsForPortal({ from: '2026-10-26', to: '2026-10-28' }, now)
+  const byTitle = new Map(listed.meetings.map((m: any) => [m.title, m]))
+  check('Tetra Commission\'s student meetings only (not staff, not a sales CRM\'s)', !byTitle.has('Staff sync') && !byTitle.has('Booked by a sales CRM'), j([...byTitle.keys()]))
+  check('each with where it stands: done (with its outcome), waiting, upcoming, cancelled', (byTitle.get('Pitch Saif') as any)?.status === 'done' && (byTitle.get('Pitch Saif') as any).outcome?.stage === 'interested'
+    && (byTitle.get('Still on') as any)?.status === 'upcoming' && (byTitle.get('Called off') as any)?.status === 'cancelled' && (byTitle.get('Second pitch Saif') as any)?.status === 'waiting', j(listed.meetings.map((m: any) => [m.title, m.status])))
+  check('…with the mentor and the attendees, newest first', (byTitle.get('Bob pitch') as any)?.mentor?.email === 'bob@d.local' && listed.meetings[0].startsAt >= listed.meetings.at(-1).startsAt)
+  const hers: any = await S.meetingsForPortal({ emails: 'S1@d.local' }, now)
+  check('by a student\'s address (any case): theirs only', hers.meetings.length >= 2 && hers.meetings.every((m: any) => m.attendees.some((a: any) => a.email.toLowerCase() === 's1@d.local')), j(hers.meetings.map((m: any) => m.title)))
+  check('a day outside: none', (await S.meetingsForPortal({ from: '2026-09-01', to: '2026-09-02' }, now) as any).meetings.length === 0)
+  check('neither days nor whose: refused', await refused(S.meetingsForPortal({}, now), 400) === true)
+
   console.log('\nBooking asks for it only when Tetra Commission says so')
   const at = new Date(now.getTime() + 3 * 86_400_000).toISOString()
   const asked: any = await createMentorMeetingForPortal({ remoteOrgId: String(org), mentorEmail: 'bob@d.local', title: 'Asked', kind: 'student', scheduledStart: at, durationMins: 30, attendees: [{ name: 'Saif', email: 's1@d.local' }], bookedByEmail: 'cs@portal.local', askOutcome: true, meetingUrl: 'https://meet.example/x' })

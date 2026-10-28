@@ -252,6 +252,13 @@ router.get('/meeting-outcomes/options', wrap(async (_req, res) => {
 }))
 
 /* The outcomes filled from ?since= on, oldest first — for Tetra Commission to put on its students. */
+/* The student meetings booked from Tetra Commission, with where each stands and its outcome — ?from=&to= (Dubai days)
+   and/or ?emails= (2026-10-28: its Meetings tab, Meetings done page and report). Read only. */
+router.get('/meeting-outcomes/meetings', wrap(async (req, res) => {
+  const { meetingsForPortal } = await import('@/services/meetingOutcome.service.ts')
+  sendSuccess(res, await meetingsForPortal(req.query as Record<string, unknown>), 'Meetings')
+}))
+
 router.get('/meeting-outcomes', wrap(async (req, res) => {
   const { outcomesSince } = await import('@/services/meetingOutcome.service.ts')
   sendSuccess(res, await outcomesSince(req.query['since'], Number(req.query['limit'] ?? 200) || 200), 'Meeting outcomes')
