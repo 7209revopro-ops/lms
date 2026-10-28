@@ -375,6 +375,13 @@ router.get('/mentor-report/details', wrap(async (req, res) => {
   sendSuccess(res, await mentorReportDetailForPortal(req.query as Record<string, unknown>), 'Mentor report details')
 }))
 
+/* What waits on each mentor (2026-10-28, portalMentorPending.service.ts): meeting outcome forms, classes to verify,
+   students' unread messages — every instructor, or ?emails=. Tetra Commission's Dashboard. Read only. */
+router.get('/mentor-pending', wrap(async (req, res) => {
+  const { mentorPendingForPortal } = await import('@/services/portalMentorPending.service.ts')
+  sendSuccess(res, await mentorPendingForPortal(req.query), 'Mentor pending')
+}))
+
 /* Programs a student completed (2026-10-25, portalProgramCompletions.service.ts): ended programs, each student who
    attended any of them with attended / held — completed when every held class. ?since=YYYY-MM-DD (end date). Read only. */
 router.get('/program-completions', wrap(async (req, res) => {
