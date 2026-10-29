@@ -425,4 +425,16 @@ router.get('/pending', wrap(async (req, res) => {
   sendSuccess(res, await pendingForPortal(), 'Pending')
 }))
 
+/* Students (2026-10-29, portalStudentReport.service.ts): the dates' bookings, the most-booked students and classes,
+   who attended fully, and the non-active students by CS — for the Root portal's Reports → Students. Read only. The
+   Root portal's alone: it lists students across both academies. */
+router.get('/student-report', wrap(async (req, res) => {
+  if (req.caller !== 'portal') {
+    sendError(res, 'FORBIDDEN', 'Only the Root portal reads the students report', 403)
+    return
+  }
+  const { studentReportForPortal } = await import('@/services/portalStudentReport.service.ts')
+  sendSuccess(res, await studentReportForPortal(req.query), 'Students report')
+}))
+
 export default router
