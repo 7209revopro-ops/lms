@@ -101,6 +101,16 @@ try {
   const sj: Jar = new Map([...jar].filter(([k]) => k === 'lms_device'))
   const signIn = await call('POST', '/auth/otp/verify', sj, { email: 'new@example.com', code: otp.body?.data?.devCode })
   check('the new (password-less) account signs in with an email code', signIn.status === 200 && sj.has('lms_at'), why(signIn))
+
+  section('F · asking for a sign-in code: says when there is no account')
+  const none = await call('POST', '/auth/otp/request', null, { email: 'nobody@example.com' })
+  check('no account → 404 ACCOUNT_NOT_FOUND, with the message', none.status === 404 && none.body?.error?.code === 'ACCOUNT_NOT_FOUND' && /No account found/.test(none.body?.error?.message ?? ''), why(none))
+  check('...and no code is made', (await M.AuthTokenModel.countDocuments({ purpose: 'otp-login', userId: { $exists: true } })) === (await M.AuthTokenModel.countDocuments({ purpose: 'otp-login' })))
+  await M.UserModel.create({ name: 'Blocked', email: 'blocked@example.com', role: 'student', isActive: false })
+  const off = await call('POST', '/auth/otp/request', null, { email: 'blocked@example.com' })
+  check('a disabled account → 403 ACCOUNT_DISABLED', off.status === 403 && off.body?.error?.code === 'ACCOUNT_DISABLED', why(off))
+  const upper = await call('POST', '/auth/otp/request', null, { email: '  NEW@Example.com ' })
+  check('an existing account, any case or spacing → 200, code sent', upper.status === 200 && !!upper.body?.data?.devCode, why(upper))
 } catch (err) {
   fail++; lines.push(`  FAIL  suite threw — ${(err as Error).message}\n${(err as Error).stack}`)
 } finally {

@@ -143,12 +143,12 @@ export class AuthController {
   }
 
   /* ── POST /auth/otp/request ───────────────────────
-     Passwordless login step 1. Always answers the same way so it can't be
-     used to probe which emails have accounts. */
+     Passwordless login step 1. Since 2026-10-29 it says when there is no
+     account (404) or a disabled one (403) — see the service. */
   requestLoginOtp = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     try {
       const { devCode } = await this.service.requestLoginOtp(String(req.body.email))
-      sendSuccess(res, { ok: true, ...(devCode ? { devCode } : {}) }, 'If an account exists for that email, a sign-in code is on its way.')
+      sendSuccess(res, { ok: true, ...(devCode ? { devCode } : {}) }, 'A sign-in code is on its way.')
     } catch (err) {
       next(err)
     }

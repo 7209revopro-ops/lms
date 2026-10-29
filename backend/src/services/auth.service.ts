@@ -1092,10 +1092,17 @@ export class AuthService {
        this cannot be used to enumerate accounts. A 6-digit code is stored
        hashed and bound to the user; only the latest is valid. */
   async requestLoginOtp(email: string): Promise<{ devCode?: string }> {
+    /* Says so when there is no account, or a disabled one, instead of
+       pretending a code went out (the user, 2026-10-29: the page moved on to
+       "enter your code" for an email that would never get one). This tells a
+       visitor whether an email has an account — accepted; the route is rate
+       limited, and password login still answers "Invalid email or password". */
     const user = await this.userRepo.findOne({ email: email.toLowerCase().trim() })
-    if (!user || !user.isActive) {
-      logger.debug({ email }, 'otp-login: no active account, silently skipping')
-      return {}
+    if (!user) {
+      throw new AuthError('ACCOUNT_NOT_FOUND', 'No account found with this email. Check the spelling, or create an account.', 404)
+    }
+    if (!user.isActive) {
+      throw new AuthError('ACCOUNT_DISABLED', 'This account is disabled. Please contact Delta support.', 403)
     }
     const code = await this.#issueLoginOtp(user.id)
     await sendLoginCode(user.email, user.name, code)
