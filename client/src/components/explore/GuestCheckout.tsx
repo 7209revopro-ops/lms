@@ -93,7 +93,7 @@ export function GuestCheckout({ open, onClose, slug, academy }: { open: boolean;
     try { sessionStorage.setItem(RETURN_KEY, prep.course.slug) } catch { /* private mode */ }
     try {
       /* Longer than the usual 15 s: the server may ask a busy gateway again before giving up (Card: up to ~22 s). */
-      const r = await api.post<{ data: { kind: 'redirect'; url: string; orderId?: string } | { kind: 'razorpay'; razorpay: any } }>('/public/checkout/pay', { method }, { timeout: 35_000 })
+      const r = await api.post<{ data: { kind: 'redirect'; url: string; orderId?: string } | { kind: 'razorpay'; razorpay: any } }>('/public/checkout/pay', { method, slug: prep.course.slug }, { timeout: 35_000 })
       const d = r.data.data
       if (d.kind === 'redirect') {
         /* BillXPro may return the buyer to an address that names no order (lib/pendingOrder). */

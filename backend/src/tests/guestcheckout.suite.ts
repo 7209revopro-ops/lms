@@ -7,6 +7,8 @@
      C  complete, paid, NEW account: a one-time sign-in link to the course; the access email once
      D  complete, paid, EXISTING account: no sign-in from here — the owner is emailed
      E  Abzer: a receipt whose amount or currency does not match the order is not fulfilled
+     F  ids that are not ours (a gateway's own) → a clean ORDER_NOT_FOUND
+     G  two checkouts in one browser: the first still confirms; a stale tab cannot pay for the second
    Gateways are never called: an order is marked paid as the webhook would.
    Run: bun --no-env-file src/tests/guestcheckout.suite.ts
 ───────────────────────────────────────────────────────────── */
@@ -170,6 +172,49 @@ try {
   }
   const ours = await call('POST', '/public/checkout/complete', j1, { gateway: 'abzer', orderId: String(order._id).toUpperCase() })
   check('our own id in capitals is still ours (Mongo ids are case-blind hex)', ours.status === 200 && ours.body?.data?.paid === true, why(ours))
+
+  /* Production, 2026-10-29: a buyer started a checkout for one course, then another in the same browser
+     (DSLP 11:19, Digital Marketing 11:22). The checkout cookie holds ONE course — the last — so coming
+     back from the first payment read "Order not found" while the order sat pending in admin. The
+     cookie proves whose checkout it is; any order of THAT account is theirs to confirm. */
+  section('G · a second checkout in the same browser does not orphan the first')
+  const owner3 = await M.UserModel.create({ name: 'Two Courses', email: 'two@example.com', role: 'student', isActive: true, organizationId: dubai._id })
+  const jTwo: Jar = new Map()
+  await call('POST', '/public/checkout/prepare', jTwo, { ...buyer, email: 'two@example.com', slug: 'mbt' })
+  const first = await M.OrderModel.create({ userId: owner3._id, courseId: mbt._id, gateway: 'abzer', amount: 250000, currency: 'AED', status: 'pending' })
+  const second = await call('POST', '/public/checkout/prepare', jTwo, { ...buyer, email: 'two@example.com', slug: 'dwt' })
+  check('the second checkout (another course) is prepared', second.status === 200, why(second))
+  const firstPending = await call('POST', '/public/checkout/complete', jTwo, { gateway: 'abzer', orderId: String(first._id) })
+  check('the first course\'s order, unpaid: "not yet", not "Order not found"', firstPending.status === 200 && firstPending.body?.data?.paid === false, why(firstPending))
+  await new OrderService().fulfillAbzerFromWebhook(String(first._id), 'rcpt-g1', { amount: 2500, currency: 'AED' })
+  const firstPaid = await call('POST', '/public/checkout/complete', jTwo, { gateway: 'abzer', orderId: String(first._id) })
+  check('...paid: confirmed, the owner emailed (an existing account)', firstPaid.body?.data?.paid === true && firstPaid.body.data.signIn === null, why(firstPaid))
+  await settle()
+  check('...the access email names the order\'s course, not the cookie\'s', (await M.AuthTokenModel.findOne({ userId: owner3._id, purpose: 'signin-link' }).lean() as any)?.nextPath === '/courses/mbt')
+  /* A NEW email, then a second checkout: by the second the account exists, so — the rule for any
+     account that existed before a checkout — it is emailed a sign-in link, never signed in here. */
+  const jNew: Jar = new Map()
+  await call('POST', '/public/checkout/prepare', jNew, { ...buyer, email: 'fresh2@example.com', slug: 'mbt' })
+  const fresh: any = await M.UserModel.findOne({ email: 'fresh2@example.com' }).lean()
+  const fOrder = await M.OrderModel.create({ userId: fresh._id, courseId: mbt._id, gateway: 'abzer', amount: 250000, currency: 'AED', status: 'pending' })
+  await call('POST', '/public/checkout/prepare', jNew, { ...buyer, email: 'fresh2@example.com', slug: 'dwt' })
+  await new OrderService().fulfillAbzerFromWebhook(String(fOrder._id), 'rcpt-g2', { amount: 2500, currency: 'AED' })
+  const fDone = await call('POST', '/public/checkout/complete', jNew, { gateway: 'abzer', orderId: String(fOrder._id) })
+  check('a new email, the earlier course after a second checkout: confirmed, emailed', fDone.body?.data?.paid === true && fDone.body.data.signIn === null, why(fDone))
+  await settle()
+  const fTok: any = await M.AuthTokenModel.findOne({ userId: fresh._id, purpose: 'signin-link' }).sort({ createdAt: -1 }).lean()
+  check('...the emailed link opens that course\'s page', fTok?.nextPath === '/courses/mbt', JSON.stringify(fTok?.nextPath))
+  /* Still never someone else's: the cookie's ACCOUNT must own the order. */
+  const notMine = await call('POST', '/public/checkout/complete', jTwo, { gateway: 'abzer', orderId: String(fOrder._id) })
+  check('another account\'s order, from this cookie: still refused', notMine.status === 403 || notMine.status === 404, why(notMine))
+  /* The other half: a tab still showing the FIRST course must not pay for the second (the cookie's). */
+  const stale = await call('POST', '/public/checkout/pay', jTwo, { method: 'card', slug: 'mbt' })
+  check('Pay from a tab showing another course than the cookie\'s: 409 CHECKOUT_REPLACED, no order made',
+    stale.status === 409 && stale.body?.error?.code === 'CHECKOUT_REPLACED' && (await M.OrderModel.countDocuments({ userId: owner3._id })) === 1, why(stale))
+  const sameCourse = await call('POST', '/public/checkout/pay', jTwo, { method: 'cash', slug: 'DWT' })
+  check('...the matching course (any case) gets past the guard', sameCourse.status === 400 && sameCourse.body?.error?.code === 'INVALID_METHOD', why(sameCourse))
+  const noSlug = await call('POST', '/public/checkout/pay', jTwo, { method: 'cash' })
+  check('...a page from before this release (no slug) still pays as before', noSlug.status === 400 && noSlug.body?.error?.code === 'INVALID_METHOD', why(noSlug))
 } catch (err) {
   fail++; lines.push(`  FAIL  suite threw — ${(err as Error).message}\n${(err as Error).stack}`)
 } finally {

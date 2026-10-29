@@ -141,10 +141,15 @@ export async function prepareGuestCheckout(input: { slug?: unknown; name?: unkno
 }
 
 /* ── 2. pay ─────────────────────────────────────────────── */
-export async function startGuestPayment(claims: GuestClaims, method: unknown, couponCode?: unknown, ctx: { isMobile?: boolean } = {}) {
+export async function startGuestPayment(claims: GuestClaims, method: unknown, couponCode?: unknown, ctx: { isMobile?: boolean; slug?: unknown } = {}) {
   const { CourseModel } = await import('@/models/schema.ts')
   const course: any = await CourseModel.findById(claims.cid).select('slug').lean()
   if (!course) throw new GuestCheckoutError('COURSE_NOT_FOUND', 'This course is not available', 404)
+  /* The cookie holds the LAST course a checkout was started for in this browser. A page still showing
+     an earlier one must not charge for the later (2026-10-29: two checkouts, three minutes apart). */
+  if (typeof ctx.slug === 'string' && ctx.slug && ctx.slug.toLowerCase() !== course.slug) {
+    throw new GuestCheckoutError('CHECKOUT_REPLACED', 'You started a checkout for another course in another tab — please enter your details again for this one.', 409)
+  }
   const coupon = typeof couponCode === 'string' && couponCode.trim() ? couponCode.trim().slice(0, 64) : undefined
   switch (method) {
     case 'card': {
@@ -156,7 +161,7 @@ export async function startGuestPayment(claims: GuestClaims, method: unknown, co
       return { kind: 'redirect' as const, url: r.checkoutUrl, orderId: r.orderId }
     }
     case 'tamara': {
-      const r = await orders.createTamaraOrder(claims.uid, claims.cid, course.slug, coupon, { guest: true, ...ctx })
+      const r = await orders.createTamaraOrder(claims.uid, claims.cid, course.slug, coupon, { guest: true, isMobile: ctx.isMobile })
       return { kind: 'redirect' as const, url: r.checkoutUrl, orderId: r.orderId }
     }
     case 'razorpay': {
@@ -194,14 +199,16 @@ export async function completeGuestCheckout(claims: GuestClaims, input: {
   }
   if (!Types.ObjectId.isValid(orderId)) throw new GuestCheckoutError('ORDER_NOT_FOUND', 'Order not found', 404)
   const order: any = await OrderModel.findById(orderId).select('userId courseId status').lean()
-  /* The order must be this checkout's — its account and course. */
-  if (!order || String(order.userId) !== claims.uid || String(order.courseId) !== claims.cid) {
+  /* The order must be this checkout's ACCOUNT's. Not its course: the cookie holds one course, the
+     last one started, so a second checkout in the same browser read "Order not found" on returning
+     from the first payment (production, 2026-10-29). The course comes from the order instead. */
+  if (!order || String(order.userId) !== claims.uid) {
     throw new GuestCheckoutError('ORDER_NOT_FOUND', 'Order not found', 404)
   }
   if (order.status !== 'paid') return { paid: false as const, ...(failed && { failed: true as const }) }
 
   const [course, user]: any[] = await Promise.all([
-    CourseModel.findById(claims.cid).select('title slug').lean(),
+    CourseModel.findById(order.courseId).select('title slug').lean(),
     UserModel.findById(claims.uid).select('name email').lean(),
   ])
   const coursePath = `/courses/${course?.slug ?? ''}`

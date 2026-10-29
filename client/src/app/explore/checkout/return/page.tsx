@@ -41,8 +41,7 @@ function ReturnInner() {
   const [rememberedId, setRememberedId] = useState<string | null | undefined>(urlOrderId || !isCard ? null : undefined)
   useEffect(() => { if (!urlOrderId && isCard) setRememberedId(readPendingOrder('abzer')?.orderId ?? null) }, [urlOrderId, isCard])
   const orderId = urlOrderId || rememberedId || ''
-  const [state, setState] = useState<'working' | 'emailed' | 'pending' | 'failed' | 'cancelled' | 'error'>('working')
-  const [msg, setMsg] = useState('')
+  const [state, setState] = useState<'working' | 'emailed' | 'pending' | 'failed' | 'cancelled' | 'unmatched'>('working')
   const [slug, setSlug] = useState<string | null>(null)
   useEffect(() => { try { setSlug(sessionStorage.getItem(RETURN_KEY)) } catch { /* private mode */ } }, [])
 
@@ -77,7 +76,10 @@ function ReturnInner() {
           /* A refusal (expired checkout, not this buyer's order) will not change by asking again;
              a network blip or a 5xx might — keep going. */
           if (code && code >= 400 && code < 500) {
-            if (alive) { setMsg(err.response?.data?.error?.message ?? 'We could not confirm this payment.'); setState('error') }
+            /* This browser cannot speak for the order (another tab's checkout, an expired one, another
+               account) — that says nothing about the payment, which the server confirms with the gateway
+               on its own. Never a red "Something went wrong — Order not found" after paying (2026-10-29). */
+            if (alive) setState('unmatched')
             return
           }
         }
@@ -113,10 +115,10 @@ function ReturnInner() {
     return card(bad, 'Payment not completed', gateway === 'tabby' ? TABBY_FAILURE : 'The payment did not go through and no money was taken. Please try again or choose another payment method.', btn(back, 'Back to checkout'))
   }
   if (!orderId && rememberedId === undefined) return card(<Loader2 size={34} className="animate-spin" style={{ color: 'var(--xp-blue)' }} />, 'Confirming your payment…', 'This takes a few seconds. Please keep this page open.')
-  if (!orderId && isCard) {
-    /* Card, and no order of ours to ask about (another tab or device): never a dead end, never "no charge". */
+  if ((!orderId && isCard) || state === 'unmatched') {
+    /* No order this browser can ask about (another tab, device or checkout): never a dead end, never "no charge". */
     return card(<Loader2 size={34} style={{ color: 'var(--xp-muted)' }} />, 'Checking your payment',
-      'We could not match this page to your order. If your card was charged, your course is added automatically within a few minutes and you will get an email — please do not pay again.',
+      'We could not match this page to your order. If your payment went through, your course is added automatically within a few minutes and you will get an email — please do not pay again.',
       btn('/explore', 'All courses'))
   }
   if (!orderId) return card(bad, 'Nothing to confirm', 'This page is opened after a payment. Start from the course page.', btn('/explore', 'All courses'))
@@ -131,7 +133,7 @@ function ReturnInner() {
         <span className="mt-3 block text-[13px]" style={{ color: 'var(--xp-muted)' }}>This page updates by itself.</span></>,
       btn('/explore', 'All courses'))
   }
-  return card(bad, 'Something went wrong', msg || 'We could not confirm this payment.', btn(back, 'Back to checkout'))
+  return card(bad, 'Something went wrong', 'We could not confirm this payment.', btn(back, 'Back to checkout'))
 }
 
 export default function GuestReturnPage() {
