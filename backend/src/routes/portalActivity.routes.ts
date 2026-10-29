@@ -17,6 +17,7 @@ import {
   rejectEnrolmentForPortal,
 } from '@/services/portalEnrolmentRequests.service.ts'
 import { studentViewForPortal } from '@/services/portalStudentView.service.ts'
+import { messageLogsForPortal, studentLoginLinkForPortal } from '@/services/portalMessageLogs.service.ts'
 import { courseAccessForPortal, giveCoursesForPortal, setModuleAccessForPortal } from '@/services/portalCourseAccess.service.ts'
 import { studentCsFromPortal } from '@/services/portalStudentCs.service.ts'
 
@@ -151,6 +152,21 @@ router.post('/enrolment-requests/:userId/reject', checkedCaller, wrap(async (req
 router.post('/students/view', checkedCaller, wrap(async (req, res) => {
   const { email, byName, byEmail, mode } = (req.body ?? {}) as Record<string, unknown>
   sendSuccess(res, await studentViewForPortal({ email, byName, byEmail, mode }), 'View as student')
+}))
+
+/**
+ * Message logs (services/portalMessageLogs.service.ts, 2026-10-29): the email queue or the WhatsApp send log for the
+ * students the portal names — { channel, emails, phones } or { all: true } — newest first, skip / limit, filters as the
+ * admin's log pages; `reveal` shows one-tap links in full. Read only.
+ */
+router.post('/message-logs', checkedCaller, wrap(async (req, res) => {
+  sendSuccess(res, await messageLogsForPortal((req.body ?? {}) as Record<string, unknown>), 'Message logs')
+}))
+
+/** A student's one-time login link (Students → Login link): signs in once, within 24 hours. Audited as the person. */
+router.post('/students/login-link', checkedCaller, wrap(async (req, res) => {
+  const { email, byName, byEmail } = (req.body ?? {}) as Record<string, unknown>
+  sendSuccess(res, await studentLoginLinkForPortal({ email, byName, byEmail }), 'Login link')
 }))
 
 /**
