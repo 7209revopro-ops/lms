@@ -1,6 +1,7 @@
 'use client'
 
 import Link from 'next/link'
+import { usePathname } from 'next/navigation'
 import { motion } from 'framer-motion'
 import { XCircle, ChevronRight, Eye, Zap, ArrowRight } from 'lucide-react'
 import { useCurrentUser } from '@/lib/api/user'
@@ -14,8 +15,39 @@ const CATEGORY_LABEL: Record<string, string> = {
 
 export function EnrollmentStatusBanner() {
   const { data: user } = useCurrentUser()
+  const pathname = usePathname()
 
   if (!user || user.role !== 'student') return null
+  /* Bought on /explore: approved by the payment, the full registration still to fill — a reminder,
+     not a gate (guestCheckout.service, 2026-10-29). Not on the form's own page. */
+  if (user.registrationDue && user.enrollmentStatus === 'approved') {
+    if (pathname?.startsWith('/complete-registration')) return null
+    return (
+      <motion.div
+        initial={{ opacity: 0, y: -6 }} animate={{ opacity: 1, y: 0 }}
+        className="mb-4 rounded-xl px-3.5 py-3"
+        style={{ background: 'linear-gradient(135deg, rgba(0,87,184,0.07), rgba(0,87,184,0.03))', border: '1px solid rgba(0,87,184,0.22)' }}
+      >
+        <div className="flex items-center gap-2.5">
+          <div className="min-w-0 flex-1">
+            <p className="text-xs font-semibold" style={{ color: 'var(--color-text-primary)' }}>Complete your registration</p>
+            <p className="mt-0.5 text-xs" style={{ color: 'var(--color-text-secondary)' }}>
+              <span className="hidden sm:inline">Your course is open. Finish your student profile — your checkout details are already filled in.</span>
+              <span className="sm:hidden">Finish your student profile.</span>
+            </p>
+          </div>
+          <Link
+            href="/complete-registration"
+            className="flex flex-shrink-0 items-center gap-1 rounded-lg px-3 py-1.5 text-xs font-semibold text-white transition-all hover:opacity-90"
+            style={{ background: 'var(--color-primary)', whiteSpace: 'nowrap' }}
+          >
+            Complete registration
+            <ArrowRight size={11} />
+          </Link>
+        </div>
+      </motion.div>
+    )
+  }
   if (user.enrollmentStatus === 'approved' || !user.enrollmentStatus) return null
 
   const prog = user.category ? (CATEGORY_LABEL[user.category] ?? user.category) : null

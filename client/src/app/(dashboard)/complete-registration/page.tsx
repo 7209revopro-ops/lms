@@ -5,13 +5,26 @@ import { motion } from 'framer-motion'
 import Link from 'next/link'
 import { useSearchParams } from 'next/navigation'
 import { Suspense } from 'react'
-import { User, Mail, Lock, Eye, EyeOff, ChevronRight, Zap, BookOpen } from 'lucide-react'
+import { User, Mail, Lock, Eye, EyeOff, ChevronRight, Zap, BookOpen, CheckCircle2, ArrowRight } from 'lucide-react'
 import { useCurrentUser } from '@/lib/api/user'
 import { RequestSection } from '@/components/settings/RequestSection'
 import Spinner from '@/components/ui/Spinner'
 
+/* A course bought on /explore: the page opened from the checkout's sign-in link
+   (guestCheckout.service, 2026-10-29) — `?from=checkout&course=<slug>`. */
+function useCheckout() {
+  const params = useSearchParams()
+  const slug   = params.get('course') ?? ''
+  return {
+    fromCheckout: params.get('from') === 'checkout',
+    /* Only a plain slug becomes a link. */
+    coursePath: /^[a-z0-9-]{1,200}$/i.test(slug) ? `/courses/${slug}` : '/my-learning',
+  }
+}
+
 function AccountCard() {
   const { data: user, isLoading } = useCurrentUser()
+  const { fromCheckout } = useCheckout()
   const [showPw, setShowPw] = useState(false)
 
   if (isLoading) {
@@ -24,6 +37,8 @@ function AccountCard() {
   }
 
   if (!user) return null
+  /* Made at checkout: no password, not an Express Account. */
+  const checkoutAccount = fromCheckout || !!user.registrationDue
 
   const field = (icon: React.ReactNode, label: string, value: React.ReactNode) => (
     <div className="flex items-center gap-3">
@@ -49,9 +64,9 @@ function AccountCard() {
         <div className="flex items-center gap-2">
           <div className="flex h-6 w-6 items-center justify-center rounded-full"
             style={{ background: 'rgba(124,58,237,0.1)' }}>
-            <Zap size={12} style={{ color: '#7C3AED' }} />
+            {checkoutAccount ? <User size={12} style={{ color: '#7C3AED' }} /> : <Zap size={12} style={{ color: '#7C3AED' }} />}
           </div>
-          <span className="text-xs font-semibold" style={{ color: '#5B21B6' }}>Express Account</span>
+          <span className="text-xs font-semibold" style={{ color: '#5B21B6' }}>{checkoutAccount ? 'Your Delta account' : 'Express Account'}</span>
         </div>
         <Link
           href="/settings"
@@ -74,7 +89,7 @@ function AccountCard() {
           'Email Address',
           user.email,
         )}
-        {field(
+        {!checkoutAccount && field(
           <Lock size={14} style={{ color: 'var(--color-primary)' }} />,
           'Password',
           <div className="flex items-center gap-2">
@@ -106,9 +121,51 @@ function AccountCard() {
         border: '1px solid rgba(0,87,184,0.10)',
         color: 'var(--color-text-secondary)',
       }}>
-        Complete the form below to upgrade your Express Account to full membership.
-        Your name and email are locked — contact support to change them.
+        {checkoutAccount
+          ? `${user.registrationDue ? 'Your phone number and country from checkout are already filled in below. ' : ''}Your name and email are locked — contact support to change them.`
+          : <>Complete the form below to upgrade your Express Account to full membership.
+            Your name and email are locked — contact support to change them.</>}
       </div>
+    </motion.div>
+  )
+}
+
+/* Paid on /explore and already approved: the form is asked for, never in the way of the course. */
+function CheckoutBanner() {
+  const { data: user } = useCurrentUser()
+  const { fromCheckout, coursePath } = useCheckout()
+  if (!fromCheckout || !user) return null
+  const done = !user.registrationDue
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }}
+      className="flex flex-col gap-3 rounded-2xl p-4 sm:flex-row sm:items-center"
+      style={{ background: 'linear-gradient(135deg,rgba(34,197,94,0.08),rgba(34,197,94,0.03))', border: '1.5px solid rgba(34,197,94,0.35)' }}
+    >
+      <div className="flex min-w-0 flex-1 items-start gap-3">
+        <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-xl"
+          style={{ background: 'rgba(34,197,94,0.12)', border: '1px solid rgba(34,197,94,0.3)' }}>
+          <CheckCircle2 size={15} style={{ color: 'var(--color-success)' }} />
+        </div>
+        <div className="min-w-0">
+          <p className="text-sm font-semibold" style={{ color: 'var(--color-text-primary)' }}>
+            {done ? 'Registration complete — you’re all set' : 'Payment received — you’re enrolled'}
+          </p>
+          <p className="mt-0.5 text-xs" style={{ color: 'var(--color-text-secondary)' }}>
+            {done
+              ? 'Your course is open in your account.'
+              : 'Your course is already open. Complete your registration below — it takes a few minutes, and your checkout details are filled in.'}
+          </p>
+        </div>
+      </div>
+      <Link href={coursePath}
+        className={done
+          ? 'inline-flex min-h-[44px] flex-shrink-0 items-center justify-center gap-1.5 rounded-xl px-4 text-sm font-semibold text-white transition-opacity hover:opacity-90'
+          : 'inline-flex min-h-[44px] flex-shrink-0 items-center justify-center gap-1 rounded-xl px-3 text-xs font-semibold transition-colors hover:underline'}
+        style={done ? { background: 'var(--color-primary)' } : { color: 'var(--color-primary)' }}>
+        {done ? 'Open my course' : 'Skip for now — open my course'}
+        <ArrowRight size={done ? 14 : 12} />
+      </Link>
     </motion.div>
   )
 }
@@ -139,6 +196,17 @@ function PaymentBanner() {
   )
 }
 
+function Intro() {
+  const { fromCheckout } = useCheckout()
+  return (
+    <p className="mt-0.5 text-sm" style={{ color: 'var(--color-text-muted)' }}>
+      {fromCheckout
+        ? 'A few details about you for your student record — your course is already open.'
+        : 'Fill in your details to unlock full access to courses, live classes, and bookings.'}
+    </p>
+  )
+}
+
 export default function CompleteRegistrationPage() {
   return (
     <div className="mx-auto max-w-2xl space-y-5 pb-20">
@@ -151,18 +219,21 @@ export default function CompleteRegistrationPage() {
           <span style={{ color: 'var(--color-text-secondary)' }}>Complete Registration</span>
         </div>
         <h1 className="mt-2 text-xl font-bold" style={{ color: 'var(--color-text-primary)' }}>Complete Your Registration</h1>
-        <p className="mt-0.5 text-sm" style={{ color: 'var(--color-text-muted)' }}>
-          Fill in your details to unlock full access to courses, live classes, and bookings.
-        </p>
+        <Suspense fallback={<p className="mt-0.5 text-sm" style={{ color: 'var(--color-text-muted)' }}>&nbsp;</p>}>
+          <Intro />
+        </Suspense>
       </div>
 
       {/* Payment context banner */}
       <Suspense fallback={null}>
         <PaymentBanner />
+        <CheckoutBanner />
       </Suspense>
 
       {/* Auto-filled account card */}
-      <AccountCard />
+      <Suspense fallback={null}>
+        <AccountCard />
+      </Suspense>
 
       {/* The full enrollment form */}
       <RequestSection />

@@ -183,6 +183,9 @@ export interface IUser extends Document {
   rejectionReason?:    string
   /* Tracks when an express user completes the full 4-step registration form */
   fullRegistrationSubmittedAt?: Date
+  /* Made by a guest checkout on /explore (name, email, phone, country only) and not yet through the
+     full registration form. Approved on payment all the same — this only asks for the rest. */
+  registrationDue?: boolean
   /* Enrollment application form data */
   enrollmentApplication?: IEnrollmentApplication
   /* Sent on to CS Portal — see services/commissionStudents.service.ts */
@@ -297,6 +300,7 @@ const UserSchema = new Schema<IUser>(
     rejectedAt:       { type: Date },
     rejectionReason:              { type: String },
     fullRegistrationSubmittedAt:  { type: Date },
+    registrationDue:              { type: Boolean },
     enrollmentApplication: {
       type: new Schema<IEnrollmentApplication>({
         phone:              { type: String },

@@ -483,6 +483,8 @@ export function RequestSection() {
   let derivedView: ViewState = 'form'
   if (enrollStatus === 'rejected')                          derivedView = 'rejected'
   else if (hasSubmitted && enrollStatus === 'pending')      derivedView = 'pending'
+  /* Bought on /explore: approved by the payment, the registration still to fill. */
+  else if (user?.registrationDue && !hasSubmitted)          derivedView = 'form'
   else if (enrollStatus === 'approved')                     derivedView = 'approved'
   else if (!hasSubmitted && isExpress)                      derivedView = 'form'
 
@@ -1036,7 +1038,9 @@ export function RequestSection() {
           <div>
             <h2 className="text-base font-bold" style={{ color: 'var(--color-text-primary)' }}>Complete Your Registration</h2>
             <p className="mt-0.5 text-sm" style={{ color: 'var(--color-text-muted)' }}>
-              Fill in your full enrollment details to get approved for courses, live classes, and bookings.
+              {user?.registrationDue
+                ? 'Your course is already open — this completes your student profile.'
+                : 'Fill in your full enrollment details to get approved for courses, live classes, and bookings.'}
             </p>
           </div>
         </div>

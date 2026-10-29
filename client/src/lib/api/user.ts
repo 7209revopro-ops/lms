@@ -59,6 +59,8 @@ export interface CurrentUser {
   enrollmentCancellationReason?: string
   rejectionReason?:             string
   fullRegistrationSubmittedAt?: string
+  /** Account made by a guest checkout on /explore: paid and approved, the full registration form still to fill. */
+  registrationDue?: boolean
   enrollmentApplication?:       EnrollmentApplication
   createdAt:      string
   updatedAt:      string

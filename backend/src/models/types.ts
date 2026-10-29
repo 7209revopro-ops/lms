@@ -61,7 +61,7 @@ const SAFE_USER_FIELDS = [
   'signupType',
   'enrollmentStatus', 'enrollmentCancellationReason',
   'rejectionReason', 'approvedAt', 'rejectedAt',
-  'fullRegistrationSubmittedAt', 'enrollmentApplication',
+  'fullRegistrationSubmittedAt', 'registrationDue', 'enrollmentApplication',
   'meetEmail',
   'lastLoginAt', 'createdAt', 'updatedAt',
 ] as const

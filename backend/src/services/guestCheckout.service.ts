@@ -19,6 +19,10 @@
                    from here — its owner is emailed a sign-in link, so typing
                    someone's email can buy them a course but never open their
                    account.
+                   An account made here is approved by the payment, but has
+                   only name, email, phone and country: its sign-in link opens
+                   the full registration form with those filled in, then the
+                   course (registrationDue, 2026-10-29).
 
    Countries: India → Razorpay (INR). UAE → Card (Abzer/BillXPro), Tabby,
    Tamara (AED). Anywhere else → Card (Abzer, AED). Free courses do not come
@@ -100,6 +104,8 @@ export async function prepareGuestCheckout(input: { slug?: unknown; name?: unkno
         ...(org ? { organizationId: org._id } : {}),
         phone,
         enrollmentApplication: { phone, homeCountry: country },
+        /* After paying, the full registration form opens with these filled in (2026-10-29). */
+        registrationDue: true,
       })
       user = { _id: doc._id, role: 'student' }
       created = true
@@ -198,7 +204,7 @@ export async function completeGuestCheckout(claims: GuestClaims, input: {
     default: throw new GuestCheckoutError('INVALID_METHOD', 'Unknown payment method')
   }
   if (!Types.ObjectId.isValid(orderId)) throw new GuestCheckoutError('ORDER_NOT_FOUND', 'Order not found', 404)
-  const order: any = await OrderModel.findById(orderId).select('userId courseId status').lean()
+  const order: any = await OrderModel.findById(orderId).select('userId courseId status gateway').lean()
   /* The order must be this checkout's ACCOUNT's. Not its course: the cookie holds one course, the
      last one started, so a second checkout in the same browser read "Order not found" on returning
      from the first payment (production, 2026-10-29). The course comes from the order instead. */
@@ -209,9 +215,20 @@ export async function completeGuestCheckout(claims: GuestClaims, input: {
 
   const [course, user]: any[] = await Promise.all([
     CourseModel.findById(order.courseId).select('title slug').lean(),
-    UserModel.findById(claims.uid).select('name email').lean(),
+    UserModel.findById(claims.uid).select('name email registrationDue enrollmentApplication.paymentMethod').lean(),
   ])
   const coursePath = `/courses/${course?.slug ?? ''}`
+  /* An account made at checkout and not yet fully registered is taken to the registration form, its
+     checkout details already filled in; the form leads on to the course. Already approved by the
+     payment — the form never stands between a buyer and what they paid for. */
+  const due = user?.registrationDue === true
+  const nextPath = due ? `/complete-registration?from=checkout&course=${encodeURIComponent(course?.slug ?? '')}` : coursePath
+  /* How they paid is known — one answer fewer on the form. Never overwrites one already given. */
+  const paidWith = ({ abzer: 'Card / Full', razorpay: 'Card / Full', tabby: 'Tabby', tamara: 'Tamara' } as Record<string, string>)[order.gateway]
+  if (due && paidWith && !user?.enrollmentApplication?.paymentMethod) {
+    await UserModel.updateOne({ _id: claims.uid, 'enrollmentApplication.paymentMethod': { $in: [null, ''] } },
+      { $set: { 'enrollmentApplication.paymentMethod': paidWith } })
+  }
   /* The access email goes once per order, however often the return page is reloaded. */
   const firstTime = (await OrderModel.updateOne({ _id: order._id, guestAccessSentAt: { $exists: false } }, { $set: { guestAccessSentAt: new Date() } })).modifiedCount === 1
   const { mintSigninCode } = await import('@/services/signinLink.service.ts')
@@ -220,21 +237,21 @@ export async function completeGuestCheckout(claims: GuestClaims, input: {
 
   if (claims.nw) {
     /* The account was made in THIS checkout and is paid for: sign the buyer in now, and email a way to set a password. */
-    const code = await mintSigninCode(claims.uid, coursePath)
+    const code = await mintSigninCode(claims.uid, nextPath)
     if (firstTime) {
-      const emailCode = await mintSigninCode(claims.uid, coursePath)
+      const emailCode = await mintSigninCode(claims.uid, nextPath)
       /* No password to set (2026-10-23): students sign in with an emailed code. */
       void sendGuestPurchaseAccess(user.email, user.name, course?.title ?? 'your course', {
-        signInUrl: `${clientUrl}/s/${emailCode}`, newAccount: true,
+        signInUrl: `${clientUrl}/s/${emailCode}`, newAccount: true, registrationDue: due,
       }).catch(err => logger.warn({ err, userId: claims.uid }, 'guest checkout: access email failed'))
     }
     return { paid: true as const, signIn: `/s/${code}`, emailed: true }
   }
   /* An account that existed before: never signed in from here — its owner gets the link by email. */
   if (firstTime) {
-    const code = await mintSigninCode(claims.uid, coursePath)
+    const code = await mintSigninCode(claims.uid, nextPath)
     await sendGuestPurchaseAccess(user.email, user.name, course?.title ?? 'your course', {
-      signInUrl: `${clientUrl}/s/${code}`, newAccount: false,
+      signInUrl: `${clientUrl}/s/${code}`, newAccount: false, registrationDue: due,
     }).catch(err => logger.warn({ err, userId: claims.uid }, 'guest checkout: access email failed'))
   }
   return { paid: true as const, signIn: null, emailed: true }

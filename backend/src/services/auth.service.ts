@@ -314,9 +314,10 @@ export class AuthService {
       if (photoUrl) set['avatarUrl'] = photoUrl
       const reopened = existing.enrollmentStatus === 'rejected' || existing.enrollmentStatus === 'cancelled'
       if (reopened) set['enrollmentStatus'] = 'pending'
+      /* Sign-up is the full registration form, so a guest-checkout account that signs up has done it. */
       await UserModel.updateOne({ _id: existing._id }, {
         $set: set,
-        ...(reopened ? { $unset: { rejectionReason: '', enrollmentCancellationReason: '' } } : {}),
+        $unset: { registrationDue: '', ...(reopened ? { rejectionReason: '', enrollmentCancellationReason: '' } : {}) },
       })
       const user = await this.userRepo.findById(String(existing._id))
       if (!user) throw new AuthError('NOT_FOUND', 'Account not found', 404)
@@ -878,7 +879,8 @@ export class AuthService {
       $set['avatarUrl'] = input['avatarUrl']
     }
 
-    const updated = await UserModel.findByIdAndUpdate(userId, { $set }, { new: true }).exec()
+    /* A guest-checkout account's outstanding registration is now done (guestCheckout.service). */
+    const updated = await UserModel.findByIdAndUpdate(userId, { $set, $unset: { registrationDue: '' } }, { new: true }).exec()
     if (!updated) throw new AuthError('USER_NOT_FOUND', 'Account not found.', 404)
 
     /* If the user already has a paid order, auto-approve immediately (approved by payment).

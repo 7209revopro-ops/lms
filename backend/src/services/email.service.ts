@@ -574,22 +574,27 @@ export async function sendPasswordSetByAdmin(to: string, name: string, password:
    it is the buyer's only way back in, so it never waits behind bulk mail. */
 export async function sendGuestPurchaseAccess(to: string, name: string, courseTitle: string, opts: {
   signInUrl: string; newAccount: boolean
+  /** The link opens the full registration form first (guest checkout account, not yet registered). */
+  registrationDue?: boolean
 }): Promise<void> {
   const subject = `You're enrolled: ${courseTitle}`
+  const due = opts.registrationDue === true
   const btn = (href: string, label: string) =>
     `<a href="${escapeHtml(sanitiseUrl(href))}" style="display:inline-block;background:linear-gradient(135deg,#0057b8,#2F6BFF);color:#fff;font-weight:600;padding:12px 24px;border-radius:12px;text-decoration:none">${label}</a>`
   const html = wrap(subject, `
     <h2 style="margin:0 0 16px;font-size:20px;font-weight:700;color:#0D0F1A">Payment received — you're in 🎓</h2>
     <p>Hi ${escapeHtml(name)},</p>
     <p>Thank you for your purchase. <strong>${escapeHtml(courseTitle)}</strong> is now open in your Delta student account.</p>
-    <p style="margin:24px 0">${btn(opts.signInUrl, 'Open my course')}</p>
+    ${due ? `
+    <p>One last step: complete your registration. Your name, email, phone and country are already filled in from checkout, and the form takes you on to your course.</p>` : ''}
+    <p style="margin:24px 0">${btn(opts.signInUrl, due ? 'Complete registration' : 'Open my course')}</p>
     ${opts.newAccount ? `
     <p>We created your Delta account with this email address. There is no password: whenever you sign in, enter this email and we'll send you a one-time code.</p>` : `
     <p>It has been added to your existing account — the button above signs you in.</p>`}
-    <p style="font-size:12px;color:#6B7280">The "Open my course" button works once and for 24 hours. After that, sign in at the student portal with this email — we'll email you a code.</p>
+    <p style="font-size:12px;color:#6B7280">The "${due ? 'Complete registration' : 'Open my course'}" button works once and for 24 hours. After that, sign in at the student portal with this email — we'll email you a code.</p>
   `)
   await sender.send({ urgent: true, priority: 10, to, subject, html,
-    text: `Hi ${name},\n\nThank you for your purchase. ${courseTitle} is now open in your Delta student account.\n\nOpen my course: ${opts.signInUrl}\n${opts.newAccount ? '\nTo sign in later, enter this email on the student portal and we will send you a code.\n' : '\nIt has been added to your existing account.\n'}` })
+    text: `Hi ${name},\n\nThank you for your purchase. ${courseTitle} is now open in your Delta student account.\n\n${due ? `Complete your registration (your checkout details are already filled in): ${opts.signInUrl}` : `Open my course: ${opts.signInUrl}`}\n${opts.newAccount ? '\nTo sign in later, enter this email on the student portal and we will send you a code.\n' : '\nIt has been added to your existing account.\n'}` })
 }
 
 /* A chat message still unread CHAT_EMAIL_DELAY_MINS after it arrived

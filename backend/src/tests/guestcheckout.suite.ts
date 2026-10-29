@@ -9,6 +9,8 @@
      E  Abzer: a receipt whose amount or currency does not match the order is not fulfilled
      F  ids that are not ours (a gateway's own) → a clean ORDER_NOT_FOUND
      G  two checkouts in one browser: the first still confirms; a stale tab cannot pay for the second
+     H  after paying, an account made at checkout opens the full registration form (its checkout
+        details filled in); submitting it keeps the paid approval and the link then opens the course
    Gateways are never called: an order is marked paid as the webhook would.
    Run: bun --no-env-file src/tests/guestcheckout.suite.ts
 ───────────────────────────────────────────────────────────── */
@@ -78,6 +80,7 @@ try {
   check('...a student is made: pending, no password, Dubai, phone and country kept',
     made?.role === 'student' && made.enrollmentStatus !== 'approved' && !made.passwordHash && String(made.organizationId) === String(dubai._id)
     && made.enrollmentApplication?.phone === '+971 50 123 4567' && made.enrollmentApplication?.homeCountry === 'United Arab Emirates', JSON.stringify(made))
+  check('...its full registration is marked due', made?.registrationDue === true && !made.fullRegistrationSubmittedAt, JSON.stringify(made))
   check('UAE: card offered (Tabby/Tamara only when their keys are set)', JSON.stringify(p1.body?.data?.methods?.map((m: any) => m.id)) === '["card"]', JSON.stringify(p1.body?.data?.methods))
   check('...priced in AED, what checkout charges', p1.body?.data?.amount === 2500 && p1.body.data.currency === 'AED', JSON.stringify(p1.body?.data))
   check('...the checkout cookie is set, httpOnly', j1.has('lms_gc'))
@@ -95,6 +98,7 @@ try {
   const pOld = await call('POST', '/public/checkout/prepare', jOld, { ...buyer, email: 'OLD@example.com', name: 'Someone Else', phone: '+971 55 999 9999' })
   const ownerAfter = await M.UserModel.findById(owner._id).lean() as any
   check('an existing student: used — name and phone not overwritten', pOld.status === 200 && ownerAfter.name === 'Old Student' && ownerAfter.enrollmentApplication.phone === '+971500000001', why(pOld))
+  check('...and no registration is asked of it', ownerAfter.registrationDue === undefined, JSON.stringify(ownerAfter.registrationDue))
   await M.EnrollmentModel.create({ userId: owner._id, courseId: dwt._id, status: 'active' })
   check('already enrolled in it: refused', (await call('POST', '/public/checkout/prepare', null, { ...buyer, slug: 'dwt', email: 'old@example.com' })).body?.error?.code === 'ALREADY_ENROLLED')
   void free
@@ -118,7 +122,7 @@ try {
   const done = await call('POST', '/public/checkout/complete', j1, { gateway: 'abzer', orderId: String(order._id) })
   check('paid: a one-time sign-in link', done.body?.data?.paid === true && /^\/s\/[\w-]{10,}$/.test(done.body.data.signIn ?? ''), JSON.stringify(done.body?.data))
   const tok = await M.AuthTokenModel.findOne({ userId: made._id, purpose: 'signin-link' }).sort({ createdAt: -1 }).lean() as any
-  check('...to the course page', tok?.nextPath === '/courses/mbt', JSON.stringify(tok))
+  check('...to the full registration form, then the course', tok?.nextPath === '/complete-registration?from=checkout&course=mbt', JSON.stringify(tok?.nextPath))
   check('...enrolled and approved', !!(await M.EnrollmentModel.exists({ userId: made._id, courseId: mbt._id })) && (await M.UserModel.findById(made._id).lean() as any)?.enrollmentStatus === 'approved')
   await settle()
   const mailMark = (await M.OrderModel.findById(order._id).lean() as any)?.guestAccessSentAt
@@ -203,7 +207,7 @@ try {
   check('a new email, the earlier course after a second checkout: confirmed, emailed', fDone.body?.data?.paid === true && fDone.body.data.signIn === null, why(fDone))
   await settle()
   const fTok: any = await M.AuthTokenModel.findOne({ userId: fresh._id, purpose: 'signin-link' }).sort({ createdAt: -1 }).lean()
-  check('...the emailed link opens that course\'s page', fTok?.nextPath === '/courses/mbt', JSON.stringify(fTok?.nextPath))
+  check('...the emailed link opens the registration form for that course (made at checkout)', fTok?.nextPath === '/complete-registration?from=checkout&course=mbt', JSON.stringify(fTok?.nextPath))
   /* Still never someone else's: the cookie's ACCOUNT must own the order. */
   const notMine = await call('POST', '/public/checkout/complete', jTwo, { gateway: 'abzer', orderId: String(fOrder._id) })
   check('another account\'s order, from this cookie: still refused', notMine.status === 403 || notMine.status === 404, why(notMine))
@@ -215,6 +219,69 @@ try {
   check('...the matching course (any case) gets past the guard', sameCourse.status === 400 && sameCourse.body?.error?.code === 'INVALID_METHOD', why(sameCourse))
   const noSlug = await call('POST', '/public/checkout/pay', jTwo, { method: 'cash' })
   check('...a page from before this release (no slug) still pays as before', noSlug.status === 400 && noSlug.body?.error?.code === 'INVALID_METHOD', why(noSlug))
+  /* The user, 2026-10-29: after the payment, the full registration — email, name, country and phone
+     already filled — and the student approved as a paid enrolment. Approval stays with the payment. */
+  section('H · after paying: the full registration form, filled in from checkout')
+  const jH: Jar = new Map()
+  await call('POST', '/public/checkout/prepare', jH, { ...buyer, email: 'reg@example.com', name: 'Reg Buyer', phone: '+971 52 111 2233' })
+  const regUser: any = await M.UserModel.findOne({ email: 'reg@example.com' }).lean()
+  const hOrder = await M.OrderModel.create({ userId: regUser._id, courseId: mbt._id, gateway: 'abzer', amount: 250000, currency: 'AED', status: 'pending' })
+  await new OrderService().fulfillAbzerFromWebhook(String(hOrder._id), 'rcpt-h1', { amount: 2500, currency: 'AED' })
+  const hDone = await call('POST', '/public/checkout/complete', jH, { gateway: 'abzer', orderId: String(hOrder._id) })
+  const code = String(hDone.body?.data?.signIn ?? '').replace(/^\/s\//, '')
+  check('paid: signed in by a one-time link', hDone.body?.data?.paid === true && code.length >= 10, why(hDone))
+  const sess: Jar = new Map()
+  const red = await call('POST', '/auth/signin-link/redeem', sess, { token: code })
+  check('...the link signs in and opens the registration form for the course', red.status === 200 && red.body?.data?.next === '/complete-registration?from=checkout&course=mbt', JSON.stringify(red.body))
+  const meRes = await call('GET', '/auth/me', sess)
+  const me1 = meRes.body?.data?.user ?? meRes.body?.data
+  check('...approved already (Paid Enrollment), the form due', me1?.enrollmentStatus === 'approved' && me1?.registrationDue === true, JSON.stringify(me1))
+  check('...name, email, phone and country come filled in',
+    me1?.name === 'Reg Buyer' && me1?.email === 'reg@example.com' && me1?.enrollmentApplication?.phone === '+971 52 111 2233' && me1?.enrollmentApplication?.homeCountry === 'United Arab Emirates', JSON.stringify(me1))
+  check('...and how they paid', me1?.enrollmentApplication?.paymentMethod === 'Card / Full', JSON.stringify(me1?.enrollmentApplication))
+  check('...enrolled in the course before the form is filled', !!(await M.EnrollmentModel.exists({ userId: regUser._id, courseId: mbt._id })))
+  const form = {
+    phone: '+971 52 111 2233', gender: 'Female', dateOfBirth: '1995-04-02', nationality: 'India', homeCountry: 'United Arab Emirates',
+    occupation: 'Engineer', idType: 'Passport', idNumber: 'P1234567', countryAttendance: 'United Arab Emirates', city: 'Dubai',
+    addressCountry: 'United Arab Emirates', passportUrl: 'kyc/passport-1.pdf', idDocUrl: 'kyc/passport-1.pdf', experienceLevel: 'Beginner',
+    preferredStartDate: '2026-11-01', hearAboutUs: 'Instagram', programs: ['forex-beginner'], paymentMethod: 'Card / Full',
+  }
+  const half = await call('PATCH', '/auth/me/complete-registration', sess, { ...form, occupation: '' })
+  check('an incomplete form is refused', half.status === 400 || half.status === 422, why(half))
+  const mid: any = await M.UserModel.findById(regUser._id).lean()
+  check('...still approved, still due', mid?.registrationDue === true && mid?.enrollmentStatus === 'approved')
+  const sub = await call('PATCH', '/auth/me/complete-registration', sess, form)
+  const after: any = await M.UserModel.findById(regUser._id).lean()
+  check('the full form: accepted', sub.status === 200, why(sub))
+  check('...approved as a paid enrolment, nothing for an admin to do', after?.enrollmentStatus === 'approved' && after.approvedByName === 'Paid Enrollment', JSON.stringify({ s: after?.enrollmentStatus, by: after?.approvedByName }))
+  check('...registration recorded, no longer due', !!after?.fullRegistrationSubmittedAt && after.registrationDue === undefined && after.signupType === 'full', JSON.stringify({ at: after?.fullRegistrationSubmittedAt, due: after?.registrationDue }))
+  check('...the course\'s programme is in their access', (after?.categories ?? []).includes('4x-trading'), JSON.stringify(after?.categories))
+  check('...the answers stored', after?.enrollmentApplication?.idNumber === 'P1234567' && after.enrollmentApplication.city === 'Dubai')
+  check('...the course still theirs', !!(await M.EnrollmentModel.exists({ userId: regUser._id, courseId: mbt._id })))
+  const meAfter = (await call('GET', '/auth/me', sess)).body?.data
+  check('...the app is told it is done', (meAfter?.user ?? meAfter)?.registrationDue === undefined, JSON.stringify(meAfter))
+  /* Once registered, the return page's link goes to the course again. */
+  await call('POST', '/public/checkout/complete', jH, { gateway: 'abzer', orderId: String(hOrder._id) })
+  const hTok: any = await M.AuthTokenModel.findOne({ userId: regUser._id, purpose: 'signin-link' }).sort({ createdAt: -1, _id: -1 }).lean()
+  check('registered: the link opens the course page', hTok?.nextPath === '/courses/mbt', JSON.stringify(hTok?.nextPath))
+  /* A payment method the buyer already gave is never replaced by the gateway's. */
+  const jP: Jar = new Map()
+  await call('POST', '/public/checkout/prepare', jP, { ...buyer, email: 'tabbyfan@example.com' })
+  const pUser: any = await M.UserModel.findOne({ email: 'tabbyfan@example.com' }).lean()
+  await M.UserModel.updateOne({ _id: pUser._id }, { $set: { 'enrollmentApplication.paymentMethod': 'USDT' } })
+  const pOrder = await M.OrderModel.create({ userId: pUser._id, courseId: mbt._id, gateway: 'abzer', amount: 250000, currency: 'AED', status: 'pending' })
+  await new OrderService().fulfillAbzerFromWebhook(String(pOrder._id), 'rcpt-h2', { amount: 2500, currency: 'AED' })
+  await call('POST', '/public/checkout/complete', jP, { gateway: 'abzer', orderId: String(pOrder._id) })
+  check('a payment method already given: kept', (await M.UserModel.findById(pUser._id).lean() as any)?.enrollmentApplication?.paymentMethod === 'USDT')
+  /* Not paid: no link, nothing changes. */
+  const jU: Jar = new Map()
+  await call('POST', '/public/checkout/prepare', jU, { ...buyer, email: 'unpaid@example.com' })
+  const uUser: any = await M.UserModel.findOne({ email: 'unpaid@example.com' }).lean()
+  const uOrder = await M.OrderModel.create({ userId: uUser._id, courseId: mbt._id, gateway: 'abzer', amount: 250000, currency: 'AED', status: 'pending' })
+  const uRes = await call('POST', '/public/checkout/complete', jU, { gateway: 'abzer', orderId: String(uOrder._id) })
+  const uAfter: any = await M.UserModel.findById(uUser._id).lean()
+  check('unpaid: no sign-in, no link, not approved, no payment method', uRes.body?.data?.paid === false && !(await M.AuthTokenModel.exists({ userId: uUser._id }))
+    && uAfter?.enrollmentStatus !== 'approved' && !uAfter?.enrollmentApplication?.paymentMethod, why(uRes))
 } catch (err) {
   fail++; lines.push(`  FAIL  suite threw — ${(err as Error).message}\n${(err as Error).stack}`)
 } finally {
