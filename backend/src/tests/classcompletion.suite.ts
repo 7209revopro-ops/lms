@@ -184,6 +184,26 @@ check('the missed seat is told as class_unattended, with its booking — the can
   un.length === 1 && un[0]!.booking?.status === 'missed' && un[0]!.booking?.classId === String(roomEnded) && un[0]!.student.email === 'student5@lms.test', JSON.stringify(un))
 check('…only to a caller that asks for it', (await studentActivityForPortal({ since: iso(ago(4 * HOUR)), now, classes: true })).events.every(x => x.type !== 'class_unattended'))
 
+step('E. a burst: more than a page of changes at one moment (2026-10-29: the portal stuck asking for the same page)')
+{
+  const burst = ago(10 * DAY), then = ago(9 * DAY)
+  const old = await klass({ scheduledStart: ago(12 * DAY), durationMins: 60, status: 'ended', endedAt: ago(12 * DAY - HOUR) })
+  const raw = (status: string, at: Date) => ({ userId: s6, liveClassId: old, status, bookedAt: ago(13 * DAY), createdAt: ago(13 * DAY), updatedAt: at })
+  await ClassBookingModel.collection.insertMany([
+    ...Array.from({ length: 10 }, () => raw('missed', new Date(burst.getTime() - MIN))),
+    ...Array.from({ length: 1100 }, () => raw('missed', burst)),
+    raw('cancelled', new Date(burst.getTime() + MIN)),
+  ])
+  const first = await studentActivityForPortal({ since: iso(ago(11 * DAY)), now: then, classes: true, unattended: true })
+  check('the page isn\'t cut inside the burst: all 1,100 at that moment come, `until` is that moment, `more` says there is more',
+    first.events.length === 1110 && first.until === iso(burst) && first.more === true && first.events.at(-1)!.at === iso(burst),
+    JSON.stringify({ n: first.events.length, until: first.until, more: first.more }))
+  const next = await studentActivityForPortal({ since: first.until, now: then, classes: true, unattended: true })
+  check('…asked again from `until`, no overlap: only what came after, nothing more to come',
+    next.events.length === 1 && next.events[0]!.booking?.status === 'cancelled' && next.more === undefined && next.until === iso(then),
+    JSON.stringify({ n: next.events.length, more: next.more }))
+}
+
 await mongoose.connection.dropDatabase()
 await mongoose.disconnect()
 console.log(`\n${pass} passed, ${fail} failed`)

@@ -28,7 +28,8 @@ import { logger } from '@/utils/logger.ts'
 
 /* How far back a portal that has been away may ask: past this, what it missed stays missed. */
 const MAX_LOOKBACK_MS = 31 * 24 * 60 * 60_000
-/* At most this many events in one answer, oldest first — `until` then says where they stop. */
+/* At most this many events in one answer, oldest first (more, when many share the last one's moment) — `until` then
+   says where they stop and `more` that there are more: ask again with since = until, no overlap. */
 const MAX_EVENTS = 1000
 const MAX_TICKETS = 50
 /* Many students' tickets in one answer: addresses per call, and tickets in all. */
@@ -307,7 +308,7 @@ async function classAttendedEvents(from: Date, now: Date): Promise<PortalActivit
  * student's own words only: support's replies and the automatic welcome are
  * not something the student did.
  */
-export async function studentActivityForPortal(input: { since: unknown; now?: Date; classes?: boolean; unattended?: boolean }): Promise<{ events: PortalActivity[]; until: string }> {
+export async function studentActivityForPortal(input: { since: unknown; now?: Date; classes?: boolean; unattended?: boolean }): Promise<{ events: PortalActivity[]; until: string; more?: true }> {
   const now = input.now ?? new Date()
   const since = typeof input.since === 'string' ? new Date(input.since) : new Date(NaN)
   if (Number.isNaN(since.getTime())) throw bad('since must be a date and time (ISO 8601)')
@@ -377,8 +378,12 @@ export async function studentActivityForPortal(input: { since: unknown; now?: Da
 
   events.sort((x, y) => x.at.localeCompare(y.at) || x.key.localeCompare(y.key))
   if (events.length > MAX_EVENTS) {
-    const page = events.slice(0, MAX_EVENTS)
-    return { events: page, until: page[page.length - 1]!.at }
+    // Never cut a burst at one moment in two (2026-10-29: 1,000+ seats changed at once kept the portal asking for the
+    // same page for two days): every event at the last one's moment comes too, and the next `since` = `until` misses none.
+    const last = events[MAX_EVENTS - 1]!.at
+    let end = MAX_EVENTS
+    while (end < events.length && events[end]!.at === last) end++
+    if (end < events.length) return { events: events.slice(0, end), until: last, more: true }
   }
   return { events, until: now.toISOString() }
 }
