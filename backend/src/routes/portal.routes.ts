@@ -278,14 +278,16 @@ router.get('/classes/:id', wrap(async (req, res) => {
   sendSuccess(res, await getClassForPortal({
     remoteOrgId: orgOf(req),
     classId: String(req.params['id'] ?? ''),
-    contacts: req.caller === 'portal',
+    // Booking ids and addresses for whoever asks (?contacts=1 — the CS Portal's Mentor Calendar, which may call with
+    // either key); names only otherwise.
+    contacts: req.caller === 'portal' || req.query['contacts'] === '1',
   }), 'Class')
 }))
 
 /* A booked student's one-tap join link for this class (2026-10-29, the class card's "Send join link") — lasts until the
-   join window closes; the CS sends it. { bookingId, byName, byEmail }. Audited. */
+   join window closes; the CS sends it. { bookingId, byName, byEmail }. Audited. Either key: the CS Portal's Mentor
+   Calendar may call with the sales CRM's (2026-10-29). */
 router.post('/classes/:id/join-link', wrap(async (req, res) => {
-  if (req.caller !== 'portal') { sendError(res, 'FORBIDDEN', 'Only the CS Portal sends join links', 403); return }
   const { classJoinLinkForPortal } = await import('@/services/portal.service.ts')
   const b = (req.body ?? {}) as Record<string, unknown>
   sendSuccess(res, await classJoinLinkForPortal({ remoteOrgId: orgOf(req), classId: req.params['id'], bookingId: b['bookingId'], byName: b['byName'], byEmail: b['byEmail'] }), 'Join link')

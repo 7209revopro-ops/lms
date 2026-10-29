@@ -26,6 +26,9 @@ process.env.JWT_ACCESS_SECRET  ??= 'portaljoinlink-suite-access-secret-012345678
 process.env.JWT_REFRESH_SECRET ??= 'portaljoinlink-suite-refresh-secret-0123456789'
 process.env.PORTAL_SUPPORT_USER_EMAIL = 'desk@lms.test'
 process.env.CLIENT_URL = 'https://lms.test'
+const CRM_SECRET = 'portaljoinlink-suite-crm-secret-0123456789'
+process.env.SALES_CRM_SECRET = CRM_SECRET
+process.env.ROOT_ERP_SECRET = ''
 
 let pass = 0, fail = 0
 function check(label: string, ok: boolean, detail = '') {
@@ -105,6 +108,27 @@ for (const [label, classId, bookingId, status, msg] of [
   let e: any = null
   try { await classJoinLinkForPortal({ remoteOrgId, classId: String(classId), bookingId: String(bookingId), byName: 'x', byEmail: '' }) } catch (err) { e = err }
   check(`${label}: refused`, e?.statusCode === status && msg.test(String(e?.message)), `${e?.statusCode} ${e?.message}`)
+}
+
+// Over HTTP with the sales CRM's key — the one the CS Portal's Mentor Calendar calls with (2026-10-29).
+{
+  const express = (await import('express')).default
+  const portalRoutes = (await import('@/routes/portal.routes.ts')).default
+  const { errorMiddleware } = await import('@/middleware/error.middleware.ts')
+  const app = express(); app.use(express.json()); app.use('/service', portalRoutes); app.use(errorMiddleware)
+  const server = await new Promise<import('node:http').Server>(resolve => { const s2 = app.listen(0, '127.0.0.1', () => resolve(s2)) })
+  const base = `http://127.0.0.1:${(server.address() as { port: number }).port}/service`
+  const ask = async (path: string, body?: unknown) => {
+    const res = await fetch(`${base}${path}`, { method: body === undefined ? 'GET' : 'POST', headers: { 'content-type': 'application/json', 'x-portal-secret': CRM_SECRET }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) })
+    return { status: res.status, body: await res.json().catch(() => ({})) as any }
+  }
+  const withC = await ask(`/classes/${tomorrow}?remoteOrgId=${remoteOrgId}&contacts=1`)
+  check('the CS Portal\'s key (the sales CRM\'s) asking for contacts: the bookings and addresses', withC.status === 200 && withC.body.data.students.some((x: any) => x.bookingId === String(sujaSeat) && x.email === 'suja@lms.test'), JSON.stringify(withC.body).slice(0, 300))
+  const without = await ask(`/classes/${tomorrow}?remoteOrgId=${remoteOrgId}`)
+  check('…not asking: names only', without.status === 200 && without.body.data.students.every((x: any) => !('email' in x)), JSON.stringify(without.body).slice(0, 300))
+  const made = await ask(`/classes/${tomorrow}/join-link?remoteOrgId=${remoteOrgId}`, { bookingId: String(sujaSeat), byName: 'CS One', byEmail: '' })
+  check('…and the join link, with that key', made.status === 200 && String(made.body.data?.joinUrl).startsWith('https://lms.test/j/'), JSON.stringify(made.body).slice(0, 300))
+  server.close()
 }
 
 await mongoose.connection.dropDatabase()
