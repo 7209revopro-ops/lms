@@ -278,7 +278,17 @@ router.get('/classes/:id', wrap(async (req, res) => {
   sendSuccess(res, await getClassForPortal({
     remoteOrgId: orgOf(req),
     classId: String(req.params['id'] ?? ''),
+    contacts: req.caller === 'portal',
   }), 'Class')
+}))
+
+/* A booked student's one-tap join link for this class (2026-10-29, the class card's "Send join link") — lasts until the
+   join window closes; the CS sends it. { bookingId, byName, byEmail }. Audited. */
+router.post('/classes/:id/join-link', wrap(async (req, res) => {
+  if (req.caller !== 'portal') { sendError(res, 'FORBIDDEN', 'Only the CS Portal sends join links', 403); return }
+  const { classJoinLinkForPortal } = await import('@/services/portal.service.ts')
+  const b = (req.body ?? {}) as Record<string, unknown>
+  sendSuccess(res, await classJoinLinkForPortal({ remoteOrgId: orgOf(req), classId: req.params['id'], bookingId: b['bookingId'], byName: b['byName'], byEmail: b['byEmail'] }), 'Join link')
 }))
 
 /* ── Programs (CS Portal's user, 2026-10-09) ─────────────────────────────────────────────────────

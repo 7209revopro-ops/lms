@@ -8,7 +8,8 @@
    hands back the meeting link.
 
    A code belongs to ONE student and ONE class, and lives 2 hours from when
-   it is made. It signs in once: a second tap with no session finds the class
+   it is made (one the CS Portal sends ahead: until the class's join window
+   closes, portalJoinMessage.service.ts). It signs in once: a second tap with no session finds the class
    but issues nothing, and the join call then renews the browser's own session
    or sends them to sign in and back. Only its SHA-256 is stored.
 
@@ -26,7 +27,7 @@ export const JOIN_LINK_TTL_MS = 2 * 60 * 60 * 1000
 export const hashJoinCode = (raw: string): string => createHash('sha256').update(raw).digest('hex')
 
 /** A fresh code for this student and class; the raw value goes in the link, never in the database. */
-export async function mintJoinCode(userId: string, liveClassId: string, now = Date.now()): Promise<string> {
+export async function mintJoinCode(userId: string, liveClassId: string, now = Date.now(), opts: { expiresAt?: number } = {}): Promise<string> {
   const { AuthTokenModel } = await import('@/models/schema.ts')
   const raw = randomBytes(18).toString('base64url')          // 24 URL-safe characters
   await AuthTokenModel.create({
@@ -34,7 +35,8 @@ export async function mintJoinCode(userId: string, liveClassId: string, now = Da
     liveClassId: new Types.ObjectId(liveClassId),
     tokenHash:   hashJoinCode(raw),
     purpose:     'join-link',
-    expiresAt:   new Date(now + JOIN_LINK_TTL_MS),
+    // Longer only when asked (a CS sending it ahead from the CS Portal: until the class's join window closes).
+    expiresAt:   new Date(Math.max(now + JOIN_LINK_TTL_MS, opts.expiresAt ?? 0)),
   })
   return raw
 }

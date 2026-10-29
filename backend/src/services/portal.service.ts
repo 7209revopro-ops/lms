@@ -1259,6 +1259,8 @@ export async function cancelMentorMeetingForPortal(input: {
 export async function getClassForPortal(input: {
   remoteOrgId?: string
   classId?: string
+  /** Each student's booking and address too — the CS Portal's only (its "Send join link"); the sales CRM gets names. */
+  contacts?: boolean
 }): Promise<Record<string, unknown>> {
   const org = await resolveOrg(input.remoteOrgId)
   const { LiveClassModel, UserModel, CourseModel } = await import('@/models/schema.ts')
@@ -1289,7 +1291,7 @@ export async function getClassForPortal(input: {
       ? CourseModel.findById(live.courseId).select('title slug').lean()
       : Promise.resolve(null),
   ])
-  const { students, timeline } = await classInfoOf(live as unknown as ClassInfoSource, instructor?.name ?? '')
+  const { students, timeline } = await classInfoOf(live as unknown as ClassInfoSource, instructor?.name ?? '', input.contacts === true)
 
   return {
     id: String(live._id),
@@ -1346,7 +1348,62 @@ export type ClassTimelineEvent = {
 }
 const iso = (d: unknown) => (d ? new Date(d as string).toISOString() : '')
 
-async function classInfoOf(live: ClassInfoSource, mentorName: string) {
+/**
+ * A booked student's join link for one class, made from the CS Portal (the user, 2026-10-29: the class card's
+ * "Send join link"): the one-tap /j/ link the "Starts in 5 minutes" WhatsApp carries — signs them in once, no
+ * password, and joins them (attendance) — lasting until the class's join window closes, so it can be sent ahead.
+ * The CS sends it themselves. For a seat booked or attended, a class of this academy not cancelled and not over.
+ * Made from the CS's own LMS account, else the shared one; audited (liveClass.joinLink).
+ */
+export async function classJoinLinkForPortal(input: { remoteOrgId?: string; classId?: unknown; bookingId?: unknown; byName?: unknown; byEmail?: unknown }) {
+  const org = await resolveOrg(input.remoteOrgId)
+  const { LiveClassModel, ClassBookingModel, UserModel, CourseModel, AuditLogModel } = await import('@/models/schema.ts')
+  const id = String(input.classId ?? ''), bookingId = String(input.bookingId ?? '')
+  if (!mongoose.isValidObjectId(id)) throw httpError('No such class', 404)
+  if (!mongoose.isValidObjectId(bookingId)) throw httpError('No such booking', 404)
+  const live = await LiveClassModel.findById(id).select('title scheduledStart durationMins status isOnline meetingUrl courseId instructorId organizationId').lean() as any
+  if (!live || String(live.organizationId ?? '') !== String(org._id)) throw httpError('No such class', 404)
+  if (live.status === 'cancelled') throw httpError('This class was cancelled', 400)
+  if (live.isOnline === false) throw httpError('This class is in person — there is no link to join', 400)
+  const { JOIN_WINDOW_AFTER_MIN } = await import('@/services/liveClassJoin.service.ts')
+  const closesAt = new Date(live.scheduledStart).getTime() + ((live.durationMins ?? 0) + JOIN_WINDOW_AFTER_MIN) * 60_000
+  if (live.status === 'ended' || Date.now() > closesAt) throw httpError('This class is over — it can no longer be joined', 400)
+  const booking = await ClassBookingModel.findOne({ _id: bookingId, liveClassId: live._id }).select('userId status').lean() as any
+  if (!booking) throw httpError('No such booking', 404)
+  if (!['booked', 'attended'].includes(String(booking.status))) throw httpError('This seat was cancelled — they need to book again', 400)
+  const [student, course, instructor] = await Promise.all([
+    UserModel.findById(booking.userId).select('name email isActive').lean() as any,
+    live.courseId ? CourseModel.findById(live.courseId).select('title').lean() as any : null,
+    UserModel.findById(live.instructorId).select('name').lean() as any,
+  ])
+  if (!student) throw httpError('No such student', 404)
+  if (student.isActive === false) throw httpError('This student is deactivated in the LMS', 400)
+
+  const by = {
+    name: (typeof input.byName === 'string' ? input.byName.trim() : '').slice(0, 100),
+    email: (typeof input.byEmail === 'string' ? input.byEmail.trim().toLowerCase() : '').slice(0, 200),
+  }
+  const { deskAccountFor } = await import('@/services/portalActivity.service.ts')
+  const account = await deskAccountFor(by.email)
+  const { mintJoinCode, joinLinkUrl, meetCodeOf } = await import('@/services/joinLink.service.ts')
+  const now = Date.now()
+  const code = await mintJoinCode(String(booking.userId), String(live._id), now, { expiresAt: closesAt })
+  await AuditLogModel.create({
+    actorId: account.id, actorEmail: by.email || account.email, actorRole: account.role,
+    action: 'liveClass.joinLink', entity: 'LiveClass', entityId: String(live._id),
+    meta: { via: 'tetra-commission', byName: by.name, byEmail: by.email, from: account.own ? 'own' : 'shared', studentId: String(booking.userId), bookingId },
+    userAgent: 'CS Portal', organizationId: live.organizationId,
+  })
+  return {
+    joinUrl: joinLinkUrl(code, meetCodeOf(live.meetingUrl)),
+    expiresAt: new Date(Math.max(now + 2 * 60 * 60_000, closesAt)).toISOString(),
+    meetingUrl: live.meetingUrl ?? '',
+    class: { title: live.title ?? '', course: course?.title ?? '', mentor: instructor?.name ?? '', startsAt: new Date(live.scheduledStart).toISOString(), durationMins: live.durationMins ?? 0 },
+    student: { name: student.name ?? '', email: String(student.email ?? '').toLowerCase() },
+  }
+}
+
+async function classInfoOf(live: ClassInfoSource, mentorName: string, contacts = false) {
   const { ClassBookingModel, ClassFeedbackModel, UserModel } = await import('@/models/schema.ts')
   const [bookings, reviews] = await Promise.all([
     ClassBookingModel.find({ liveClassId: live._id }).select('userId status attendedAt attendanceSource cancelledAt createdAt').sort({ createdAt: 1 }).lean(),
@@ -1354,14 +1411,16 @@ async function classInfoOf(live: ClassInfoSource, mentorName: string) {
   ])
   const ids = [...new Set([...bookings, ...reviews].map((r) => String((r as { userId: unknown }).userId)))]
   const names = new Map(
-    (await UserModel.find({ _id: { $in: ids } }).select('name').lean()).map((u) => [String(u._id), String((u as { name?: string }).name ?? '')]),
+    (await UserModel.find({ _id: { $in: ids } }).select('name email').lean()).map((u) => [String(u._id), { name: String((u as { name?: string }).name ?? ''), email: String((u as { email?: string }).email ?? '').toLowerCase() }]),
   )
-  const nameOf = (id: unknown) => names.get(String(id)) || 'A student'
+  const nameOf = (id: unknown) => names.get(String(id))?.name || 'A student'
   const reviewOf = new Map(reviews.map((r) => [String(r.userId), r]))
 
   const students = bookings.map((b) => {
     const r = reviewOf.get(String(b.userId))
     return {
+      // The booking and the address (2026-10-29), for the CS Portal only: it sends a student their join link from here.
+      ...(contacts ? { bookingId: String(b._id), email: names.get(String(b.userId))?.email ?? '' } : {}),
       name: nameOf(b.userId),
       status: String(b.status ?? 'booked'),
       bookedAt: iso((b as { createdAt?: Date }).createdAt),
