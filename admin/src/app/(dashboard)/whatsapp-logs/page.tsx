@@ -8,7 +8,7 @@
 import { useState, useEffect } from 'react'
 import { motion } from 'framer-motion'
 import {
-  MessageCircle, ChevronLeft, ChevronRight, Search, X, AlertCircle, CheckCircle2, Clock, XCircle, Inbox,
+  MessageCircle, ChevronLeft, ChevronRight, Search, X, AlertCircle, CheckCircle2, Clock, XCircle, Inbox, Copy, Check,
 } from 'lucide-react'
 import {
   useWhatsAppLogs, useWhatsAppLogSummary, useWhatsAppTemplates, type WhatsAppLog, type WhatsAppLogStatus,
@@ -37,6 +37,46 @@ function StatusBadge({ status }: { status: WhatsAppLogStatus }) {
 
 const selectCls = 'rounded-xl px-3 py-2 text-xs text-white outline-none'
 const selectStyle = { background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)', colorScheme: 'dark' } as const
+
+const LOGIN_STATE: Record<NonNullable<WhatsAppLog['login']>['state'], { label: string; bg: string; text: string }> = {
+  valid:   { label: 'Works',            bg: 'rgba(74,222,128,0.15)',  text: '#4ADE80' },
+  used_up: { label: 'Sign-ins used up', bg: 'rgba(250,204,21,0.15)',  text: '#FACC15' },
+  expired: { label: 'Expired',          bg: 'rgba(255,255,255,0.08)', text: 'rgba(255,255,255,0.5)' },
+}
+
+/* A one-tap button's real link — plain text with Copy, never a clickable link:
+   opening it signs that browser in as the student (and a join link records
+   them joined). Where it stands comes from the code itself. */
+function LoginLink({ log }: { log: WhatsAppLog }) {
+  const [copied, setCopied] = useState(false)
+  const l = log.login!, st = LOGIN_STATE[l.state]
+  const who = log.person?.name ?? 'this student'
+  const copy = async () => {
+    try { await navigator.clipboard.writeText(log.button!); setCopied(true); setTimeout(() => setCopied(false), 1500) } catch { /* select the text instead */ }
+  }
+  return (
+    <div className="space-y-1.5">
+      <div className="flex items-start gap-2">
+        <code className="font-mono text-[11px] select-all break-all" style={{ color: '#93C5FD' }}>{log.button}</code>
+        <button onClick={copy} className="shrink-0 flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[10px] font-semibold transition-colors hover:bg-white/10"
+          style={{ border: '1px solid rgba(255,255,255,0.12)', color: copied ? '#4ADE80' : 'rgba(255,255,255,0.7)' }}>
+          {copied ? <><Check size={10} />Copied</> : <><Copy size={10} />Copy</>}
+        </button>
+      </div>
+      <div className="flex flex-wrap items-center gap-2 text-[11px]" style={{ color: 'rgba(255,255,255,0.45)' }}>
+        <span className="rounded-md px-1.5 py-0.5 font-semibold" style={{ background: st.bg, color: st.text }}>{st.label}</span>
+        <span>{l.kind === 'join' ? 'Join link' : 'Sign-in link'}</span>
+        {l.expiresAt && <span>· {l.state === 'expired' ? 'expired' : 'until'} {fmtDate(l.expiresAt)}</span>}
+        <span>· {l.signIns} of {l.maxSignIns} sign-ins used</span>
+      </div>
+      {l.state !== 'expired' && (
+        <p className="text-[11px] leading-snug" style={{ color: '#FBBF24' }}>
+          Opening this signs that browser in as {who}{l.kind === 'join' ? ' and marks them joined' : ''}.
+        </p>
+      )}
+    </div>
+  )
+}
 
 /* The message as a WhatsApp bubble, its values, and its button. */
 function MessagePreview({ log }: { log: WhatsAppLog }) {
@@ -69,7 +109,9 @@ function MessagePreview({ log }: { log: WhatsAppLog }) {
             ))}
             {log.button && (
               <tr><td className="py-1.5 pr-3 align-top" style={{ color: 'rgba(255,255,255,0.4)' }}>Button</td>
-                <td className="py-1.5 break-all" style={{ color: '#60A5FA' }}>{log.button}</td></tr>
+                <td className="py-1.5 break-all" style={{ color: '#60A5FA' }}>
+                  {log.login ? <LoginLink log={log} /> : log.button}
+                </td></tr>
             )}
             <tr><td className="py-1.5 pr-3" style={{ color: 'rgba(255,255,255,0.4)' }}>Template</td>
               <td className="py-1.5 font-mono text-[11px]" style={{ color: 'rgba(255,255,255,0.6)' }}>{log.templateName}</td></tr>

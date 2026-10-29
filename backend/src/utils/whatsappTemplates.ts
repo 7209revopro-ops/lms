@@ -6,7 +6,9 @@
    filled from the row's params); for older templates whose wording lives
    only in Meta, `params` names each value instead. `button` says where the
    button goes. A one-tap sign-in or join code is a live login for that
-   student, so it is NEVER shown — only that there is one.
+   student, so it is masked — except on the super-admin WhatsApp Logs page,
+   which asks for it with `reveal` (the user, 2026-10-29: "show the actual
+   link"), and shows it as copy-only text with a warning.
 ───────────────────────────────────────────────────────────── */
 export interface TemplateInfo {
   label:   string
@@ -62,19 +64,25 @@ export const WHATSAPP_TEMPLATES: Record<string, TemplateInfo> = {
   instructor_review_request_v1: { label: 'Mentor review request', params: ['Student', 'Class'] },
 }
 
-/** The message as the student read it, its labelled values, and its button. */
-export function renderWhatsApp(templateName: string, params: string[], buttonParam?: string): {
+/** The message as the student read it, its labelled values, and its button.
+ *  `reveal`: give a one-tap button's real link (in `button`) and say which kind it is (`login`). */
+export function renderWhatsApp(templateName: string, params: string[], buttonParam?: string, opts: { reveal?: boolean } = {}): {
   label: string; text?: string; values: Array<{ name: string; value: string }>; button?: string
+  login?: { kind: 'join' | 'signin'; note: string }
 } {
   const t = WHATSAPP_TEMPLATES[templateName]
   const values = (params ?? []).map((v, i) => ({ name: t?.params[i] ?? `Value ${i + 1}`, value: String(v ?? '') }))
   const text = t?.body?.replace(/\{\{(\d+)\}\}/g, (_, n) => String(params?.[Number(n) - 1] ?? ''))
   let button: string | undefined
+  let login: { kind: 'join' | 'signin'; note: string } | undefined
   if (t?.button && buttonParam) {
     const base = (t.button.base === 'admin' ? process.env['ADMIN_URL'] : process.env['CLIENT_URL']) ?? ''
-    button = t.button.secret ? `${base}${t.button.path}•••• (${t.button.secret})` : `${base}${t.button.path}${buttonParam}`
+    const url = `${base}${t.button.path}${buttonParam}`
+    if (!t.button.secret) button = url
+    else if (opts.reveal) { button = url; login = { kind: t.button.path === '/j/' ? 'join' : 'signin', note: t.button.secret } }
+    else button = `${base}${t.button.path}•••• (${t.button.secret})`
   }
-  return { label: t?.label ?? templateName, ...(text ? { text } : {}), values, ...(button ? { button } : {}) }
+  return { label: t?.label ?? templateName, ...(text ? { text } : {}), values, ...(button ? { button } : {}), ...(login ? { login } : {}) }
 }
 
 /* ─────────────────────────────────────────────────────────────

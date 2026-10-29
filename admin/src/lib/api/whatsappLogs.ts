@@ -21,8 +21,17 @@ export interface WhatsAppLog {
   /** The message as the student read it, when the template's wording is known. */
   text?:        string
   values:       Array<{ name: string; value: string }>
-  /** Where the button goes — a one-tap login is shown masked. */
+  /** Where the button goes — for a one-tap button, its real link (see `login`). */
   button?:      string
+  /** The button is a live one-tap login for the student: what kind, and where it stands. */
+  login?: {
+    kind:       'join' | 'signin'
+    note:       string
+    expiresAt?: string
+    signIns:    number
+    maxSignIns: number
+    state:      'valid' | 'used_up' | 'expired'
+  }
   person?:      { id: string; name?: string; email?: string; role?: string }
 }
 

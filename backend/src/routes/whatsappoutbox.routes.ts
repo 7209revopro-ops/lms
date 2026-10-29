@@ -8,6 +8,8 @@
    delivery webhook, which is not set up.
 ───────────────────────────────────────────────────────────── */
 import { Router, type Request, type Response, type NextFunction } from 'express'
+import { createHash } from 'node:crypto'
+import { LINK_MAX_SIGNINS } from '@/services/auth.service.ts'
 import { authenticateAdmin, requireSuperAdmin } from '@/middleware/auth.middleware.ts'
 import { sendSuccess, parsePagination, buildPaginationMeta } from '@/utils/response.ts'
 import { createdBetween, escapeRegex, outboxSummary } from '@/utils/outboxLog.ts'
@@ -23,7 +25,7 @@ const endsWithDigits = (digits: string) => new RegExp(`${digits.split('').map(es
 /* GET /whatsapp-logs?page&per_page&status&template&from&until&q */
 router.get('/', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { WhatsAppOutboxModel, UserModel } = await import('@/models/schema.ts')
+    const { WhatsAppOutboxModel, UserModel, AuthTokenModel } = await import('@/models/schema.ts')
     const { page, per_page } = parsePagination(req.query as Record<string, unknown>)
     const qs = req.query as Record<string, string | undefined>
     const filter: Record<string, unknown> = {}
@@ -65,14 +67,31 @@ router.get('/', async (req: Request, res: Response, next: NextFunction) => {
     }).select('name email role enrollmentApplication.phone phone').lean() as any[] : []
     const ownerOf = (to: string) => owners.find(u => String(u.enrollmentApplication?.phone ?? u.phone ?? '').replace(/\D/g, '').endsWith(String(to).slice(-9)))
 
-    const docs = rows.map(r => {
+    /* A one-tap button's link is shown in full here (super admin only) with
+       where it stands: its code's expiry and sign-ins used, from AuthToken. */
+    const rendered = rows.map(r => renderWhatsApp(r.templateName, r.params ?? [], r.buttonParam, { reveal: true }))
+    const codeOf = (p: unknown) => String(p ?? '').split('?')[0]!
+    const hashes = rows.flatMap((r, i) => rendered[i]!.login ? [createHash('sha256').update(codeOf(r.buttonParam)).digest('hex')] : [])
+    const tokens = new Map((hashes.length
+      ? await AuthTokenModel.find({ tokenHash: { $in: hashes }, purpose: { $in: ['join-link', 'signin-link'] } }).select('tokenHash expiresAt useCount').lean() as any[]
+      : []).map(t => [t.tokenHash, t]))
+    const now = Date.now()
+
+    const docs = rows.map((r, i) => {
       const u = ownerOf(r.to)
+      const { login, ...shown } = rendered[i]!
+      const tok = login ? tokens.get(createHash('sha256').update(codeOf(r.buttonParam)).digest('hex')) : undefined
+      const uses = tok?.useCount ?? 0
       return {
         id: String(r._id), to: r.to, templateName: r.templateName, status: r.status,
         attempts: r.attempts ?? 0, lastError: r.lastError, sentAt: r.sentAt, createdAt: r.createdAt,
         waMessageId: r.waMessageId,
         ...(u ? { person: { id: String(u._id), name: u.name, email: u.email, role: u.role } } : {}),
-        ...renderWhatsApp(r.templateName, r.params ?? [], r.buttonParam),
+        ...shown,
+        ...(login ? { login: {
+          ...login, ...(tok ? { expiresAt: tok.expiresAt } : {}), signIns: uses, maxSignIns: LINK_MAX_SIGNINS,
+          state: !tok || new Date(tok.expiresAt).getTime() <= now ? 'expired' : uses >= LINK_MAX_SIGNINS ? 'used_up' : 'valid',
+        } } : {}),
       }
     })
     sendSuccess(res, docs, undefined, 200, buildPaginationMeta(total, page, per_page))

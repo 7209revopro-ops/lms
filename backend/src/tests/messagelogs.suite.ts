@@ -4,7 +4,8 @@
 
      A. super admin only (an academy admin gets 403);
      B. WhatsApp list: the message rendered from its template, the student
-        matched by phone, a one-tap login link MASKED, filters (status,
+        matched by phone, a one-tap login link in full with its state
+        (works / used up / expired) — masked anywhere else, filters (status,
         template, search by name / phone, date range);
      C. summaries: today and last 7 days by status;
      D. Email list: search by subject, date range.
@@ -64,7 +65,10 @@ try {
   const hash = await hashPassword(PW)
   const sa = await M.UserModel.create({ name: 'SA', email: 'sa@ml.local', passwordHash: hash, role: 'super_admin', isActive: true, isVerified: true })
   await M.UserModel.create({ name: 'Ad', email: 'ad@ml.local', passwordHash: hash, role: 'admin', isActive: true, isVerified: true, organizationId: org._id })
-  await M.UserModel.create({ name: 'Reema Thomas', email: 'reema@ml.local', passwordHash: hash, role: 'student', isActive: true, organizationId: org._id, enrollmentApplication: { phone: '+971 50 402 7626' } })
+  const reema = await M.UserModel.create({ name: 'Reema Thomas', email: 'reema@ml.local', passwordHash: hash, role: 'student', isActive: true, organizationId: org._id, enrollmentApplication: { phone: '+971 50 402 7626' } })
+  /* The sign-in code behind the first message: live, one of three sign-ins used. */
+  const { createHash } = await import('node:crypto')
+  await M.AuthTokenModel.create({ userId: reema._id, tokenHash: createHash('sha256').update('SECRETCODE1234567890ab').digest('hex'), purpose: 'signin-link', expiresAt: new Date(Date.now() + DAY), useCount: 1 })
   const now = new Date(), old = new Date(Date.now() - 20 * DAY)
   const wa = (o: Record<string, unknown>) => M.WhatsAppOutboxModel.create({ languageCode: 'en_US', attempts: 1, nextAttemptAt: now, category: 'utility', ...o })
   await wa({ to: '971504027626', templateName: 'new_class_scheduled_v1', params: ['Reema', 'MBT', 'MBT 4', 'Fri, 9 Oct', '05:00 PM GST'], buttonParam: 'SECRETCODE1234567890ab', status: 'sent', sentAt: now, waMessageId: 'wamid.1' })
@@ -90,7 +94,12 @@ try {
   check('message rendered from the template', nc?.text?.startsWith('Hi Reema, a new class has been scheduled in *MBT*') && nc?.text?.includes('*MBT 4* — Fri, 9 Oct, 05:00 PM GST'), nc?.text)
   check('labelled values + friendly name', nc?.label === 'New class scheduled' && nc?.values?.[1]?.name === 'Course' && nc?.values?.[1]?.value === 'MBT')
   check('student matched by phone (stored "+971 50 402 7626")', nc?.person?.name === 'Reema Thomas', JSON.stringify(nc?.person))
-  check('one-tap login link masked, code never sent', nc?.button?.includes('/s/••••') && !JSON.stringify(all.body).includes('SECRETCODE') && !JSON.stringify(all.body).includes('OTHERSECRET'), nc?.button)
+  check('one-tap sign-in link shown in full to the super admin', nc?.button === 'https://lms.example.test/s/SECRETCODE1234567890ab', nc?.button)
+  check('...with where it stands: works, 1 of 3 sign-ins, its expiry', nc?.login?.kind === 'signin' && nc.login.state === 'valid' && nc.login.signIns === 1 && nc.login.maxSignIns === 3 && !!nc.login.expiresAt, JSON.stringify(nc?.login))
+  const tc = all.body?.data?.find((d: any) => d.templateName === 'todays_classes_v1')
+  check('a code with no live token reads as expired', tc?.button === 'https://lms.example.test/s/OTHERSECRET' && tc?.login?.state === 'expired', JSON.stringify(tc?.login))
+  const { renderWhatsApp } = await import('@/utils/whatsappTemplates.ts')
+  check('elsewhere (no reveal) the link stays masked', renderWhatsApp('class_has_started_v2', ['A', 'B'], 'LIVECODE').button?.includes('/j/••••') === true)
   const bc = all.body?.data?.find((d: any) => d.templateName === 'booking_confirmed_v2')
   check('unknown wording: values only, error shown', !bc?.text && bc?.values?.[0]?.name === 'Name' && bc?.lastError?.includes('131026'))
   const f1 = await call('GET', '/whatsapp-logs?status=failed', { jar: SA })
