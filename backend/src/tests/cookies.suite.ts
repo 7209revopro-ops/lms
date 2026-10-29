@@ -326,6 +326,55 @@ try {
       !!rtReg?.maxAge && Math.abs(rtReg.maxAge - THIRTY_DAYS_S) < 60, String(rtReg?.maxAge))
   }
 
+  section('I — a student away for more than 15 minutes is still signed in  ← 2026-10-29')
+  {
+    /* The client middleware only sees lms_at (lms_rt is Path=/api/v1/auth). A
+       15-minute lms_at was gone when the student came back, so the middleware
+       sent them to /login although the session had 30 days left. The cookie
+       now lives as long as the session; the token inside still expires. */
+    const THIRTY_DAYS_S = 30 * 86_400, ONE_DAY_S = 86_400
+    const r = await post('/auth/login', { email: 'student@t.local', password: PW })
+    const at = find(r.cookies, 'lms_at', { deleted: false })[0]
+    const rt = find(r.cookies, 'lms_rt', { deleted: false })[0]
+    check('the access cookie lasts as long as the session (~30 days)',
+      !!at?.maxAge && Math.abs(at.maxAge - THIRTY_DAYS_S) < 60, String(at?.maxAge))
+    check('...the same as the refresh cookie', at?.maxAge === rt?.maxAge, `${at?.maxAge} vs ${rt?.maxAge}`)
+    const exp = decodeJwtExp(at?.value ?? '')
+    const left = exp ? exp - Math.floor(Date.now() / 1000) : -1
+    check('the access TOKEN inside still expires in ~15 minutes', left > 0 && left <= 15 * 60 + 5, String(left))
+
+    const short = await post('/auth/login', { email: 'student@t.local', password: PW, remember: false })
+    check('remember:false keeps the access cookie to the ~1-day session',
+      Math.abs((find(short.cookies, 'lms_at', { deleted: false })[0]?.maxAge ?? 0) - ONE_DAY_S) < 60)
+
+    /* Coming back: the cookie is still there but its token has expired. */
+    const { signAccessToken } = await import('@/utils/jwt.ts')
+    const student = await UserModel.findOne({ email: 'student@t.local' }).lean()
+    const stale = await signAccessToken({ id: String(student!._id), email: 'student@t.local', role: 'student' }, '1s', 'client')
+    await new Promise(res => setTimeout(res, 2_500))
+    const back = `lms_at=${stale}; lms_rt=${rt!.value}`
+    const me = await fetch(`${BASE}/auth/me`, { headers: { cookie: back } })
+    const meBody: any = await me.json().catch(() => null)
+    check('the expired token is refused with TOKEN_EXPIRED — the cue for the client to refresh',
+      me.status === 401 && meBody?.error?.code === 'TOKEN_EXPIRED', `${me.status} ${meBody?.error?.code}`)
+    const ref = await post('/auth/refresh', undefined, back)
+    check('the refresh renews the session', ref.status === 200, `got ${ref.status}`)
+    const jar = ref.cookies.filter(c => !c.deleted).map(c => `${c.name}=${c.value}`).join('; ')
+    const again = await fetch(`${BASE}/auth/me`, { headers: { cookie: jar } })
+    check('...and the student carries on, signed in', again.status === 200, `got ${again.status}`)
+
+    /* A session that is really over still ends: no refresh token → cookies cleared. */
+    const dead = await post('/auth/refresh', undefined, `lms_at=${stale}`)
+    check('a refresh with no session is refused', dead.status === 401, `got ${dead.status}`)
+    check('...and the long-lived access cookie is cleared with it',
+      find(dead.cookies, 'lms_at', { deleted: true }).length > 0)
+
+    const admin = await post('/admin/auth/login', { email: 'admin@t.local', password: PW })
+    check('the admin access cookie is unchanged for now (~15 minutes)',
+      (find(admin.cookies, 'lms_admin_at', { deleted: false })[0]?.maxAge ?? 0) <= 15 * 60,
+      String(find(admin.cookies, 'lms_admin_at', { deleted: false })[0]?.maxAge))
+  }
+
 } finally {
   delete process.env.COOKIE_DOMAIN
   delete process.env.LEGACY_COOKIE_DOMAIN

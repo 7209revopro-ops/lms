@@ -7,7 +7,8 @@ import type { TokenPair } from '@/types/index.ts'
 /* ─────────────────────────────────────────────────────
    Auth cookie helpers
    ─────────────────────────────────────────────────────
-   Access token  → `lms_at` cookie, ~15m, Path=/
+   Access token  → `lms_at` cookie, Path=/ — the JWT inside lasts ~15m,
+                   the cookie as long as the session (~30d), see setAuthCookies
    Refresh token → `lms_rt` cookie, ~30d, Path=/api/v1/auth
    Both httpOnly + SameSite=Lax. Secure flag only in
    production so dev over http://localhost still works.
@@ -114,13 +115,25 @@ function parseDurationMs(duration: string): number {
    default, same as every non-login-form issuance path (register, OTP, 2FA,
    magic link, token rotation) that never passes one. */
 export function setAuthCookies(res: Response, tokens: TokenPair, refreshTtlOverride?: string): void {
+  const sessionMs = parseDurationMs(refreshTtlOverride ?? env.JWT_REFRESH_EXPIRES_IN)
+  /* The access COOKIE lives as long as the session; the JWT inside it still
+     expires after JWT_ACCESS_EXPIRES_IN and the API refuses it (TOKEN_EXPIRED).
+
+     With a 15-minute cookie, a student who left the app for 15 minutes came
+     back to no `lms_at` at all — and the client middleware, which can only see
+     that cookie (lms_rt is Path=/api/v1/auth), sent them straight to /login,
+     though their 30-day session was fine (2026-10-29: "logged out after a
+     while"). Kept, the page loads, its first call gets TOKEN_EXPIRED, and the
+     client's interceptor refreshes in the background as it does mid-session.
+     A session that is really over still ends: the refresh is refused and the
+     cookies are cleared (isDeadSession, auth.controller.ts). */
   res.cookie(ACCESS_COOKIE, tokens.access_token, {
     httpOnly: true,
     secure:   isProd(),
     sameSite: 'lax',
     domain:   cookieDomain(),
     path:     '/',
-    maxAge:   parseDurationMs(env.JWT_ACCESS_EXPIRES_IN),
+    maxAge:   sessionMs,
   })
   res.cookie(REFRESH_COOKIE, tokens.refresh_token, {
     httpOnly: true,
@@ -128,7 +141,7 @@ export function setAuthCookies(res: Response, tokens: TokenPair, refreshTtlOverr
     sameSite: 'lax',
     domain:   cookieDomain(),
     path:     REFRESH_PATH,
-    maxAge:   parseDurationMs(refreshTtlOverride ?? env.JWT_REFRESH_EXPIRES_IN),
+    maxAge:   sessionMs,
   })
   evictLegacyCookie(res, ACCESS_COOKIE,  '/')
   evictLegacyCookie(res, REFRESH_COOKIE, REFRESH_PATH)
