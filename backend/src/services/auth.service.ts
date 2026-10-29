@@ -1199,9 +1199,10 @@ export class AuthService {
 
     const doc = await AuthTokenModel.findOne({
       tokenHash: hashSigninCode(String(rawCode ?? '')), purpose: 'signin-link', expiresAt: { $gt: new Date() },
-    }).lean() as { _id: unknown; userId: unknown; nextPath?: string; useCount?: number } | null
+    }).lean() as { _id: unknown; userId: unknown; nextPath?: string; useCount?: number; maxUses?: number } | null
     if (!doc) throw expired()
     const owner = String(doc.userId), next = safeNextPath(doc.nextPath ?? '/my-bookings')
+    const maxUses = doc.maxUses ?? LINK_MAX_SIGNINS     // an admin's login link: 1
 
     if (currentUserId) {
       if (currentUserId !== owner) {
@@ -1212,17 +1213,17 @@ export class AuthService {
     const user = await this.userRepo.findById(owner)
     if (!user || !user.isActive) throw expired()
     /* Device gate BEFORE a use is spent — see redeemJoinLink. */
-    if ((doc.useCount ?? 0) < LINK_MAX_SIGNINS) await this.#enforceDeviceForLogin(user.id, user.role, meta)
+    if ((doc.useCount ?? 0) < maxUses) await this.#enforceDeviceForLogin(user.id, user.role, meta)
 
     const claimed = await AuthTokenModel.updateOne(
-      { _id: doc._id, $or: [{ useCount: { $lt: LINK_MAX_SIGNINS } }, { useCount: { $exists: false } }] },
+      { _id: doc._id, $or: [{ useCount: { $lt: maxUses } }, { useCount: { $exists: false } }] },
       { $inc: { useCount: 1 }, $set: { usedAt: new Date() } },
     )
     if (claimed.modifiedCount === 0) return { next }
 
     void this.userRepo.touchLastLogin(user.id)
     const tokens = await this.#issueTokens(user.id, user.email, user.role, meta, 'client')
-    logger.info({ userId: user.id, next }, 'Student signed in via sign-in link')
+    logger.info({ userId: user.id, next, maxUses }, 'Student signed in via sign-in link')
     return { next, user: toSafeUser(user), tokens }
   }
 

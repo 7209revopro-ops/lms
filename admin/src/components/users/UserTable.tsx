@@ -1,19 +1,21 @@
 'use client'
 
 import { useState } from 'react'
+import { createPortal } from 'react-dom'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
   Search, Mail, Calendar, CheckCircle2, XCircle,
   ChevronLeft, ChevronRight, MoreHorizontal, ShieldCheck, ShieldOff, ArrowUp, ArrowDown, Pencil, Eye, PenLine,
-  Phone, PhoneOff, RefreshCw,
+  Phone, PhoneOff, RefreshCw, Link2, Copy, Check, X,
 } from 'lucide-react'
-import { useUsers, useUpdateUser, useImpersonateClient, useRecheckCs, type AdminUser } from '@/lib/api/users'
+import { useUsers, useUpdateUser, useImpersonateClient, useRecheckCs, useStudentLoginLink, type AdminUser, type StudentLoginLink } from '@/lib/api/users'
 import { useCurrentUser } from '@/lib/api/user'
 import { useQueryState } from '@/lib/useQueryState'
 import { categoryScopeOf, isProgrammeScoped } from '@/lib/programScope'
 import Spinner from '@/components/ui/Spinner'
 import { AvatarImg } from '@/components/ui/AvatarImg'
 import { useToast } from '@/store/ui.store'
+import { useBackdropClose } from '@/hooks/useBackdropClose'
 import { EditStudentModal } from '@/components/users/EditStudentModal'
 import { EditInstructorModal } from '@/components/instructors/EditInstructorModal'
 import { StudentHistoryModal } from '@/components/users/StudentHistoryModal'
@@ -250,8 +252,19 @@ function UserRow({ user, index, onEdit, onViewHistory }: {
   const recheck   = useRecheckCs()
   const toast     = useToast()
   const viewAs    = useImpersonateClient()
+  const loginLink = useStudentLoginLink()
   const { data: me } = useCurrentUser()
   const [menuOpen, setMenuOpen] = useState(false)
+  const [link, setLink] = useState<StudentLoginLink | null>(null)
+
+  /* A one-time login link: super admins, and admins for their own academy's
+     students (the server checks the academy). Not for a deactivated student. */
+  const canMakeLoginLink = user.role === 'student' && user.isActive && (me?.role === 'super_admin' || me?.role === 'admin')
+  const makeLoginLink = async () => {
+    setMenuOpen(false)
+    try { setLink(await loginLink.mutateAsync(user.id)) }
+    catch (err: any) { toast.error('Could not make a login link', err?.response?.data?.error?.message) }
+  }
 
   /* Students only, and only for the three roles the endpoint now accepts.
      Hiding it here is a courtesy; the endpoint is the actual control — and it
@@ -530,6 +543,14 @@ function UserRow({ user, index, onEdit, onViewHistory }: {
                     </button>
                   </>
                 )}
+                {canMakeLoginLink && (
+                  <button onClick={() => void makeLoginLink()} disabled={loginLink.isPending}
+                    className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-xs font-semibold transition-colors hover:bg-white/[0.05] disabled:opacity-40"
+                    style={{ color: '#A78BFA' }}>
+                    {loginLink.isPending ? <Spinner size={12} /> : <Link2 size={12} />}
+                    Login link · one time, 24 h
+                  </button>
+                )}
                 {user.role === 'student' && (
                   <button onClick={() => void recheckCs()} disabled={recheck.isPending}
                     className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-xs font-semibold transition-colors hover:bg-white/[0.05] disabled:opacity-40"
@@ -563,6 +584,48 @@ function UserRow({ user, index, onEdit, onViewHistory }: {
         </AnimatePresence>
       </td>
     </motion.tr>
+    {link && <LoginLinkModal name={user.name} link={link} onClose={() => setLink(null)} />}
     </>
+  )
+}
+
+/* The link just made, to copy and send to the student. Shown once — it is
+   never stored readable, so closing this means making a new one next time
+   (which cancels this one if it is still unused). */
+function LoginLinkModal({ name, link, onClose }: { name: string; link: StudentLoginLink; onClose: () => void }) {
+  const backdrop = useBackdropClose(onClose)
+  const [copied, setCopied] = useState(false)
+  const copy = async () => {
+    try { await navigator.clipboard.writeText(link.url); setCopied(true); setTimeout(() => setCopied(false), 1500) } catch { /* the text is selectable */ }
+  }
+  const until = new Date(link.expiresAt).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
+  return createPortal(
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: 'rgba(0,0,0,0.55)' }} {...backdrop}>
+      <motion.div initial={{ opacity: 0, y: 8, scale: 0.98 }} animate={{ opacity: 1, y: 0, scale: 1 }}
+        className="w-full max-w-md space-y-4 rounded-2xl p-5" style={{ background: '#13141C', border: '1px solid rgba(255,255,255,0.08)' }}
+        onClick={e => e.stopPropagation()}>
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <p className="text-sm font-semibold text-white">Login link for {name}</p>
+            <p className="mt-0.5 text-xs" style={{ color: 'rgba(255,255,255,0.45)' }}>Signs in once, no password · works until {until}</p>
+          </div>
+          <button onClick={onClose} aria-label="Close" className="rounded-lg p-1 hover:bg-white/[0.06]" style={{ color: 'rgba(255,255,255,0.5)' }}><X size={14} /></button>
+        </div>
+        <div className="flex items-start gap-2 rounded-xl p-3" style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)' }}>
+          <code className="flex-1 select-all break-all font-mono text-[12px]" style={{ color: '#C4B5FD' }}>{link.url}</code>
+          <button onClick={copy} className="shrink-0 flex items-center gap-1 rounded-lg px-2 py-1 text-[11px] font-semibold transition-colors hover:bg-white/10"
+            style={{ border: '1px solid rgba(255,255,255,0.12)', color: copied ? '#4ADE80' : 'rgba(255,255,255,0.8)' }}>
+            {copied ? <><Check size={11} />Copied</> : <><Copy size={11} />Copy</>}
+          </button>
+        </div>
+        <ul className="space-y-1 text-[11px] leading-snug" style={{ color: 'rgba(255,255,255,0.5)' }}>
+          <li>Send it to {name} yourself — WhatsApp or email. It opens their class schedule, signed in.</li>
+          <li>Anyone who has it can sign in as them until it is used, so send it only to them.</li>
+          <li>A new device still needs approval if they already have two.</li>
+          <li style={{ color: '#FBBF24' }}>This is shown once. Making another link cancels this one if it has not been used.</li>
+        </ul>
+      </motion.div>
+    </div>,
+    document.body,
   )
 }

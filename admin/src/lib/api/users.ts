@@ -273,6 +273,17 @@ export function useImpersonateClient() {
   })
 }
 
+/* ─── One-time login link for a student ─────────────────────────
+   Signs the student in once, within 24 hours, with no password; the admin
+   copies it and sends it. Making a new one cancels the earlier unused one. */
+export interface StudentLoginLink { url: string; expiresAt: string; maxSignIns: number }
+export function useStudentLoginLink() {
+  return useMutation({
+    mutationFn: async (userId: string): Promise<StudentLoginLink> =>
+      (await api.post<{ success: true; data: StudentLoginLink }>(`/admin/users/${userId}/login-link`)).data.data,
+  })
+}
+
 /* ─── Delete user (hard delete) ──────────────────────────────── */
 export function useDeleteUser() {
   const qc = useQueryClient()

@@ -710,6 +710,37 @@ router.post('/users/:id/set-password', requireRole('super_admin', 'admin', 'sub_
     } catch (err) { next(err) }
   })
 
+/* POST /admin/users/:id/login-link — a one-time login link for a student
+   (the user, 2026-10-29): {CLIENT_URL}/s/<code>, signs the student in ONCE
+   within 24 hours with no password, then opens their class schedule. The
+   admin copies it and sends it themselves. Super admin, or an academy admin
+   for a student of their own academy (requireImpersonableStudent — 404
+   outside it); sub_admins cannot. Making a new one cancels the student's
+   earlier hand-made links still waiting. Audited. Device approval still
+   applies when the student opens it. */
+router.post('/users/:id/login-link', requireRole('super_admin', 'admin'), requireImpersonableStudent('id'),
+  audit('user.loginLink', 'User', r => String(r.params['id'] ?? '')),
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const id = String(req.params['id'] ?? '')
+      const { Types } = await import('mongoose')
+      if (!Types.ObjectId.isValid(id)) {
+        res.status(400).json({ success: false, error: { code: 'INVALID_ID', message: 'Invalid user id' } }); return
+      }
+      const { UserModel } = await import('@/models/schema.ts')
+      const target = await UserModel.findById(id).select('role isActive name').lean() as { role?: string; isActive?: boolean; name?: string } | null
+      if (!target || target.role !== 'student') {
+        res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Student not found' } }); return
+      }
+      if (target.isActive === false) {
+        res.status(400).json({ success: false, error: { code: 'STUDENT_BLOCKED', message: 'This student is deactivated — activate them before sending a login link.' } }); return
+      }
+      const { mintAdminLoginLink } = await import('@/services/signinLink.service.ts')
+      const link = await mintAdminLoginLink(id, req.user!.id)
+      sendSuccess(res, { ...link, maxSignIns: 1 }, 'Login link made — it signs in once, within 24 hours.')
+    } catch (err) { next(err) }
+  })
+
 /* POST /admin/users/:id/reset-2fa — clear a user's second factor.
    For the lost-device case. Nothing else in the codebase could write
    twoFactorEnabled, so a user who lost their authenticator had no route back

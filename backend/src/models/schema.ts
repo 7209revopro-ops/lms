@@ -583,6 +583,10 @@ export interface IAuthToken extends Document {
   liveClassId?: Types.ObjectId
   /* signin-link only: the page it opens once signed in (services/signinLink.service.ts). */
   nextPath?: string
+  /* signin-link only: sign-ins it allows when not LINK_MAX_SIGNINS (an admin's login link: 1). */
+  maxUses?: number
+  /* signin-link only: the admin who made it by hand (Students → Login link); unset for WhatsApp's. */
+  issuedBy?: Types.ObjectId
   createdAt: Date
   updatedAt: Date
 }
@@ -597,6 +601,8 @@ const AuthTokenSchema = new Schema<IAuthToken>(
     useCount:  { type: Number },
     liveClassId: { type: Schema.Types.ObjectId, ref: 'LiveClass' },
     nextPath:    { type: String, maxlength: 300 },
+    maxUses:     { type: Number, min: 1 },
+    issuedBy:    { type: Schema.Types.ObjectId, ref: 'User' },
   },
   baseSchemaOptions,
 )
@@ -2754,6 +2760,7 @@ export type AuditAction =
   | 'course.publish'  | 'course.archive'
   | 'user.create'     | 'user.ban'        | 'user.unban'      | 'user.roleChange'
   | 'user.delete'     | 'user.impersonate' | 'user.reset2fa' | 'user.setPassword'
+  | 'user.loginLink'
   | 'user.impersonate.revoke'
   | 'user.impersonate.client'
   | 'user.impersonate.write'
