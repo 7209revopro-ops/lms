@@ -449,4 +449,16 @@ router.get('/student-report', wrap(async (req, res) => {
   sendSuccess(res, await studentReportForPortal(req.query), 'Students report')
 }))
 
+/* Course progress (2026-10-29, portalCourseProgress.service.ts): each course's students — completed, in progress, not
+   started — and where each stopped, for the Root portal's Reports → Students → Course progress. Read only; the Root
+   portal's alone, as the report above. */
+router.get('/course-progress', wrap(async (req, res) => {
+  if (req.caller !== 'portal') {
+    sendError(res, 'FORBIDDEN', 'Only the Root portal reads course progress', 403)
+    return
+  }
+  const { courseProgressForPortal } = await import('@/services/portalCourseProgress.service.ts')
+  sendSuccess(res, await courseProgressForPortal(req.query), 'Course progress')
+}))
+
 export default router
