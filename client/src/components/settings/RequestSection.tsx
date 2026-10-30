@@ -549,6 +549,9 @@ export function RequestSection() {
       if (Array.isArray(stored) && stored.length === 0) return current
       return stored
     }
+    /* Bought on /explore: the country given at checkout is the likeliest answer for where they
+       attend and live too — filled, not fixed. */
+    const checkoutCountry = user.registrationDue ? keep(a?.homeCountry, '') : ''
     setForm(f => ({
       ...f,
       name:              user.name            ?? f.name,
@@ -561,10 +564,10 @@ export function RequestSection() {
       occupation:        keep(a?.occupation, f.occupation),
       idType:            keep(a?.idType, f.idType),
       idNumber:          keep(a?.idNumber, f.idNumber),
-      countryAttendance: keep(a?.countryAttendance, f.countryAttendance),
+      countryAttendance: keep(a?.countryAttendance, f.countryAttendance || checkoutCountry),
       villa:             keep(a?.villa, f.villa),
       city:              keep(a?.city, f.city),
-      addressCountry:    keep(a?.addressCountry, f.addressCountry),
+      addressCountry:    keep(a?.addressCountry, f.addressCountry || checkoutCountry),
       experienceLevel:   keep(a?.experienceLevel, f.experienceLevel),
       preferredStartDate: keep(a?.preferredStartDate, f.preferredStartDate),
       hearAboutUs:       keep(a?.hearAboutUs, f.hearAboutUs),
