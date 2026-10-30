@@ -8,6 +8,7 @@ import { motion, AnimatePresence } from 'framer-motion'
 import { Eye, EyeOff, Mail, Lock, ArrowRight, ArrowLeft, AlertCircle, ShieldCheck } from 'lucide-react'
 import { api } from '@/lib/axios'
 import { safeRedirect } from '@/lib/safeRedirect'
+import { takeSignInEmail } from '@/lib/signInEmail'
 import Spinner from '@/components/ui/Spinner'
 
 /* ─── Validation schema ─────────────────────────── */
@@ -66,6 +67,9 @@ export function LoginForm({ onSwitch }: LoginFormProps) {
         setOtpStep('email')
       }
     } catch { /* SSR / no window — ignore */ }
+    /* An address handed over by the page that sent us here (the /explore return page). */
+    const handed = takeSignInEmail()
+    if (handed) setOtpEmail(handed)
   }, [])
 
   const {

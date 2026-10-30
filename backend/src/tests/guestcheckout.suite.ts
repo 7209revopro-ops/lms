@@ -11,6 +11,8 @@
      G  two checkouts in one browser: the first still confirms; a stale tab cannot pay for the second
      H  after paying, an account made at checkout opens the full registration form (its checkout
         details filled in); submitting it keeps the paid approval and the link then opens the course
+     I  a retry in the same browser keeps the account it made "new" (signed in on paying); another
+        browser never is — it is told the address and where signing in leads (the form, or the course)
    Gateways are never called: an order is marked paid as the webhook would.
    Run: bun --no-env-file src/tests/guestcheckout.suite.ts
 ───────────────────────────────────────────────────────────── */
@@ -195,8 +197,8 @@ try {
   check('...paid: confirmed, the owner emailed (an existing account)', firstPaid.body?.data?.paid === true && firstPaid.body.data.signIn === null, why(firstPaid))
   await settle()
   check('...the access email names the order\'s course, not the cookie\'s', (await M.AuthTokenModel.findOne({ userId: owner3._id, purpose: 'signin-link' }).lean() as any)?.nextPath === '/courses/mbt')
-  /* A NEW email, then a second checkout: by the second the account exists, so — the rule for any
-     account that existed before a checkout — it is emailed a sign-in link, never signed in here. */
+  /* A NEW email, then a second checkout IN THE SAME BROWSER: the cookie proves this browser made the
+     account, so it is still "new" — signed in from here, like the first checkout would have (2026-10-30). */
   const jNew: Jar = new Map()
   await call('POST', '/public/checkout/prepare', jNew, { ...buyer, email: 'fresh2@example.com', slug: 'mbt' })
   const fresh: any = await M.UserModel.findOne({ email: 'fresh2@example.com' }).lean()
@@ -204,7 +206,7 @@ try {
   await call('POST', '/public/checkout/prepare', jNew, { ...buyer, email: 'fresh2@example.com', slug: 'dwt' })
   await new OrderService().fulfillAbzerFromWebhook(String(fOrder._id), 'rcpt-g2', { amount: 2500, currency: 'AED' })
   const fDone = await call('POST', '/public/checkout/complete', jNew, { gateway: 'abzer', orderId: String(fOrder._id) })
-  check('a new email, the earlier course after a second checkout: confirmed, emailed', fDone.body?.data?.paid === true && fDone.body.data.signIn === null, why(fDone))
+  check('a new email, the earlier course after a second checkout (same browser): confirmed, signed in', fDone.body?.data?.paid === true && /^\/s\//.test(fDone.body.data.signIn ?? ''), why(fDone))
   await settle()
   const fTok: any = await M.AuthTokenModel.findOne({ userId: fresh._id, purpose: 'signin-link' }).sort({ createdAt: -1 }).lean()
   check('...the emailed link opens the registration form for that course (made at checkout)', fTok?.nextPath === '/complete-registration?from=checkout&course=mbt', JSON.stringify(fTok?.nextPath))
@@ -282,6 +284,41 @@ try {
   const uAfter: any = await M.UserModel.findById(uUser._id).lean()
   check('unpaid: no sign-in, no link, not approved, no payment method', uRes.body?.data?.paid === false && !(await M.AuthTokenModel.exists({ userId: uUser._id }))
     && uAfter?.enrollmentStatus !== 'approved' && !uAfter?.enrollmentApplication?.paymentMethod, why(uRes))
+  /* The user, 2026-10-30: "You're enrolled — check your email" needs a button to the registration. */
+  section('I · a retry keeps the account new; an existing one is told where signing in leads')
+  const jI: Jar = new Map()
+  await call('POST', '/public/checkout/prepare', jI, { ...buyer, email: 'retry@example.com' })
+  const rUser: any = await M.UserModel.findOne({ email: 'retry@example.com' }).lean()
+  const rCancelled = await M.OrderModel.create({ userId: rUser._id, courseId: mbt._id, gateway: 'abzer', amount: 250000, currency: 'AED', status: 'cancelled' })
+  /* Cancelled at the gateway → back to the course page → Buy again, same browser. */
+  const again = await call('POST', '/public/checkout/prepare', jI, { ...buyer, email: 'retry@example.com' })
+  check('the retry is prepared', again.status === 200, why(again))
+  check('...no second account', (await M.UserModel.countDocuments({ email: 'retry@example.com' })) === 1)
+  const rOrder = await M.OrderModel.create({ userId: rUser._id, courseId: mbt._id, gateway: 'abzer', amount: 250000, currency: 'AED', status: 'pending' })
+  await new OrderService().fulfillAbzerFromWebhook(String(rOrder._id), 'rcpt-i1', { amount: 2500, currency: 'AED' })
+  const rDone = await call('POST', '/public/checkout/complete', jI, { gateway: 'abzer', orderId: String(rOrder._id) })
+  check('paid on the retry: signed in, not "check your email"', rDone.body?.data?.paid === true && /^\/s\//.test(rDone.body.data.signIn ?? ''), JSON.stringify(rDone.body?.data))
+  const rTok: any = await M.AuthTokenModel.findOne({ userId: rUser._id, purpose: 'signin-link' }).sort({ createdAt: -1 }).lean()
+  check('...to the registration form', rTok?.nextPath === '/complete-registration?from=checkout&course=mbt', JSON.stringify(rTok?.nextPath))
+  check('...the cancelled attempt is left alone', (await M.OrderModel.findById(rCancelled._id).lean() as any)?.status === 'cancelled')
+  /* Another browser typing that address (no cookie of the attempt that made it) is never signed in. */
+  const jI2: Jar = new Map()
+  await call('POST', '/public/checkout/prepare', jI2, { ...buyer, slug: 'dwt', email: 'retry@example.com' })
+  const r2 = await M.OrderModel.create({ userId: rUser._id, courseId: dwt._id, gateway: 'abzer', amount: 250000, currency: 'AED', status: 'pending' })
+  await new OrderService().fulfillAbzerFromWebhook(String(r2._id), 'rcpt-i2', { amount: 2500, currency: 'AED' })
+  const r2Done = await call('POST', '/public/checkout/complete', jI2, { gateway: 'abzer', orderId: String(r2._id) })
+  check('the same address from ANOTHER browser: not signed in', r2Done.body?.data?.paid === true && r2Done.body.data.signIn === null, JSON.stringify(r2Done.body?.data))
+  check('...told the address and that the form is still due', r2Done.body.data.email === 'retry@example.com' && r2Done.body.data.registrationDue === true
+    && r2Done.body.data.next === '/complete-registration?from=checkout&course=dwt', JSON.stringify(r2Done.body?.data))
+  /* A cookie whose `nw` is for ANOTHER account does not make this one new. */
+  const jI3: Jar = new Map()
+  await call('POST', '/public/checkout/prepare', jI3, { ...buyer, email: 'brandnew@example.com' })
+  await call('POST', '/public/checkout/prepare', jI3, { ...buyer, slug: 'dwt', email: 'two@example.com' })
+  const oI = await M.OrderModel.create({ userId: owner3._id, courseId: dwt._id, gateway: 'abzer', amount: 250000, currency: 'AED', status: 'pending' })
+  await new OrderService().fulfillAbzerFromWebhook(String(oI._id), 'rcpt-i3', { amount: 2500, currency: 'AED' })
+  const iDone = await call('POST', '/public/checkout/complete', jI3, { gateway: 'abzer', orderId: String(oI._id) })
+  check("a new account's cookie, then someone else's email: never signed in as them", iDone.body?.data?.paid === true && iDone.body.data.signIn === null, JSON.stringify(iDone.body?.data))
+  check('...an account not made at checkout: its link opens the course', iDone.body.data.registrationDue === false && iDone.body.data.next === '/courses/dwt', JSON.stringify(iDone.body?.data))
 } catch (err) {
   fail++; lines.push(`  FAIL  suite threw — ${(err as Error).message}\n${(err as Error).stack}`)
 } finally {

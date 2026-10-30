@@ -67,7 +67,11 @@ const UAE = 'United Arab Emirates'
 const clean = (v: unknown, max: number) => String(v ?? '').trim().slice(0, max)
 
 /* ── 1. prepare ─────────────────────────────────────────── */
-export async function prepareGuestCheckout(input: { slug?: unknown; name?: unknown; email?: unknown; phone?: unknown; country?: unknown }) {
+/* `prior`: this browser's checkout cookie, if it still holds one. An account THIS browser made in an
+   earlier, unpaid attempt (cancelled, declined, abandoned) stays "new" on the retry — so paying the
+   second time signs the buyer in like the first would have (2026-10-30: a retry read "check your
+   email"). Only the cookie proves that; an email typed on another browser never does. */
+export async function prepareGuestCheckout(input: { slug?: unknown; name?: unknown; email?: unknown; phone?: unknown; country?: unknown }, prior: GuestClaims | null = null) {
   const { CourseModel, UserModel, EnrollmentModel, OrganizationModel } = await import('@/models/schema.ts')
   const name = clean(input.name, 120), email = clean(input.email, 200).toLowerCase()
   const phone = clean(input.phone, 30), country = clean(input.country, 80)
@@ -118,6 +122,7 @@ export async function prepareGuestCheckout(input: { slug?: unknown; name?: unkno
     }
   }
   const uid = String(user._id), cid = String(course._id)
+  if (!created && prior?.nw && prior.uid === uid) created = true
   /* The country decides the methods; an existing account's own country wins if it has one. */
   const fresh: any = await UserModel.findById(uid).select('enrollmentApplication.homeCountry').lean()
   const home = String(fresh?.enrollmentApplication?.homeCountry || country)
@@ -254,7 +259,9 @@ export async function completeGuestCheckout(claims: GuestClaims, input: {
       signInUrl: `${clientUrl}/s/${code}`, newAccount: false, registrationDue: due,
     }).catch(err => logger.warn({ err, userId: claims.uid }, 'guest checkout: access email failed'))
   }
-  return { paid: true as const, signIn: null, emailed: true }
+  /* Where signing in leads, and the address to sign in with — the one this buyer typed at checkout,
+     so it tells the cookie's holder nothing new. Signing in still needs the emailed code. */
+  return { paid: true as const, signIn: null, emailed: true, email: user.email as string, next: nextPath, registrationDue: due }
 }
 
 export { OrderError }

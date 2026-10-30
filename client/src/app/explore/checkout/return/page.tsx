@@ -4,7 +4,9 @@
    send a buyer from /explore back (2026-10-18). Asks the API to finish the
    checkout (the httpOnly checkout cookie says whose), waiting a little for
    the gateway's webhook when the redirect beats it. Paid → a new account is
-   signed in straight into the course; an existing one is told to check email.
+   signed in straight into the course; an existing one is told to check email,
+   or to sign in here — its address filled in — and go on to the registration
+   form when that is still due (2026-10-30).
 
    Cancelled / declined: Tabby's QA requires its own sentences, word for word,
    and the way back to checkout — the other gateways get plain ones.
@@ -12,13 +14,41 @@
 import { Suspense, useEffect, useState } from 'react'
 import Link from 'next/link'
 import { useSearchParams } from 'next/navigation'
-import { AlertCircle, Check, Loader2, Mail } from 'lucide-react'
+import { AlertCircle, ArrowRight, Check, Loader2, Mail } from 'lucide-react'
 import { api } from '@/lib/axios'
 import { RETURN_KEY, type CompleteResult } from '@/components/explore/GuestCheckout'
 import { readPendingOrder } from '@/lib/pendingOrder'
+import { rememberSignInEmail } from '@/lib/signInEmail'
 
 const TABBY_CANCEL  = 'You aborted the payment. Please retry or choose another payment method.'
 const TABBY_FAILURE = 'Sorry, Tabby is unable to approve this purchase. Please use an alternative payment method for your order'
+
+/* The way on for an account that existed before this checkout. Whoever this browser is signed in
+   as decides it: the buyer → straight there; nobody → sign in (address typed) and then there;
+   SOMEONE ELSE (a shared computer) → signed out first, so the buyer never lands on, and fills in,
+   another student's registration (2026-10-30 QA). */
+function ContinueButton({ next, email, label }: { next: string; email: string; label: string }) {
+  const [busy, setBusy] = useState(false)
+  const go = async () => {
+    if (busy) return
+    setBusy(true)
+    let signedInAs = ''
+    try {
+      const r = await api.get<{ data: { user?: { email?: string }; email?: string } }>('/auth/me')
+      signedInAs = (r.data.data.user?.email ?? r.data.data.email ?? '').toLowerCase()
+    } catch { /* not signed in */ }
+    if (signedInAs && signedInAs === email.toLowerCase()) { window.location.href = next; return }
+    if (signedInAs) await api.post('/auth/logout').catch(() => {})
+    if (email) rememberSignInEmail(email)
+    window.location.href = `/login?from=${encodeURIComponent(next)}`
+  }
+  return (
+    <button type="button" onClick={go} disabled={busy} aria-busy={busy}
+      className="inline-flex max-w-full items-center gap-2 rounded-2xl px-5 text-center py-3.5 text-[15px] font-semibold text-white disabled:opacity-80 sm:px-6 sm:text-base" style={{ background: 'linear-gradient(135deg, #0a6be0, #0057b8)' }}>
+      {label}{busy ? <Loader2 size={18} className="animate-spin" /> : <ArrowRight size={18} />}
+    </button>
+  )
+}
 
 function ReturnInner() {
   const q = useSearchParams()
@@ -43,6 +73,7 @@ function ReturnInner() {
   const orderId = urlOrderId || rememberedId || ''
   const [state, setState] = useState<'working' | 'emailed' | 'pending' | 'failed' | 'cancelled' | 'unmatched'>('working')
   const [slug, setSlug] = useState<string | null>(null)
+  const [paid, setPaid] = useState<CompleteResult | null>(null)
   useEffect(() => { try { setSlug(sessionStorage.getItem(RETURN_KEY)) } catch { /* private mode */ } }, [])
 
   const stopped = urlStopped && !isCard
@@ -65,7 +96,7 @@ function ReturnInner() {
           const d = r.data.data
           if (d.paid) {
             if (d.signIn) { window.location.replace(d.signIn); return }
-            if (alive) setState('emailed')
+            if (alive) { setPaid(d); setState('emailed') }
             return
           }
           /* Card: Abzer itself reports the attempt failed — say so now rather than wait. */
@@ -124,8 +155,16 @@ function ReturnInner() {
   if (!orderId) return card(bad, 'Nothing to confirm', 'This page is opened after a payment. Start from the course page.', btn('/explore', 'All courses'))
   if (state === 'working') return card(<Loader2 size={34} className="animate-spin" style={{ color: 'var(--xp-blue)' }} />, 'Confirming your payment…', 'This takes a few seconds. Please keep this page open.')
   if (state === 'emailed') {
+    /* Never signed in from here (the account existed before this checkout): signing in takes the
+       emailed code, with the address already typed — then straight to the form, or the course. */
+    const due = paid?.registrationDue === true
+    const next = paid?.next && paid.next.startsWith('/') && !paid.next.startsWith('//') ? paid.next : ''
+    const go = next && <ContinueButton next={next} email={paid?.email ?? ''} label={due ? 'Complete your registration' : 'Sign in to open your course'} />
     return card(<span className="flex h-14 w-14 items-center justify-center rounded-full" style={{ background: 'rgba(18,146,74,0.12)', color: 'var(--xp-up)' }}><Check size={26} /></span>,
-      'You’re enrolled', <>Payment received — the course has been added to your Delta account. <span className="mt-3 flex items-center justify-center gap-2 font-semibold" style={{ color: 'var(--xp-text)' }}><Mail size={16} />Check your email for the link to open it.</span></>)
+      'You’re enrolled', <>Payment received — the course has been added to your Delta account.
+        {due && <span className="mt-2 block">One last step: complete your registration — your name, email and phone are already filled in.</span>}
+        <span className="mt-3 flex items-center justify-center gap-2 text-[14px]" style={{ color: 'var(--xp-muted)' }}><Mail size={15} />{go ? 'We’ve also emailed you a link.' : <span className="font-semibold" style={{ color: 'var(--xp-text)' }}>Check your email for the link to open it.</span>}</span></>,
+      go || undefined)
   }
   if (state === 'pending') {
     return card(<Loader2 size={34} className="animate-spin" style={{ color: 'var(--xp-muted)' }} />, 'Payment being confirmed',

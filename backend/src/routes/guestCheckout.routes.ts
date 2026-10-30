@@ -27,7 +27,9 @@ const claimsOf = async (req: Request) => {
 /* 1. Who is buying → the payment methods for their country (Tabby / Tamara pre-scored). */
 router.post('/prepare', authRateLimit, wrap(async (req, res) => {
   const { prepareGuestCheckout, GUEST_COOKIE, guestCookieMaxAgeMs } = await import('@/services/guestCheckout.service.ts')
-  const { token, checkout } = await prepareGuestCheckout(req.body ?? {})
+  /* An earlier attempt's cookie, if any: a retry keeps the account that attempt made "new". */
+  const prior = await claimsOf(req).catch(() => null)
+  const { token, checkout } = await prepareGuestCheckout(req.body ?? {}, prior)
   res.cookie(GUEST_COOKIE, token, { httpOnly: true, secure: isProd(), sameSite: 'lax', path: COOKIE_PATH, maxAge: guestCookieMaxAgeMs })
   sendSuccess(res, checkout)
 }))

@@ -29,7 +29,11 @@ interface Prepared {
   amount: number; currency: 'AED' | 'INR'
   methods: Array<{ id: MethodId; available: boolean; message?: string | null }>
 }
-export interface CompleteResult { paid: boolean; signIn?: string | null; emailed?: boolean; /** Card (Abzer): the gateway says this attempt failed. */ failed?: boolean }
+export interface CompleteResult {
+  paid: boolean; signIn?: string | null; emailed?: boolean; /** Card (Abzer): the gateway says this attempt failed. */ failed?: boolean
+  /** An existing account (no sign-in from here): the address it signs in with, where that leads, and whether the registration form is still due. */
+  email?: string; next?: string; registrationDue?: boolean
+}
 
 const errText = (e: unknown, fallback: string) =>
   (e as { response?: { data?: { error?: { message?: string } } } })?.response?.data?.error?.message ?? fallback
