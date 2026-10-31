@@ -24,12 +24,16 @@ export interface CurrentUser {
   /** 'express' accounts can finish the full registration later. */
   signupType?:       'express' | 'full'
   fullRegistrationSubmittedAt?: string | null
+  /** Bought on the website's /explore and not yet registered: booking, joining and lessons
+   *  wait for the full registration (backend utils/registrationGate.ts). */
+  registrationDue?:  boolean
   rejectionReason?:  string | null
   enrollmentCancellationReason?: string | null
 }
 
 /** The account owes the academy its full registration (website: Settings → Request). */
-export function needsFullRegistration(u: Pick<CurrentUser, 'signupType' | 'enrollmentStatus' | 'fullRegistrationSubmittedAt'>): boolean {
+export function needsFullRegistration(u: Pick<CurrentUser, 'signupType' | 'enrollmentStatus' | 'fullRegistrationSubmittedAt' | 'registrationDue'>): boolean {
+  if (u.registrationDue) return true
   if (u.enrollmentStatus === 'rejected' || u.enrollmentStatus === 'cancelled') return true
   return u.signupType === 'express' && !u.fullRegistrationSubmittedAt && u.enrollmentStatus !== 'approved'
 }

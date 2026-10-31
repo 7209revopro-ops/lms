@@ -584,9 +584,9 @@ export async function sendGuestPurchaseAccess(to: string, name: string, courseTi
   const html = wrap(subject, `
     <h2 style="margin:0 0 16px;font-size:20px;font-weight:700;color:#0D0F1A">Payment received — you're in 🎓</h2>
     <p>Hi ${escapeHtml(name)},</p>
-    <p>Thank you for your purchase. <strong>${escapeHtml(courseTitle)}</strong> is now open in your Delta student account.</p>
+    <p>Thank you for your purchase. <strong>${escapeHtml(courseTitle)}</strong> ${due ? 'has been added to' : 'is now open in'} your Delta student account.</p>
     ${due ? `
-    <p>One last step: complete your registration. Your name, email, phone and country are already filled in from checkout, and the form takes you on to your course.</p>` : ''}
+    <p><strong>One last step: complete your registration.</strong> Your classes and lessons unlock as soon as you submit it. Your name, email, phone and country are already filled in from checkout.</p>` : ''}
     <p style="margin:24px 0">${btn(opts.signInUrl, due ? 'Complete registration' : 'Open my course')}</p>
     ${opts.newAccount ? `
     <p>We created your Delta account with this email address. There is no password: whenever you sign in, enter this email and we'll send you a one-time code.</p>` : `
@@ -594,7 +594,7 @@ export async function sendGuestPurchaseAccess(to: string, name: string, courseTi
     <p style="font-size:12px;color:#6B7280">The "${due ? 'Complete registration' : 'Open my course'}" button works once and for 24 hours. After that, sign in at the student portal with this email — we'll email you a code.</p>
   `)
   await sender.send({ urgent: true, priority: 10, to, subject, html,
-    text: `Hi ${name},\n\nThank you for your purchase. ${courseTitle} is now open in your Delta student account.\n\n${due ? `Complete your registration (your checkout details are already filled in): ${opts.signInUrl}` : `Open my course: ${opts.signInUrl}`}\n${opts.newAccount ? '\nTo sign in later, enter this email on the student portal and we will send you a code.\n' : '\nIt has been added to your existing account.\n'}` })
+    text: `Hi ${name},\n\nThank you for your purchase. ${courseTitle} ${due ? 'has been added to' : 'is now open in'} your Delta student account.\n\n${due ? `One last step: complete your registration — your classes and lessons unlock as soon as you submit it (your checkout details are already filled in): ${opts.signInUrl}` : `Open my course: ${opts.signInUrl}`}\n${opts.newAccount ? '\nTo sign in later, enter this email on the student portal and we will send you a code.\n' : '\nIt has been added to your existing account.\n'}` })
 }
 
 /* A chat message still unread CHAT_EMAIL_DELAY_MINS after it arrived

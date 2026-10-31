@@ -7,7 +7,8 @@ import { SectionService } from '@/services/section.service.ts'
 import { TranscriptError } from '@/services/transcript.service.ts'
 import { EnrollmentRepository } from '@/repositories/enrollment.repository.ts'
 import { LessonModel } from '@/models/schema.ts'
-import { authenticate, authenticateAny, optionalAuthenticate, requireAdmin, requireInstructor, injectCategoryScope } from '@/middleware/auth.middleware.ts'
+import { authenticate, authenticateAny, optionalAuthenticate, requireAdmin, requireInstructor, injectCategoryScope, requireRegistrationComplete } from '@/middleware/auth.middleware.ts'
+import { registrationOutstanding, REGISTRATION_REQUIRED, REGISTRATION_REQUIRED_MESSAGE } from '@/utils/registrationGate.ts'
 import { validate } from '@/middleware/validate.middleware.ts'
 import { sendSuccess } from '@/utils/response.ts'
 import { keyFromUrl, generatePresignedGetUrl, isR2Configured } from '@/services/r2.service.ts'
@@ -78,6 +79,10 @@ router.get('/:id/play-url', optionalAuthenticate, async (req: Request, res: Resp
       if (!req.user) throw new TranscriptError('UNAUTHENTICATED', 'Login required to watch this lesson', 401)
       const enrollment = await enrollRepo.findByUserCourse(req.user.id, lesson.courseId)
       if (!enrollment) throw new TranscriptError('NOT_ENROLLED', 'You must be enrolled in this course', 403)
+      /* A paid /explore buyer opens lessons once the registration form is in (utils/registrationGate.ts). */
+      if (req.user.role === 'student' && await registrationOutstanding(req.user.id)) {
+        throw new TranscriptError(REGISTRATION_REQUIRED, REGISTRATION_REQUIRED_MESSAGE, 403)
+      }
       /* Module-level block — blockedLessons stores SECTION ids (legacy name). */
       const blocked = (enrollment.blockedLessons ?? []).map((x: unknown) => String(x))
       if (blocked.includes(String(lesson.sectionId))) {
@@ -96,12 +101,12 @@ router.get('/:id/play-url', optionalAuthenticate, async (req: Request, res: Resp
 
 /* ── Progress ─────────────────────────────────────── */
 router.get ('/:id/progress',    authenticate, progress.myLessonProgress)
-router.post('/:id/complete',    authenticate, progress.markComplete)
-router.post('/:id/watch-time',  authenticate, validate(watchTimeSchema), progress.recordWatchTime)
+router.post('/:id/complete',    authenticate, requireRegistrationComplete, progress.markComplete)
+router.post('/:id/watch-time',  authenticate, requireRegistrationComplete, validate(watchTimeSchema), progress.recordWatchTime)
 
 /* ── Transcript ───────────────────────────────────── */
 /* Read — enrolled students only */
-router.get('/:id/transcript', authenticate, requireLessonEnrollment, transcript.get)
+router.get('/:id/transcript', authenticate, requireRegistrationComplete, requireLessonEnrollment, transcript.get)
 /* Admin/instructor write + AI generation — must own the lesson's course.
 
    authenticateAny, not authenticate. These two are only ever called from the

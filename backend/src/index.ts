@@ -60,7 +60,9 @@ async function bootstrap() {
 
   /* 1b. Migrate legacy student accounts that predate the enrollmentStatus field */
   const migrated = await UserModel.updateMany(
-    { role: 'student', enrollmentStatus: { $exists: false } },
+    /* Not a checkout account still owing its registration: that one is approved by the form
+       (utils/registrationGate.ts), and is status-less only until then. */
+    { role: 'student', enrollmentStatus: { $exists: false }, registrationDue: { $ne: true } },
     { $set: { enrollmentStatus: 'approved' } },
   )
   if (migrated.modifiedCount > 0) {

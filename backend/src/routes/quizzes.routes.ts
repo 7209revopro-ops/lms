@@ -1,6 +1,6 @@
 import { Router } from 'express'
 import { z } from 'zod'
-import { authenticate } from '@/middleware/auth.middleware.ts'
+import { authenticate, requireRegistrationComplete } from '@/middleware/auth.middleware.ts'
 import { validate } from '@/middleware/validate.middleware.ts'
 import { QuizService } from '@/services/quiz.service.ts'
 import { StreakService } from '@/services/streak.service.ts'
@@ -21,7 +21,7 @@ const submitSchema = z.object({
 })
 
 /* GET /quizzes/lessons/:lessonId — student gets quiz questions (no answers) */
-router.get('/lessons/:lessonId', authenticate, async (req: Request, res: Response, next: NextFunction) => {
+router.get('/lessons/:lessonId', authenticate, requireRegistrationComplete, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const quiz = await quizSvc.getForStudent(req.user!.id, String(req.params['lessonId'] ?? ''))
     sendSuccess(res, quiz)
@@ -29,7 +29,7 @@ router.get('/lessons/:lessonId', authenticate, async (req: Request, res: Respons
 })
 
 /* GET /quizzes/lessons/:lessonId/summary — user's attempt history */
-router.get('/lessons/:lessonId/summary', authenticate, async (req: Request, res: Response, next: NextFunction) => {
+router.get('/lessons/:lessonId/summary', authenticate, requireRegistrationComplete, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const summary = await quizSvc.getSummary(req.user!.id, String(req.params['lessonId'] ?? ''))
     sendSuccess(res, summary)
@@ -37,7 +37,7 @@ router.get('/lessons/:lessonId/summary', authenticate, async (req: Request, res:
 })
 
 /* POST /quizzes/lessons/:lessonId/submit — submit an attempt */
-router.post('/lessons/:lessonId/submit', authenticate, validate(submitSchema), async (req: Request, res: Response, next: NextFunction) => {
+router.post('/lessons/:lessonId/submit', authenticate, requireRegistrationComplete, validate(submitSchema), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const lessonId = String(req.params['lessonId'] ?? '')
     const { answers } = req.body as { answers: Array<{ questionId: string; answer: string }> }

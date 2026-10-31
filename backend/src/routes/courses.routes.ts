@@ -4,7 +4,7 @@ import { CourseController } from '@/controllers/course.controller.ts'
 import { EnrollmentController } from '@/controllers/enrollment.controller.ts'
 import { ReviewController } from '@/controllers/review.controller.ts'
 import { LiveClassController } from '@/controllers/liveClass.controller.ts'
-import { authenticate, optionalAuthenticate, requireEnrollmentApproval } from '@/middleware/auth.middleware.ts'
+import { authenticate, optionalAuthenticate, requireEnrollmentApproval, withholdLessonContentWhileRegistrationDue } from '@/middleware/auth.middleware.ts'
 import { searchRateLimit } from '@/middleware/rateLimit.middleware.ts'
 import { validate } from '@/middleware/validate.middleware.ts'
 
@@ -41,8 +41,8 @@ const listQuerySchema = z.object({
 router.get ('/',                       optionalAuthenticate, validate(listQuerySchema, 'query'), courses.list)
 /* by-id lookup must come BEFORE /:slug — otherwise Express treats
    "by-id" as a slug and the wrong handler fires. */
-router.get ('/by-id/:id',              optionalAuthenticate, courses.getById)
-router.get ('/:slug',                   optionalAuthenticate, courses.getBySlug)
+router.get ('/by-id/:id',              optionalAuthenticate, withholdLessonContentWhileRegistrationDue, courses.getById)
+router.get ('/:slug',                   optionalAuthenticate, withholdLessonContentWhileRegistrationDue, courses.getBySlug)
 router.get ('/:slug/ai-notes',          searchRateLimit, authenticate, courses.getAINotes)
 router.get ('/:slug/recommendations',   courses.getRecommendations)
 router.get ('/:slug/rating-histogram', courses.getRatingHistogram)

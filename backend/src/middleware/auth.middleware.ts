@@ -743,6 +743,59 @@ export async function requireEnrollmentApproval(
 }
 
 /* ─────────────────────────────────────────────────────
+   requireRegistrationComplete  (2026-10-31)
+   ─────────────────────────────────────────────────────
+   A paid /explore buyer whose full registration form is still due may browse,
+   but not book, join or open lessons (utils/registrationGate.ts). Answers
+   403 REGISTRATION_REQUIRED, which the client turns into its "Complete your
+   registration" prompt. Staff and students without the flag pass.
+───────────────────────────────────────────────────── */
+export async function requireRegistrationComplete(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): Promise<void> {
+  try {
+    if (!req.user || req.user.role !== 'student') { next(); return }
+    const { registrationOutstanding, REGISTRATION_REQUIRED, REGISTRATION_REQUIRED_MESSAGE } = await import('@/utils/registrationGate.ts')
+    if (await registrationOutstanding(req.user.id)) {
+      res.status(403).json({ success: false, error: { code: REGISTRATION_REQUIRED, message: REGISTRATION_REQUIRED_MESSAGE } })
+      return
+    }
+    next()
+  } catch (err) { next(err) }
+}
+
+/* The course page stays open to a student still owing the registration form, but its lessons'
+   content does not ride along (article / PDF / link bodies — video is behind play-url already).
+   Free preview lessons stay as they are for everyone. Applied to the course routes as a response
+   filter, so the controller's own open/closed rule is untouched. */
+export async function withholdLessonContentWhileRegistrationDue(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): Promise<void> {
+  try {
+    if (!req.user || req.user.role !== 'student') { next(); return }
+    const { registrationOutstanding } = await import('@/utils/registrationGate.ts')
+    if (!(await registrationOutstanding(req.user.id))) { next(); return }
+    /* sendSuccess writes a JSON string through res.send (utils/response.ts), so the filter sits there. */
+    const send = res.send.bind(res)
+    res.send = ((body: unknown) => {
+      if (typeof body !== 'string') return send(body)
+      try {
+        const parsed = JSON.parse(body)
+        const lessons = parsed?.data?.lessons
+        if (!Array.isArray(lessons)) return send(body)
+        for (const l of lessons) if (l && l.isFree !== true) { delete l.contentUrl; delete l.contentBody }
+        return send(JSON.stringify(parsed))
+      } catch { return send(body) }
+    }) as typeof res.send
+    next()
+  } catch (err) { next(err) }
+}
+
+/* ─────────────────────────────────────────────────────
    requireCheckoutEligibility  (B-03)
    ─────────────────────────────────────────────────────
    Five checkout routes, one of which behaved differently from the other four.

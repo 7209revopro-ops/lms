@@ -11,6 +11,7 @@ import { MissedPopup } from '@/components/notifications/MissedPopup'
 import { RightSidebar, RightSidebarToggle } from '@/components/layout/RightSidebar'
 import { VerifyEmailBanner } from '@/components/auth/VerifyEmailBanner'
 import { EnrollmentStatusBanner } from '@/components/auth/EnrollmentStatusBanner'
+import { RegistrationRequiredSheet } from '@/components/auth/RegistrationRequiredSheet'
 import { InstallPopup } from '@/components/pwa/InstallPopup'
 import { ChatAlerts } from '@/components/chat/ChatAlerts'
 import { PushPrompt } from '@/components/pwa/PushPrompt'
@@ -55,6 +56,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       <MobileTabBar />
       <NotificationsSheet />
       <MissedPopup />
+      <RegistrationRequiredSheet />
       <RightSidebar />
       <RightSidebarToggle />
       <InstallPopup />

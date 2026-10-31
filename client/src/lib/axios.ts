@@ -1,4 +1,5 @@
 import axios from 'axios'
+import { isRegistrationRequired, showRegistrationRequired } from '@/lib/registrationGate'
 
 /**
  * Main API client.
@@ -69,6 +70,16 @@ api.interceptors.response.use(
       void axios.post('/api/v1/auth/impersonation/exit', null, { withCredentials: true })
         .catch(() => {})
         .finally(() => { window.location.href = '/login?impersonation=ended' })
+      return Promise.reject(err)
+    }
+
+    /* A paid /explore buyer tried what waits for the registration form: one prompt, from
+       wherever it was tried (lib/registrationGate). The caller still gets the rejection. */
+    if (isRegistrationRequired(err)) {
+      const url = String(original?.url ?? '')
+      showRegistrationRequired(/\/bookings/.test(url) ? 'book'
+        : /\/(join|join-ticket|handoff)/.test(url) ? 'join'
+        : /\/(lessons|quizzes|exams|assignments)\//.test(url) ? 'lesson' : 'other')
       return Promise.reject(err)
     }
 

@@ -49,6 +49,8 @@ export function ClassEntryPanel({ liveClassId }: { liveClassId: string }) {
       if (status === 409 && code !== 'CLASS_CANCELLED' && code !== 'CLASS_ENDED') {
         setPhase('waiting'); return
       }
+      /* The registration prompt says this one (lib/registrationGate, opened by lib/axios). */
+      if (code === 'REGISTRATION_REQUIRED') { setPhase('idle'); return }
       setError(handoffError(err))
       setPhase('error')
     }

@@ -25,6 +25,7 @@ import { tryEnsureRoom, cltConfigured } from '@/services/clt.service.ts'
 import { logger } from '@/utils/logger.ts'
 import { studentJoinWindow, STUDENT_JOIN_GRACE_MS } from '@/utils/liveStatus.ts'
 import { resolveClassEntitlement } from '@/services/classEntitlement.service.ts'
+import { registrationOutstanding, REGISTRATION_REQUIRED, REGISTRATION_REQUIRED_MESSAGE } from '@/utils/registrationGate.ts'
 
 export class JoinError extends Error {
   constructor(
@@ -345,6 +346,11 @@ export async function assertStudentMayJoin(
 ): Promise<void> {
   if (ctx.isActive === false) {
     throw new JoinError('ACCOUNT_DISABLED', 'This account is disabled.', 403)
+  }
+  /* A paid /explore buyer joins once the registration form is in (utils/registrationGate.ts).
+     Every way in — web, the in-app room, the app, an emailed or WhatsApp link — comes through here. */
+  if (ctx.role === 'student' && await registrationOutstanding(ctx.userId)) {
+    throw new JoinError(REGISTRATION_REQUIRED, REGISTRATION_REQUIRED_MESSAGE, 403)
   }
   if (ctx.enrollmentStatus && ctx.enrollmentStatus !== 'approved') {
     throw new JoinError('ENROLMENT_NOT_APPROVED',

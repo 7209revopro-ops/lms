@@ -147,6 +147,8 @@ export interface WatchAccess {
   joinClosesAt?: string
   playbackUrl?:  string      // internal only
   recordingUrl?: string      // internal, after stream ends
+  /** The registration form is still due: no stream or recording was sent (lib/registrationGate). */
+  registrationRequired?: boolean
   thumbnailUrl?: string
   viewerCount:   number
 }

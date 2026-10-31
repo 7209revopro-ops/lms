@@ -86,7 +86,7 @@ export async function prepareGuestCheckout(input: { slug?: unknown; name?: unkno
   if (course.isFree || !(course.price > 0)) throw new GuestCheckoutError('COURSE_IS_FREE', 'This course is free — create an account to enrol', 400)
 
   /* The account: the one with this email, or a new one. Staff addresses are never used for a purchase. */
-  let user: any = await UserModel.findOne({ email }).select('role isActive enrollmentApplication phone').lean()
+  let user: any = await UserModel.findOne({ email }).select('role isActive enrollmentApplication phone enrollmentStatus approvedByEmail fullRegistrationSubmittedAt registrationDue').lean()
   let created = false
   if (user) {
     if (user.role !== 'student') throw new GuestCheckoutError('EMAIL_NOT_STUDENT', 'This email belongs to a staff account — please use another email', 409)
@@ -98,6 +98,17 @@ export async function prepareGuestCheckout(input: { slug?: unknown; name?: unkno
     const set: Record<string, unknown> = {}
     if (!user.enrollmentApplication?.homeCountry) set['enrollmentApplication.homeCountry'] = country
     if (!user.enrollmentApplication?.phone && !user.phone) set['enrollmentApplication.phone'] = phone
+    /* An /explore buyer is held for the registration form (utils/registrationGate.ts), and marked
+       NOW, before paying: the payment can be confirmed by the gateway's webhook alone, with this
+       browser never back, and approval waits on the mark (order.service _autoApproveViaPayment).
+       Not a registered student, and never one an admin or an import approved — they keep every
+       course they have (2026-10-31 review). An account approved only by an earlier /explore payment
+       is an /explore buyer, and is held. Registered = submitted the full form, or signed up with
+       it (ID + date of birth). */
+    const app = user.enrollmentApplication
+    const registered = !!user.fullRegistrationSubmittedAt || !!(app?.idNumber && app?.dateOfBirth)
+    const keptApproval = user.enrollmentStatus === 'approved' && user.approvedByEmail !== 'payment@system'
+    if (!registered && !keptApproval && user.registrationDue !== true) set['registrationDue'] = true
     if (Object.keys(set).length) await UserModel.updateOne({ _id: user._id }, { $set: set })
   } else {
     const org: any = await OrganizationModel.findOne({ slug: country === 'India' ? 'bangalore' : 'dubai' }).select('_id').lean()
@@ -220,20 +231,13 @@ export async function completeGuestCheckout(claims: GuestClaims, input: {
 
   const [course, user]: any[] = await Promise.all([
     CourseModel.findById(order.courseId).select('title slug').lean(),
-    UserModel.findById(claims.uid).select('name email registrationDue fullRegistrationSubmittedAt enrollmentApplication.paymentMethod enrollmentApplication.idNumber enrollmentApplication.dateOfBirth').lean(),
+    UserModel.findById(claims.uid).select('name email registrationDue enrollmentApplication.paymentMethod').lean(),
   ])
   const coursePath = `/courses/${course?.slug ?? ''}`
-  /* An account not yet fully registered is taken to the registration form, its checkout details
-     already filled in; the form leads on to the course. Already approved by the payment — the form
-     never stands between a buyer and what they paid for. Not only accounts made by THIS checkout:
-     one made by an earlier checkout (before the flag existed) or an Express sign-up buying on
-     /explore has no registration either, and was sent to the course instead (production,
-     2026-10-31). Registered = submitted the full form, or signed up with it (ID + date of birth). */
-  const app = user?.enrollmentApplication
-  const registered = !!user?.fullRegistrationSubmittedAt || !!(app?.idNumber && app?.dateOfBirth)
-  const due = user?.registrationDue === true || !registered
-  /* The flag is what the form page and the reminder banner read — mark it, so they agree. */
-  if (due && user?.registrationDue !== true) await UserModel.updateOne({ _id: claims.uid }, { $set: { registrationDue: true } })
+  /* A buyer held for the registration form (marked at prepare, utils/registrationGate.ts) is taken
+     to it, checkout details already filled in; submitting it approves them and opens classes and
+     lessons. Anyone else goes to the course. */
+  const due = user?.registrationDue === true
   const nextPath = due ? `/complete-registration?from=checkout&course=${encodeURIComponent(course?.slug ?? '')}` : coursePath
   /* How they paid is known — one answer fewer on the form. Never overwrites one already given. */
   const paidWith = ({ abzer: 'Card / Full', razorpay: 'Card / Full', tabby: 'Tabby', tamara: 'Tamara' } as Record<string, string>)[order.gateway]

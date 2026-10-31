@@ -96,6 +96,10 @@ describe('full registration', () => {
     expect(needsFullRegistration({ signupType: 'full', enrollmentStatus: 'rejected' })).toBe(true)
     expect(needsFullRegistration({ signupType: 'full', enrollmentStatus: 'cancelled' })).toBe(true)
   })
+  it('bought on the website before registering: owed, whatever the status', () => {
+    expect(needsFullRegistration({ signupType: 'full', registrationDue: true })).toBe(true)
+    expect(needsFullRegistration({ signupType: 'full', enrollmentStatus: 'approved', registrationDue: true })).toBe(true)
+  })
   it('body: flat, no account fields, passport doubles as the ID when chosen', () => {
     const f = { ...EMPTY_FORM, name: 'X', email: 'x@y.z', password: 'Secret123', idType: 'Passport' as const, nationality: ' Emirati ', programs: ['fx'] }
     const b = completeRegistrationBody(f, { passportUrl: 'p', idDocUrl: 'other', photoUrl: 'ph' })

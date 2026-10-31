@@ -5,7 +5,7 @@ import { meetingDisplayName } from '@/utils/meetingIdentity.ts'
 import express from 'express'
 import { z } from 'zod'
 import { LiveClassController, seatsLeftForDoor, labelGuestDoors, yourCohortFrom, moduleNumbers } from '@/controllers/liveClass.controller.ts'
-import { authenticate, authenticateAny, injectCategoryScope } from '@/middleware/auth.middleware.ts'
+import { authenticate, authenticateAny, injectCategoryScope, requireRegistrationComplete } from '@/middleware/auth.middleware.ts'
 import { validate } from '@/middleware/validate.middleware.ts'
 import { resolveLiveStatus, bookingClosesAt, studentJoinWindow } from '@/utils/liveStatus.ts'
 import type { PaginationMeta } from '@/types/index.ts'
@@ -191,6 +191,10 @@ router.get('/', authenticate, async (req: Request, res: Response, next: NextFunc
         .filter(Boolean)),
     ])
 
+    /* A paid /explore buyer still owing the registration form sees the schedule, never the way in
+       (utils/registrationGate.ts) — the stream and recording fields are held back as for the unentitled. */
+    const { registrationOutstanding } = await import('@/utils/registrationGate.ts')
+    const held = await registrationOutstanding(req.user?.id)
     let annotated = (classes as any[]).map((c, i) => {
       const e = verdicts[i]!
       const isEnrolled = e.ok || e.code === 'MODULE_BLOCKED'
@@ -255,7 +259,7 @@ router.get('/', authenticate, async (req: Request, res: Response, next: NextFunc
         yourCohort:      yourCohortFrom(labelDoor(e.door)),
       }
       // Non-entitled students see the listing only — never the way in.
-      if (!isEntitled) {
+      if (!isEntitled || held) {
         for (const f of ENTITLED_ONLY_FIELDS) delete dto[f]
       }
       for (const f of STAFF_ONLY_FIELDS) delete dto[f]
@@ -615,6 +619,8 @@ router.post('/homework/:id/submit', authenticate, validate(submitHomeworkSchema)
    session and nothing else. The admin portal mounts the very same handler
    behind its own guard, so the identity follows the portal the click came
    from. The handler explains why that matters. */
-router.post('/:id/handoff', authenticate, injectCategoryScope, issueClassHandoff)
+/* The exchange refuses a held student anyway (mintStudentTicket); refusing here too keeps them on
+   the site with the registration prompt instead of sending them to the meeting app to be refused. */
+router.post('/:id/handoff', authenticate, requireRegistrationComplete, injectCategoryScope, issueClassHandoff)
 
 export default router

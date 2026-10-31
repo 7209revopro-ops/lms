@@ -1,6 +1,6 @@
 import { Router } from 'express'
 import { z } from 'zod'
-import { authenticate } from '@/middleware/auth.middleware.ts'
+import { authenticate, requireRegistrationComplete } from '@/middleware/auth.middleware.ts'
 import { validate } from '@/middleware/validate.middleware.ts'
 import { ExamService } from '@/services/exam.service.ts'
 import { sendSuccess } from '@/utils/response.ts'
@@ -28,7 +28,7 @@ router.get('/course/:courseId', authenticate, async (req: Request, res: Response
 })
 
 /* POST /exams/:examId/start — start (or resume) the one attempt */
-router.post('/:examId/start', authenticate, async (req: Request, res: Response, next: NextFunction) => {
+router.post('/:examId/start', authenticate, requireRegistrationComplete, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const data = await examSvc.start(req.user!.id, String(req.params['examId'] ?? ''))
     sendSuccess(res, data)
@@ -44,7 +44,7 @@ router.get('/:examId/status', authenticate, async (req: Request, res: Response, 
 })
 
 /* POST /exams/:examId/answer — auto-save one answer */
-router.post('/:examId/answer', authenticate, validate(answerSchema), async (req: Request, res: Response, next: NextFunction) => {
+router.post('/:examId/answer', authenticate, requireRegistrationComplete, validate(answerSchema), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { questionId, answer } = req.body as { questionId: string; answer: string }
     const data = await examSvc.saveAnswer(req.user!.id, String(req.params['examId'] ?? ''), questionId, answer)
@@ -53,7 +53,7 @@ router.post('/:examId/answer', authenticate, validate(answerSchema), async (req:
 })
 
 /* POST /exams/:examId/submit — finalize the attempt */
-router.post('/:examId/submit', authenticate, async (req: Request, res: Response, next: NextFunction) => {
+router.post('/:examId/submit', authenticate, requireRegistrationComplete, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const data = await examSvc.submit(req.user!.id, String(req.params['examId'] ?? ''))
     sendSuccess(res, data, 'Exam submitted')

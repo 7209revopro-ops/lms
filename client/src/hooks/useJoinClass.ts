@@ -95,6 +95,8 @@ export function useJoinClass(sessionId: string) {
         void qc.invalidateQueries({ queryKey: ['live-classes'] })
       } else if (code === 'NOT_BOOKED') {
         toast.error('You have not booked this class')
+      } else if (code === 'REGISTRATION_REQUIRED') {
+        /* The registration prompt says it (lib/registrationGate, opened by lib/axios). */
       } else {
         toast.error(err?.message ?? 'Could not open the class link. Please try again.')
       }

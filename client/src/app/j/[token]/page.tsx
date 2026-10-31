@@ -44,6 +44,8 @@ type View =
   | { kind: 'working'; label: string }
   | { kind: 'wait'; until: number }
   | { kind: 'error'; title: string; message: string }
+  /* A paid /explore buyer whose registration form is still due (lib/registrationGate). */
+  | { kind: 'register'; message: string }
 
 type Failure = { status?: number; data?: { error?: { code?: string; message?: string; retryAfter?: number } } }
 const errorOf = (err: unknown) => (err as { response?: Failure })?.response
@@ -139,6 +141,10 @@ export default function JoinLinkPage({ params, searchParams }: {
       } catch (err) {
         const r = errorOf(err)
         const e = r?.data?.error
+        if (e?.code === 'REGISTRATION_REQUIRED') {
+          setView({ kind: 'register', message: e.message ?? 'Complete your registration to join your classes.' })
+          return
+        }
         if (r?.status === 425 && e?.retryAfter) {
           setView({ kind: 'wait', until: Date.now() + e.retryAfter * 1000 })
           timer = setTimeout(() => { void join(classId) }, e.retryAfter * 1000 + 500)
@@ -231,6 +237,20 @@ export default function JoinLinkPage({ params, searchParams }: {
     const mm = Math.floor(secs / 60), ss = String(secs % 60).padStart(2, '0')
     return card(<Clock size={24} style={{ color: 'var(--color-primary)' }} />, 'Your class opens soon',
       <>It opens at <strong>{new Date(view.until).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}</strong> — in {mm}:{ss}. Keep this page open; it will take you in.</>)
+  }
+
+  if (view.kind === 'register') {
+    return card(<AlertCircle size={24} style={{ color: '#B45309' }} />, 'Complete your registration', view.message, (
+      <>
+        <Link href="/complete-registration"
+          className="inline-flex items-center gap-1.5 rounded-xl px-5 py-2.5 text-sm font-bold text-white" style={{ background: 'var(--color-primary)' }}>
+          Complete registration
+        </Link>
+        <Link href="/my-bookings" className="inline-flex items-center gap-1.5 text-sm font-semibold" style={{ color: 'var(--color-primary)' }}>
+          <Video size={14} />My Bookings
+        </Link>
+      </>
+    ))
   }
 
   return card(<AlertCircle size={24} style={{ color: 'var(--color-danger)' }} />, view.title, view.message, ways)

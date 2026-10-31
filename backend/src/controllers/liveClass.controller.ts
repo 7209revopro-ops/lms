@@ -19,6 +19,7 @@ import type { CriticalKind } from '@/jobs/criticalmail.job.ts'
 import { SCHEDULE_LINK, liveClassWatchUrl } from '@/utils/clientLinks.ts'
 import { publicJoinByCodeUrl } from '@/services/clt.service.ts'
 import { enrolledProgramsOf } from '@/utils/enrolledPrograms.ts'
+import { registrationOutstanding } from '@/utils/registrationGate.ts'
 
 function isPopulated(v: unknown): v is Record<string, unknown> & { id: string } {
   return !!v && typeof v === 'object' && typeof (v as { id?: unknown }).id === 'string'
@@ -850,13 +851,15 @@ export class LiveClassController {
         ? entitlementFrom(d as unknown as ClassDoors, index, courseCaller.org).door
         : undefined)
       const label  = await labelGuestDoors(doors)
+      /* Registration still due (utils/registrationGate.ts): listed, never the stream. */
+      const held   = await registrationOutstanding(userId)
 
       sendSuccess(res, docs.map((d, i) => {
         /* Anonymous and non-entitled callers get no Mux-derived thumbnail and
            no recording — the playback id embedded in the thumbnail URL is
            enough to watch the stream. */
         /* staff=false: a student never receives the cross-academy pools. */
-        const dto = toDTO(d, (d as any).isEntitled ?? false, false, label(doors[i]))
+        const dto = toDTO(d, ((d as any).isEntitled ?? false) && !held, false, label(doors[i]))
         /* Strip meeting URL and stream credentials from the course listing.
            Students receive the join link via email after booking a session. */
         delete (dto as any).meetingUrl
@@ -913,16 +916,19 @@ export class LiveClassController {
       const index  = await loadEnrolmentIndex(req.user!.id, 'notDropped')
       const doors  = docs.map(d => entitlementFrom(d as unknown as ClassDoors, index, caller.org).door)
       const label  = await labelGuestDoors(doors)
+      /* Registration still due (utils/registrationGate.ts): listed, never the stream. */
+      const held   = await registrationOutstanding(req.user!.id)
 
       sendSuccess(res, docs.map((d, i) => {
         const isEnrolled = (d as any).isEnrolled ?? false
         /* Entitlement is enrolment MINUS any module the admin blocked for this
            student — a blocked module must not hand out the stream fields. */
         const isEntitled = (d as any).isEntitled ?? false
-        const dto        = toDTO(d, isEntitled, false, label(doors[i]))
+        const streams    = isEntitled && !held
+        const dto        = toDTO(d, streams, false, label(doors[i]))
         /* The feed lists every upcoming session, enrolled or not — but only
            entitled students receive the stream fields. */
-        if (!isEntitled) {
+        if (!streams) {
           delete (dto as any).muxPlaybackId
           delete (dto as any).playbackUrl
           delete (dto as any).thumbnailUrl

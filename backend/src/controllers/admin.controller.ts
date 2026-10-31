@@ -877,7 +877,8 @@ export class AdminController {
           approvedByRole:   admin.role,
           approvedAt:       new Date(),
         },
-        $unset: { enrollmentCancellationReason: '', rejectionReason: '' },
+        /* An admin's approval is a full one — it also lifts a checkout account's registration hold (utils/registrationGate.ts). */
+        $unset: { enrollmentCancellationReason: '', rejectionReason: '', registrationDue: '' },
       })
 
       void sendEnrollmentApproved(existing.email, existing.name, mergedCats.join(', ')).catch(() => {})

@@ -3,7 +3,7 @@
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { motion } from 'framer-motion'
-import { XCircle, ChevronRight, Eye, Zap, ArrowRight } from 'lucide-react'
+import { XCircle, ChevronRight, Eye, Zap, ArrowRight, ClipboardList } from 'lucide-react'
 import { useCurrentUser } from '@/lib/api/user'
 
 const CATEGORY_LABEL: Record<string, string> = {
@@ -18,27 +18,36 @@ export function EnrollmentStatusBanner() {
   const pathname = usePathname()
 
   if (!user || user.role !== 'student') return null
-  /* Bought on /explore: approved by the payment, the full registration still to fill — a reminder,
-     not a gate (guestCheckout.service, 2026-10-29). Not on the form's own page. */
-  if (user.registrationDue && user.enrollmentStatus === 'approved') {
+  /* Bought on /explore, the full registration still to fill: classes and lessons wait for it
+     (lib/registrationGate.ts, 2026-10-31) — whatever the enrollment status, which the form sets.
+     Not on the form's own page. */
+  if (user.registrationDue) {
     if (pathname?.startsWith('/complete-registration')) return null
     return (
       <motion.div
         initial={{ opacity: 0, y: -6 }} animate={{ opacity: 1, y: 0 }}
+        role="status"
         className="mb-4 rounded-xl px-3.5 py-3"
-        style={{ background: 'linear-gradient(135deg, rgba(0,87,184,0.07), rgba(0,87,184,0.03))', border: '1px solid rgba(0,87,184,0.22)' }}
+        style={{ background: 'linear-gradient(135deg, rgba(217,119,6,0.10), rgba(217,119,6,0.04))', border: '1px solid rgba(217,119,6,0.35)' }}
       >
-        <div className="flex items-center gap-2.5">
+        {/* On a phone the button takes its own full-width row, so the words are never squeezed. */}
+        <div className="flex flex-wrap items-center gap-2.5 sm:flex-nowrap">
+          <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg" style={{ background: 'rgba(217,119,6,0.14)', color: '#B45309' }}>
+            <ClipboardList size={15} />
+          </div>
           <div className="min-w-0 flex-1">
-            <p className="text-xs font-semibold" style={{ color: 'var(--color-text-primary)' }}>Complete your registration</p>
+            <p className="flex flex-wrap items-center gap-1.5 text-xs font-semibold" style={{ color: 'var(--color-text-primary)' }}>
+              <span className="whitespace-nowrap rounded-full px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide" style={{ background: 'rgba(217,119,6,0.16)', color: '#B45309' }}>Action required</span>
+              Complete your registration
+            </p>
             <p className="mt-0.5 text-xs" style={{ color: 'var(--color-text-secondary)' }}>
-              <span className="hidden sm:inline">Your course is open. Finish your student profile — your checkout details are already filled in.</span>
-              <span className="sm:hidden">Finish your student profile.</span>
+              <span className="hidden sm:inline">Your payment is confirmed. Booking, joining classes and your lessons unlock as soon as you submit the form — your details are already filled in.</span>
+              <span className="sm:hidden">Unlocks booking, classes and lessons.</span>
             </p>
           </div>
           <Link
             href="/complete-registration"
-            className="flex flex-shrink-0 items-center gap-1 rounded-lg px-3 py-1.5 text-xs font-semibold text-white transition-all hover:opacity-90"
+            className="flex min-h-[40px] w-full flex-shrink-0 items-center justify-center gap-1 rounded-lg px-3 py-1.5 text-xs font-semibold text-white transition-all hover:opacity-90 sm:min-h-0 sm:w-auto"
             style={{ background: 'var(--color-primary)', whiteSpace: 'nowrap' }}
           >
             Complete registration

@@ -2142,7 +2142,8 @@ export class OrderService {
         approvedAt: new Date(),
         ...(cats.size ? { categories: [...cats], category: [...cats][0] } : {}),
       },
-      $unset: { rejectionReason: '', enrollmentCancellationReason: '' },
+      /* Access now is the point — a checkout account's registration hold goes too (utils/registrationGate.ts). */
+      $unset: { rejectionReason: '', enrollmentCancellationReason: '', registrationDue: '' },
     })
 
     await OrderModel.create({
@@ -2406,11 +2407,17 @@ export class OrderService {
      and auto-approves at that point. */
   private async _autoApproveViaPayment(userId: string, courseId: string): Promise<void> {
     const user = await UserModel.findById(userId)
-      .select('enrollmentStatus categories category signupType').lean()
+      .select('enrollmentStatus categories category signupType registrationDue').lean()
     if (!user || (user as any).enrollmentStatus === 'approved') return
 
     if ((user as any).signupType === 'express') {
       logger.info({ userId }, 'Express account paid — deferring approval until registration complete')
+      return
+    }
+    /* A paid /explore buyer is approved when the registration form comes in, not at payment
+       (2026-10-31) — completeRegistration approves on the paid order (utils/registrationGate.ts). */
+    if ((user as any).registrationDue === true) {
+      logger.info({ userId }, 'Checkout account paid — deferring approval until registration complete')
       return
     }
 

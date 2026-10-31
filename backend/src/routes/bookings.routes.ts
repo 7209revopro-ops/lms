@@ -19,7 +19,7 @@ import { callerOrgForRead } from '@/utils/tenancy.ts'
 import { labelGuestDoors, yourCohortFrom, moduleNumbers } from '@/controllers/liveClass.controller.ts'
 import { z } from 'zod'
 import { isBookingOpen, bookingClosesAt, bookingCutoffPhrase, studentJoinWindow } from '@/utils/liveStatus.ts'
-import { authenticate, requireEnrollmentApproval } from '@/middleware/auth.middleware.ts'
+import { authenticate, requireEnrollmentApproval, requireRegistrationComplete } from '@/middleware/auth.middleware.ts'
 import { validate } from '@/middleware/validate.middleware.ts'
 import { NotificationService } from '@/services/notification.service.ts'
 /* The SHARED sendSuccess, deliberately — not a local one.
@@ -145,7 +145,7 @@ async function afterBookingCancelled(
 }
 
 /* ── POST /bookings ─────────────────────────── */
-router.post('/', authenticate, requireEnrollmentApproval, validate(createBookingSchema), async (req: Request, res: Response, next: NextFunction) => {
+router.post('/', authenticate, requireRegistrationComplete, requireEnrollmentApproval, validate(createBookingSchema), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { ClassBookingModel, LiveClassModel, EnrollmentModel, UserModel } =
       await import('@/models/schema.ts')
@@ -532,12 +532,16 @@ router.get('/me', authenticate, validate(bookingQuerySchema, 'query'), async (re
       moduleNumbers((docs as any[]).map(b => sectionOf(b.liveClassId)).filter(Boolean)),
     ])
 
+    /* Registration still due (utils/registrationGate.ts): the playback id is the stream itself. */
+    const { registrationOutstanding } = await import('@/utils/registrationGate.ts')
+    const held = await registrationOutstanding(req.user?.id)
     const rows = (docs as any[]).map((b, i) => {
       const lc = b.liveClassId
       if (!lc?.scheduledStart) return b
       const w = studentJoinWindow(lc.scheduledStart, lc.durationMins ?? 0)
       /* Never serialised — see the note on the projection above. */
       const { organizationId: _org, guestCohorts: _cohorts, ...classRow } = lc as Record<string, unknown>
+      if (held) delete classRow['muxPlaybackId']
       return {
         ...b,
         liveClassId: {

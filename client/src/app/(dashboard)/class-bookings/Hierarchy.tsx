@@ -1559,7 +1559,8 @@ export function ModuleSheet({
      the one fetch on this level, and it is the query the whole app already
      shares: one cache entry, no second request. */
   const { data: me } = useCurrentUser()
-  const pendingReg = me?.enrollmentStatus === 'pending'
+  /* …or a paid /explore buyer whose registration form is still due (lib/registrationGate). */
+  const pendingReg = me?.enrollmentStatus === 'pending' || !!me?.registrationDue
 
   const [langParam,  setLangParam]  = useQueryState('mlang', '')
   const [tutorParam, setTutorParam] = useQueryState('mmentor', '')

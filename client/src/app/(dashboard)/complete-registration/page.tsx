@@ -154,7 +154,7 @@ function CheckoutBanner() {
           <p className="mt-0.5 text-xs" style={{ color: 'var(--color-text-secondary)' }}>
             {done
               ? 'Your course is open in your account.'
-              : 'Your course is already open. Complete your registration below — it takes a few minutes, and your checkout details are filled in.'}
+              : 'Your course has been added. Complete your registration below to unlock your classes and lessons — it takes a few minutes, and your checkout details are filled in.'}
           </p>
         </div>
       </div>
@@ -163,7 +163,7 @@ function CheckoutBanner() {
           ? 'inline-flex min-h-[44px] flex-shrink-0 items-center justify-center gap-1.5 rounded-xl px-4 text-sm font-semibold text-white transition-opacity hover:opacity-90'
           : 'inline-flex min-h-[44px] flex-shrink-0 items-center justify-center gap-1 rounded-xl px-3 text-xs font-semibold transition-colors hover:underline'}
         style={done ? { background: 'var(--color-primary)' } : { color: 'var(--color-primary)' }}>
-        {done ? 'Open my course' : 'Skip for now — open my course'}
+        {done ? 'Open my course' : 'Skip for now — view my course'}
         <ArrowRight size={done ? 14 : 12} />
       </Link>
     </motion.div>
@@ -201,7 +201,7 @@ function Intro() {
   return (
     <p className="mt-0.5 text-sm" style={{ color: 'var(--color-text-muted)' }}>
       {fromCheckout
-        ? 'A few details about you for your student record — your course is already open.'
+        ? 'A few details for your student record — submitting them unlocks your classes and lessons.'
         : 'Fill in your details to unlock full access to courses, live classes, and bookings.'}
     </p>
   )

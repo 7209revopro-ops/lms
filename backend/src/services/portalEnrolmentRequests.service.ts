@@ -317,7 +317,8 @@ export async function approveEnrolmentForPortal(input: { userId: unknown; email:
       approvedByRole: decider.account.role,
       approvedAt: new Date(),
     },
-    $unset: { enrollmentCancellationReason: '', rejectionReason: '' },
+    /* A full approval — it also lifts a checkout account's registration hold (utils/registrationGate.ts). */
+    $unset: { enrollmentCancellationReason: '', rejectionReason: '', registrationDue: '' },
   })
   void sendEnrollmentApproved(email, user.name ?? '', categories.join(', ')).catch(() => {})
   void sendEnrollmentApprovedWhatsApp(user.enrollmentApplication?.phone, user.name ?? '', categories.join(', '), env.CLIENT_URL).catch(() => {})

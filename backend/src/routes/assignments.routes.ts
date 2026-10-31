@@ -1,6 +1,6 @@
 import { Router } from 'express'
 import { z } from 'zod'
-import { authenticate } from '@/middleware/auth.middleware.ts'
+import { authenticate, requireRegistrationComplete } from '@/middleware/auth.middleware.ts'
 import { validate } from '@/middleware/validate.middleware.ts'
 import { AssignmentService } from '@/services/assignment.service.ts'
 import { sendSuccess } from '@/utils/response.ts'
@@ -21,7 +21,7 @@ const submitSchema = z.object({
    authenticated account — including an unapproved viewer and the other
    academy's students — could pull a paid course's assignment instructions by
    lesson id. Staff read freely; the admin editor uses its own route. */
-router.get('/lessons/:lessonId', authenticate, async (req: Request, res: Response, next: NextFunction) => {
+router.get('/lessons/:lessonId', authenticate, requireRegistrationComplete, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const assignment = await assignSvc.getByLesson(String(req.params['lessonId'] ?? ''))
     if (assignment && req.user!.role === 'student') {
@@ -48,7 +48,7 @@ router.get('/lessons/:lessonId/my-submission', authenticate, async (req: Request
 })
 
 /* POST /assignments/lessons/:lessonId/submit — submit assignment */
-router.post('/lessons/:lessonId/submit', authenticate, validate(submitSchema), async (req: Request, res: Response, next: NextFunction) => {
+router.post('/lessons/:lessonId/submit', authenticate, requireRegistrationComplete, validate(submitSchema), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const lessonId = String(req.params['lessonId'] ?? '')
     const submission = await assignSvc.submit(req.user!.id, lessonId, req.body)

@@ -773,6 +773,8 @@ export class LiveClassService {
     recordingUrl?: string
     thumbnailUrl?: string
     viewerCount:   number
+    /* The registration form is still due: the page says so, and no stream or recording is sent. */
+    registrationRequired?: boolean
   }> {
     if (!Types.ObjectId.isValid(id)) {
       throw new LiveClassError('INVALID_ID', 'Invalid id', 400)
@@ -865,17 +867,23 @@ export class LiveClassService {
     /* Internal — Mux or LiveKit. The client branches on `provider`: a LiveKit
        class has no playback URL at all, because the media only exists inside
        the room. */
+    /* A paid /explore buyer watches once the registration form is in (utils/registrationGate.ts) —
+       the stream is the class, so it is held back like the join. */
+    const { registrationOutstanding } = await import('@/utils/registrationGate.ts')
+    const held = await registrationOutstanding(userId)
     return {
       type:        'internal',
       provider:    (live as { provider?: LiveClassProvider }).provider ?? 'mux',
       cltRoomName: (live as { cltRoomName?: string }).cltRoomName ?? undefined,
       title:       live.title,
       status:      live.status,
-      playbackUrl: live.muxPlaybackId
+      playbackUrl: live.muxPlaybackId && !held
         ? muxSvc.buildPlaybackUrl(live.muxPlaybackId)
         : undefined,
-      recordingUrl: live.recordingUrl ?? undefined,
-      thumbnailUrl: live.muxPlaybackId
+      recordingUrl: held ? undefined : live.recordingUrl ?? undefined,
+      ...(held && { registrationRequired: true }),
+      /* The thumbnail URL carries the playback id — enough to watch — so it is held back too. */
+      thumbnailUrl: live.muxPlaybackId && !held
         ? muxSvc.buildThumbnailUrl(live.muxPlaybackId)
         : undefined,
       viewerCount: live.viewerCount ?? 0,

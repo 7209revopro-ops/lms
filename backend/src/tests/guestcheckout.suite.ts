@@ -13,6 +13,8 @@
         details filled in); submitting it keeps the paid approval and the link then opens the course
      I  a retry in the same browser keeps the account it made "new" (signed in on paying); another
         browser never is — it is told the address and where signing in leads (the form, or the course)
+     K  paid but not registered (2026-10-31): not approved until the form; the course page opens, but
+        booking, joining and lessons answer REGISTRATION_REQUIRED — and open once the form is in
      J  an account that existed before the checkout but never registered is sent to the form too
         (and marked, so the form page shows it); one that signed up with the full form is not
    Gateways are never called: an order is marked paid as the webhook would.
@@ -127,7 +129,9 @@ try {
   check('paid: a one-time sign-in link', done.body?.data?.paid === true && /^\/s\/[\w-]{10,}$/.test(done.body.data.signIn ?? ''), JSON.stringify(done.body?.data))
   const tok = await M.AuthTokenModel.findOne({ userId: made._id, purpose: 'signin-link' }).sort({ createdAt: -1 }).lean() as any
   check('...to the full registration form, then the course', tok?.nextPath === '/complete-registration?from=checkout&course=mbt', JSON.stringify(tok?.nextPath))
-  check('...enrolled and approved', !!(await M.EnrollmentModel.exists({ userId: made._id, courseId: mbt._id })) && (await M.UserModel.findById(made._id).lean() as any)?.enrollmentStatus === 'approved')
+  /* Approval waits for the registration form (2026-10-31, section K). */
+  check('...enrolled, approval waiting for the form', !!(await M.EnrollmentModel.exists({ userId: made._id, courseId: mbt._id }))
+    && (await M.UserModel.findById(made._id).lean() as any)?.enrollmentStatus !== 'approved' && (await M.UserModel.findById(made._id).lean() as any)?.registrationDue === true)
   await settle()
   const mailMark = (await M.OrderModel.findById(order._id).lean() as any)?.guestAccessSentAt
   check('the access email marked sent', !!mailMark)
@@ -239,11 +243,48 @@ try {
   check('...the link signs in and opens the registration form for the course', red.status === 200 && red.body?.data?.next === '/complete-registration?from=checkout&course=mbt', JSON.stringify(red.body))
   const meRes = await call('GET', '/auth/me', sess)
   const me1 = meRes.body?.data?.user ?? meRes.body?.data
-  check('...approved already (Paid Enrollment), the form due', me1?.enrollmentStatus === 'approved' && me1?.registrationDue === true, JSON.stringify(me1))
+  /* 2026-10-31: approval waits for the form — paid && registered → Paid Enrollment (utils/registrationGate.ts). */
+  check('...NOT approved yet, the form due', me1?.enrollmentStatus !== 'approved' && me1?.registrationDue === true, JSON.stringify(me1))
   check('...name, email, phone and country come filled in',
     me1?.name === 'Reg Buyer' && me1?.email === 'reg@example.com' && me1?.enrollmentApplication?.phone === '+971 52 111 2233' && me1?.enrollmentApplication?.homeCountry === 'United Arab Emirates', JSON.stringify(me1))
   check('...and how they paid', me1?.enrollmentApplication?.paymentMethod === 'Card / Full', JSON.stringify(me1?.enrollmentApplication))
   check('...enrolled in the course before the form is filled', !!(await M.EnrollmentModel.exists({ userId: regUser._id, courseId: mbt._id })))
+
+  section('K · paid but not registered: browse yes; book, join and lessons wait for the form')
+  const kSec = await M.SectionModel.create({ courseId: mbt._id, title: 'Module 1', order: 1 })
+  const kVid = await M.LessonModel.create({ courseId: mbt._id, sectionId: kSec._id, title: 'Video 1', type: 'video', order: 1, contentUrl: 'https://cdn.example.com/v1.mp4' })
+  const isGate = (r: any) => r.status === 403 && r.body?.error?.code === 'REGISTRATION_REQUIRED'
+  const kArt = await M.LessonModel.create({ courseId: mbt._id, sectionId: kSec._id, title: 'Reading 1', type: 'article', order: 2, contentBody: '<p>SECRET-BODY</p>', contentUrl: 'https://docs.example.com/r1.pdf' })
+  const kFree = await M.LessonModel.create({ courseId: mbt._id, sectionId: kSec._id, title: 'Free preview', type: 'article', order: 3, isFree: true, contentBody: '<p>FREE-BODY</p>' })
+  const kCourse = await call('GET', '/courses/mbt', sess)
+  check('the course page opens', kCourse.status === 200, why(kCourse))
+  const kLs = (kCourse.body?.data?.lessons ?? []) as any[]
+  check('...with its outline (every lesson listed)', kLs.some(l => l.id === String(kArt._id)) && kLs.some(l => l.id === String(kVid._id)), JSON.stringify(kLs.map(l => l.title)))
+  check('...but no lesson content (article body, document link)', !JSON.stringify(kCourse.body).includes('SECRET-BODY') && !JSON.stringify(kCourse.body).includes('r1.pdf'))
+  const kById = await call('GET', `/courses/by-id/${mbt._id}`, sess)
+  check('...the same by id', kById.status === 200 && !JSON.stringify(kById.body).includes('SECRET-BODY'), why(kById))
+  check('...a free preview lesson is unchanged (open to everyone)', JSON.stringify(kCourse.body).includes('FREE-BODY'))
+  const kBook = await call('POST', '/bookings', sess, { liveClassId: String(new mongoose.Types.ObjectId()) })
+  check('booking a class: REGISTRATION_REQUIRED', isGate(kBook), why(kBook))
+  check('...with a sentence that says what to do', /registration/i.test(kBook.body?.error?.message ?? ''), why(kBook))
+  const kPlay = await call('GET', `/lessons/${kVid._id}/play-url`, sess)
+  check('a lesson video: REGISTRATION_REQUIRED', isGate(kPlay), why(kPlay))
+  const kDone = await call('POST', `/lessons/${kVid._id}/complete`, sess)
+  check('marking a lesson done: REGISTRATION_REQUIRED', isGate(kDone), why(kDone))
+  const kQuiz = await call('GET', `/quizzes/lessons/${kVid._id}`, sess)
+  check('a quiz: REGISTRATION_REQUIRED', isGate(kQuiz), why(kQuiz))
+  const kTr = await call('GET', `/lessons/${kVid._id}/transcript`, sess)
+  check('a transcript: REGISTRATION_REQUIRED', isGate(kTr), why(kTr))
+  /* Every join path — web, room, app, emailed link — goes through this one check. */
+  const { assertStudentMayJoin } = await import('@/services/liveClassJoin.service.ts')
+  const joinErr = await assertStudentMayJoin({ scheduledStart: new Date(), durationMins: 60 } as any, { userId: String(regUser._id), name: 'Reg Buyer', email: 'reg@example.com', role: 'student', enrollmentStatus: me1?.enrollmentStatus } as any)
+    .then(() => null, (e: any) => e)
+  check('joining a class: REGISTRATION_REQUIRED', joinErr?.code === 'REGISTRATION_REQUIRED' && joinErr?.statusCode === 403 || joinErr?.status === 403 && joinErr?.code === 'REGISTRATION_REQUIRED', String(joinErr?.code ?? joinErr))
+  const { registrationOutstanding } = await import('@/utils/registrationGate.ts')
+  check('staff are never held', !(await registrationOutstanding(String(teacher._id))))
+  /* A student without the flag (an existing one who never filled the form) is not held: the rule is for /explore buyers. */
+  const plain = await M.UserModel.create({ name: 'Plain', email: 'plain@example.com', role: 'student', isActive: true, organizationId: dubai._id, enrollmentStatus: 'approved' })
+  check('a student without the flag is not held', !(await registrationOutstanding(String(plain._id))))
   const form = {
     phone: '+971 52 111 2233', gender: 'Female', dateOfBirth: '1995-04-02', nationality: 'India', homeCountry: 'United Arab Emirates',
     occupation: 'Engineer', idType: 'Passport', idNumber: 'P1234567', countryAttendance: 'United Arab Emirates', city: 'Dubai',
@@ -253,7 +294,7 @@ try {
   const half = await call('PATCH', '/auth/me/complete-registration', sess, { ...form, occupation: '' })
   check('an incomplete form is refused', half.status === 400 || half.status === 422, why(half))
   const mid: any = await M.UserModel.findById(regUser._id).lean()
-  check('...still approved, still due', mid?.registrationDue === true && mid?.enrollmentStatus === 'approved')
+  check('...still not approved, still due', mid?.registrationDue === true && mid?.enrollmentStatus !== 'approved')
   const sub = await call('PATCH', '/auth/me/complete-registration', sess, form)
   const after: any = await M.UserModel.findById(regUser._id).lean()
   check('the full form: accepted', sub.status === 200, why(sub))
@@ -264,6 +305,15 @@ try {
   check('...the course still theirs', !!(await M.EnrollmentModel.exists({ userId: regUser._id, courseId: mbt._id })))
   const meAfter = (await call('GET', '/auth/me', sess)).body?.data
   check('...the app is told it is done', (meAfter?.user ?? meAfter)?.registrationDue === undefined, JSON.stringify(meAfter))
+  const kCourse2 = await call('GET', '/courses/mbt', sess)
+  check('registered: the lesson content comes with the course', JSON.stringify(kCourse2.body).includes('SECRET-BODY'), why(kCourse2))
+  const kPlay2 = await call('GET', `/lessons/${kVid._id}/play-url`, sess)
+  check('registered: the lesson video opens', kPlay2.status === 200 && !!kPlay2.body?.data?.url, why(kPlay2))
+  const kBook2 = await call('POST', '/bookings', sess, { liveClassId: String(new mongoose.Types.ObjectId()) })
+  check('registered: booking is no longer held (the class itself decides)', !isGate(kBook2), why(kBook2))
+  const joinErr2 = await assertStudentMayJoin({ scheduledStart: new Date(), durationMins: 60 } as any, { userId: String(regUser._id), name: 'Reg Buyer', email: 'reg@example.com', role: 'student', enrollmentStatus: 'approved' } as any)
+    .then(() => null, (e: any) => e)
+  check('registered: joining is no longer held', joinErr2?.code !== 'REGISTRATION_REQUIRED', String(joinErr2?.code ?? joinErr2))
   /* Once registered, the return page's link goes to the course again. */
   await call('POST', '/public/checkout/complete', jH, { gateway: 'abzer', orderId: String(hOrder._id) })
   const hTok: any = await M.AuthTokenModel.findOne({ userId: regUser._id, purpose: 'signin-link' }).sort({ createdAt: -1, _id: -1 }).lean()
@@ -323,12 +373,30 @@ try {
   check('...an account already registered: its link opens the course', iDone.body.data.registrationDue === false && iDone.body.data.next === '/courses/dwt', JSON.stringify(iDone.body?.data))
   check('...and is not marked as owing the form', (await M.UserModel.findById(owner3._id).lean() as any)?.registrationDue !== true)
 
-  section('J · an existing account that never registered is sent to the form too (production, 2026-10-31)')
-  /* The D account: made before this checkout, no full registration on file. */
-  check('the existing, unregistered account: told the form is due', done2.body.data.registrationDue === true
-    && done2.body.data.next === '/complete-registration?from=checkout&course=mbt', JSON.stringify(done2.body?.data))
-  check('...its emailed link opens the form', (await M.AuthTokenModel.findOne({ userId: owner._id, purpose: 'signin-link' }).sort({ createdAt: -1 }).lean() as any)?.nextPath === '/complete-registration?from=checkout&course=mbt')
-  check('...and the account is marked, so the form page shows the form', (await M.UserModel.findById(owner._id).lean() as any)?.registrationDue === true)
+  section('J · who is held for the form: /explore buyers only — never a student an admin or an import approved')
+  /* The D account: approved before (not by a payment), no full registration on file — an existing student. */
+  check('an admin-approved student buying on /explore: NOT held, the link opens the course', done2.body.data.registrationDue === false
+    && done2.body.data.next === '/courses/mbt', JSON.stringify(done2.body?.data))
+  check('...not marked, still approved — every course they had stays open', (await M.UserModel.findById(owner._id).lean() as any)?.registrationDue !== true
+    && (await M.UserModel.findById(owner._id).lean() as any)?.enrollmentStatus === 'approved')
+  /* Made by an earlier /explore payment, before the mark existed (production, 2026-10-31): an /explore buyer. */
+  const legacy = await M.UserModel.create({ name: 'Legacy Buyer', email: 'legacy@example.com', role: 'student', isActive: true, organizationId: dubai._id,
+    enrollmentStatus: 'approved', approvedByEmail: 'payment@system', approvedByName: 'Paid Enrollment', enrollmentApplication: { homeCountry: 'United Arab Emirates', phone: '+971500000010' } })
+  const jL: Jar = new Map()
+  await call('POST', '/public/checkout/prepare', jL, { ...buyer, slug: 'dwt', email: 'legacy@example.com' })
+  check('an account approved only by an earlier /explore payment: marked at prepare, before paying', (await M.UserModel.findById(legacy._id).lean() as any)?.registrationDue === true)
+  const oL = await M.OrderModel.create({ userId: legacy._id, courseId: dwt._id, gateway: 'abzer', amount: 250000, currency: 'AED', status: 'pending' })
+  await new OrderService().fulfillAbzerFromWebhook(String(oL._id), 'rcpt-jl', { amount: 2500, currency: 'AED' })
+  const lDone = await call('POST', '/public/checkout/complete', jL, { gateway: 'abzer', orderId: String(oL._id) })
+  check('...told the form is due, the link opens it', lDone.body?.data?.registrationDue === true && lDone.body.data.next === '/complete-registration?from=checkout&course=dwt', JSON.stringify(lDone.body?.data))
+  /* The buyer never comes back to this browser: the gateway's webhook alone confirms the payment. */
+  const pend = await M.UserModel.create({ name: 'Webhook Only', email: 'webhook@example.com', role: 'student', isActive: true, organizationId: dubai._id, enrollmentStatus: 'pending' })
+  await call('POST', '/public/checkout/prepare', new Map(), { ...buyer, slug: 'dwt', email: 'webhook@example.com' })
+  const oW = await M.OrderModel.create({ userId: pend._id, courseId: dwt._id, gateway: 'abzer', amount: 250000, currency: 'AED', status: 'pending' })
+  await new OrderService().fulfillAbzerFromWebhook(String(oW._id), 'rcpt-jw', { amount: 2500, currency: 'AED' })
+  const wU: any = await M.UserModel.findById(pend._id).lean()
+  check('paid by webhook alone, browser never back: still held, NOT approved by the payment', wU?.registrationDue === true && wU?.enrollmentStatus !== 'approved', JSON.stringify({ s: wU?.enrollmentStatus, due: wU?.registrationDue }))
+  check('...but enrolled in what they paid for', !!(await M.EnrollmentModel.exists({ userId: pend._id, courseId: dwt._id })))
   /* Signed up with the full form (ID + date of birth) but never via complete-registration: registered. */
   const signedUp = await M.UserModel.create({ name: 'Full Signup', email: 'full@example.com', role: 'student', isActive: true, organizationId: dubai._id,
     enrollmentStatus: 'approved', enrollmentApplication: { homeCountry: 'United Arab Emirates', phone: '+971500000009', idNumber: '784-1990-1234567-1', dateOfBirth: '1990-01-01' } })

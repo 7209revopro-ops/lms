@@ -437,7 +437,8 @@ function SlotModal({group,bookingMap,onBook,onCancel,bookPending,cancelPending,o
 }) {
   const {slots,bookedSlot,instructor,courseTitle,moduleTitle} = group
   const { data: currentUser } = useCurrentUser()
-  const isPendingAny = currentUser?.enrollmentStatus === 'pending'
+  /* Pending, or a paid /explore buyer whose registration form is still due (lib/registrationGate). */
+  const isPendingAny = currentUser?.enrollmentStatus === 'pending' || !!currentUser?.registrationDue
   const defaultId = useMemo(()=>{
     if(bookedSlot) return bookedSlot.id
     return slots.find(s=>{const st=getSlotStatus(s,bookingMap.get(s.id),false);return st==='bookable'||st==='live'})?.id??slots[0]?.id??null
@@ -1588,6 +1589,7 @@ export default function ClassBookingsPage() {
         const lc:any=allClasses.find(c=>c.id===id)
         showModuleLocked({courseId:lc?.course?.id??lc?.courseId, courseTitle:lc?.course?.title, moduleTitle:lc?.sectionId?.title})
       }
+      else if(code==='REGISTRATION_REQUIRED') {/* the registration prompt says it (lib/registrationGate) */}
       else if(code==='PENDING_APPROVAL') toast.error('Complete your registration first to book classes.')
       else if(code==='ACCESS_REJECTED')  toast.error('Your access request was not approved. Contact support to appeal.')
       else toast.error(e?.response?.data?.error?.message??'Could not book.')

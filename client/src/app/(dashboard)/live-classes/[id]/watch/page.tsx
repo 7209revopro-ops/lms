@@ -18,6 +18,7 @@ import { SessionHomework } from '@/components/live-classes/SessionHomework'
 import { SessionFeedback } from '@/components/live-classes/SessionFeedback'
 import Spinner from '@/components/ui/Spinner'
 import { ClassEntryPanel } from '@/components/live-classes/ClassEntryPanel'
+import { RegistrationLocked } from '@/components/auth/RegistrationLocked'
 
 /* ── Helpers ─────────────────────────────────────────── */
 function StatusBadge({ status }: { status: string }) {
@@ -282,7 +283,10 @@ export default function WatchPage({ params }: { params: Promise<{ id: string }> 
               touches Mux. It stays inside WatermarkedFrame, which is the whole
               reason the plan chose a native embed over an iframe — the
               forensic watermark has to ride over live video too. */}
-          {isInteractiveRoom(data) ? (
+          {data.registrationRequired ? (
+            /* The registration form is still due: no stream was sent (lib/registrationGate). */
+            <RegistrationLocked action="join" />
+          ) : isInteractiveRoom(data) ? (
             <WatermarkedFrame>
               <ClassEntryPanel liveClassId={id} />
             </WatermarkedFrame>
