@@ -220,13 +220,20 @@ export async function completeGuestCheckout(claims: GuestClaims, input: {
 
   const [course, user]: any[] = await Promise.all([
     CourseModel.findById(order.courseId).select('title slug').lean(),
-    UserModel.findById(claims.uid).select('name email registrationDue enrollmentApplication.paymentMethod').lean(),
+    UserModel.findById(claims.uid).select('name email registrationDue fullRegistrationSubmittedAt enrollmentApplication.paymentMethod enrollmentApplication.idNumber enrollmentApplication.dateOfBirth').lean(),
   ])
   const coursePath = `/courses/${course?.slug ?? ''}`
-  /* An account made at checkout and not yet fully registered is taken to the registration form, its
-     checkout details already filled in; the form leads on to the course. Already approved by the
-     payment — the form never stands between a buyer and what they paid for. */
-  const due = user?.registrationDue === true
+  /* An account not yet fully registered is taken to the registration form, its checkout details
+     already filled in; the form leads on to the course. Already approved by the payment — the form
+     never stands between a buyer and what they paid for. Not only accounts made by THIS checkout:
+     one made by an earlier checkout (before the flag existed) or an Express sign-up buying on
+     /explore has no registration either, and was sent to the course instead (production,
+     2026-10-31). Registered = submitted the full form, or signed up with it (ID + date of birth). */
+  const app = user?.enrollmentApplication
+  const registered = !!user?.fullRegistrationSubmittedAt || !!(app?.idNumber && app?.dateOfBirth)
+  const due = user?.registrationDue === true || !registered
+  /* The flag is what the form page and the reminder banner read — mark it, so they agree. */
+  if (due && user?.registrationDue !== true) await UserModel.updateOne({ _id: claims.uid }, { $set: { registrationDue: true } })
   const nextPath = due ? `/complete-registration?from=checkout&course=${encodeURIComponent(course?.slug ?? '')}` : coursePath
   /* How they paid is known — one answer fewer on the form. Never overwrites one already given. */
   const paidWith = ({ abzer: 'Card / Full', razorpay: 'Card / Full', tabby: 'Tabby', tamara: 'Tamara' } as Record<string, string>)[order.gateway]

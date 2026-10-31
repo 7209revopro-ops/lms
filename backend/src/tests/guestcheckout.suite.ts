@@ -13,6 +13,8 @@
         details filled in); submitting it keeps the paid approval and the link then opens the course
      I  a retry in the same browser keeps the account it made "new" (signed in on paying); another
         browser never is — it is told the address and where signing in leads (the form, or the course)
+     J  an account that existed before the checkout but never registered is sent to the form too
+        (and marked, so the form page shows it); one that signed up with the full form is not
    Gateways are never called: an order is marked paid as the webhook would.
    Run: bun --no-env-file src/tests/guestcheckout.suite.ts
 ───────────────────────────────────────────────────────────── */
@@ -184,7 +186,7 @@ try {
      back from the first payment read "Order not found" while the order sat pending in admin. The
      cookie proves whose checkout it is; any order of THAT account is theirs to confirm. */
   section('G · a second checkout in the same browser does not orphan the first')
-  const owner3 = await M.UserModel.create({ name: 'Two Courses', email: 'two@example.com', role: 'student', isActive: true, organizationId: dubai._id })
+  const owner3 = await M.UserModel.create({ name: 'Two Courses', email: 'two@example.com', role: 'student', isActive: true, organizationId: dubai._id, fullRegistrationSubmittedAt: new Date() })
   const jTwo: Jar = new Map()
   await call('POST', '/public/checkout/prepare', jTwo, { ...buyer, email: 'two@example.com', slug: 'mbt' })
   const first = await M.OrderModel.create({ userId: owner3._id, courseId: mbt._id, gateway: 'abzer', amount: 250000, currency: 'AED', status: 'pending' })
@@ -318,7 +320,25 @@ try {
   await new OrderService().fulfillAbzerFromWebhook(String(oI._id), 'rcpt-i3', { amount: 2500, currency: 'AED' })
   const iDone = await call('POST', '/public/checkout/complete', jI3, { gateway: 'abzer', orderId: String(oI._id) })
   check("a new account's cookie, then someone else's email: never signed in as them", iDone.body?.data?.paid === true && iDone.body.data.signIn === null, JSON.stringify(iDone.body?.data))
-  check('...an account not made at checkout: its link opens the course', iDone.body.data.registrationDue === false && iDone.body.data.next === '/courses/dwt', JSON.stringify(iDone.body?.data))
+  check('...an account already registered: its link opens the course', iDone.body.data.registrationDue === false && iDone.body.data.next === '/courses/dwt', JSON.stringify(iDone.body?.data))
+  check('...and is not marked as owing the form', (await M.UserModel.findById(owner3._id).lean() as any)?.registrationDue !== true)
+
+  section('J · an existing account that never registered is sent to the form too (production, 2026-10-31)')
+  /* The D account: made before this checkout, no full registration on file. */
+  check('the existing, unregistered account: told the form is due', done2.body.data.registrationDue === true
+    && done2.body.data.next === '/complete-registration?from=checkout&course=mbt', JSON.stringify(done2.body?.data))
+  check('...its emailed link opens the form', (await M.AuthTokenModel.findOne({ userId: owner._id, purpose: 'signin-link' }).sort({ createdAt: -1 }).lean() as any)?.nextPath === '/complete-registration?from=checkout&course=mbt')
+  check('...and the account is marked, so the form page shows the form', (await M.UserModel.findById(owner._id).lean() as any)?.registrationDue === true)
+  /* Signed up with the full form (ID + date of birth) but never via complete-registration: registered. */
+  const signedUp = await M.UserModel.create({ name: 'Full Signup', email: 'full@example.com', role: 'student', isActive: true, organizationId: dubai._id,
+    enrollmentStatus: 'approved', enrollmentApplication: { homeCountry: 'United Arab Emirates', phone: '+971500000009', idNumber: '784-1990-1234567-1', dateOfBirth: '1990-01-01' } })
+  const jJ: Jar = new Map()
+  await call('POST', '/public/checkout/prepare', jJ, { ...buyer, slug: 'dwt', email: 'full@example.com' })
+  const oJ = await M.OrderModel.create({ userId: signedUp._id, courseId: dwt._id, gateway: 'abzer', amount: 250000, currency: 'AED', status: 'pending' })
+  await new OrderService().fulfillAbzerFromWebhook(String(oJ._id), 'rcpt-j1', { amount: 2500, currency: 'AED' })
+  const jDone = await call('POST', '/public/checkout/complete', jJ, { gateway: 'abzer', orderId: String(oJ._id) })
+  check('a full sign-up: straight to the course, no form', jDone.body?.data?.registrationDue === false && jDone.body.data.next === '/courses/dwt', JSON.stringify(jDone.body?.data))
+  check('...not marked', (await M.UserModel.findById(signedUp._id).lean() as any)?.registrationDue !== true)
 } catch (err) {
   fail++; lines.push(`  FAIL  suite threw — ${(err as Error).message}\n${(err as Error).stack}`)
 } finally {
