@@ -36,6 +36,7 @@ export const PROGRAMS: ProgramOption[] = [
   { id: 'ai-trading',         label: 'AI Trading Automation',  group: 'AI Academy' },
   { id: 'jura-core',          label: 'JURA Program',           group: 'JURA Academy' },
   { id: 'jura-labour-law',    label: 'UAE Labour Law & HR Compliance', group: 'JURA Academy' },
+  { id: 'cma-us',             label: 'CMA (US)',               group: 'Delta Commerce Academy' },
 ]
 
 const BY_ID = new Map(PROGRAMS.map(p => [p.id.toLowerCase(), p.label]))

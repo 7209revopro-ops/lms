@@ -2,19 +2,28 @@
 
 import { useEffect, useRef } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { X, ScrollText, Shield, BookOpen, CreditCard, AlertTriangle, Scale } from 'lucide-react'
+import { X, ScrollText, Shield, BookOpen, CreditCard, AlertTriangle, Scale, GraduationCap, Users, Lock, Download } from 'lucide-react'
 import { TERMS_SECTIONS } from '@/lib/legal/terms'
+import { CMA_TERMS_SECTIONS, CMA_TERMS_INTRO, CMA_TERMS_VERSION, CMA_TERMS_PDF } from '@/lib/legal/cmaTerms'
 
 interface TermsModalProps {
   open: boolean
   onClose: () => void
+  /* 'cma' — the Delta Commerce Academy CMA (US) terms, shown when the student
+     picks that programme (lib/legal/cmaTerms.ts). */
+  variant?: 'general' | 'cma'
 }
 
 /* One icon per section, in order (the text lives in lib/legal/terms.ts). */
 const ICONS = [BookOpen, BookOpen, Shield, CreditCard, ScrollText, Shield, AlertTriangle, Shield, ScrollText, ScrollText, ScrollText, Scale]
 const SECTIONS = TERMS_SECTIONS.map((s, i) => ({ ...s, icon: ICONS[i] ?? ScrollText }))
 
-export function TermsModal({ open, onClose }: TermsModalProps) {
+const CMA_ICONS = [BookOpen, GraduationCap, Users, GraduationCap, CreditCard, Shield, Users, AlertTriangle, Lock, ScrollText, ScrollText, ScrollText, Scale, ScrollText]
+const CMA_SECTIONS = CMA_TERMS_SECTIONS.map((s, i) => ({ ...s, icon: CMA_ICONS[i] ?? ScrollText }))
+
+export function TermsModal({ open, onClose, variant = 'general' }: TermsModalProps) {
+  const cma      = variant === 'cma'
+  const sections = cma ? CMA_SECTIONS : SECTIONS
   const scrollRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -74,10 +83,12 @@ export function TermsModal({ open, onClose }: TermsModalProps) {
                     </div>
                     <div>
                       <h2 className="text-base font-bold" style={{ color: 'var(--color-text-primary)' }}>
-                        Terms &amp; Conditions
+                        {cma ? 'CMA (US) Terms & Conditions' : 'Terms & Conditions'}
                       </h2>
                       <p className="text-[11px]" style={{ color: 'var(--color-text-muted)' }}>
-                        Delta International Management Development Training · Amended 10th May 2026
+                        {cma
+                          ? `Delta Commerce Academy · Version date ${CMA_TERMS_VERSION}`
+                          : 'Delta International Management Development Training · Amended 10th May 2026'}
                       </p>
                     </div>
                   </div>
@@ -93,16 +104,18 @@ export function TermsModal({ open, onClose }: TermsModalProps) {
 
                 {/* Intro paragraph */}
                 <p className="mt-4 text-[12px] leading-relaxed" style={{ color: 'var(--color-text-muted)' }}>
+                  {cma ? CMA_TERMS_INTRO : <>
                   The Terms and Conditions agreed herein govern the participation of the undersigned
                   student in any forex trading course or related course offered by Delta International
                   Management Development Training, an educational initiative providing instructional
                   courses in forex trading and related subjects.
+                  </>}
                 </p>
               </div>
 
               {/* Scrollable body */}
               <div ref={scrollRef} className="flex-1 overflow-y-auto px-6 py-5 space-y-6">
-                {SECTIONS.map((section, idx) => {
+                {sections.map((section, idx) => {
                   const Icon = section.icon
                   return (
                     <div key={idx}>
@@ -121,6 +134,8 @@ export function TermsModal({ open, onClose }: TermsModalProps) {
                       <div className="space-y-2 pl-9">
                         {section.content.map((para, pIdx) => (
                           <p key={pIdx} className="text-[12px] leading-relaxed" style={{ color: 'var(--color-text-secondary)' }}>
+                            {/* The CMA terms refer to their own clauses ("clause 1.2"), so they keep the numbers. */}
+                            {cma && <span className="font-semibold">{idx + 1}.{pIdx + 1}. </span>}
                             {para}
                           </p>
                         ))}
@@ -129,8 +144,8 @@ export function TermsModal({ open, onClose }: TermsModalProps) {
                   )
                 })}
 
-                {/* Acknowledgement */}
-                <div className="rounded-xl p-4" style={{ background: 'rgba(0,87,184,0.05)', border: '1px solid rgba(0,87,184,0.14)' }}>
+                {/* Acknowledgement — the CMA terms carry it as their last section */}
+                {!cma && <div className="rounded-xl p-4" style={{ background: 'rgba(0,87,184,0.05)', border: '1px solid rgba(0,87,184,0.14)' }}>
                   <p className="text-[12px] font-semibold mb-1" style={{ color: 'var(--color-primary)' }}>
                     Acknowledgement and Acceptance
                   </p>
@@ -138,7 +153,7 @@ export function TermsModal({ open, onClose }: TermsModalProps) {
                     By submitting your registration form electronically, you confirm that you have read,
                     understood, and agreed to be legally bound by these Terms in full.
                   </p>
-                </div>
+                </div>}
 
                 <div className="h-2" />
               </div>
@@ -146,9 +161,17 @@ export function TermsModal({ open, onClose }: TermsModalProps) {
               {/* Footer */}
               <div className="flex-shrink-0 flex items-center justify-between gap-3 px-6 py-4"
                 style={{ borderTop: '1px solid #F0F2F5' }}>
-                <p className="text-[11px]" style={{ color: 'var(--color-text-muted)' }}>
-                  Last updated: 10 May 2026
-                </p>
+                {cma ? (
+                  <a href={CMA_TERMS_PDF} target="_blank" rel="noopener noreferrer"
+                    className="flex items-center gap-1.5 text-[11px] font-semibold transition-colors hover:opacity-80"
+                    style={{ color: 'var(--color-primary)' }}>
+                    <Download size={12} /> Download PDF
+                  </a>
+                ) : (
+                  <p className="text-[11px]" style={{ color: 'var(--color-text-muted)' }}>
+                    Last updated: 10 May 2026
+                  </p>
+                )}
                 <button
                   onClick={onClose}
                   className="rounded-xl px-5 py-2 text-xs font-semibold text-white transition-all hover:opacity-90 active:scale-95"

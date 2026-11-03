@@ -14,7 +14,7 @@ import { returnTo } from '@/lib/safeRedirect'
 import { cn } from '@/lib/utils'
 import { TermsModal } from './TermsModal'
 import Spinner from '@/components/ui/Spinner'
-import { PROGRAMS, PROGRAM_GROUPS, programLabel } from '@/lib/programs'
+import { PROGRAMS, PROGRAM_GROUPS, programLabel, CMA_PROGRAM_ID } from '@/lib/programs'
 import { describeTransportError, describeStatus } from '@/lib/apiResponse'
 import { uploadSignupDoc } from '@/lib/signupUpload'
 import { compressImageIfNeeded } from '@/lib/imageCompression'
@@ -898,6 +898,9 @@ export function RegisterForm({ onSwitch, lockFull = false }: { onSwitch: () => v
   const [passportBusy,  setPassportBusy]  = useState(false)
   const [idDocBusy,     setIdDocBusy]     = useState(false)
   const [showTerms,     setShowTerms]     = useState(false)
+  /* Which terms the dialog shows — kept after closing so the exit animation does not swap text. */
+  const [termsVariant,  setTermsVariant]  = useState<'general' | 'cma'>('general')
+  const openTerms = (v: 'general' | 'cma') => { setTermsVariant(v); setShowTerms(true) }
 
   /* Set by next()/submit() when validation refuses. The refused field can be a
      screen-height above the button on a phone — the profile photo on step 1
@@ -936,9 +939,16 @@ export function RegisterForm({ onSwitch, lockFull = false }: { onSwitch: () => v
   }
 
   const set = (k: keyof FormData, v: unknown) => {
-    setData(d => ({ ...d, [k]: v }))
+    setData(d => ({
+      ...d, [k]: v,
+      /* Picking CMA (US) after ticking the terms adds the CMA terms to what
+         was agreed — so the tick has to be given again, against both. */
+      ...(k === 'programs' && d.termsAccepted && !d.programs.includes(CMA_PROGRAM_ID) && (v as string[]).includes(CMA_PROGRAM_ID)
+        ? { termsAccepted: false } : {}),
+    }))
     setErrors(e => ({ ...e, [k]: undefined }))
   }
+  const wantsCma = data.programs.includes(CMA_PROGRAM_ID)
 
   /* ── Validation ────────────────────────────────────── */
   function validateStep(s: number): boolean {
@@ -1719,12 +1729,23 @@ export function RegisterForm({ onSwitch, lockFull = false }: { onSwitch: () => v
             I agree to Delta Institutions&apos;{' '}
             <button
               type="button"
-              onClick={e => { e.preventDefault(); setShowTerms(true) }}
+              onClick={e => { e.preventDefault(); openTerms('general') }}
               className="font-semibold transition-colors hover:opacity-80"
               style={{ color: 'var(--color-primary)' }}
             >
               Terms &amp; Conditions
             </button>
+            {wantsCma && <>
+              , the Delta Commerce Academy{' '}
+              <button
+                type="button"
+                onClick={e => { e.preventDefault(); openTerms('cma') }}
+                className="font-semibold transition-colors hover:opacity-80"
+                style={{ color: 'var(--color-primary)' }}
+              >
+                CMA (US) Terms &amp; Conditions
+              </button>
+            </>}
             , Privacy Policy, and KHDA training regulations.
             I confirm the information provided is accurate and complete.
           </span>
@@ -1895,7 +1916,7 @@ export function RegisterForm({ onSwitch, lockFull = false }: { onSwitch: () => v
                 className="mt-0.5 h-4 w-4 flex-shrink-0 cursor-pointer rounded accent-blue-600" />
               <span className="text-xs leading-relaxed text-[var(--color-text-secondary)]">
                 I agree to Delta Institutions&apos;{' '}
-                <button type="button" onClick={e => { e.preventDefault(); setShowTerms(true) }}
+                <button type="button" onClick={e => { e.preventDefault(); openTerms('general') }}
                   className="font-semibold transition-colors hover:opacity-80" style={{ color: 'var(--color-primary)' }}>
                   Terms &amp; Conditions
                 </button>
@@ -2050,7 +2071,7 @@ export function RegisterForm({ onSwitch, lockFull = false }: { onSwitch: () => v
       </p>
 
       {/* ── Terms modal — always mounted so it can open from any step ── */}
-      <TermsModal open={showTerms} onClose={() => setShowTerms(false)} />
+      <TermsModal open={showTerms} variant={termsVariant} onClose={() => setShowTerms(false)} />
     </div>
   )
 }
