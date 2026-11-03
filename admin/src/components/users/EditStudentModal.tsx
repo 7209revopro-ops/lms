@@ -7,13 +7,14 @@ import {
   Lock, Unlock, BookOpen, Plus, Trash2,
   ChevronDown, ChevronUp, FileText, ExternalLink,
   Phone, MapPin, CreditCard, ClipboardList, Camera,
-  TrendingUp, Cpu, BarChart2, KeyRound, Eye, EyeOff, Copy, Wand2,
+  TrendingUp, Cpu, BarChart2, KeyRound, Eye, EyeOff, Copy, Wand2, Building2,
 } from 'lucide-react'
 import { api } from '@/lib/axios'
 import Spinner from '@/components/ui/Spinner'
 import {
   useUpdateUser, useStudentEnrollments, useUpdateEnrollmentAccess,
   useEnrollStudent, useRemoveEnrollment, type AdminUser, useSetStudentPassword,
+  useMoveStudentAcademy,
 } from '@/lib/api/users'
 import { useCourseOutline } from '@/lib/api/outline'
 import { useCourses } from '@/lib/api/courses'
@@ -881,6 +882,9 @@ export function EditStudentModal({ user, onClose, onSuccess }: Props) {
               )}
             </div>
 
+            {/* Academy — super admins only */}
+            {isSuper && <MoveAcademySection user={user} orgs={orgs} />}
+
             {/* Password — admins, super admins, the student's sub-admin */}
             {(me?.role === 'admin' || me?.role === 'super_admin' || me?.role === 'sub_admin') && <SetPasswordSection userId={user.id} />}
 
@@ -915,6 +919,69 @@ export function EditStudentModal({ user, onClose, onSuccess }: Props) {
         </motion.div>
       </motion.div>
     </AnimatePresence>
+  )
+}
+
+/* Move the student to another academy (PATCH /admin/users/:id/academy) — super
+   admins only. Its own button with a confirm step, never part of "Save changes".
+   Their account and enrolment rows move; their courses stay where they are. */
+function MoveAcademySection({ user, orgs }: { user: AdminUser; orgs: { id: string; name: string }[] }) {
+  const move = useMoveStudentAcademy()
+  const [current, setCurrent] = useState(user.organizationId ?? '')
+  const [to, setTo] = useState('')
+  const [confirming, setConfirming] = useState(false)
+  const [done, setDone] = useState('')
+  const [err, setErr] = useState('')
+  const nameOf = (id: string) => orgs.find(o => o.id === id)?.name ?? 'no academy'
+  const others = orgs.filter(o => o.id !== current)
+  const confirm = async () => {
+    setErr(''); setDone('')
+    try {
+      const r = await move.mutateAsync({ id: user.id, organizationId: to })
+      setCurrent(r.to.id); setTo(''); setConfirming(false)
+      setDone(`Moved to ${r.to.name}.${r.enrollments ? ` Their ${r.enrollments} course${r.enrollments === 1 ? '' : 's'} stay as they are.` : ''}`)
+    } catch (e) {
+      setConfirming(false)
+      setErr((e as any)?.response?.data?.error?.message || (e as Error).message || 'Could not move the student')
+    }
+  }
+  return (
+    <div className="px-6 pb-4">
+      <div className="mb-3 flex items-center gap-2">
+        <Building2 size={13} style={{ color: 'rgba(255,255,255,0.4)' }} />
+        <p className="text-[10px] font-semibold uppercase tracking-widest" style={{ color: 'rgba(255,255,255,0.35)' }}>Academy</p>
+      </div>
+      <div className="flex items-center gap-2">
+        <p className="flex-1 text-sm">Now in <span className="font-semibold">{nameOf(current)}</span></p>
+        <select value={to} onChange={e => { setTo(e.target.value); setConfirming(false); setDone(''); setErr('') }}
+          className="rounded-full border border-white/10 bg-white/5 px-3 py-2.5 text-xs outline-none" style={{ colorScheme: 'dark' }}>
+          <option value="">Move to…</option>
+          {others.map(o => <option key={o.id} value={o.id}>{o.name}</option>)}
+        </select>
+        <button type="button" disabled={!to || move.isPending} onClick={() => setConfirming(true)}
+          className="rounded-full bg-blue-600 px-4 py-2.5 text-xs font-semibold text-white disabled:opacity-40">
+          Move
+        </button>
+      </div>
+      {confirming && (
+        <div className="mt-2 rounded-xl border border-amber-400/30 bg-amber-400/10 p-3 text-xs">
+          <p>
+            Move <span className="font-semibold">{user.name}</span> from {nameOf(current)} to <span className="font-semibold">{nameOf(to)}</span>?
+            Their courses and booked classes stay as they are; admin will show the courses as &ldquo;other academy&rdquo; until you enrol them in the new academy&apos;s.
+          </p>
+          <div className="mt-2 flex justify-end gap-2">
+            <button type="button" onClick={() => setConfirming(false)} className="rounded-full border border-white/10 px-3 py-1.5 opacity-80 hover:opacity-100">Cancel</button>
+            <button type="button" disabled={move.isPending} onClick={() => void confirm()}
+              className="rounded-full bg-amber-500 px-3 py-1.5 font-semibold text-black disabled:opacity-40">
+              {move.isPending ? 'Moving…' : `Yes, move to ${nameOf(to)}`}
+            </button>
+          </div>
+        </div>
+      )}
+      <p className="mt-1.5 text-[11px] opacity-50">Moves their account to the other academy at once. Orders and certificates keep the academy they were made in.</p>
+      {done && <p className="mt-1.5 text-xs text-emerald-400">{done}</p>}
+      {err && <p className="mt-1.5 text-xs text-rose-400">{err}</p>}
+    </div>
   )
 }
 

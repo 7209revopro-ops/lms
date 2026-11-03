@@ -710,6 +710,26 @@ router.post('/users/:id/set-password', requireRole('super_admin', 'admin', 'sub_
     } catch (err) { next(err) }
   })
 
+/* PATCH /admin/users/:id/academy — move a STUDENT to another academy
+   (2026-11-03). Super admins only: an academy admin sees one academy and
+   could only hand a student away, never check where they landed. One student
+   at a time; their courses stay as they are (UserService.adminMoveStudentAcademy).
+   Audited with where they came from and went to. */
+const moveAcademySchema = z.object({ organizationId: z.string().trim().min(1, 'Pick an academy') })
+router.patch('/users/:id/academy', requireRole('super_admin'), validate(moveAcademySchema),
+  audit('user.moveAcademy', 'User', r => String(r.params['id'] ?? ''), r => (r as Request & { academyMove?: Record<string, unknown> }).academyMove ?? {}),
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const { UserService } = await import('@/services/user.service.ts')
+      const r = await new UserService().adminMoveStudentAcademy(String(req.params['id'] ?? ''), (req.body as { organizationId: string }).organizationId)
+      ;(req as Request & { academyMove?: Record<string, unknown> }).academyMove = {
+        fromAcademy: r.from?.name ?? null, fromOrganizationId: r.from?.id ?? null,
+        toAcademy: r.to.name, toOrganizationId: r.to.id, enrollments: r.enrollments,
+      }
+      sendSuccess(res, r, `Moved to ${r.to.name}.`)
+    } catch (err) { next(err) }
+  })
+
 /* POST /admin/users/:id/login-link — a one-time login link for a student
    (the user, 2026-10-29): {CLIENT_URL}/s/<code>, signs the student in ONCE
    within 24 hours with no password, then opens their class schedule. The

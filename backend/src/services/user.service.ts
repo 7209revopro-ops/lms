@@ -61,6 +61,42 @@ export class UserService {
     return { email: user.email ?? '' }
   }
 
+  /* Move a STUDENT to another academy — the super admin's "Move to academy"
+     in Edit Student, doing what scripts/move-student-org.ts did by hand. The
+     account and its enrolment rows move, so course and booking scoping agree.
+     The COURSES do not: a course belongs to its academy, so the student keeps
+     the old academy's courses (flagged "other academy") until staff enrol
+     them in the new one. Orders, certificates, tickets and the audit trail
+     keep the academy they were made under — those are history. The session
+     needs nothing: auth re-reads organizationId on every request. */
+  async adminMoveStudentAcademy(id: string, toOrgId: string): Promise<{
+    from: { id: string; name: string } | null; to: { id: string; name: string }; enrollments: number
+  }> {
+    if (!Types.ObjectId.isValid(id))      throw new UserError('INVALID_ID', 'Invalid user id', 400)
+    if (!Types.ObjectId.isValid(toOrgId)) throw new UserError('INVALID_ACADEMY', 'Pick an academy.', 400)
+    const { UserModel, OrganizationModel, EnrollmentModel } = await import('@/models/schema.ts')
+    const user = await UserModel.findById(id).select('role organizationId').lean<{ role?: string; organizationId?: unknown }>()
+    if (!user) throw new UserError('USER_NOT_FOUND', 'User not found.', 404)
+    if (user.role !== 'student') throw new UserError('NOT_A_STUDENT', 'Only a student can be moved to another academy.', 400)
+    const to = await OrganizationModel.findById(toOrgId).select('name').lean<{ _id: unknown; name?: string }>()
+    if (!to) throw new UserError('ACADEMY_NOT_FOUND', 'That academy does not exist.', 404)
+    if (user.organizationId && String(user.organizationId) === toOrgId) {
+      throw new UserError('ALREADY_IN_ACADEMY', `This student is already in ${to.name ?? 'that academy'}.`, 409)
+    }
+    const from = user.organizationId
+      ? await OrganizationModel.findById(user.organizationId).select('name').lean<{ _id: unknown; name?: string }>()
+      : null
+
+    await UserModel.updateOne({ _id: id }, { $set: { organizationId: to._id } })
+    const moved = await EnrollmentModel.updateMany({ userId: id }, { $set: { organizationId: to._id } })
+    logger.info({ userId: id, from: from ? String(from._id) : null, to: toOrgId, enrollments: moved.modifiedCount }, 'student moved to another academy')
+    return {
+      from: from ? { id: String(from._id), name: from.name ?? '' } : null,
+      to:   { id: String(to._id), name: to.name ?? '' },
+      enrollments: moved.modifiedCount,
+    }
+  }
+
   /* Admin-only updates: role change, deactivate/activate, force-verify.
      Deactivation also revokes all refresh tokens for that user. */
   async adminUpdate(

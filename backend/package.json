@@ -151,7 +151,8 @@
     "test:crossorgauthoring": "bun src/tests/crossorgauthoring.suite.ts",
     "test:crossorgfixes": "bun src/tests/crossorgfixes.suite.ts",
     "test:portalmessagelogs": "bun --no-env-file src/tests/portalmessagelogs.suite.ts",
-    "test:portaljoinlink": "bun --no-env-file src/tests/portaljoinlink.suite.ts"
+    "test:portaljoinlink": "bun --no-env-file src/tests/portaljoinlink.suite.ts",
+    "test:moveacademy": "bun --no-env-file src/tests/moveacademy.suite.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1046.0",

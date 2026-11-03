@@ -2764,7 +2764,7 @@ export type AuditAction =
   | 'course.publish'  | 'course.archive'
   | 'user.create'     | 'user.ban'        | 'user.unban'      | 'user.roleChange'
   | 'user.delete'     | 'user.impersonate' | 'user.reset2fa' | 'user.setPassword'
-  | 'user.loginLink'
+  | 'user.loginLink'   | 'user.moveAcademy'
   | 'user.impersonate.revoke'
   | 'user.impersonate.client'
   | 'user.impersonate.write'

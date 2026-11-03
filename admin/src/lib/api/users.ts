@@ -318,6 +318,22 @@ export function useSetStudentPassword() {
   })
 }
 
+/* ─── Move a student to another academy (super admin) ───
+   Their account and enrolment rows move; their courses stay where they are. */
+export interface StudentAcademyMove { from: { id: string; name: string } | null; to: { id: string; name: string }; enrollments: number }
+export function useMoveStudentAcademy() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async (v: { id: string; organizationId: string }) =>
+      (await api.patch<{ success: true; data: StudentAcademyMove }>(`/admin/users/${v.id}/academy`, { organizationId: v.organizationId })).data.data,
+    onSuccess: (_d, v) => {
+      qc.invalidateQueries({ queryKey: ['admin', 'users'] })
+      qc.invalidateQueries({ queryKey: ['admin', 'enrollments', v.id] })
+      qc.invalidateQueries({ queryKey: ['admin', 'stats'] })
+    },
+  })
+}
+
 /* ─── Update user (role / isActive / isVerified / name / email) ─── */
 export function useUpdateUser() {
   const qc = useQueryClient()
