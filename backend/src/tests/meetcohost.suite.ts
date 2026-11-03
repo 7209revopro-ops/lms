@@ -23,10 +23,10 @@ function check(label: string, ok: boolean, detail = '') {
 }
 function section(n: string) { lines.push(`\n${n}`) }
 
-const { staffMeetCohosts, ensureMeetCohosts, __test } = await import('@/services/googleMeet.service.ts')
+const { staffMeetCohosts, ensureMeetCohosts, meetJoinAsViewer, __test } = await import('@/services/googleMeet.service.ts')
 
 /* A stand-in for Google: one meeting space, its members, and every request. */
-function fakeGoogle(o: { members?: string[]; refuse?: string[]; listFails?: boolean } = {}) {
+function fakeGoogle(o: { members?: string[]; refuse?: string[]; listFails?: boolean; refusePatch?: boolean } = {}) {
   const calls: Array<{ method: string; url: string; email?: string }> = []
   const members = new Map((o.members ?? []).map((e, i) => [`spaces/s1/members/m${i}`, e.toLowerCase()]))
   let n = members.size
@@ -48,6 +48,10 @@ function fakeGoogle(o: { members?: string[]; refuse?: string[]; listFails?: bool
         return { data: {} }
       }
       if (method === 'DELETE') { members.delete(url.replace(/^.*\/v2\//, '')); return { data: {} } }
+      if (method === 'PATCH') {
+        if (o.refusePatch) throw Object.assign(new Error('Unsupported for this edition'), { status: 400 })
+        return { data: {} }
+      }
       return { data: { id: 'event-1' } }                 // the calendar event
     },
   }
@@ -115,6 +119,38 @@ try {
     const g = fakeGoogle()
     await __test.createCoHostedMeetingWith(g.auth, { ...base, cohostEmail: 'mentor@gmail.com' })
     check('C5 a meeting that asks for no staff (mentor meetings) is unchanged', JSON.stringify(g.added()) === JSON.stringify(['mentor@gmail.com']), JSON.stringify(g.added()))
+  }
+
+  /* ── V ────────────────────────────────────────────── */
+  section('V  students join as viewers')
+  delete process.env['GOOGLE_MEET_JOIN_AS_VIEWER']
+  check('V1 off by default', meetJoinAsViewer() === false)
+  process.env['GOOGLE_MEET_JOIN_AS_VIEWER'] = ' ON '
+  check('V2 GOOGLE_MEET_JOIN_AS_VIEWER=on turns it on', meetJoinAsViewer() === true)
+  delete process.env['GOOGLE_MEET_JOIN_AS_VIEWER']
+  const viewerPatch = (g: ReturnType<typeof fakeGoogle>) =>
+    g.calls.findIndex(c => c.method === 'PATCH' && c.url.endsWith('/v2/spaces/s1?updateMask=config.moderationRestrictions.defaultJoinAsViewerType'))
+  {
+    const g = fakeGoogle()
+    const m = await __test.createCoHostedMeetingWith(g.auth, { ...base, cohostEmail: 'teacher@gmail.com', staffCohosts: [STAFF], joinAsViewer: true })
+    const lastCohost = g.calls.map(c => c.method === 'POST' && c.url.endsWith('/members')).lastIndexOf(true)
+    check('V3 a class room is switched to viewers, after the instructor is co-host',
+      viewerPatch(g) > lastCohost && lastCohost >= 0 && m.meetSpace?.cohost === 'teacher@gmail.com', JSON.stringify(g.calls))
+  }
+  {
+    const g = fakeGoogle({ refuse: ['teacher@gmail.com'] })
+    await __test.createCoHostedMeetingWith(g.auth, { ...base, cohostEmail: 'teacher@gmail.com', staffCohosts: [STAFF], joinAsViewer: true })
+    check('V4 not switched when the instructor could not be made co-host (they would be muted)', viewerPatch(g) === -1, JSON.stringify(g.calls))
+  }
+  {
+    const g = fakeGoogle()
+    await __test.createCoHostedMeetingWith(g.auth, { ...base, cohostEmail: 'mentor@gmail.com' })
+    check('V5 a meeting that does not ask (mentor meetings) is not switched', viewerPatch(g) === -1, JSON.stringify(g.calls))
+  }
+  {
+    const g = fakeGoogle({ refusePatch: true })
+    const m = await __test.createCoHostedMeetingWith(g.auth, { ...base, cohostEmail: 'teacher@gmail.com', staffCohosts: [STAFF], joinAsViewer: true })
+    check('V6 Google refusing viewer mode still leaves a working room', m.meetingCode === 'abc-defg-hij' && m.meetSpace?.cohost === 'teacher@gmail.com', JSON.stringify(m))
   }
 
   /* ── Y ────────────────────────────────────────────── */

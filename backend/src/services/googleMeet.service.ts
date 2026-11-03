@@ -136,6 +136,29 @@ export function staffMeetCohosts(): string[] {
   return [...new Set(raw.split(',').map(s => s.trim().toLowerCase()).filter(s => /^[^@\s]+@[^@\s]+$/.test(s)))]
 }
 
+/* ── Students join as viewers ────────────────────────────────────────────
+   GOOGLE_MEET_JOIN_AS_VIEWER=on: in a new CLASS room only the owner and the
+   co-hosts (staff + instructor) can use mic, camera and screen share; everyone
+   else joins as a viewer — sees, hears and chats. Off by default. Mentor
+   meetings never ask for it: there the student has to be able to talk. */
+export function meetJoinAsViewer(): boolean {
+  return /^(on|true|yes|1)$/i.test((process.env['GOOGLE_MEET_JOIN_AS_VIEWER'] ?? '').trim())
+}
+
+/** Best-effort: a room Google will not switch keeps working as it was. */
+async function setJoinAsViewer(auth: ServiceAccountAuth, spaceName: string): Promise<boolean> {
+  try {
+    await auth.request({
+      url: `${MEET_API}/${spaceName}?updateMask=config.moderationRestrictions.defaultJoinAsViewerType`, method: 'PATCH',
+      data: { config: { moderationRestrictions: { defaultJoinAsViewerType: 'ON' } } },
+    })
+    return true
+  } catch (err) {
+    console.warn(`[googleMeet] join-as-viewer NOT applied to ${spaceName}: ${describeGoogleError(err)}`)
+    return false
+  }
+}
+
 /** Make each address a co-host, in order, skipping any already a member.
     Never throws: what could not be added is reported, not raised. */
 export async function ensureMeetCohosts(
@@ -295,6 +318,8 @@ type CoHostedMeetingInput = {
   title: string; start: Date; end: Date; host: string; cohostEmail?: string
   /* Staff co-hosts, made co-host FIRST — see staffMeetCohosts. */
   staffCohosts?: string[]
+  /* Students join as viewers — see meetJoinAsViewer. */
+  joinAsViewer?: boolean
 }
 
 async function createCoHostedMeeting(o: CoHostedMeetingInput): Promise<CreatedMeet> {
@@ -322,6 +347,12 @@ async function createCoHostedMeetingWith(auth: ServiceAccountAuth, o: CoHostedMe
   if (staff.length) await ensureMeetCohosts(auth, space.name, staff)
 
   const cohost  = invitee && await addMeetCohost(auth, space.name, invitee) ? invitee : undefined
+
+  /* Never before the instructor is a co-host — viewer mode would mute them too. */
+  if (o.joinAsViewer) {
+    if (invitee && !cohost) console.warn(`[googleMeet] join-as-viewer NOT applied to ${space.meetingCode} — the instructor is not a co-host and would be muted`)
+    else await setJoinAsViewer(auth, space.name)
+  }
 
   let calendarEventId: string | undefined
   try {
@@ -475,6 +506,8 @@ export async function createGoogleMeetLink(opts: {
   instructorMeetEmail?: string
   /* Made co-host ahead of the instructor — live classes pass staffMeetCohosts(). */
   staffCohosts?:        string[]
+  /* Students join as viewers — live classes pass meetJoinAsViewer(). */
+  joinAsViewer?:        boolean
 }): Promise<CreatedMeet> {
   const WORKSPACE_DOMAIN     = process.env.GOOGLE_WORKSPACE_DOMAIN ?? 'deltagroups.ae'
   const instructorIsInternal = opts.instructorEmail?.endsWith(`@${WORKSPACE_DOMAIN}`) ?? false
@@ -491,6 +524,7 @@ export async function createGoogleMeetLink(opts: {
           host,
           ...(opts.instructorMeetEmail ? { cohostEmail: opts.instructorMeetEmail.trim().toLowerCase() } : {}),
           ...(opts.staffCohosts?.length ? { staffCohosts: opts.staffCohosts } : {}),
+          ...(opts.joinAsViewer ? { joinAsViewer: true } : {}),
         })
       } catch (err) {
         console.warn(`[googleMeet] co-hosted meeting failed, falling back to a calendar meeting without co-host: ${describeGoogleError(err)}`)
@@ -503,6 +537,9 @@ export async function createGoogleMeetLink(opts: {
   if (opts.staffCohosts?.length) {
     console.warn(`[googleMeet] staff co-host ${opts.staffCohosts.join(', ')} NOT applied to "${opts.title}" — ` +
       'a Calendar-made meeting takes no co-hosts through the API; add them in Meet by hand')
+  }
+  if (opts.joinAsViewer) {
+    console.warn(`[googleMeet] join-as-viewer NOT applied to "${opts.title}" — set it in Meet's Host controls by hand`)
   }
 
   const auth       = instructorIsInternal ? makeServiceAccountAuth(opts.instructorEmail!) : makeOAuth2Client()

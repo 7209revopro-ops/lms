@@ -9,7 +9,7 @@ import { EnrollmentRepository } from '@/repositories/enrollment.repository.ts'
    is kept for any caller that genuinely needs a standalone announcement. */
 import { queueDigestItem } from '@/jobs/digest.job.ts'
 import * as muxSvc from '@/services/mux.service.ts'
-import { fetchMeetRecordingUrl, syncMeetSpace, effectiveMeetEmail, createGoogleMeetLink, staffMeetCohosts, type MeetSpaceRecord, type CreatedMeet } from '@/services/googleMeet.service.ts'
+import { fetchMeetRecordingUrl, syncMeetSpace, effectiveMeetEmail, createGoogleMeetLink, staffMeetCohosts, meetJoinAsViewer, type MeetSpaceRecord, type CreatedMeet } from '@/services/googleMeet.service.ts'
 import { STUDENT_JOIN_GRACE_MS } from '@/utils/liveStatus.ts'
 import { logger } from '@/utils/logger.ts'
 import { env } from '@/config/env.ts'
@@ -1692,6 +1692,7 @@ export class LiveClassService {
                class room — somebody must be able to admit people even if the
                instructor is still locked out. */
             staffCohosts:        staffMeetCohosts(),
+            joinAsViewer:        meetJoinAsViewer(),
           })
         } catch (err) {
           logger.error({ err, classId: id }, 'backup link: Google Meet creation failed')

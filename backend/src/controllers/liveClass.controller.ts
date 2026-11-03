@@ -9,7 +9,7 @@ import { logger } from '@/utils/logger.ts'
 import { LiveClassService, LiveClassError } from '@/services/liveClass.service.ts'
 import { SectionService } from '@/services/section.service.ts'
 import { verifyWebhookSignature } from '@/services/mux.service.ts'
-import { createGoogleMeetLink, effectiveMeetEmail, staffMeetCohosts, syncMeetSpace, type MeetSpaceRecord } from '@/services/googleMeet.service.ts'
+import { createGoogleMeetLink, effectiveMeetEmail, staffMeetCohosts, meetJoinAsViewer, syncMeetSpace, type MeetSpaceRecord } from '@/services/googleMeet.service.ts'
 import { sendSuccess } from '@/utils/response.ts'
 import { sendInstructorClassScheduled } from '@/services/email.service.ts'
 import { wantsStaffEmail } from '@/utils/emailPrefs.ts'
@@ -1379,6 +1379,7 @@ export class LiveClassController {
           /* The staff account co-hosts every class, ahead of the instructor — and a
              program's co-mentors after it. */
           staffCohosts:     [...new Set([...staffMeetCohosts(), ...(opts.extraCohosts ?? []).map(e => e.trim().toLowerCase()).filter(Boolean)])],
+          joinAsViewer:     meetJoinAsViewer(),
         })
         meetingUrl     = meet.meetingUrl
         googleMeetCode = meet.meetingCode || undefined
