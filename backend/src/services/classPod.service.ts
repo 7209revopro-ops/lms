@@ -79,9 +79,23 @@ export function podsConfigured(): boolean {
 
 /* ── The HRMS, signed as its integration API wants (hrms-backend utils/signing.ts) ── */
 
-async function hrms<T>(method: 'GET' | 'PUT' | 'POST' | 'DELETE', path: string, query: Record<string, string> = {}, body?: unknown): Promise<T> {
+/** Whether the HRMS can be asked at all — what the wallet needs, without the pods' organization or POD_SYNC. */
+export function hrmsLinked(): boolean {
   const c = podConfig()
-  const qs = new URLSearchParams({ organizationId: c.orgId, ...query }).toString()
+  return !!(c.baseUrl && c.clientId && c.secret)
+}
+
+/**
+ * One signed call. Scoped to HRMS_ORG_ID unless `org: false` — the wallet (2026-11-04) finds a person by email in
+ * whichever academy they work, Dubai or Bangalore. A refusal carries the HRMS's `status` and its own words
+ * (`hrmsMessage`).
+ */
+export async function hrms<T>(
+  method: 'GET' | 'PUT' | 'POST' | 'DELETE', path: string, query: Record<string, string> = {}, body?: unknown,
+  opts: { org?: boolean; timeoutMs?: number } = {},
+): Promise<T> {
+  const c = podConfig()
+  const qs = new URLSearchParams({ ...(opts.org === false ? {} : { organizationId: c.orgId }), ...query }).toString()
   const signedPath = `/api/v1/integrations${path}?${qs}`
   const raw = body === undefined ? '' : JSON.stringify(body)
   const timestamp = String(Date.now())
@@ -95,11 +109,11 @@ async function hrms<T>(method: 'GET' | 'PUT' | 'POST' | 'DELETE', path: string, 
       'x-delta-nonce': nonce, 'x-delta-signature': signature,
     },
     ...(raw ? { body: raw } : {}),
-    signal: AbortSignal.timeout(TIMEOUT_MS),
+    signal: AbortSignal.timeout(opts.timeoutMs ?? TIMEOUT_MS),
   })
   const json = await res.json().catch(() => ({})) as { success?: boolean; message?: string; data?: T }
   if (!res.ok || json.success === false) {
-    throw Object.assign(new Error(`HRMS ${res.status}: ${json.message ?? 'request failed'}`), { status: res.status })
+    throw Object.assign(new Error(`HRMS ${res.status}: ${json.message ?? 'request failed'}`), { status: res.status, hrmsMessage: json.message })
   }
   return json.data as T
 }

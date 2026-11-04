@@ -9,6 +9,7 @@ import {
   Tag, Star, Settings, ChevronLeft, ChevronRight, LogOut, X,
   ShoppingBag, Ticket, Map, ClipboardList, Video, CalendarDays, Repeat, BarChart3, ShieldCheck, UserCog, LifeBuoy,
   ClipboardCheck, Film, MonitorSmartphone, FileCheck2, Megaphone, Mail, UserX, Award, MessageCircle, MessagesSquare, Send, ListChecks, DoorOpen, GitMerge,
+  WalletCards,
 } from 'lucide-react'
 import { useStaffUnread } from '@/lib/api/chat'
 import { useUIStore } from '@/store/ui.store'
@@ -22,6 +23,8 @@ import { useRouter } from 'next/navigation'
 /* ── All nav items (admin sees all) ──────────────────── */
 const adminNavItems = [
   { label: 'Dashboard',      href: '/',                       icon: LayoutDashboard },
+  /* My Wallet, from the HRMS (2026-11-04): every staff member's own pay — not on the Roles screen, never someone else's. */
+  { label: 'My Wallet',      href: '/wallet',                 icon: WalletCards },
   { label: 'Users',      href: '/users',                  icon: UserCog },
   { label: 'Requests',   href: '/enrollment-requests',    icon: ClipboardCheck },
   { label: 'Courses',        href: '/courses',                icon: BookOpen },
@@ -55,6 +58,8 @@ const adminNavItems = [
 /* ── Scoped-admin nav (sub_admin, scoped by `program`) ─ */
 const scopedAdminNavItems = [
   { label: 'Dashboard',        href: '/',                       icon: LayoutDashboard },
+  /* My Wallet, from the HRMS (2026-11-04): every staff member's own pay — not on the Roles screen, never someone else's. */
+  { label: 'My Wallet',      href: '/wallet',                 icon: WalletCards },
   { label: 'Requests',   href: '/enrollment-requests',    icon: ClipboardCheck },
   { label: 'Users',      href: '/users',                  icon: UserCog },
   /* Instructors are created from the Instructors page, and a sub-admin's
@@ -77,6 +82,8 @@ const scopedAdminNavItems = [
 /* ── Instructor-restricted nav (view users + own content) ─ */
 const instructorNavItems = [
   { label: 'My Courses',    href: '/courses',            icon: BookOpen },
+  /* My Wallet, from the HRMS (2026-11-04): every staff member's own pay — not on the Roles screen, never someone else's. */
+  { label: 'My Wallet',      href: '/wallet',                 icon: WalletCards },
   { label: 'Live Classes',  href: '/live-classes',       icon: Video },
   { label: 'Class Verification', href: '/class-verification', icon: ListChecks },
   { label: 'Bookings',      href: '/bookings',           icon: CalendarDays },

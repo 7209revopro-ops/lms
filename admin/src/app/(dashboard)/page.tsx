@@ -19,6 +19,7 @@ import Link from 'next/link'
 import Spinner from '@/components/ui/Spinner'
 import { useOrgCurrency, formatCoursePrice } from '@/lib/currency'
 import { getActiveTimeZone } from '@/lib/timezone'
+import { WalletCard } from '@/components/wallet/WalletCard'
 
 /* The hour this greeting reads must come from the ACADEMY's clock, not the
    machine's. Two reasons, and the second is the one that bites:
@@ -96,6 +97,9 @@ export default function DashboardPage() {
             : <>Here&apos;s what&apos;s happening with Delta Institutions today.</>}
         </p>
       </motion.div>
+
+      {/* ── My wallet, first in the row (2026-11-04) ── */}
+      <WalletCard />
 
       {/* ── Stat cards ──────────────────────────────── */}
       <div className={`grid grid-cols-1 gap-4 sm:grid-cols-2 ${departmentScoped ? 'xl:grid-cols-3' : 'xl:grid-cols-4'}`}>

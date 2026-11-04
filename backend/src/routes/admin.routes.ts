@@ -3383,6 +3383,22 @@ const addTimeOffFor = async (req: Request, mentorId: string) => {
   return addTimeOff({ mentorId, ...(req.body as object), byEmail: me?.email ?? String(req.user?.email ?? ''), byName: me?.name ?? '' })
 }
 
+/* ─── My Wallet (2026-11-04) ─────────────────────────────
+   GET /admin/wallet/me?month=YYYY-MM — the caller's own wallet from the HRMS
+   (this month when none is given). Every staff role; never while someone is
+   impersonating them — their pay is not the operator's to read. */
+router.get('/wallet/me', async (req: Request, res: Response, next: NextFunction) => {
+  const { walletOf, WalletError } = await import('@/services/wallet.service.ts')
+  const { sendError } = await import('@/utils/response.ts')
+  try {
+    if (req.user!.impersonatorId) { sendError(res, 'IMPERSONATING', "A wallet isn't shown while you're signed in as someone else.", 403); return }
+    sendSuccess(res, await walletOf(req.user!.id, typeof req.query['month'] === 'string' ? req.query['month'] : undefined))
+  } catch (err) {
+    if (err instanceof WalletError) { sendError(res, err.code, err.message, err.status); return }
+    next(err)
+  }
+})
+
 router.get('/time-off/me', requireInstructor, (req, res, next) => timeOffRoute(res, next, async () => {
   sendSuccess(res, await listTimeOffOf(req.user!.id))
 }))
