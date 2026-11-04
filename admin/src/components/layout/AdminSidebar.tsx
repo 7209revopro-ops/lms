@@ -8,7 +8,7 @@ import {
   LayoutDashboard, BookOpen, Users, GraduationCap,
   Tag, Star, Settings, ChevronLeft, ChevronRight, LogOut, X,
   ShoppingBag, Ticket, Map, ClipboardList, Video, CalendarDays, Repeat, BarChart3, ShieldCheck, UserCog, LifeBuoy,
-  ClipboardCheck, Film, MonitorSmartphone, FileCheck2, Megaphone, Mail, UserX, Award, MessageCircle, MessagesSquare, Send, ListChecks, DoorOpen,
+  ClipboardCheck, Film, MonitorSmartphone, FileCheck2, Megaphone, Mail, UserX, Award, MessageCircle, MessagesSquare, Send, ListChecks, DoorOpen, GitMerge,
 } from 'lucide-react'
 import { useStaffUnread } from '@/lib/api/chat'
 import { useUIStore } from '@/store/ui.store'
@@ -160,6 +160,8 @@ function SidebarContent({ collapsed, onClose }: SidebarContentProps) {
         { label: 'Email Logs', href: '/email-logs',  icon: Mail },
         { label: 'WhatsApp Logs', href: '/whatsapp-logs', icon: MessageCircle },
         { label: 'Chats',      href: '/chats',       icon: MessagesSquare },
+        /* Merging two accounts of one student — super admin only, as the routes are. */
+        { label: 'Duplicates', href: '/duplicates',  icon: GitMerge },
       ]
     : user?.role === 'admin' ? [...withClassroom, sendItem] : withClassroom
   const navItems = allNavItems.filter(i => canView(i.href))

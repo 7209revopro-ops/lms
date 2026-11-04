@@ -34,6 +34,8 @@ import { UserModel, CourseModel, SectionModel, EnrollmentModel, OrganizationMode
 import { PortalError } from '@/services/portal.service.ts'
 import { deskAccountFor } from '@/services/portalActivity.service.ts'
 import { logger } from '@/utils/logger.ts'
+import { followMerged } from '@/utils/mergedAccount.ts'
+
 
 /** The programme the portal looks after: Forex. */
 export const FOREX = '4x-trading'
@@ -55,8 +57,12 @@ export type CourseStudent = { _id: unknown; name?: string; email?: string; isAct
 type Module = { id: string; title: string }
 
 async function studentByEmail(email: unknown): Promise<CourseStudent> {
-  const student = await UserModel.findOne({ email: oneEmail(email), role: 'student' })
-    .select('_id name email isActive enrollmentStatus organizationId').lean() as CourseStudent | null
+  const FIELDS = '_id name email isActive enrollmentStatus organizationId mergedInto'
+  /* An address merged into another account is that account (utils/mergedAccount.ts). */
+  const student = await followMerged(
+    await UserModel.findOne({ email: oneEmail(email), role: 'student' }).select(FIELDS).lean() as (CourseStudent & { mergedInto?: unknown }) | null,
+    id => UserModel.findOne({ _id: id, role: 'student' }).select(FIELDS).lean() as Promise<(CourseStudent & { mergedInto?: unknown }) | null>,
+  )
   if (!student) throw new PortalError('NOT_FOUND', 'This student has no account in the LMS', 404)
   return student
 }

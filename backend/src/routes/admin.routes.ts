@@ -730,6 +730,100 @@ router.patch('/users/:id/academy', requireRole('super_admin'), validate(moveAcad
     } catch (err) { next(err) }
   })
 
+/* ─── Duplicate student accounts (2026-11-03) ──────────
+   One student with two accounts — found by a shared phone number, merged into
+   one by a SUPER ADMIN (services/accountMerge.service.ts): only they see every
+   academy, and the two accounts may sit in different ones. */
+type ReqWithMerge = Request & { mergeAudit?: Record<string, unknown> }
+const pickSide = z.enum(['primary', 'secondary'])
+const picksSchema = z.object({
+  name: pickSide, phone: pickSide, photo: pickSide, registration: pickSide, academy: pickSide, approval: pickSide,
+}).partial().optional()
+const mergePairSchema = z.object({
+  primaryId:   z.string().trim().min(1),
+  secondaryId: z.string().trim().min(1),
+  picks:       picksSchema,
+})
+const mergeSchema = mergePairSchema.extend({ confirmEmail: z.string().trim().min(1, 'Type the email of the account being closed') })
+const dismissSchema = z.object({ userIds: z.array(z.string().trim().min(1)).min(2).max(20) })
+
+router.get('/duplicates', requireRole('super_admin'), async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { findDuplicateGroups } = await import('@/services/accountMerge.service.ts')
+    const org = typeof req.query['organizationId'] === 'string' ? req.query['organizationId'] : undefined
+    const r = await findDuplicateGroups({ ...(org ? { organizationId: org } : {}), includeDismissed: req.query['dismissed'] === '1' })
+    sendSuccess(res, r)
+  } catch (err) { next(err) }
+})
+
+router.get('/duplicates/compare', requireRole('super_admin'), async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { compareAccounts } = await import('@/services/accountMerge.service.ts')
+    const ids = String(req.query['ids'] ?? '').split(',').map(x => x.trim()).filter(Boolean)
+    sendSuccess(res, await compareAccounts(ids))
+  } catch (err) { next(err) }
+})
+
+router.post('/duplicates/preview', requireRole('super_admin'), validate(mergePairSchema), async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { previewMerge } = await import('@/services/accountMerge.service.ts')
+    const b = req.body as z.infer<typeof mergePairSchema>
+    sendSuccess(res, await previewMerge(b.primaryId, b.secondaryId, b.picks))
+  } catch (err) { next(err) }
+})
+
+router.post('/duplicates/merge', requireRole('super_admin'), validate(mergeSchema),
+  audit('user.merge', 'User', r => String((r.body as { primaryId?: string }).primaryId ?? ''), r => (r as ReqWithMerge).mergeAudit ?? {}),
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const { mergeAccounts } = await import('@/services/accountMerge.service.ts')
+      const b = req.body as z.infer<typeof mergeSchema>
+      const r = await mergeAccounts({ ...b, by: { id: req.user!.id, email: req.user!.email } })
+      ;(req as ReqWithMerge).mergeAudit = {
+        mergeId: r.mergeId, kept: r.primaryId, closed: b.secondaryId, closedEmail: r.secondaryEmail,
+        moved: r.items.map(i => `${i.label}: ${i.moved} moved, ${i.dropped} dropped`),
+      }
+      sendSuccess(res, r, 'Accounts merged.')
+    } catch (err) { next(err) }
+  })
+
+router.post('/duplicates/dismiss', requireRole('super_admin'), validate(dismissSchema),
+  audit('user.duplicateDismiss', 'User', r => String((r.body as { userIds?: string[] }).userIds?.[0] ?? ''), r => ({ userIds: (r.body as { userIds?: string[] }).userIds })),
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const { dismissGroup } = await import('@/services/accountMerge.service.ts')
+      sendSuccess(res, await dismissGroup((req.body as { userIds: string[] }).userIds, req.user!.id), 'Marked as not a duplicate.')
+    } catch (err) { next(err) }
+  })
+
+router.delete('/duplicates/dismiss/:key', requireRole('super_admin'), async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { undismissGroup } = await import('@/services/accountMerge.service.ts')
+    await undismissGroup(String(req.params['key'] ?? ''))
+    sendSuccess(res, { key: req.params['key'] }, 'Shown again.')
+  } catch (err) { next(err) }
+})
+
+router.get('/duplicates/merges', requireRole('super_admin'), async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { listMerges } = await import('@/services/accountMerge.service.ts')
+    const { page, per_page } = parsePagination(req.query as Record<string, unknown>)
+    const r = await listMerges({ page, perPage: per_page })
+    sendSuccess(res, r.docs, undefined, 200, buildPaginationMeta(r.total, page, per_page))
+  } catch (err) { next(err) }
+})
+
+router.post('/duplicates/merges/:id/undo', requireRole('super_admin'),
+  audit('user.mergeUndo', 'AccountMerge', r => String(r.params['id'] ?? ''), r => ({ notes: (r as ReqWithMerge).mergeAudit?.['notes'] ?? [] })),
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const { undoMerge } = await import('@/services/accountMerge.service.ts')
+      const r = await undoMerge(String(req.params['id'] ?? ''), req.user!.id)
+      ;(req as ReqWithMerge).mergeAudit = { notes: r.notes }
+      sendSuccess(res, r, r.notes.length ? 'Undone, with notes.' : 'Merge undone.')
+    } catch (err) { next(err) }
+  })
+
 /* POST /admin/users/:id/login-link — a one-time login link for a student
    (the user, 2026-10-29): {CLIENT_URL}/s/<code>, signs the student in ONCE
    within 24 hours with no password, then opens their class schedule. The
@@ -2120,7 +2214,8 @@ router.get('/programs/students', requireInstructor, async (req: Request, res: Re
     if (q.length < 2) { sendSuccess(res, []); return }
     const rx = new RegExp(q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i')
     const org = await mentorCalendarOrg(req)
-    const rows = await UserModel.find({ role: 'student', $or: [{ name: rx }, { email: rx }], ...(org ? { organizationId: org } : {}) })
+    /* Not an account merged into another — it is closed; its person is the other one. */
+    const rows = await UserModel.find({ role: 'student', mergedInto: { $exists: false }, $or: [{ name: rx }, { email: rx }], ...(org ? { organizationId: org } : {}) })
       .select('name email').limit(20).lean() as any[]
     sendSuccess(res, rows.map(u => ({ id: String(u._id), name: u.name, email: u.email })))
   } catch (err) { next(err) }

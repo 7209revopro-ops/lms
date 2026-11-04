@@ -577,6 +577,8 @@ export class AdminController {
       const filter: Record<string, unknown> = {
         role:             'student',
         enrollmentStatus: { $exists: true },
+        /* An account merged into another is closed — its person is the other one. */
+        mergedInto:       { $exists: false },
         /* Express-only members belong in the Express Members section, not in
            the request pipeline — EXCEPT the ones this pipeline put there.
 
@@ -721,6 +723,8 @@ export class AdminController {
       const filter: Record<string, unknown> = {
         role:       'student',
         signupType: 'express',
+        /* An account merged into another is closed — its person is the other one. */
+        mergedInto: { $exists: false },
       }
       if (orgId2) {
         const { Types: OTypes } = await import('mongoose')

@@ -1099,7 +1099,7 @@ export class AuthService {
        "enter your code" for an email that would never get one). This tells a
        visitor whether an email has an account — accepted; the route is rate
        limited, and password login still answers "Invalid email or password". */
-    const user = await this.userRepo.findOne({ email: email.toLowerCase().trim() })
+    const user = await this.userRepo.findByEmailForSignIn(email)
     if (!user) {
       throw new AuthError('ACCOUNT_NOT_FOUND', 'No account found with this email. Check the spelling, or create an account.', 404)
     }
@@ -1126,7 +1126,7 @@ export class AuthService {
   ): Promise<{ user: ReturnType<typeof toSafeUser>; tokens: TokenPair }> {
     const invalid = () => new AuthError('INVALID_OTP', 'That code is invalid or has expired. Request a new one.', 400)
 
-    const user = await this.userRepo.findOne({ email: email.toLowerCase().trim() })
+    const user = await this.userRepo.findByEmailForSignIn(email)
     if (!user || !user.isActive) throw invalid()
 
     const tokenHash = this.#hashToken(`${user.id}:${code.trim()}`)
@@ -1439,7 +1439,7 @@ export class AuthService {
   async forgotPassword(email: string, portal: 'client' | 'admin' = 'client'): Promise<void> {
     /* Always succeed visibly (don't leak account existence).
        Only do work when an active account is found. */
-    const user = await this.userRepo.findOne({ email: email.toLowerCase().trim() })
+    const user = await this.userRepo.findByEmailForSignIn(email)
     if (!user || !user.isActive) {
       logger.debug({ email }, 'forgot-password: no active account, silently skipping')
       return

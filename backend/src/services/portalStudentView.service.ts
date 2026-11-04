@@ -27,6 +27,8 @@ import { deskAccountFor } from '@/services/portalActivity.service.ts'
 import { toSeconds } from '@/utils/jwt.ts'
 import { env } from '@/config/env.ts'
 import { logger } from '@/utils/logger.ts'
+import { followMerged } from '@/utils/mergedAccount.ts'
+
 
 /** The code in the link: a bearer secret for this long, then useless (as the admin's handoff). */
 const HANDOFF_TTL_MS = 60_000
@@ -45,8 +47,13 @@ export async function studentViewForPortal(input: { email: unknown; byName: unkn
      things except the account's security, payments and ID documents, and audits each change as the person. The
      portal decides who may ask for it. */
   const mode: 'read' | 'write' = input.mode === 'write' ? 'write' : 'read'
-  const student = await UserModel.findOne({ email, role: 'student' }).select('_id name email isActive organizationId').lean() as
-    { _id: unknown; name?: string; email: string; isActive?: boolean; organizationId?: unknown } | null
+  type Student = { _id: unknown; name?: string; email: string; isActive?: boolean; organizationId?: unknown; mergedInto?: unknown }
+  const FIELDS = '_id name email isActive organizationId mergedInto'
+  /* An address merged into another account is that account (utils/mergedAccount.ts). */
+  const student = await followMerged(
+    await UserModel.findOne({ email, role: 'student' }).select(FIELDS).lean() as Student | null,
+    id => UserModel.findOne({ _id: id, role: 'student' }).select(FIELDS).lean() as Promise<Student | null>,
+  )
   if (!student) throw new PortalError('NOT_FOUND', 'This student has no account in the LMS', 404)
   if (student.isActive === false) throw new PortalError('ACCOUNT_DISABLED', 'This account is disabled in the LMS and cannot be viewed', 400)
 

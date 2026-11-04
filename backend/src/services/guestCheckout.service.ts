@@ -86,7 +86,10 @@ export async function prepareGuestCheckout(input: { slug?: unknown; name?: unkno
   if (course.isFree || !(course.price > 0)) throw new GuestCheckoutError('COURSE_IS_FREE', 'This course is free — create an account to enrol', 400)
 
   /* The account: the one with this email, or a new one. Staff addresses are never used for a purchase. */
-  let user: any = await UserModel.findOne({ email }).select('role isActive enrollmentApplication phone enrollmentStatus approvedByEmail fullRegistrationSubmittedAt registrationDue').lean()
+  const USER_SELECT = 'role isActive enrollmentApplication phone enrollmentStatus approvedByEmail fullRegistrationSubmittedAt registrationDue mergedInto'
+  let user: any = await UserModel.findOne({ email }).select(USER_SELECT).lean()
+  /* An account merged into another (services/accountMerge.service.ts) buys as that one. */
+  for (let hop = 0; user?.mergedInto && hop < 5; hop++) user = await UserModel.findById(user.mergedInto).select(USER_SELECT).lean()
   let created = false
   if (user) {
     if (user.role !== 'student') throw new GuestCheckoutError('EMAIL_NOT_STUDENT', 'This email belongs to a staff account — please use another email', 409)

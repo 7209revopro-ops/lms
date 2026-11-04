@@ -75,14 +75,23 @@ export async function studentCsFromPortal(input: { students: unknown }): Promise
   }
   if (!told.length) return { updated: 0, unchanged: 0, notFound: [] }
 
+  type StudentDoc = { _id: Types.ObjectId; email: string; mergedInto?: Types.ObjectId; tetraCs?: { name?: string; team?: string; code?: string; open?: boolean; onboarded?: boolean; onboardedAt?: Date | null } }
   const ids = [...new Set(told.map(t => t.lmsUserId).filter(Boolean))].map(id => new Types.ObjectId(id))
   const emails = [...new Set(told.map(t => t.email).filter(e => e.includes('@')))]
   const docs = await UserModel.find({
     role: 'student',
     $or: [...(ids.length ? [{ _id: { $in: ids } }] : []), ...(emails.length ? [{ email: { $in: emails } }] : [])],
-  }).select('_id email tetraCs').lean() as unknown as { _id: Types.ObjectId; email: string; tetraCs?: { name?: string; team?: string; code?: string; open?: boolean; onboarded?: boolean; onboardedAt?: Date | null } }[]
-  const byId = new Map(docs.map(d => [String(d._id), d]))
-  const byEmail = new Map(docs.map(d => [d.email, d]))
+  }).select('_id email tetraCs mergedInto').lean() as unknown as StudentDoc[]
+  /* A student merged into another account (services/accountMerge.service.ts) is that account: the
+     portal may still know them by the address or id that was closed. A merge re-points earlier
+     merges at the account it keeps, so one step reaches it. */
+  const keptIds = [...new Set(docs.filter(d => d.mergedInto).map(d => String(d.mergedInto)))]
+  const kept = new Map((keptIds.length
+    ? await UserModel.find({ _id: { $in: keptIds.map(id => new Types.ObjectId(id)) }, role: 'student' }).select('_id email tetraCs').lean() as unknown as StudentDoc[]
+    : []).map(d => [String(d._id), d]))
+  const person = (d: StudentDoc) => (d.mergedInto ? kept.get(String(d.mergedInto)) : d)
+  const byId = new Map(docs.flatMap(d => { const p = person(d); return p ? [[String(d._id), p] as const] : [] }))
+  const byEmail = new Map(docs.flatMap(d => { const p = person(d); return p ? [[d.email, p] as const] : [] }))
 
   const at = new Date()
   const result: StudentCsResult = { updated: 0, unchanged: 0, notFound: [] }

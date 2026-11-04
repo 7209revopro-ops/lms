@@ -121,9 +121,11 @@ export async function resolveStudents(refs: unknown, orgId: string | null): Prom
     role: 'student',
     $or: [{ _id: { $in: ids.map(i => new Types.ObjectId(i)) } }, { email: { $in: emails } }],
     ...(orgId ? { organizationId: new Types.ObjectId(orgId) } : {}),
-  }).select('_id email').lean() as any[]
+  }).select('_id email mergedInto').lean() as any[]
   const found = new Set(users.flatMap(u => [String(u._id), String(u.email ?? '').toLowerCase()]))
-  return { ids: users.map(u => u._id), missing: list.filter(r => !found.has(r.toLowerCase())) }
+  /* A student merged into another account (services/accountMerge.service.ts) is that account. */
+  const people = [...new Map(users.map(u => { const id = u.mergedInto ?? u._id; return [String(id), id] })).values()]
+  return { ids: people, missing: list.filter(r => !found.has(r.toLowerCase())) }
 }
 
 async function enrol(courseId: Types.ObjectId, studentIds: Types.ObjectId[], orgId: unknown) {
@@ -536,7 +538,8 @@ export async function listPrograms(actor: Actor, opts: { studentEmails?: string[
   if (actor.organizationId) q['organizationId'] = new Types.ObjectId(actor.organizationId)
   if (actor.role === 'instructor' && actor.id) q['$or'] = [{ instructorId: new Types.ObjectId(actor.id) }, { createdById: new Types.ObjectId(actor.id) }]
   if (opts.studentEmails) {
-    const ids = (await UserModel.find({ email: { $in: opts.studentEmails.map(e => e.toLowerCase()) }, role: 'student' }).select('_id').lean() as any[]).map(u => u._id)
+    /* A merged-away address is the account it was merged into. */
+    const ids = (await UserModel.find({ email: { $in: opts.studentEmails.map(e => e.toLowerCase()) }, role: 'student' }).select('_id mergedInto').lean() as any[]).map(u => u.mergedInto ?? u._id)
     q['studentIds'] = { $in: ids }
   }
   const rows = await ProgramModel.find(q).sort({ createdAt: -1 }).limit(300).lean()

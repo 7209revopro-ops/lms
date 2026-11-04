@@ -186,6 +186,10 @@ export interface IUser extends Document {
   /* Made by a guest checkout on /explore (name, email, phone, country only) and not yet through the
      full registration form. Approved on payment all the same — this only asks for the rest. */
   registrationDue?: boolean
+  /* Merged into another account (services/accountMerge.service.ts): this one is
+     closed, and signing in with its email lands in that one. */
+  mergedInto?: Types.ObjectId
+  mergedAt?:   Date
   /* Enrollment application form data */
   enrollmentApplication?: IEnrollmentApplication
   /* Sent on to CS Portal — see services/commissionStudents.service.ts */
@@ -301,6 +305,8 @@ const UserSchema = new Schema<IUser>(
     rejectionReason:              { type: String },
     fullRegistrationSubmittedAt:  { type: Date },
     registrationDue:              { type: Boolean },
+    mergedInto:                   { type: Schema.Types.ObjectId, ref: 'User', index: true },
+    mergedAt:                     { type: Date },
     enrollmentApplication: {
       type: new Schema<IEnrollmentApplication>({
         phone:              { type: String },
@@ -2765,6 +2771,7 @@ export type AuditAction =
   | 'user.create'     | 'user.ban'        | 'user.unban'      | 'user.roleChange'
   | 'user.delete'     | 'user.impersonate' | 'user.reset2fa' | 'user.setPassword'
   | 'user.loginLink'   | 'user.moveAcademy'
+  | 'user.merge'       | 'user.mergeUndo'   | 'user.duplicateDismiss'
   | 'user.impersonate.revoke'
   | 'user.impersonate.client'
   | 'user.impersonate.write'
@@ -4205,3 +4212,80 @@ const ClassImportSchema = new Schema<IClassImport>(
 ClassImportSchema.index({ createdAt: -1 })
 
 export const ClassImportModel = mongoose.model<IClassImport>('ClassImport', ClassImportSchema)
+
+/* ─────────────────────────────────────────────────────
+   ACCOUNT MERGE — one student with two accounts (a mistyped email, an import
+   beside a sign-up) made into one by a super admin. See
+   services/accountMerge.service.ts.
+
+   `ops` is the journal, written as the merge goes, so a merge that stops
+   halfway can be seen and undone, and a finished one undone too: every row
+   moved (ids and the value it had), every row dropped as the losing copy of a
+   pair (the whole row). `before` holds what the two accounts said before.
+───────────────────────────────────────────────────── */
+export interface IAccountMerge extends Document {
+  id:          string
+  primaryId:   Types.ObjectId
+  secondaryId: Types.ObjectId
+  primaryEmail:   string
+  secondaryEmail: string
+  picks:       Record<string, 'primary' | 'secondary'>
+  before:      { primary: Record<string, unknown>; secondary: Record<string, unknown> }
+  ops:         Record<string, unknown>[]
+  summary:     { model: string; label: string; moved: number; dropped: number }[]
+  status:      'running' | 'done' | 'failed' | 'undone'
+  error?:      string
+  mergedBy:    Types.ObjectId
+  mergedByEmail?: string
+  undoneAt?:   Date
+  undoneBy?:   Types.ObjectId
+  undoNotes?:  string[]
+  createdAt:   Date
+  updatedAt:   Date
+}
+
+const AccountMergeSchema = new Schema<IAccountMerge>(
+  {
+    primaryId:      { type: Schema.Types.ObjectId, ref: 'User', required: true, index: true },
+    secondaryId:    { type: Schema.Types.ObjectId, ref: 'User', required: true, index: true },
+    primaryEmail:   { type: String, required: true },
+    secondaryEmail: { type: String, required: true },
+    picks:          { type: Schema.Types.Mixed, default: {} },
+    before:         { type: Schema.Types.Mixed, default: {} },
+    ops:            { type: Schema.Types.Mixed, default: () => [] },
+    summary:        { type: Schema.Types.Mixed, default: () => [] },
+    status:         { type: String, enum: ['running', 'done', 'failed', 'undone'], default: 'running', index: true },
+    error:          { type: String },
+    mergedBy:       { type: Schema.Types.ObjectId, ref: 'User', required: true },
+    mergedByEmail:  { type: String },
+    undoneAt:       { type: Date },
+    undoneBy:       { type: Schema.Types.ObjectId, ref: 'User' },
+    undoNotes:      { type: [String], default: undefined },
+  },
+  baseSchemaOptions,
+)
+AccountMergeSchema.index({ createdAt: -1 })
+
+export const AccountMergeModel = mongoose.model<IAccountMerge>('AccountMerge', AccountMergeSchema)
+
+/* A group of accounts a super admin said are NOT one person (a family on one
+   phone). `key` is their ids, sorted and joined: the same group stays hidden,
+   and a new account joining it shows the group again. */
+export interface IDuplicateDismissal extends Document {
+  id:          string
+  key:         string
+  userIds:     Types.ObjectId[]
+  dismissedBy: Types.ObjectId
+  createdAt:   Date
+}
+
+const DuplicateDismissalSchema = new Schema<IDuplicateDismissal>(
+  {
+    key:         { type: String, required: true, unique: true },
+    userIds:     [{ type: Schema.Types.ObjectId, ref: 'User' }],
+    dismissedBy: { type: Schema.Types.ObjectId, ref: 'User', required: true },
+  },
+  { ...baseSchemaOptions, timestamps: { createdAt: true, updatedAt: false } },
+)
+
+export const DuplicateDismissalModel = mongoose.model<IDuplicateDismissal>('DuplicateDismissal', DuplicateDismissalSchema)

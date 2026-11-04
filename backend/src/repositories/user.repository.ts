@@ -17,13 +17,33 @@ export class UserRepository extends BaseRepository<IUser> {
     super(UserModel)
   }
 
-  /* ── Find by email (includes passwordHash for auth) */
+  /* ── Find by email (includes passwordHash for auth) ─
+     An account merged into another (services/accountMerge.service.ts) is
+     closed, and its email signs in to the account it was merged into — so a
+     student who still types the old address lands in their one account. */
   async findByEmail(email: string): Promise<IUser | null> {
     /* passwordHash has select:false — must opt-in explicitly */
-    return UserModel
+    const user = await UserModel
       .findOne({ email: email.toLowerCase().trim() })
       .select('+passwordHash')
       .exec()
+    return this.followMerge(user, true)
+  }
+
+  /* findOne({ email }) for the sign-in paths that do not need the hash (login
+     code, forgot password), following a merge the same way. */
+  async findByEmailForSignIn(email: string): Promise<IUser | null> {
+    const user = await UserModel.findOne({ email: email.toLowerCase().trim() }).exec()
+    return this.followMerge(user, false)
+  }
+
+  private async followMerge(user: IUser | null, withHash: boolean): Promise<IUser | null> {
+    let cur = user
+    for (let hop = 0; cur?.mergedInto && hop < 5; hop++) {
+      const q = UserModel.findById(cur.mergedInto)
+      cur = await (withHash ? q.select('+passwordHash') : q).exec()
+    }
+    return cur
   }
 
   /* ── Find by OAuth provider ─────────────────────── */
@@ -181,6 +201,8 @@ export class UserRepository extends BaseRepository<IUser> {
     if (role === 'student') {
       // Explicit enrollmentStatus overrides the default; default is 'approved' for student lists
       filter['enrollmentStatus'] = params.enrollmentStatus ?? 'approved'
+      /* A student merged into another account is closed, and listed as that one. */
+      filter['mergedInto'] = { $exists: false }
     } else if (params.enrollmentStatus) {
       filter['enrollmentStatus'] = params.enrollmentStatus
     }
