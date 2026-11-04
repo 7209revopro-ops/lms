@@ -162,7 +162,7 @@ export type PickGroup = keyof typeof PICK_GROUPS
 export type Picks = Partial<Record<PickGroup, Side>>
 
 const USER_FIELDS = 'name email phone avatarUrl role isActive isVerified signupType enrollmentStatus categories category ' +
-  'organizationId lastLoginAt createdAt enrollmentApplication fullRegistrationSubmittedAt registrationDue mergedInto ' +
+  'organizationId lastLoginAt createdAt enrollmentApplication fullRegistrationSubmittedAt registrationDue mergedInto secondaryEmails ' +
   'approvedBy approvedByEmail approvedByName approvedByRole approvedAt rejectedBy rejectedByEmail rejectedByName rejectedAt rejectionReason'
 
 const phoneOf = (u: Lean): string => String(u.phone || u.enrollmentApplication?.phone || '').trim()
@@ -339,6 +339,7 @@ function defaultPicks(p: Lean, s: Lean): Picks {
 }
 
 export interface CompareAccount extends DuplicateAccount {
+  secondaryEmails: string[]
   counts: Record<string, number>
   categories: string[]
   details: Record<PickGroup, string>
@@ -361,6 +362,7 @@ export async function compareAccounts(ids: string[]): Promise<{ accounts: Compar
   const [cp, cs] = await Promise.all([countsFor(p._id), countsFor(s._id)])
   const accounts = [[p, cp], [s, cs]].map(([u, c]) => ({
     ...summarize(u as Lean), counts: c as Record<string, number>,
+    secondaryEmails: ((u as Lean).secondaryEmails ?? []).map((e: Lean) => e.email),
     categories: (u as Lean).categories ?? [], details: detailText(u as Lean, orgNames),
   }))
   const suggestedPrimaryId = score(s, cs) > score(p, cp) ? String(s._id) : String(p._id)
@@ -568,10 +570,23 @@ async function applyStep(st: Step, P: Types.ObjectId, S: Types.ObjectId, journal
   }
 }
 
+/* The kept account's secondary emails after the merge: its own, the closed
+   account's (from merges into it before), and the closed account's address
+   itself — never the kept account's own address, each once. */
+function secondaryEmailsAfter(p: Lean, s: Lean, mergeId: Types.ObjectId): Lean[] {
+  const out = new Map<string, Lean>()
+  for (const e of [...(p.secondaryEmails ?? []), ...(s.secondaryEmails ?? [])]) if (e?.email) out.set(e.email, e)
+  out.set(String(s.email), { email: String(s.email), source: 'merge', mergeId, addedAt: new Date() })
+  out.delete(String(p.email))
+  return [...out.values()]
+}
+
 export async function mergeAccounts(input: {
   primaryId: string; secondaryId: string; picks?: Picks; confirmEmail: string
+  /** Save the closed account's email on the kept one as a secondary email (default yes). */
+  keepSecondaryEmail?: boolean
   by: { id: string; email?: string }
-}): Promise<{ mergeId: string; primaryId: string; secondaryEmail: string; items: PlanItem[] }> {
+}): Promise<{ mergeId: string; primaryId: string; secondaryEmail: string; keptSecondaryEmail: boolean; items: PlanItem[] }> {
   const { p, s } = await loadPair(input.primaryId, input.secondaryId)
   if (String(input.confirmEmail ?? '').toLowerCase().trim() !== String(s.email).toLowerCase()) {
     throw new UserError('CONFIRM_MISMATCH', `Type ${s.email} to confirm which account is closed.`, 422)
@@ -585,11 +600,17 @@ export async function mergeAccounts(input: {
     const picks = normalisePicks(P0, S0, input.picks)
     const upd = userUpdate(P0, S0, picks)
     const P = P0._id as Types.ObjectId, S = S0._id as Types.ObjectId
+    const recId = new Types.ObjectId()
+    const keepEmail = input.keepSecondaryEmail !== false
+    if (keepEmail) {
+      upd.$set['secondaryEmails'] = secondaryEmailsAfter(P0, S0, recId)
+      if (!upd.touched.includes('secondaryEmails')) upd.touched.push('secondaryEmails')
+    }
 
     const primaryBefore = Object.fromEntries(upd.touched.map(f => [f, P0[f] ?? null]))
     const secondaryBefore = { isActive: S0.isActive !== false, mergedInto: null, mergedAt: null }
     const rec = await AccountMergeModel.create({
-      primaryId: P, secondaryId: S, primaryEmail: P0.email, secondaryEmail: S0.email, picks,
+      _id: recId, primaryId: P, secondaryId: S, primaryEmail: P0.email, secondaryEmail: S0.email, picks, keptSecondaryEmail: keepEmail,
       before: { primary: primaryBefore, secondary: secondaryBefore },
       mergedBy: input.by.id, mergedByEmail: input.by.email, status: 'running',
     })
@@ -633,7 +654,7 @@ export async function mergeAccounts(input: {
       $set: { status: 'done', summary: items.map(i => ({ model: i.model, label: i.label, moved: i.moved, dropped: i.dropped })) },
     })
     logger.info({ mergeId, primaryId: String(P), secondaryId: String(S), by: input.by.id }, 'student accounts merged')
-    return { mergeId, primaryId: String(P), secondaryEmail: S0.email, items }
+    return { mergeId, primaryId: String(P), secondaryEmail: S0.email, keptSecondaryEmail: keepEmail, items }
   } catch (err) {
     if (mergeId) {
       await AccountMergeModel.updateOne({ _id: mergeId }, { $set: { status: 'failed', error: String((err as Error)?.message ?? err) } }).catch(() => {})
@@ -716,13 +737,13 @@ export async function listMerges(params: { page: number; perPage: number }): Pro
   const { AccountMergeModel } = await import('@/models/schema.ts')
   const [docs, total] = await Promise.all([
     AccountMergeModel.find().sort({ createdAt: -1 }).skip((params.page - 1) * params.perPage).limit(params.perPage)
-      .select('primaryId secondaryId primaryEmail secondaryEmail picks summary status error mergedByEmail undoneAt undoNotes createdAt').lean<Lean[]>(),
+      .select('primaryId secondaryId primaryEmail secondaryEmail picks keptSecondaryEmail summary status error mergedByEmail undoneAt undoNotes createdAt').lean<Lean[]>(),
     AccountMergeModel.countDocuments(),
   ])
   return {
     docs: docs.map(d => ({
       id: String(d._id), primaryId: String(d.primaryId), secondaryId: String(d.secondaryId),
-      primaryEmail: d.primaryEmail, secondaryEmail: d.secondaryEmail, summary: d.summary ?? [],
+      primaryEmail: d.primaryEmail, secondaryEmail: d.secondaryEmail, keptSecondaryEmail: !!d.keptSecondaryEmail, summary: d.summary ?? [],
       status: d.status, error: d.error, mergedByEmail: d.mergedByEmail, undoneAt: d.undoneAt,
       undoNotes: d.undoNotes, createdAt: d.createdAt,
     })),

@@ -467,6 +467,11 @@ export function EditStudentModal({ user, onClose, onSuccess }: Props) {
                 Edit Student
               </h2>
               <p className="mt-0.5 truncate text-xs" style={{ color: 'rgba(255,255,255,0.4)' }}>{user.email}</p>
+              {!!user.secondaryEmails?.length && (
+                <p className="truncate text-[11px]" style={{ color: 'rgba(255,255,255,0.3)' }}>
+                  Secondary: {user.secondaryEmails.map(e => e.email).join(', ')}
+                </p>
+              )}
               <CsTag cs={user.tetraCs} className="mt-0.5" />
             </div>
             <Button

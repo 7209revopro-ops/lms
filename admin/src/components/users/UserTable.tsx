@@ -436,6 +436,12 @@ function UserRow({ user, index, onEdit, onViewHistory }: {
           <Mail size={12} />
           <span className="text-sm truncate max-w-[220px]">{user.email}</span>
         </div>
+        {!!user.secondaryEmails?.length && (
+          <p className="mt-0.5 truncate pl-[18px] text-[11px] max-w-[240px]" style={{ color: 'rgba(255,255,255,0.35)' }}
+            title={`Secondary email${user.secondaryEmails.length > 1 ? 's' : ''}: ${user.secondaryEmails.map(e => e.email).join(', ')}`}>
+            also {user.secondaryEmails.map(e => e.email).join(', ')}
+          </p>
+        )}
       </td>
       {user.role === 'student' && (
         <td className="px-4 py-3.5">

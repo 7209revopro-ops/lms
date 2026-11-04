@@ -91,6 +91,7 @@ export default function MergeModal({ ids, onClose }: { ids: [string, string]; on
   const [primaryId, setPrimaryId] = useState<string | null>(null)
   const [overrides, setOverrides] = useState<Picks>({})
   const [confirm, setConfirm]     = useState('')
+  const [keepEmail, setKeepEmail] = useState(true)
   useEffect(() => { if (cmp && !primaryId) setPrimaryId(cmp.suggestedPrimaryId) }, [cmp, primaryId])
 
   const [left, right] = cmp?.accounts ?? []
@@ -112,7 +113,7 @@ export default function MergeModal({ ids, onClose }: { ids: [string, string]; on
   const doMerge = async () => {
     if (!primary || !secondary) return
     try {
-      await merge.mutateAsync({ primaryId: primary.id, secondaryId: secondary.id, picks, confirmEmail: confirm })
+      await merge.mutateAsync({ primaryId: primary.id, secondaryId: secondary.id, picks, confirmEmail: confirm, keepSecondaryEmail: keepEmail })
       toast.success(`Merged. ${secondary.email} now signs in to ${primary.email}.`)
       onClose()
     } catch (err: any) {
@@ -247,8 +248,19 @@ export default function MergeModal({ ids, onClose }: { ids: [string, string]; on
                 </section>
 
                 {/* 4 — confirm */}
-                {secondary && (
-                  <section>
+                {secondary && primary && (
+                  <section className="space-y-3">
+                    <label className="flex cursor-pointer items-start gap-2.5 rounded-xl p-3 text-xs"
+                      style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.07)', color: 'rgba(255,255,255,0.75)' }}>
+                      <input type="checkbox" checked={keepEmail} onChange={e => setKeepEmail(e.target.checked)}
+                        className="mt-0.5 h-3.5 w-3.5 flex-shrink-0 accent-blue-500" />
+                      <span>
+                        Save <b className="text-white">{secondary.email}</b> on <b className="text-white">{primary.email}</b> as a secondary email
+                        <span className="mt-0.5 block text-[11px]" style={{ color: muted }}>
+                          Shown on the student and found by the Students search.{secondary.secondaryEmails.length ? ` Its earlier secondary emails (${secondary.secondaryEmails.join(', ')}) come across too.` : ''}
+                        </span>
+                      </span>
+                    </label>
                     <label htmlFor="merge-confirm" className="mb-1.5 block text-xs" style={{ color: muted }}>
                       To confirm, type the email of the account being closed: <b className="text-white">{secondary.email}</b>
                     </label>

@@ -250,6 +250,8 @@ export class UserRepository extends BaseRepository<IUser> {
     const searchAnd = words.map(w => ({ $or: [
       { name:  { $regex: w, $options: 'i' } },
       { email: { $regex: w, $options: 'i' } },
+      /* An address saved from a merged account (services/accountMerge.service.ts). */
+      { 'secondaryEmails.email': { $regex: w, $options: 'i' } },
     ] }))
 
     if (categoryOr && searchAnd.length) {

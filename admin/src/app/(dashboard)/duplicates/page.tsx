@@ -166,7 +166,10 @@ function MergeHistory() {
                 <tr key={m.id} style={{ borderBottom: '1px solid rgba(255,255,255,0.04)' }} className="align-top">
                   <td className="whitespace-nowrap px-4 py-3 tabular-nums" style={{ color: muted }}>{new Date(m.createdAt).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</td>
                   <td className="px-4 py-3 text-white">{m.primaryEmail}</td>
-                  <td className="px-4 py-3" style={{ color: 'rgba(255,255,255,0.6)' }}>{m.secondaryEmail}</td>
+                  <td className="px-4 py-3" style={{ color: 'rgba(255,255,255,0.6)' }}>
+                    {m.secondaryEmail}
+                    {m.keptSecondaryEmail && <p className="text-[11px]" style={{ color: muted }}>saved as secondary email</p>}
+                  </td>
                   <td className="px-4 py-3" style={{ color: muted }} title={m.summary.map(i => `${i.label}: ${i.moved}`).join('\n')}>
                     {total} record{total === 1 ? '' : 's'}
                   </td>

@@ -744,7 +744,10 @@ const mergePairSchema = z.object({
   secondaryId: z.string().trim().min(1),
   picks:       picksSchema,
 })
-const mergeSchema = mergePairSchema.extend({ confirmEmail: z.string().trim().min(1, 'Type the email of the account being closed') })
+const mergeSchema = mergePairSchema.extend({
+  confirmEmail:       z.string().trim().min(1, 'Type the email of the account being closed'),
+  keepSecondaryEmail: z.boolean().optional(),
+})
 const dismissSchema = z.object({ userIds: z.array(z.string().trim().min(1)).min(2).max(20) })
 
 router.get('/duplicates', requireRole('super_admin'), async (req: Request, res: Response, next: NextFunction) => {
@@ -780,7 +783,7 @@ router.post('/duplicates/merge', requireRole('super_admin'), validate(mergeSchem
       const b = req.body as z.infer<typeof mergeSchema>
       const r = await mergeAccounts({ ...b, by: { id: req.user!.id, email: req.user!.email } })
       ;(req as ReqWithMerge).mergeAudit = {
-        mergeId: r.mergeId, kept: r.primaryId, closed: b.secondaryId, closedEmail: r.secondaryEmail,
+        mergeId: r.mergeId, kept: r.primaryId, closed: b.secondaryId, closedEmail: r.secondaryEmail, keptSecondaryEmail: r.keptSecondaryEmail,
         moved: r.items.map(i => `${i.label}: ${i.moved} moved, ${i.dropped} dropped`),
       }
       sendSuccess(res, r, 'Accounts merged.')

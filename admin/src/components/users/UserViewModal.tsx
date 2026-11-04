@@ -123,6 +123,9 @@ export function UserViewModal({ user, onClose }: Props) {
               </p>
               {[
                 { icon: Mail,          label: 'Email',       value: user.email },
+                ...(user.secondaryEmails?.length
+                  ? [{ icon: Mail, label: 'Secondary email', value: user.secondaryEmails.map(e => e.email).join(', ') }]
+                  : []),
                 { icon: Shield,        label: 'Role',        value: roleStyle.label },
                 { icon: Tag,           label: 'Category',    value: catStyle?.label ?? '—' },
                 { icon: Calendar,      label: 'Joined',      value: fmt(user.createdAt) },

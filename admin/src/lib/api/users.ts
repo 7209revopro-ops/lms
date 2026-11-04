@@ -71,6 +71,8 @@ export interface AdminUser {
   id:               string
   name:             string
   email:            string
+  /** Other addresses this student used — saved from accounts merged into this one (Duplicates). */
+  secondaryEmails?: { email: string; source: 'merge'; addedAt: string }[]
   avatarUrl?:       string
   role:             AdminUserRole
   isVerified:       boolean

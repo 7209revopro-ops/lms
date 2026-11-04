@@ -336,6 +336,45 @@ try {
   check('while an account is locked (a merge running), another merge is refused (409)', lockedMerge.status === 409 && lockedMerge.body?.error?.code === 'MERGE_IN_PROGRESS', why(lockedMerge))
   await raw('Mutex').deleteMany({})
 
+  /* ── M. Secondary email ─────────────────────────── */
+  section('M. secondary email')
+  const eK = await make({ name: 'Second Keep', email: 'second@gmail.com', phone: '+971555000999' })
+  const eC = await make({ name: 'Second Close', email: 'second@gamil.com', phone: '0555000999', isVerified: false })
+  const eBefore = await snapshot([eK._id, eC._id])
+  const me1 = await merge(eK, eC)   // the option not sent: saved by default
+  const keptE = await raw('User').findOne({ _id: eK._id })
+  check('by default the closed account\'s email is saved on the kept one', me1.status === 200 && me1.body?.data?.keptSecondaryEmail === true
+    && keptE?.['secondaryEmails']?.length === 1 && keptE['secondaryEmails'][0].email === 'second@gamil.com' && keptE['secondaryEmails'][0].source === 'merge'
+    && String(keptE['secondaryEmails'][0].mergeId) === me1.body.data.mergeId, JSON.stringify(keptE?.['secondaryEmails']))
+  check('the sign-in address is unchanged', keptE?.['email'] === 'second@gmail.com')
+  const sr = await call('GET', '/admin/users?role=student&search=second@gamil&per_page=50', { jar: sa })
+  check('the Students search finds the kept account by the secondary email', sr.status === 200 && (sr.body?.data ?? []).some((u: any) => u.email === 'second@gmail.com'), why(sr))
+  check('…and the admin sees it on the student', (sr.body?.data ?? []).find((u: any) => u.email === 'second@gmail.com')?.secondaryEmails?.[0]?.email === 'second@gamil.com')
+  const hist = (await call('GET', '/admin/duplicates/merges', { jar: sa })).body?.data?.find((m: any) => m.id === me1.body.data.mergeId)
+  check('Merge history says it was saved', hist?.keptSecondaryEmail === true)
+  await call('POST', `/admin/duplicates/merges/${me1.body.data.mergeId}/undo`, { jar: sa })
+  check('undo removes it — both accounts exactly as before', (await snapshot([eK._id, eC._id])) === eBefore)
+  const me2 = await call('POST', '/admin/duplicates/merge', { jar: sa, body: { primaryId: String(eK._id), secondaryId: String(eC._id), confirmEmail: eC.email, keepSecondaryEmail: false } })
+  check('with the option off nothing is saved', me2.status === 200 && me2.body?.data?.keptSecondaryEmail === false && !(await raw('User').findOne({ _id: eK._id }))?.['secondaryEmails'], why(me2))
+  check('…and signing in with the old address still works (it follows the merge)', await meVia('second@gamil.com', PW, 'eK') === 'second@gmail.com')
+  const bad2 = await call('POST', '/admin/duplicates/merge', { jar: sa, body: { primaryId: String(a1._id), secondaryId: String(a2._id), confirmEmail: a2.email, keepSecondaryEmail: 'yes' } })
+  check('a non-true/false option is refused (422)', bad2.status === 422, why(bad2))
+  /* A chain carries them: X1 into X2 (saved), then X2 into X3 (saved) → X3 has both. */
+  const x1 = await make({ name: 'Ex', email: 'ex@gamil.com', phone: '+971555001000', isVerified: false })
+  const x2 = await make({ name: 'Ex', email: 'ex@gmial.com', phone: '0555001000', isVerified: false })
+  const x3 = await make({ name: 'Ex', email: 'ex@gmail.com', phone: '555001000' })
+  await merge(x2, x1); await merge(x3, x2)
+  const x3s = ((await raw('User').findOne({ _id: x3._id }))?.['secondaryEmails'] ?? []).map((e: any) => e.email).sort()
+  check('a chain carries earlier secondary emails across', JSON.stringify(x3s) === JSON.stringify(['ex@gamil.com', 'ex@gmial.com']), JSON.stringify(x3s))
+  /* Merging back the other way never lists an account's own address as its secondary. */
+  const y1 = await make({ name: 'Why', email: 'why@gmail.com', phone: '+971555001100' })
+  const y2 = await make({ name: 'Why', email: 'why@gamil.com', phone: '0555001100', isVerified: false })
+  const my = await merge(y2, y1)
+  await call('POST', `/admin/duplicates/merges/${my.body.data.mergeId}/undo`, { jar: sa })
+  await merge(y1, y2)
+  const y1s = ((await raw('User').findOne({ _id: y1._id }))?.['secondaryEmails'] ?? []).map((e: any) => e.email)
+  check('an account never has its own address as a secondary email', !y1s.includes('why@gmail.com') && y1s.includes('why@gamil.com'), JSON.stringify(y1s))
+
   /* ── L. A big account ───────────────────────────── */
   section('L. a big account')
   const bK = await make({ name: 'Big Keep', email: 'big@gmail.com', phone: '+971555000888' })

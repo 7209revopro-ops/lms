@@ -18,6 +18,8 @@ export interface DuplicateAccount {
 export interface DuplicateGroup { key: string; phone: string; confidence: Confidence; reasons: string[]; accounts: DuplicateAccount[]; dismissed?: boolean }
 
 export interface CompareAccount extends DuplicateAccount {
+  /** Addresses saved on this account from earlier merges. */
+  secondaryEmails: string[]
   counts: Record<string, number>
   categories: string[]
   details: Record<PickGroup, string>
@@ -29,6 +31,8 @@ export interface PreviewResult { items: PlanItem[]; picks: Picks; result: Record
 
 export interface MergeRecord {
   id: string; primaryId: string; secondaryId: string; primaryEmail: string; secondaryEmail: string
+  /** The closed account's email was saved on the kept one as a secondary email. */
+  keptSecondaryEmail?: boolean
   summary: { label: string; moved: number; dropped: number }[]
   status: 'running' | 'done' | 'failed' | 'undone'; error?: string; mergedByEmail?: string
   undoneAt?: string; undoNotes?: string[]; createdAt: string
@@ -73,8 +77,8 @@ export function useMergePreview(primaryId: string | null, secondaryId: string | 
 export function useMergeAccounts() {
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: (body: { primaryId: string; secondaryId: string; picks: Picks; confirmEmail: string }) =>
-      apiPost<{ mergeId: string; primaryId: string; secondaryEmail: string; items: PlanItem[] }>('/admin/duplicates/merge', body),
+    mutationFn: (body: { primaryId: string; secondaryId: string; picks: Picks; confirmEmail: string; keepSecondaryEmail: boolean }) =>
+      apiPost<{ mergeId: string; primaryId: string; secondaryEmail: string; keptSecondaryEmail: boolean; items: PlanItem[] }>('/admin/duplicates/merge', body),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: KEYS.all })
       qc.invalidateQueries({ queryKey: ['admin', 'users'] })

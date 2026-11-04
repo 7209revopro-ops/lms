@@ -190,6 +190,10 @@ export interface IUser extends Document {
      closed, and signing in with its email lands in that one. */
   mergedInto?: Types.ObjectId
   mergedAt?:   Date
+  /* Other addresses this student has used — saved from accounts merged into
+     this one, if the admin chose to. Shown and searchable in the admin; the
+     account's own sign-in address stays `email`. */
+  secondaryEmails?: { email: string; source: 'merge'; mergeId?: Types.ObjectId; addedAt: Date }[]
   /* Enrollment application form data */
   enrollmentApplication?: IEnrollmentApplication
   /* Sent on to CS Portal — see services/commissionStudents.service.ts */
@@ -307,6 +311,15 @@ const UserSchema = new Schema<IUser>(
     registrationDue:              { type: Boolean },
     mergedInto:                   { type: Schema.Types.ObjectId, ref: 'User', index: true },
     mergedAt:                     { type: Date },
+    secondaryEmails: {
+      type: [new Schema({
+        email:   { type: String, required: true, lowercase: true, trim: true },
+        source:  { type: String, enum: ['merge'], required: true },
+        mergeId: { type: Schema.Types.ObjectId, ref: 'AccountMerge' },
+        addedAt: { type: Date, required: true },
+      }, { _id: false })],
+      default: undefined,
+    },
     enrollmentApplication: {
       type: new Schema<IEnrollmentApplication>({
         phone:              { type: String },
@@ -4230,6 +4243,8 @@ export interface IAccountMerge extends Document {
   primaryEmail:   string
   secondaryEmail: string
   picks:       Record<string, 'primary' | 'secondary'>
+  /** The closed account's email was saved on the kept one as a secondary email. */
+  keptSecondaryEmail?: boolean
   before:      { primary: Record<string, unknown>; secondary: Record<string, unknown> }
   ops:         Record<string, unknown>[]
   summary:     { model: string; label: string; moved: number; dropped: number }[]
@@ -4251,6 +4266,7 @@ const AccountMergeSchema = new Schema<IAccountMerge>(
     primaryEmail:   { type: String, required: true },
     secondaryEmail: { type: String, required: true },
     picks:          { type: Schema.Types.Mixed, default: {} },
+    keptSecondaryEmail: { type: Boolean },
     before:         { type: Schema.Types.Mixed, default: {} },
     ops:            { type: Schema.Types.Mixed, default: () => [] },
     summary:        { type: Schema.Types.Mixed, default: () => [] },
