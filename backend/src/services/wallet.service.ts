@@ -4,8 +4,8 @@
    The user, 2026-11-04: "the wallet page on every portal". The HRMS keeps
    it — salary a day at a time, what came off and why, commission, what
    finance has paid — and finds the person by the email they sign in here
-   with (hrms-backend GET /integrations/wallet). Staff only, and only ever
-   their own: never while someone is impersonating them.
+   with (hrms-backend GET /integrations/wallet). Staff only: their own, or,
+   while someone is impersonating them, theirs (2026-11-04).
 ───────────────────────────────────────────────────── */
 import { UserModel } from '@/models/schema.ts'
 import { hrms, hrmsLinked } from '@/services/classPod.service.ts'
