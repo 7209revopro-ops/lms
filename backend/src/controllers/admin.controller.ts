@@ -136,7 +136,7 @@ export class AdminController {
         tags?:         string[] | string
         categoryId?:   string
         instructorId?: string
-        program?:      '4x-trading' | 'digital-marketing' | 'ai' | 'jura'
+        program?:      '4x-trading' | 'digital-marketing' | 'ai' | 'jura' | 'cma'
         organizationId?: string
         sharedAcademies?: boolean
         programOrder?: number | null
@@ -337,8 +337,8 @@ export class AdminController {
         role:       UserRole
         bio?:       string
         headline?:  string
-        category?:  '4x-trading' | 'digital-marketing' | 'ai' | 'jura'
-        program?:   'ai' | 'digital_marketing' | 'forex' | 'jura'
+        category?:  '4x-trading' | 'digital-marketing' | 'ai' | 'jura' | 'cma'
+        program?:   'ai' | 'digital_marketing' | 'forex' | 'jura' | 'cma'
         avatarUrl?: string
         phone?:     string
       }
@@ -556,7 +556,7 @@ export class AdminController {
   updateUser = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     try {
       const id = String(req.params['id'] ?? '')
-      const dto = req.body as { role?: UserRole; isActive?: boolean; isVerified?: boolean; name?: string; email?: string; category?: '4x-trading' | 'digital-marketing' | 'ai' | 'jura' | null; categories?: ('4x-trading' | 'digital-marketing' | 'ai' | 'jura')[]; headline?: string; bio?: string; phone?: string; avatarUrl?: string; program?: 'ai' | 'digital_marketing' | 'forex' | 'jura'; sharedAcrossOrgs?: boolean }
+      const dto = req.body as { role?: UserRole; isActive?: boolean; isVerified?: boolean; name?: string; email?: string; category?: '4x-trading' | 'digital-marketing' | 'ai' | 'jura' | 'cma' | null; categories?: ('4x-trading' | 'digital-marketing' | 'ai' | 'jura' | 'cma')[]; headline?: string; bio?: string; phone?: string; avatarUrl?: string; program?: 'ai' | 'digital_marketing' | 'forex' | 'jura' | 'cma'; sharedAcrossOrgs?: boolean }
       const user = await this.userService.adminUpdate(id, dto)
       sendSuccess(res, user, 'User updated')
     } catch (err) { next(err) }

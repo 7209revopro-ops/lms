@@ -30,6 +30,7 @@ export const PROGRAMS: Record<string, { label: string; color: string; glyph: str
   'digital-marketing': { label: 'Digital Marketing', color: '#0e7fc4', glyph: 'DM' },
   ai:                  { label: 'AI',                color: '#7c3aed', glyph: 'AI' },
   jura:                { label: 'Law & HR',          color: '#b7791f', glyph: 'HR' },
+  cma:                 { label: 'CMA (US)',          color: '#0d9488', glyph: 'CMA' },
 }
 export const programOf = (p?: string) => PROGRAMS[p ?? ''] ?? { label: 'Course', color: '#0057b8', glyph: 'DI' }
 

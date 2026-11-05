@@ -44,7 +44,7 @@ const schema = z.object({
   language:     z.string().min(1, 'Language required'),
   tags:         z.string(),
   categoryId:   z.string(),
-  program:      z.enum(['4x-trading', 'digital-marketing', 'ai', 'jura', '']),
+  program:      z.enum(['4x-trading', 'digital-marketing', 'ai', 'jura', 'cma', '']),
   organizationId: z.string().optional(),
   sharedAcademies: z.boolean().optional(),
   /* Level in its programme's journey (student Class Schedule). '' = none. */
@@ -562,6 +562,7 @@ export function CourseForm({ course }: CourseFormProps) {
                     options={[
                       { value: '4x-trading',        label: 'FOREX Trading' },
                       { value: 'jura',              label: 'JURA' },
+                      { value: 'cma',               label: 'CMA' },
                       { value: 'digital-marketing', label: 'Digital Marketing' },
                       { value: 'ai',                label: 'AI' },
                     ]} />

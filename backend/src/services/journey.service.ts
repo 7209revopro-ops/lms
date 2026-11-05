@@ -37,7 +37,7 @@ export interface Journey {
 }
 
 const PROGRAM_LABEL: Record<string, string> = {
-  '4x-trading': 'Forex', 'digital-marketing': 'Digital Marketing', ai: 'AI Academy', jura: 'JURA',
+  '4x-trading': 'Forex', 'digital-marketing': 'Digital Marketing', ai: 'AI Academy', jura: 'JURA', cma: 'CMA',
 }
 
 export async function studentJourney(userId: string): Promise<Journey> {

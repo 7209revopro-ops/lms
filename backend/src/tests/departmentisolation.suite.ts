@@ -1,5 +1,5 @@
 /* ─────────────────────────────────────────────────────────────
-   Department isolation (plan.md §10) — FOREX · DM · AI · JURA.
+   Department isolation (plan.md §10) — FOREX · DM · AI · JURA · CMA.
 
    A department's sub_admin sees, and acts on, its own department's data only,
    in every admin section; another department's record answers 404 (or the
@@ -21,6 +21,7 @@
      K  devices
      L  reports
      M  admins are not narrowed
+     O  CMA — the fifth department, end to end
 
    Boots against an ISOLATED throwaway database, dropped on exit.
    Run: bun run test:departmentisolation
@@ -115,6 +116,8 @@ try {
   check('"AI & Data Science" (legacy label) → AI', departmentsNamedBy(['AI & Data Science']).join() === 'ai')
   check('"Digital Marketing" (legacy label) → DM', departmentsNamedBy(['Digital Marketing']).join() === 'digital-marketing')
   check('jura-labour-law → JURA', departmentsNamedBy(['jura-labour-law']).join() === 'jura')
+  check('cma-us and "CMA (US)" → CMA', departmentsNamedBy(['cma-us']).join() === 'cma' && departmentsNamedBy(['CMA (US)']).join() === 'cma')
+  check('nothing else reads as CMA', departmentsNamedBy(['forex-beginner', 'dm-seo', 'ai-trading', 'jura-core']).every(d => d !== 'cma'))
   check('two picks → two departments', departmentsNamedBy(['forex-advanced', 'ai-fundamentals']).sort().join() === '4x-trading,ai')
 
   /* ── Seed ───────────────────────────────────────────── */
@@ -567,6 +570,48 @@ try {
     check('M3 admin sees all three tickets', (sup.body?.data ?? []).length === 3, String((sup.body?.data ?? []).length))
     const req = await call('GET', '/admin/enrollment-requests?status=pending', { jar: ADMIN })
     check('M4 admin sees all three applicants', (req.body?.data ?? []).length === 3, String((req.body?.data ?? []).length))
+  }
+
+  /* ═══════════════════════════════════════════════ */
+  section('O  CMA — the fifth department')
+  {
+    /* Seeded here, after M, so the counts above stay what they were. */
+    const cmaSub  = await staff('Cma Sub', 'sub_admin', { program: 'cma' })
+    const cmaInst = await staff('Cma Teacher', 'instructor', { category: 'cma' })
+    const cmaStu  = await student('Cma Student', { category: 'cma', categories: ['cma'], enrollmentStatus: 'approved' })
+    await student('Cma Applicant', { categories: [], enrollmentStatus: 'pending', enrollmentApplication: { programs: ['cma-us'] } })
+    const cmaCourse = await mkCourse('CMA Course', 'cma', cmaInst)
+    await enrol(cmaStu, cmaCourse)
+    const cmaClass  = await mkClass('CMA upcoming', cmaCourse, cmaInst, 48 * H)
+    const CMA = await login(cmaSub)
+
+    const courses = await call('GET', '/admin/courses', { jar: CMA })
+    const got = ids(courses.body?.data)
+    check('O1 the CMA sub-admin lists the CMA course only', courses.status === 200 && got.size === 1 && got.has(String(cmaCourse._id)), `${courses.status} ${JSON.stringify([...got])}`)
+    const stu = await call('GET', '/admin/users?role=student', { jar: CMA })
+    const stuNames = (stu.body?.data ?? []).map((u: any) => u.name)
+    check('O2 …CMA students only', stu.status === 200 && stuNames.includes('Cma Student') && !stuNames.some((n: string) => /^(Fx|Dm|Both)/.test(n)), JSON.stringify(stuNames))
+    const inst = await call('GET', '/admin/users?role=instructor', { jar: CMA })
+    const instNames = (inst.body?.data ?? []).map((u: any) => u.name)
+    check('O3 …CMA instructors only', inst.status === 200 && instNames.includes('Cma Teacher') && !instNames.some((n: string) => /Fx|Dm|Ai|Jura/.test(n)), JSON.stringify(instNames))
+    const pend = await call('GET', '/admin/enrollment-requests?status=pending', { jar: CMA })
+    const pendNames = (pend.body?.data ?? []).map((u: any) => u.name)
+    check('O4 …and the applicant who picked CMA (US) at signup, nobody else', JSON.stringify(pendNames) === JSON.stringify(['Cma Applicant']), JSON.stringify(pendNames))
+    const lc = await call('GET', '/admin/live-classes', { jar: CMA })
+    check('O5 …and CMA classes only', lc.status === 200 && ids(lc.body?.data).has(String(cmaClass._id)) && !ids(lc.body?.data).has(String(fxClass._id)), `${lc.status}`)
+    const otherCourse = await call('GET', `/admin/courses/${fxCourse._id}/students`, { jar: CMA })
+    check('O6 a Forex roster answers 404 to CMA', otherCourse.status === 404, `${otherCourse.status} ${code(otherCourse)}`)
+
+    const fxCourses = await call('GET', '/admin/courses', { jar: FX })
+    const fxPend = (await call('GET', '/admin/enrollment-requests?status=pending', { jar: FX })).body?.data?.map((u: any) => u.name) ?? []
+    const fxStus = ((await call('GET', '/admin/users?role=student', { jar: FX })).body?.data ?? []).map((u: any) => u.name)
+    check('O7 Forex sees no CMA course, student or applicant',
+      !ids(fxCourses.body?.data).has(String(cmaCourse._id)) && !fxPend.includes('Cma Applicant') && !fxStus.includes('Cma Student'),
+      JSON.stringify({ fxPend, fxStus }))
+    const cmaRoster = await call('GET', `/admin/courses/${cmaCourse._id}/students`, { jar: DM })
+    check('O8 the CMA roster answers 404 to Digital Marketing', cmaRoster.status === 404, `${cmaRoster.status} ${code(cmaRoster)}`)
+    const adminCourses = await call('GET', '/admin/courses', { jar: ADMIN })
+    check('O9 admin sees the CMA course too', ids(adminCourses.body?.data).has(String(cmaCourse._id)))
   }
 } catch (err) {
   fail++

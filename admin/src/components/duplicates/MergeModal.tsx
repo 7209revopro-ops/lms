@@ -31,7 +31,7 @@ const GROUPS: { key: PickGroup; label: string }[] = [
 ]
 
 const muted = 'rgba(255,255,255,0.45)'
-const PROGRAMME: Record<string, string> = { '4x-trading': 'Forex', 'digital-marketing': 'Digital Marketing', ai: 'AI', jura: 'JURA' }
+const PROGRAMME: Record<string, string> = { '4x-trading': 'Forex', 'digital-marketing': 'Digital Marketing', ai: 'AI', jura: 'JURA', cma: 'CMA' }
 const fmt = (iso?: string) => iso ? new Date(iso).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }) : '—'
 
 function AccountCard({ a, keep, suggested, onKeep, countLabels }: {

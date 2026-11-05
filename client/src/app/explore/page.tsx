@@ -31,6 +31,7 @@ const PROGRAM_ALIAS: Record<string, string> = {
   forex: '4x-trading', trading: '4x-trading', fx: '4x-trading', '4x-trading': '4x-trading',
   dm: 'digital-marketing', marketing: 'digital-marketing', 'digital-marketing': 'digital-marketing',
   ai: 'ai', law: 'jura', hr: 'jura', jura: 'jura',
+  cma: 'cma', 'cma-us': 'cma', commerce: 'cma',
 }
 
 function ExploreInner() {

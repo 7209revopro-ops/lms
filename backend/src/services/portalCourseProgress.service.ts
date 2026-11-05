@@ -8,7 +8,7 @@ import { PROGRAMMES, programmeOf, type Programme } from '@/services/portalStuden
    student report"). For the Root portal's Reports → Students → Course
    progress. Read only.
 
-   GET /service/course-progress?course=<id>&academy=dubai|bangalore&program=forex|digital|jura|none
+   GET /service/course-progress?course=<id>&academy=dubai|bangalore&program=forex|digital|jura|cma|none
    - courses: every course with a student enrolled (not dropped), how many and
      how many completed — in the academy and programme asked; the most first.
    - course: the one asked, else the one with the most students. Its modules
@@ -46,7 +46,7 @@ export async function courseProgressForPortal(q: { course?: unknown; academy?: u
   const slug = typeof q.academy === 'string' ? q.academy.trim().toLowerCase() : ''
   if (slug && slug !== 'dubai' && slug !== 'bangalore') throw fail('academy is dubai or bangalore')
   const programme = (typeof q.program === 'string' ? q.program.trim().toLowerCase() : '') as Programme | ''
-  if (programme && !(programme in PROGRAMMES) && programme !== 'none') throw fail('program is forex, digital, jura or none')
+  if (programme && !(programme in PROGRAMMES) && programme !== 'none') throw fail('program is forex, digital, jura, cma or none')
   const asked = typeof q.course === 'string' ? q.course.trim() : ''
   if (asked && !Types.ObjectId.isValid(asked)) throw fail('course is a course id')
 

@@ -39,7 +39,7 @@ export interface CurrentAdmin {
   avatarUrl?:      string
   role:            'student' | 'instructor' | 'admin' | 'sub_admin' | 'support' | 'super_admin'
   organizationId?: string
-  program?:        'ai' | 'digital_marketing' | 'forex' | 'jura'
+  program?:        'ai' | 'digital_marketing' | 'forex' | 'jura' | 'cma'
   headline?:       string
   bio?:            string
   isVerified:      boolean

@@ -30,7 +30,7 @@ const STATE = {
 /* "MARKET BREAK-OUT TRADING PROGRAM" → "Market Break-Out Trading Program";
    a leading code ("DSLP - Delta Structure …", "MMC (MARKET MAKING CYCLE)")
    stays in capitals. */
-const KEEP_CAPS = new Set(['AI', 'UAE', 'HR', 'MBT', 'DWT', 'MMC', 'HADC', 'DSLP', 'SEO', 'JURA'])
+const KEEP_CAPS = new Set(['AI', 'UAE', 'HR', 'MBT', 'DWT', 'MMC', 'HADC', 'DSLP', 'SEO', 'JURA', 'CMA', 'US'])
 const courseName = (t: string) => t.trim().split(/\s+/).map(w => {
   const bare = w.replace(/[^A-Za-z]/g, '')
   if (KEEP_CAPS.has(bare.toUpperCase()) && bare === bare.toUpperCase()) return w

@@ -102,7 +102,7 @@ export class UserService {
   async adminUpdate(
     id: string,
     dto: {
-      sharedAcrossOrgs?: boolean; meetEmail?: string; role?: UserRole; isActive?: boolean; isVerified?: boolean; name?: string; email?: string; category?: '4x-trading' | 'digital-marketing' | 'ai' | 'jura' | null; categories?: ('4x-trading' | 'digital-marketing' | 'ai' | 'jura')[]; avatarUrl?: string; headline?: string; bio?: string; phone?: string; program?: import('@/types/index.ts').ProgramType },
+      sharedAcrossOrgs?: boolean; meetEmail?: string; role?: UserRole; isActive?: boolean; isVerified?: boolean; name?: string; email?: string; category?: '4x-trading' | 'digital-marketing' | 'ai' | 'jura' | 'cma' | null; categories?: ('4x-trading' | 'digital-marketing' | 'ai' | 'jura' | 'cma')[]; avatarUrl?: string; headline?: string; bio?: string; phone?: string; program?: import('@/types/index.ts').ProgramType },
   ): Promise<IUser> {
     if (!Types.ObjectId.isValid(id)) {
       throw new UserError('INVALID_ID', 'Invalid user id', 400)
@@ -230,8 +230,8 @@ export class UserService {
     role:            UserRole
     bio?:            string
     headline?:       string
-    category?:       '4x-trading' | 'digital-marketing' | 'ai' | 'jura'
-    categories?:     ('4x-trading' | 'digital-marketing' | 'ai' | 'jura')[]
+    category?:       '4x-trading' | 'digital-marketing' | 'ai' | 'jura' | 'cma'
+    categories?:     ('4x-trading' | 'digital-marketing' | 'ai' | 'jura' | 'cma')[]
     avatarUrl?:      string
     approvedBy?:     string
     organizationId?: string

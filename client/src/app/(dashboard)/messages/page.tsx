@@ -17,7 +17,7 @@ import { useUIStore } from '@/store/ui.store'
 import { useDesktopAlerts } from '@/lib/desktopAlerts'
 
 const PROGRAM: Record<string, string> = {
-  '4x-trading': 'Forex', 'digital-marketing': 'Digital Marketing', 'ai': 'AI', 'jura': 'Jura',
+  '4x-trading': 'Forex', 'digital-marketing': 'Digital Marketing', 'ai': 'AI', 'jura': 'Jura', 'cma': 'CMA',
 }
 const MAX = 2000
 

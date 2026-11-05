@@ -32,6 +32,7 @@ const SCOPE_COLOR: Record<string, string> = {
   digital_marketing: '#0057b8',
   ai:                '#8B5CF6',
   jura:              '#8B5CF6',
+  cma:               '#14B8A6',
 }
 
 export function AdminTopbar() {

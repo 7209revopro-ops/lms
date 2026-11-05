@@ -41,7 +41,7 @@ import { createHash, randomBytes } from 'node:crypto'
 const ORG_SLUG        = 'dubai'
 /* Category and batch are flags so the same proven code imports any programme.
    Defaults keep the original Digital Marketing run reproducible. */
-const VALID_CATEGORIES = ['digital-marketing', '4x-trading', 'ai', 'jura'] as const
+const VALID_CATEGORIES = ['digital-marketing', '4x-trading', 'ai', 'jura', 'cma'] as const
 type Category = typeof VALID_CATEGORIES[number]
 const LOG_COLLECTION  = 'bulk_import_log'
 const TOKEN_TTL_MS    = 7 * 24 * 60 * 60 * 1000

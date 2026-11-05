@@ -7,7 +7,7 @@ import { CROSS_ORG_CLASSES_ENABLED } from '@/utils/featureFlags.ts'
 /* ─────────────────────────────────────────────────────
    Department isolation — one implementation  (plan.md §10)
    ─────────────────────────────────────────────────────
-   Delta runs four departments — Forex, Digital Marketing, AI and Jura. A
+   Delta runs five departments — Forex, Digital Marketing, AI, Jura and CMA. A
    department's sub_admin sees, and acts on, that department's data only, in
    every admin section. tenancy.ts draws the line between ACADEMIES; this
    module draws it between DEPARTMENTS inside one. The two compose: a query
@@ -32,7 +32,7 @@ import { CROSS_ORG_CLASSES_ENABLED } from '@/utils/featureFlags.ts'
         tenancy gives across academies — so an id is never confirmed to exist.
 
    What makes a record a department's (plan.md §10.3):
-     course              course.program  ('4x-trading' | 'digital-marketing' | 'ai' | 'jura')
+     course              course.program  ('4x-trading' | 'digital-marketing' | 'ai' | 'jura' | 'cma')
      live class, booking,
      recording, feedback the class's course — or, for a class shared INTO the
                          caller's academy, that academy's own cohort course
@@ -58,7 +58,7 @@ export class DepartmentError extends Error {
 export const NO_DEPARTMENT = Symbol('no-department')
 export type CallerDepartment = Department | typeof NO_DEPARTMENT | null
 
-const DEPARTMENTS: readonly string[] = ['4x-trading', 'digital-marketing', 'ai', 'jura']
+const DEPARTMENTS: readonly string[] = ['4x-trading', 'digital-marketing', 'ai', 'jura', 'cma']
 
 export function callerDepartment(req: Request): CallerDepartment {
   const u = req.user
@@ -109,7 +109,7 @@ export function memberClause(req: Request): Record<string, unknown> | null {
 /* An applicant has no category until approved (signup writes categories: []),
    so the only department signal on a pending or rejected application is the
    programme the student PICKED: an option id ('forex-beginner', 'dm-seo',
-   'ai-trading', 'jura-core' — client/src/lib/programs.ts) or, on rows written
+   'ai-trading', 'jura-core', 'cma-us' — client/src/lib/programs.ts) or, on rows written
    by an older form, the human label itself ('AI & Data Science', 'Digital
    Marketing'). Anchored at the start so 'AI Trading Automation' is AI, not
    Forex. */
@@ -118,6 +118,7 @@ const APPLICATION_PATTERN: Record<Department, RegExp> = {
   'digital-marketing': /^\s*(dm-|digital[\s_-]*marketing|social\s+media|seo\b)/i,
   'ai':                /^\s*(ai(?:[\s&:,-]|$)|data\s+science)/i,
   'jura':              /^\s*(jura|uae\s+labou?r)/i,
+  'cma':               /^\s*cma\b/i,
 }
 
 /** The departments an application names, from its programme picks. */

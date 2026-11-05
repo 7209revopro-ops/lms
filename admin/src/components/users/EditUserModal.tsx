@@ -149,25 +149,28 @@ const ALL_ROLE_LABELS: Record<string, string> = {
   student:     'Student',
 }
 
-const PROGRAM_OPTIONS: { value: 'ai' | 'digital_marketing' | 'forex' | 'jura'; label: string }[] = [
+const PROGRAM_OPTIONS: { value: 'ai' | 'digital_marketing' | 'forex' | 'jura' | 'cma'; label: string }[] = [
   { value: 'ai',                label: 'AI' },
   { value: 'digital_marketing', label: 'Digital Marketing' },
   { value: 'forex',             label: 'FOREX Trading' },
   { value: 'jura',              label: 'JURA' },
+  { value: 'cma',               label: 'CMA' },
 ]
 
-const PROGRAM_TO_CATEGORY: Record<string, '4x-trading' | 'digital-marketing' | 'ai' | 'jura'> = {
+const PROGRAM_TO_CATEGORY: Record<string, '4x-trading' | 'digital-marketing' | 'ai' | 'jura' | 'cma'> = {
   ai:                'ai',
   digital_marketing: 'digital-marketing',
   forex:             '4x-trading',
   jura:              'jura',
+  cma:               'cma', 
 }
 
-const CATEGORY_TO_PROGRAM: Record<string, 'ai' | 'digital_marketing' | 'forex' | 'jura'> = {
+const CATEGORY_TO_PROGRAM: Record<string, 'ai' | 'digital_marketing' | 'forex' | 'jura' | 'cma'> = {
   'ai':                'ai',
   'digital-marketing': 'digital_marketing',
   '4x-trading':        'forex',
   'jura':              'jura',
+  'cma':               'cma', 
 }
 
 function needsProgram(role: AdminUserRole) {
@@ -188,7 +191,7 @@ export function EditUserModal({ user, me, onClose, onSuccess }: Props) {
   const [email,         setEmail]         = useState(user.email)
   const [phone,         setPhone]         = useState(user.phone ?? '')
   const [role,          setRole]          = useState<AdminUserRole>(user.role)
-  const [program,       setProgram]       = useState<'ai' | 'digital_marketing' | 'forex' | 'jura' | ''>(() => {
+  const [program,       setProgram]       = useState<'ai' | 'digital_marketing' | 'forex' | 'jura' | 'cma' | ''>(() => {
     if (user.role === 'instructor' && user.category) {
       return CATEGORY_TO_PROGRAM[user.category] ?? ''
     }
@@ -250,7 +253,7 @@ export function EditUserModal({ user, me, onClose, onSuccess }: Props) {
         if (activeRole === 'instructor') {
           dto.category = PROGRAM_TO_CATEGORY[program]
         } else {
-          dto.program = program as 'ai' | 'digital_marketing' | 'forex' | 'jura'
+          dto.program = program as 'ai' | 'digital_marketing' | 'forex' | 'jura' | 'cma'
         }
       } else if (!needsProgram(activeRole)) {
         dto.category = null

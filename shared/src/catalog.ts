@@ -42,6 +42,7 @@ export const PROGRAMS = [
   { value: '', label: 'All' },
   { value: '4x-trading', label: 'Forex' },
   { value: 'jura', label: 'JURA' },
+  { value: 'cma',  label: 'CMA' },
   { value: 'digital-marketing', label: 'Digital Marketing' },
   { value: 'ai', label: 'AI' },
 ] as const

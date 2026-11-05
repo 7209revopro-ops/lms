@@ -32,7 +32,7 @@ export class SupportError extends Error {
 type Requester = {
   id:              string
   role:            'student' | 'instructor' | 'admin' | 'super_admin' | 'sub_admin' | 'support'
-  categoryScope?:  '4x-trading' | 'digital-marketing' | 'ai' | 'jura'
+  categoryScope?:  '4x-trading' | 'digital-marketing' | 'ai' | 'jura' | 'cma'
   organizationId?: string
 }
 
@@ -300,6 +300,7 @@ export class SupportService {
       { id: 'ai',                 label: 'AI' },
       { id: '4x-trading',        label: 'FOREX' },
       { id: 'jura',              label: 'JURA' },
+      { id: 'cma',               label: 'CMA' },
       { id: 'digital-marketing', label: 'Digital Marketing' },
     ]
     /* A department's sub_admin sees its own department's row only (plan.md §10). */

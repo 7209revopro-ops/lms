@@ -172,7 +172,7 @@ const courseCreateSchema = z.object({
   tags:         z.union([z.string(), z.array(z.string())]).optional(),
   categoryId:   z.string().optional(),
   instructorId: z.string().optional(),
-  program:      z.enum(['4x-trading', 'digital-marketing', 'ai', 'jura']).optional(),
+  program:      z.enum(['4x-trading', 'digital-marketing', 'ai', 'jura', 'cma']).optional(),
   /* Which academy the course belongs to. Super admins only — see the resolver
      in createCourse; everyone else's is their own. */
   organizationId: z.string().optional(),
@@ -227,7 +227,7 @@ const usersQuerySchema = z.object({
   per_page:          z.coerce.number().int().min(1).max(500).default(20),
   role:              z.enum(['student', 'instructor', 'admin', 'sub_admin', 'support', 'super_admin']).optional(),
   search:            z.string().trim().optional(),
-  category:          z.enum(['4x-trading', 'digital-marketing', 'ai', 'jura']).optional(),
+  category:          z.enum(['4x-trading', 'digital-marketing', 'ai', 'jura', 'cma']).optional(),
   status:            z.enum(['active', 'inactive']).optional(),
   exclude_students:  z.coerce.boolean().optional(),
   enrollmentStatus:  z.enum(['pending', 'approved', 'rejected', 'cancelled']).optional(),
@@ -360,8 +360,8 @@ const userUpdateSchema = z.object({
   /* The Google account they join Meet with, when not their login email —
      see IUser.meetEmail. '' clears it. */
   meetEmail:  z.string().trim().email().or(z.literal('')).optional(),
-  category:   z.enum(['4x-trading', 'digital-marketing', 'ai', 'jura']).nullable().optional(),
-  categories: z.array(z.enum(['4x-trading', 'digital-marketing', 'ai', 'jura'])).optional(),
+  category:   z.enum(['4x-trading', 'digital-marketing', 'ai', 'jura', 'cma']).nullable().optional(),
+  categories: z.array(z.enum(['4x-trading', 'digital-marketing', 'ai', 'jura', 'cma'])).optional(),
   /* A SUB-ADMIN'S PROGRAMME. userCreateSchema has always carried this; this
      one did not, and validate() strips what a schema does not name — so the
      Edit User modal, which requires a programme before it will let you save a
@@ -371,7 +371,7 @@ const userUpdateSchema = z.object({
      programme-scoped guard then reads undefined, including the impersonation
      one, which now fails closed — so promoting someone to sub_admin through
      the modal produced an account that could open nobody. */
-  program:    z.enum(['ai', 'digital_marketing', 'forex', 'jura']).optional(),
+  program:    z.enum(['ai', 'digital_marketing', 'forex', 'jura', 'cma']).optional(),
   avatarUrl:  z.string().url().or(z.literal('')).optional(),
   headline:   z.string().max(255).optional(),
   bio:        z.string().max(2000).optional(),
@@ -399,10 +399,10 @@ const userCreateSchema = z.object({
   role:       z.enum(['student', 'instructor', 'admin', 'sub_admin', 'support', 'super_admin']).default('instructor'),
   bio:        z.string().max(2000).optional(),
   headline:   z.string().max(255).optional(),
-  category:   z.enum(['4x-trading', 'digital-marketing', 'ai', 'jura']).optional(),
-  categories: z.array(z.enum(['4x-trading', 'digital-marketing', 'ai', 'jura'])).optional(),
+  category:   z.enum(['4x-trading', 'digital-marketing', 'ai', 'jura', 'cma']).optional(),
+  categories: z.array(z.enum(['4x-trading', 'digital-marketing', 'ai', 'jura', 'cma'])).optional(),
   avatarUrl:  z.string().url().or(z.literal('')).optional(),
-  program:    z.enum(['ai', 'digital_marketing', 'forex', 'jura']).optional(),
+  program:    z.enum(['ai', 'digital_marketing', 'forex', 'jura', 'cma']).optional(),
   /* Staff contact number — see userUpdateSchema. */
   phone:      z.string().trim().max(30).optional(),
   /* Lend this instructor to the other academy — see userUpdateSchema. */
@@ -1137,7 +1137,7 @@ router.patch('/devices/:id/revoke', requireAnyAdmin, async (req: Request, res: R
 ──────────────────────────────────────────────────────────────────────── */
 const enrollmentRequestQuerySchema = z.object({
   status:   z.enum(['pending', 'approved', 'rejected', 'cancelled', 'all']).default('pending'),
-  category: z.enum(['4x-trading', 'digital-marketing', 'ai', 'jura']).optional(),
+  category: z.enum(['4x-trading', 'digital-marketing', 'ai', 'jura', 'cma']).optional(),
   page:     z.coerce.number().min(1).default(1),
   per_page: z.coerce.number().min(1).max(100).default(20),
   /* Where the student's enrolment stands in finance (2026-10-13): none raised,
@@ -1148,7 +1148,7 @@ const enrollmentRequestQuerySchema = z.object({
 const salesStatusSchema = z.object({ ids: z.array(z.string()).min(1).max(100) })
 
 const approveEnrollmentSchema = z.object({
-  categories: z.array(z.enum(['4x-trading', 'digital-marketing', 'ai', 'jura'])).optional(),
+  categories: z.array(z.enum(['4x-trading', 'digital-marketing', 'ai', 'jura', 'cma'])).optional(),
 })
 
 const rejectEnrollmentSchema = z.object({
@@ -1224,7 +1224,7 @@ router.patch('/enrollment-requests/:userId/cancel',          requireAnyAdmin, re
 router.patch('/enrollment-requests/:userId/revoke-to-viewer', requireAnyAdmin, requireSameOrgUser('userId'), requireDepartmentApplicant('userId'), ctrl.revokeToViewer)
 
 const removeCategorySchema = z.object({
-  category: z.enum(['4x-trading', 'digital-marketing', 'ai', 'jura']),
+  category: z.enum(['4x-trading', 'digital-marketing', 'ai', 'jura', 'cma']),
 })
 router.patch('/enrollment-requests/:userId/remove-category', requireAnyAdmin, requireSameOrgUser('userId'), requireDepartmentApplicant('userId'), validate(removeCategorySchema), ctrl.removeEnrollmentCategory)
 

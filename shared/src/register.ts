@@ -53,7 +53,13 @@ export const PROGRAM_GROUPS = [
     { id: 'jura-core', label: 'JURA Program' },
     { id: 'jura-labour-law', label: 'UAE Labour Law & HR Compliance' },
   ] },
+  { title: 'Delta Commerce Academy', items: [
+    { id: 'cma-us', label: 'CMA (US)' },
+  ] },
 ] as const
+
+/** Picking it means the CMA (US) terms (site /terms/cma) are agreed to as well. */
+export const CMA_PROGRAM_ID = 'cma-us'
 
 export const STEPS = ['personal', 'address', 'program', 'account'] as const
 

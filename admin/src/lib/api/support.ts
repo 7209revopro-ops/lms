@@ -5,7 +5,7 @@ import type { TetraCs } from '@/lib/api/tetraCs'
 
 export type SupportStatus   = 'open' | 'pending' | 'resolved' | 'closed'
 export type SupportCategory = 'technical' | 'billing' | 'course' | 'account' | 'other'
-export type SupportProgram  = 'ai' | '4x-trading' | 'digital-marketing' | 'jura' | 'all'
+export type SupportProgram  = 'ai' | '4x-trading' | 'digital-marketing' | 'jura' | 'cma' | 'all'
 
 export interface SupportMessage {
   _id?:       string
@@ -22,7 +22,7 @@ export interface SupportTicket {
   userId:         SupportUser | string
   subject:        string
   category:       SupportCategory
-  program?:       'ai' | '4x-trading' | 'digital-marketing'
+  program?:       'ai' | '4x-trading' | 'digital-marketing' | 'jura' | 'cma'
   status:         SupportStatus
   messages:       SupportMessage[]
   lastMessageAt:  string
@@ -59,6 +59,8 @@ export const PROGRAM_LABELS: Record<string, string> = {
   'ai':                'AI',
   '4x-trading':        'FOREX',
   'digital-marketing': 'Digital Marketing',
+  'jura':              'JURA',
+  'cma':               'CMA',
 }
 
 export { CATEGORY_LABELS }

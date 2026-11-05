@@ -1,10 +1,10 @@
 /* ─────────────────────────────────────────────────────
-   Two spellings of the same four programmes, everywhere in this codebase.
+   Two spellings of the same five programmes, everywhere in this codebase.
 
    Student-facing / course-scoping vocabulary (Course.program, categoryScope,
-   User.category):        'ai' | 'digital-marketing' | '4x-trading' | 'jura'
+   User.category):        'ai' | 'digital-marketing' | '4x-trading' | 'jura' | 'cma'
    sub_admin's own vocabulary (User.program):
-                           'ai' | 'digital_marketing' | 'forex'     | 'jura'
+                           'ai' | 'digital_marketing' | 'forex'     | 'jura' | 'cma'
 
    This exact table used to be copy-pasted independently in reminders.job.ts,
    classHandoff.service.ts and auth.middleware.ts's injectCategoryScope — three
@@ -13,14 +13,15 @@
    (see the org-switcher scoping fixes). One table now; everything else calls
    into it. ───────────────────────────────────────────────────────────── */
 
-export type StudentProgram = '4x-trading' | 'digital-marketing' | 'ai' | 'jura'
-export type SubAdminProgram = 'forex' | 'digital_marketing' | 'ai' | 'jura'
+export type StudentProgram = '4x-trading' | 'digital-marketing' | 'ai' | 'jura' | 'cma'
+export type SubAdminProgram = 'forex' | 'digital_marketing' | 'ai' | 'jura' | 'cma'
 
 const STUDENT_TO_SUB_ADMIN: Record<StudentProgram, SubAdminProgram> = {
   'ai':                'ai',
   'digital-marketing': 'digital_marketing',
   '4x-trading':        'forex',
   'jura':               'jura',
+  'cma':                'cma',
 }
 
 const SUB_ADMIN_TO_STUDENT: Record<SubAdminProgram, StudentProgram> = {
@@ -28,6 +29,7 @@ const SUB_ADMIN_TO_STUDENT: Record<SubAdminProgram, StudentProgram> = {
   'digital_marketing':'digital-marketing',
   'forex':            '4x-trading',
   'jura':              'jura',
+  'cma':               'cma',
 }
 
 /** Course/categoryScope vocabulary → the sub_admin.program vocabulary. */

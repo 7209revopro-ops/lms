@@ -291,10 +291,10 @@ const UserSchema = new Schema<IUser>(
        to every write path to remember. */
     sharedAcrossOrgs: { type: Boolean, default: false, index: true },
     meetEmail:      { type: String, trim: true, lowercase: true, maxlength: 255 },
-    program:        { type: String, enum: ['ai', 'digital_marketing', 'forex', 'jura'] },
+    program:        { type: String, enum: ['ai', 'digital_marketing', 'forex', 'jura', 'cma'] },
     lastLoginAt:    { type: Date },
-    category:         { type: String, enum: ['4x-trading', 'digital-marketing', 'ai', 'jura'] },
-    categories:       [{ type: String, enum: ['4x-trading', 'digital-marketing', 'ai', 'jura'] }],
+    category:         { type: String, enum: ['4x-trading', 'digital-marketing', 'ai', 'jura', 'cma'] },
+    categories:       [{ type: String, enum: ['4x-trading', 'digital-marketing', 'ai', 'jura', 'cma'] }],
     signupType:       { type: String, enum: ['express', 'full'], default: 'full' },
     enrollmentStatus: { type: String, enum: ['pending', 'approved', 'rejected', 'cancelled'] },
     approvedBy:       { type: Schema.Types.ObjectId, ref: 'User' },
@@ -1092,7 +1092,7 @@ export interface IInstructorReview extends Document {
   courseId:        Types.ObjectId
   organizationId?: Types.ObjectId
   /* Student-facing programme vocabulary ('4x-trading' | 'digital-marketing' |
-     'ai' | 'jura'), copied from the course at submission time so the admin
+     'ai' | 'jura' | 'cma'), copied from the course at submission time so the admin
      list can scope by programme without a join on every query — the same
      denormalisation ClassAssignment and SupportTicket already carry their
      own `program` for. */

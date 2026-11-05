@@ -400,7 +400,7 @@ export const en = {
     referral: 'Who referred you? (optional)', programs: 'Programs', payment: 'Payment method',
     terms: 'I agree to Delta Institutions’ Terms & Conditions, Privacy Policy and KHDA training regulations.',
     termsFull: ' I confirm the information provided is accurate and complete.',
-    readTerms: 'Read the terms', readPrivacy: 'Privacy policy',
+    readTerms: 'Read the terms', readPrivacy: 'Privacy policy', readCmaTerms: 'CMA (US) terms',
     choose: 'Choose…', search: 'Search', takePhoto: 'Take a photo', fromLibrary: 'Choose from photos', fromFiles: 'Choose a PDF or file',
     replace: 'Replace', optimizing: 'Preparing…',
     create: 'Create account', creating: 'Creating account…',

@@ -20,6 +20,7 @@ import { useBackdropClose } from '@/hooks/useBackdropClose'
 const CATS = [
   { value: '4x-trading',        label: 'FOREX Trading',     color: '#fb923c', Icon: TrendingUp },
   { value: 'jura',              label: 'JURA',              color: '#8B5CF6', Icon: TrendingUp },
+  { value: 'cma',               label: 'CMA',              color: '#14B8A6', Icon: TrendingUp },
   { value: 'digital-marketing', label: 'Digital Marketing', color: '#60a5fa', Icon: BarChart2 },
   { value: 'ai',                label: 'AI',                color: '#c084fc', Icon: Cpu },
 ] as const
@@ -102,7 +103,7 @@ export function EditInstructorModal({ user, onClose, onSuccess }: Props) {
     if (name.trim()        !== user.name)            dto.name     = name.trim()
     if (email.trim()       !== user.email)           dto.email    = email.trim().toLowerCase()
     if (role               !== (user.role === 'admin' ? 'admin' : 'instructor') as 'instructor' | 'admin') dto.role = role
-    if (category           !== (user.category ?? '')) dto.category = (category || null) as '4x-trading' | 'digital-marketing' | 'ai' | 'jura' | null
+    if (category           !== (user.category ?? '')) dto.category = (category || null) as '4x-trading' | 'digital-marketing' | 'ai' | 'jura' | 'cma' | null
     if (headline.trim()    !== (user.headline ?? '')) dto.headline = headline.trim() || undefined
     if (bio.trim()         !== (user.bio ?? ''))      dto.bio      = bio.trim() || undefined
     if (newAvatarUrl)                                 dto.avatarUrl = newAvatarUrl

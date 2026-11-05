@@ -22,7 +22,7 @@ import { PortalError } from '@/services/portal.service.ts'
    One academy at a time, by the student's own account; none = both.
    One programme at a time (the user, 2026-10-29: "separate the forex course
    and digital and AI"), by the class's course (Course.program): forex,
-   digital (Digital Marketing + AI), jura, or none (no programme set); none =
+   digital (Digital Marketing + AI), jura, cma, or none (no programme set); none =
    all. Non-active then counts students with an active enrolment in it.
 ───────────────────────────────────────────────────────────── */
 
@@ -45,7 +45,7 @@ export function seatState(b: { status?: string; attendedAt?: Date | null }, c: {
 }
 
 /** Report programmes → Course.program values. "none" is every course without one of these. */
-export const PROGRAMMES = { forex: ['4x-trading'], digital: ['digital-marketing', 'ai'], jura: ['jura'] } as const
+export const PROGRAMMES = { forex: ['4x-trading'], digital: ['digital-marketing', 'ai'], jura: ['jura'], cma: ['cma'] } as const
 export type Programme = keyof typeof PROGRAMMES | 'none'
 const KNOWN = Object.values(PROGRAMMES).flat() as string[]
 /** A course's report programme. */
@@ -66,7 +66,7 @@ export async function studentReportForPortal(q: { from?: unknown; to?: unknown; 
   const slug = typeof q.academy === 'string' ? q.academy.trim().toLowerCase() : ''
   if (slug && slug !== 'dubai' && slug !== 'bangalore') throw fail('academy is dubai or bangalore')
   const programme = (typeof q.program === 'string' ? q.program.trim().toLowerCase() : '') as Programme | ''
-  if (programme && !(programme in PROGRAMMES) && programme !== 'none') throw fail('program is forex, digital, jura or none')
+  if (programme && !(programme in PROGRAMMES) && programme !== 'none') throw fail('program is forex, digital, jura, cma or none')
   const now = nowDate.getTime()
 
   const { UserModel, LiveClassModel, ClassBookingModel, EnrollmentModel, OrganizationModel, CourseModel } = await import('@/models/schema.ts')
@@ -104,7 +104,7 @@ export async function studentReportForPortal(q: { from?: unknown; to?: unknown; 
   const perClass = new Map<string, Tally & { c: any }>()
   const list: any[] = []
   /* Seats per programme in the dates and academy, whichever one is picked — for the pills. */
-  const programmes: Record<Programme, number> = { forex: 0, digital: 0, jura: 0, none: 0 }
+  const programmes: Record<Programme, number> = { forex: 0, digital: 0, jura: 0, cma: 0, none: 0 }
   for (const s of seats) {
     const u = userById.get(String(s.userId)), c = classById.get(String(s.liveClassId))
     if (!u || !c || !inAcademy(u)) continue

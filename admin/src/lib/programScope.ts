@@ -21,6 +21,7 @@ export const PROGRAM_TO_CATEGORY: Record<string, ProgramCategory> = {
   digital_marketing: 'digital-marketing',
   ai:                'ai',
   jura:              'jura',
+  cma:               'cma', 
 }
 
 /** Short label for a programme, for badges and chips. */
@@ -29,6 +30,7 @@ export const PROGRAM_LABEL: Record<string, string> = {
   digital_marketing: 'Digital Mktg',
   ai:                'AI',
   jura:              'JURA',
+  cma:               'CMA',
 }
 
 /**

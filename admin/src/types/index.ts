@@ -34,7 +34,7 @@ export interface Course {
   lessonCount?:  number
   createdAt:     string
   updatedAt:     string
-  program?:    '4x-trading' | 'digital-marketing' | 'ai' | 'jura'
+  program?:    '4x-trading' | 'digital-marketing' | 'ai' | 'jura' | 'cma'
   /* populated */
   instructor?: { id: string; name: string; avatarUrl?: string }
   category?:   { id: string; name: string }
@@ -55,7 +55,7 @@ export interface CourseFormValues {
   language:     string
   tags:         string
   categoryId:   string
-  program:      '4x-trading' | 'digital-marketing' | 'ai' | 'jura' | ''
+  program:      '4x-trading' | 'digital-marketing' | 'ai' | 'jura' | 'cma' | ''
   /** Which academy owns the course. Super admins choose; others inherit. */
   organizationId?: string
   /** Serve both academies — super admins only. */

@@ -30,7 +30,7 @@ export interface Course {
   updatedAt:     string
   instructor?: { id: string; name: string; avatarUrl?: string }
   category?:   { id: string; name: string }
-  program?:    '4x-trading' | 'digital-marketing' | 'ai' | 'jura'
+  program?:    '4x-trading' | 'digital-marketing' | 'ai' | 'jura' | 'cma'
 }
 
 export interface PaginationMeta {

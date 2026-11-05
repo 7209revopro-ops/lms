@@ -26,7 +26,7 @@ async function requester(req: Request) {
   return {
     id:            req.user!.id,
     role,
-    categoryScope: (req.user as any).categoryScope as '4x-trading' | 'digital-marketing' | 'ai' | 'jura' | undefined,
+    categoryScope: (req.user as any).categoryScope as '4x-trading' | 'digital-marketing' | 'ai' | 'jura' | 'cma' | undefined,
     organizationId,
   }
 }
@@ -48,7 +48,7 @@ export class SupportController {
       if (userRole === 'student') {
         const { UserModel } = await import('@/models/schema.ts')
         const user = await UserModel.findById(req.user!.id).select('category categories').lean()
-        const VALID = ['4x-trading', 'digital-marketing', 'ai', 'jura'] as const
+        const VALID = ['4x-trading', 'digital-marketing', 'ai', 'jura', 'cma'] as const
         type ValidProg = typeof VALID[number]
         const multi  = ((user as any)?.categories as string[] | undefined) ?? []
         const single = (user as any)?.category as string | undefined

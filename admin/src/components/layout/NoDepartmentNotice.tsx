@@ -19,7 +19,7 @@ export function NoDepartmentNotice() {
         <p className="font-semibold text-white">Your account is not assigned to a department yet.</p>
         <p className="mt-0.5">
           Sub-admins see only their own department&apos;s data, so nothing can be shown until an
-          administrator sets your department (FOREX, Digital Marketing, AI or JURA).
+          administrator sets your department (FOREX, Digital Marketing, AI, JURA or CMA).
         </p>
       </div>
     </div>

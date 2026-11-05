@@ -58,7 +58,7 @@ export class CourseController {
         priceMin:     toNum(q['price_min']),
         priceMax:     toNum(q['price_max']),
         sort:           q['sort'],
-        program:        (q['program'] as '4x-trading' | 'digital-marketing' | 'ai' | 'jura' | undefined) || undefined,
+        program:        (q['program'] as '4x-trading' | 'digital-marketing' | 'ai' | 'jura' | 'cma' | undefined) || undefined,
         organizationId: req.user?.organizationId ?? await academyFromQuery(q['academy']),
       })
 

@@ -138,11 +138,12 @@ export function creatableStaffRoles(creatorRole: string) {
   return STAFF_ROLE_OPTIONS_BY_CREATOR[creatorRole] ?? []
 }
 
-const PROGRAM_OPTIONS: { value: 'ai' | 'digital_marketing' | 'forex' | 'jura'; label: string }[] = [
+const PROGRAM_OPTIONS: { value: 'ai' | 'digital_marketing' | 'forex' | 'jura' | 'cma'; label: string }[] = [
   { value: 'ai',                label: 'AI' },
   { value: 'digital_marketing', label: 'Digital Marketing' },
   { value: 'forex',             label: 'FOREX Trading' },
   { value: 'jura',              label: 'JURA' },
+  { value: 'cma',               label: 'CMA' },
 ]
 
 function needsProgram(role: AdminUserRole) {
@@ -181,7 +182,7 @@ export function AddUserModal({ me, open, onClose }: Props) {
   const [password,      setPassword]      = useState('')
   const [showPass,      setShowPass]      = useState(false)
   const [role,          setRole]          = useState<AdminUserRole>(defaultRole)
-  const [program,       setProgram]       = useState<'ai' | 'digital_marketing' | 'forex' | 'jura' | ''>('')
+  const [program,       setProgram]       = useState<'ai' | 'digital_marketing' | 'forex' | 'jura' | 'cma' | ''>('')
   const [avatarFile,    setAvatarFile]    = useState<File | null>(null)
   const [avatarPreview, setAvatarPreview] = useState<string | null>(null)
   const [uploading,     setUploading]     = useState(false)

@@ -33,6 +33,7 @@ const ROLE_STYLE: Record<string, { bg: string; color: string; label: string }> =
 const CATEGORY_LABELS: Record<string, string> = {
   '4x-trading':        'FOREX Trading',
   'jura':              'JURA',
+  'cma':               'CMA',
   'digital-marketing': 'Digital Marketing',
   'ai':                'AI',
 }
@@ -40,16 +41,18 @@ const CATEGORY_LABELS: Record<string, string> = {
 const CATEGORY_STYLE: Record<string, { bg: string; color: string }> = {
   '4x-trading':        { bg: 'rgba(96,165,250,0.12)',  color: '#60A5FA' },
   'jura':              { bg: 'rgba(139,92,246,0.12)', color: '#8B5CF6' },
+  'cma':               { bg: 'rgba(20,184,166,0.12)', color: '#14B8A6' },
   'digital-marketing': { bg: 'rgba(52,211,153,0.12)',  color: '#34D399' },
   'ai':                { bg: 'rgba(192,132,252,0.14)', color: '#C084FC' },
 }
 
 /* Program-scoped roles (sub_admin, *_admin) store their scope in `program`
-   ('ai' | 'digital_marketing' | 'forex' | 'jura') rather than `category` — map it to
+   ('ai' | 'digital_marketing' | 'forex' | 'jura' | 'cma') rather than `category` — map it to
    the same slug space the category badge already renders. */
 const PROGRAM_TO_CATEGORY: Record<string, string> = {
   forex:              '4x-trading',
   jura:               'jura',
+  cma:                'cma', 
   digital_marketing:  'digital-marketing',
   ai:                 'ai',
 }

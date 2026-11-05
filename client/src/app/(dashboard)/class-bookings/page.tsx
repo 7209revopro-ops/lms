@@ -118,14 +118,14 @@ function fmtDateRange(s: Date, e: Date): string {
 /* ── Types ─────────────────────────────────────────────────── */
 type AccessFilter   = 'all'|'mine'
 type DeliveryFilter = 'all'|'online'|'offline'
-type ProgramFilter  = 'all'|'4x-trading'|'digital-marketing'|'ai'|'jura'
+type ProgramFilter  = 'all'|'4x-trading'|'digital-marketing'|'ai'|'jura'|'cma'
 type StatusFilter   = 'all'|'live'|'upcoming'|'ended'
 
 interface DateSection { dateKey:string; dateLabel:string; isToday:boolean; groups:ClassGroup[] }
 interface GroupKey { id:string; dateKey:string }
 
 const PROGRAM_LABELS: Record<string,string> = {
-  all:'All', '4x-trading':'FOREX', 'digital-marketing':'Digital Marketing', ai:'AI', jura:'JURA',
+  all:'All', '4x-trading':'FOREX', 'digital-marketing':'Digital Marketing', ai:'AI', jura:'JURA', cma:'CMA',
 }
 
 /* ── Panel chip ────────────────────────────────────────────── */
@@ -1329,7 +1329,7 @@ export default function ClassBookingsPage() {
   },[allClasses])
 
   const programCounts = useMemo(()=>{
-    const c:Record<string,number> = {'4x-trading':0,'digital-marketing':0,'ai':0,'jura':0}
+    const c:Record<string,number> = {'4x-trading':0,'digital-marketing':0,'ai':0,'jura':0,'cma':0}
     allClasses.forEach(lc=>{const p=effProgram(lc);if(p&&p in c)c[p]++})
     return c
   },[allClasses])
@@ -1870,7 +1870,7 @@ export default function ClassBookingsPage() {
 
                   <PanelSection label="Program" icon={<GraduationCap size={11}/>}>
                     <PanelChip active={filterProgram==='all'} onClick={()=>setFilterProgram('all')}>All Programs</PanelChip>
-                    {(['4x-trading','digital-marketing','ai','jura'] as ProgramFilter[]).map(key=>(
+                    {(['4x-trading','digital-marketing','ai','jura','cma'] as ProgramFilter[]).map(key=>(
                       <PanelChip key={key} active={filterProgram===key} onClick={()=>setFilterProgram(key)}
                         count={programCounts[key]??0}>
                         {PROGRAM_LABELS[key]}

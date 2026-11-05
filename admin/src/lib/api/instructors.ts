@@ -16,8 +16,8 @@ export interface CreateInstructorDto {
   role:        'student' | 'instructor' | 'admin'
   bio?:        string
   headline?:   string
-  category?:   '4x-trading' | 'digital-marketing' | 'ai' | 'jura'
-  categories?: ('4x-trading' | 'digital-marketing' | 'ai' | 'jura')[]
+  category?:   '4x-trading' | 'digital-marketing' | 'ai' | 'jura' | 'cma'
+  categories?: ('4x-trading' | 'digital-marketing' | 'ai' | 'jura' | 'cma')[]
   avatarUrl?:  string
   courses?:    CourseEnrollmentDto[]
   /** WhatsApp number (students: also their application's phone). */

@@ -91,6 +91,13 @@ const PROGRAM_FILTERS = [
     ring: 'rgba(139,92,246,0.15)',
   },
   {
+    id: 'cma', label: 'CMA', icon: TrendingUp,
+    color: '#14B8A6',
+    activeGrad: '#14B8A6',
+    shadow: 'rgba(20,184,166,0.35)',
+    ring: 'rgba(20,184,166,0.15)',
+  },
+  {
     id: 'digital-marketing', label: 'Digital Marketing', icon: Megaphone,
     color: 'var(--color-primary)',
     activeGrad: '#0057b8',
@@ -232,7 +239,7 @@ export default function CoursesPage() {
         transition={{ delay: 0.04, type: 'spring', stiffness: 280, damping: 26 }}
         className="mb-4">
         <div /* WRAPS ON A PHONE. This row is the whole catalogue's top-level
-                     segmentation - All / FOREX / JURA / Digital Marketing / AI -
+                     segmentation - All / FOREX / JURA / CMA / Digital Marketing / AI -
                      and at 375px five h-11 chips need ~556px inside a 343px box.
                      It scrolled, but `scrollbar-none` removed the only cue that
                      it did, so two of the five programs simply did not exist for

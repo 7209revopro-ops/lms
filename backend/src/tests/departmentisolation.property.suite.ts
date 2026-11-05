@@ -121,9 +121,9 @@ const subset = <T>(arr: readonly T[], max: number): T[] => {
 }
 
 /* ── The spec (plan.md §10.3) ─────────────────────────── */
-type Dept = '4x-trading' | 'digital-marketing' | 'ai' | 'jura'
-const DEPTS: readonly Dept[] = ['4x-trading', 'digital-marketing', 'ai', 'jura']
-const PROGRAM_OF: Record<Dept, string> = { '4x-trading': 'forex', 'digital-marketing': 'digital_marketing', 'ai': 'ai', 'jura': 'jura' }
+type Dept = '4x-trading' | 'digital-marketing' | 'ai' | 'jura' | 'cma'
+const DEPTS: readonly Dept[] = ['4x-trading', 'digital-marketing', 'ai', 'jura', 'cma']
+const PROGRAM_OF: Record<Dept, string> = { '4x-trading': 'forex', 'digital-marketing': 'digital_marketing', 'ai': 'ai', 'jura': 'jura', 'cma': 'cma' }
 /* Application picks and the department each one names — option ids from the
    signup form plus labels older forms wrote. The oracle trusts THIS table. */
 const PICKS: ReadonlyArray<readonly [string, Dept]> = [
@@ -131,6 +131,7 @@ const PICKS: ReadonlyArray<readonly [string, Dept]> = [
   ['dm-seo', 'digital-marketing'], ['dm-social', 'digital-marketing'], ['Digital Marketing', 'digital-marketing'], ['Social Media Marketing', 'digital-marketing'],
   ['ai-fundamentals', 'ai'], ['ai-trading', 'ai'], ['AI & Data Science', 'ai'], ['AI Trading Automation', 'ai'],
   ['jura-core', 'jura'], ['jura-labour-law', 'jura'], ['UAE Labour Law', 'jura'],
+  ['cma-us', 'cma'], ['CMA (US)', 'cma'],
 ]
 const DEPT_OF_PICK = new Map(PICKS.map(([p, d]) => [p, d]))
 const APPLICANT = new Set(['pending', 'rejected', 'cancelled'])

@@ -45,13 +45,13 @@ export type UserRole =
   | 'support'
 
 export type OrgSlug    = 'dubai' | 'bangalore'
-export type ProgramType = 'ai' | 'digital_marketing' | 'forex' | 'jura'
+export type ProgramType = 'ai' | 'digital_marketing' | 'forex' | 'jura' | 'cma'
 
 export type EnrollmentStatus = 'active' | 'completed' | 'dropped'
 
 export type StudentEnrollmentStatus = 'pending' | 'approved' | 'rejected' | 'cancelled'
 
-export type ProgramCategory = '4x-trading' | 'digital-marketing' | 'ai' | 'jura'
+export type ProgramCategory = '4x-trading' | 'digital-marketing' | 'ai' | 'jura' | 'cma'
 
 export type CourseStatus = 'draft' | 'published' | 'archived'
 

@@ -863,7 +863,7 @@ export default function BookingsPage() {
 
   /* Scope label for header */
   const SCOPE_TITLE: Record<string, string> = {
-    '4x-trading': 'FOREX', 'digital-marketing': 'Digital Marketing', ai: 'AI', jura: 'JURA',
+    '4x-trading': 'FOREX', 'digital-marketing': 'Digital Marketing', ai: 'AI', jura: 'JURA', cma: 'CMA',
   }
   const scopeLabel = userScope
     ? `${SCOPE_TITLE[userScope] ?? userScope} Bookings`

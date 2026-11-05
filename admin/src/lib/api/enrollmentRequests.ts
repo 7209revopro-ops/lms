@@ -5,7 +5,7 @@ import type { TetraCs } from '@/lib/api/tetraCs'
 import type { FinanceRequestFilter } from '@/lib/api/salesStatus'
 
 export type EnrollmentRequestStatus = 'pending' | 'approved' | 'rejected' | 'cancelled'
-export type ProgramCategory = '4x-trading' | 'digital-marketing' | 'ai' | 'jura'
+export type ProgramCategory = '4x-trading' | 'digital-marketing' | 'ai' | 'jura' | 'cma'
 
 export interface EnrollmentApplication {
   phone?:              string

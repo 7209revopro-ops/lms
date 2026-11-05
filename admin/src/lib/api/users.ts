@@ -89,13 +89,13 @@ export interface AdminUser {
      indistinguishable from an ordinary one in every list. */
   sharedAcrossOrgs?: boolean
   organizationId?:   string
-  category?:        '4x-trading' | 'digital-marketing' | 'ai' | 'jura'
-  categories?:      ('4x-trading' | 'digital-marketing' | 'ai' | 'jura')[]
+  category?:        '4x-trading' | 'digital-marketing' | 'ai' | 'jura' | 'cma'
+  categories?:      ('4x-trading' | 'digital-marketing' | 'ai' | 'jura' | 'cma')[]
   /* The Google account an instructor joins Meet with, when it isn't their
      login email (most log in with a non-Google Zoho address). null/absent =
      use `email`. */
   meetEmail?:       string | null
-  program?:         'ai' | 'digital_marketing' | 'forex' | 'jura'
+  program?:         'ai' | 'digital_marketing' | 'forex' | 'jura' | 'cma'
   enrollmentStatus?: 'pending' | 'approved' | 'rejected' | 'cancelled'
   /** Students only: programmes of the courses they are enrolled on — derived
       server-side, separate from the programmes they were approved into. */
@@ -349,7 +349,7 @@ export function useUpdateUser() {
          un-lending had no route at all. Who may set it is the server's
          business — an admin or super admin, and only the academy that OWNS
          the instructor. */
-    }: { id: string; meetEmail?: string; role?: AdminUser['role']; isActive?: boolean; isVerified?: boolean; name?: string; email?: string; category?: '4x-trading' | 'digital-marketing' | 'ai' | 'jura' | null; categories?: ('4x-trading' | 'digital-marketing' | 'ai' | 'jura')[]; avatarUrl?: string; headline?: string; bio?: string; phone?: string; program?: 'ai' | 'digital_marketing' | 'forex' | 'jura'; sharedAcrossOrgs?: boolean }) => {
+    }: { id: string; meetEmail?: string; role?: AdminUser['role']; isActive?: boolean; isVerified?: boolean; name?: string; email?: string; category?: '4x-trading' | 'digital-marketing' | 'ai' | 'jura' | 'cma' | null; categories?: ('4x-trading' | 'digital-marketing' | 'ai' | 'jura' | 'cma')[]; avatarUrl?: string; headline?: string; bio?: string; phone?: string; program?: 'ai' | 'digital_marketing' | 'forex' | 'jura' | 'cma'; sharedAcrossOrgs?: boolean }) => {
       const res = await api.patch<{ success: true; data: AdminUser }>(`/admin/users/${id}`, dto)
       return res.data.data
     },

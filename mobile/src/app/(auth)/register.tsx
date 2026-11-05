@@ -4,7 +4,7 @@ import { router } from 'expo-router'
 import * as WebBrowser from 'expo-web-browser'
 import { useTranslation } from 'react-i18next'
 import {
-  CENTERS, EXPERIENCE, EMPTY_FORM, GENDERS, HEAR_ABOUT, ID_TYPES, PAYMENT_METHODS, PROGRAM_GROUPS, REFERRAL, STEPS,
+  CENTERS, CMA_PROGRAM_ID, EXPERIENCE, EMPTY_FORM, GENDERS, HEAR_ABOUT, ID_TYPES, PAYMENT_METHODS, PROGRAM_GROUPS, REFERRAL, STEPS,
   formatIdNumber, fullBody, isoDate, problemOf, refusedFields, validateStep,
   type Errors, type IdType, type RegisterForm,
 } from '@shared'
@@ -156,6 +156,9 @@ export default function Register() {
       <View style={{ flexDirection: 'row', gap: 16, marginTop: 6 }}>
         <Text onPress={() => void WebBrowser.openBrowserAsync(`${env.siteUrl}/terms`)} style={{ fontFamily: fonts.semibold, fontSize: 14, color: colors.primary }}>{t('register.readTerms')}</Text>
         <Text onPress={() => void WebBrowser.openBrowserAsync(`${env.siteUrl}/privacy`)} style={{ fontFamily: fonts.semibold, fontSize: 14, color: colors.primary }}>{t('register.readPrivacy')}</Text>
+        {f.programs.includes(CMA_PROGRAM_ID) && (
+          <Text onPress={() => void WebBrowser.openBrowserAsync(`${env.siteUrl}/terms/cma`)} style={{ fontFamily: fonts.semibold, fontSize: 14, color: colors.primary }}>{t('register.readCmaTerms')}</Text>
+        )}
       </View>
     </Checkbox>
   )

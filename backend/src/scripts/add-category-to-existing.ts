@@ -24,7 +24,7 @@ import mongoose from 'mongoose'
 import { readFileSync, mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
-const VALID = ['digital-marketing', '4x-trading', 'ai', 'jura'] as const
+const VALID = ['digital-marketing', '4x-trading', 'ai', 'jura', 'cma'] as const
 type Category = typeof VALID[number]
 
 const args = new Map<string, string>()

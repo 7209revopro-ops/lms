@@ -672,7 +672,7 @@ export async function injectCategoryScope(req: Request, res: Response, next: Nex
     /* FAIL CLOSED (plan.md §10, rule R2). A sub_admin is a department head;
        one with no department used to get no categoryScope, and every
        `if (scope)` downstream read that as "unscoped" — the whole academy, all
-       four departments. Refused here instead, before any read or write runs:
+       every department. Refused here instead, before any read or write runs:
        a missing field must never widen access. */
     if (!scope) {
       if (OWN_ACCOUNT_ROUTES.has(`${req.method} ${(req.baseUrl + req.path).replace(/[/]+$/, '')}`)) { next(); return }
@@ -690,7 +690,7 @@ export async function injectCategoryScope(req: Request, res: Response, next: Nex
     const { UserModel } = await import('@/models/schema.ts')
     const user = await UserModel.findById(req.user.id).select('category').lean()
     const cat  = (user as any)?.category as string | undefined
-    if (cat === '4x-trading' || cat === 'digital-marketing' || cat === 'ai' || cat === 'jura') req.user.categoryScope = cat
+    if (cat === '4x-trading' || cat === 'digital-marketing' || cat === 'ai' || cat === 'jura' || cat === 'cma') req.user.categoryScope = cat
   }
   next()
 }

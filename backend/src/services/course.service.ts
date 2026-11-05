@@ -139,7 +139,7 @@ export class CourseService {
     tags?:           string[]
     instructorId:    string
     categoryId?:     string
-    program?:        '4x-trading' | 'digital-marketing' | 'ai' | 'jura'
+    program?:        '4x-trading' | 'digital-marketing' | 'ai' | 'jura' | 'cma'
     organizationId?: string
     sharedAcademies?: boolean
     programOrder?:   number | null
@@ -197,7 +197,7 @@ export class CourseService {
       tags:         string[]
       categoryId:   string
       instructorId: string
-      program:      '4x-trading' | 'digital-marketing' | 'ai' | 'jura' | ''
+      program:      '4x-trading' | 'digital-marketing' | 'ai' | 'jura' | 'cma' | ''
       sharedAcademies: boolean
       programOrder:    number | null
     }>,

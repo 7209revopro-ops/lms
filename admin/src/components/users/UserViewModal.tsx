@@ -22,6 +22,7 @@ const ROLE_STYLE: Record<string, { bg: string; color: string; label: string }> =
 const CATEGORY_STYLE: Record<string, { bg: string; color: string; label: string }> = {
   '4x-trading':        { bg: 'rgba(96,165,250,0.12)',  color: '#60A5FA', label: 'FOREX Trading' },
   'jura':              { bg: 'rgba(139,92,246,0.12)', color: '#8B5CF6', label: 'JURA' },
+  'cma':               { bg: 'rgba(20,184,166,0.12)', color: '#14B8A6', label: 'CMA' },
   'digital-marketing': { bg: 'rgba(52,211,153,0.12)',  color: '#34D399', label: 'Digital Marketing' },
   'ai':                { bg: 'rgba(168,85,247,0.12)',  color: '#C084FC', label: 'AI' },
 }

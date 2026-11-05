@@ -14,7 +14,7 @@ import { Types } from 'mongoose'
    every non-dropped enrolment belongs to. Removing the course removes it again,
    with nothing to keep in sync. One aggregation for any number of students. */
 
-export const PROGRAM_ORDER = ['4x-trading', 'digital-marketing', 'ai', 'jura'] as const
+export const PROGRAM_ORDER = ['4x-trading', 'digital-marketing', 'ai', 'jura', 'cma'] as const
 
 export async function enrolledProgramsByUser(
   userIds: Array<string | Types.ObjectId>,
