@@ -60,6 +60,19 @@ export const userKeys = {
    see TimezoneScope in app/providers.tsx. A page nobody is signed into yet
    has no "current user" to ask for, and firing this anyway produced a 401
    that the axios interceptor used to treat as a dead session and act on. */
+/* Retried only when the server did not really answer: no response at all (a
+   network blip, the backend mid-restart, a timeout), a 5xx, or a 429. One
+   such failure used to drop a signed-in admin on "Could not verify your
+   session" and then the sign-in form (AdminGuard). 1 s, 2 s, 4 s — about the
+   length of a backend restart. A real verdict (401, 403) is never retried. */
+const ME_RETRIES = 3
+export function retryMe(failureCount: number, err: unknown): boolean {
+  if (failureCount >= ME_RETRIES) return false
+  const status = (err as { response?: { status?: number } })?.response?.status
+  return status === undefined || status >= 500 || status === 429
+}
+export const retryMeDelay = (attempt: number) => Math.min(1000 * 2 ** attempt, 4000)
+
 export function useCurrentUser(enabled = true) {
   return useQuery({
     queryKey: userKeys.me,
@@ -68,7 +81,8 @@ export function useCurrentUser(enabled = true) {
       return data.permissions ? { ...data.user, permissions: data.permissions } : data.user
     },
     enabled,
-    retry: false,
+    retry: retryMe,
+    retryDelay: retryMeDelay,
     staleTime: 60_000,
   })
 }
