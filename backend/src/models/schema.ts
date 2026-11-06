@@ -763,7 +763,15 @@ CourseSchema.index({ instructorId: 1 })
 CourseSchema.index({ categoryId: 1 })
 CourseSchema.index({ status: 1 })
 CourseSchema.index({ organizationId: 1 })
-CourseSchema.index({ title: 'text', description: 'text', tags: 'text' })  // full-text search
+/* NO TEXT INDEX. There was one ({ title, description, tags }: 'text') and no
+   query ever used it — nothing calls $text. It was not harmless: MongoDB reads
+   a document's `language` field as the language to stem it in, accepts only
+   ~15 European ones, and refuses the write otherwise. Every course saved in
+   Malayalam, Hindi, Arabic or Tamil failed with error 17262 ("language
+   override unsupported") — the admin saw "An unexpected error occurred".
+   Dropping it from a live database: src/scripts/drop-course-text-index.ts.
+   If course search ever needs one, give it language_override: 'searchLanguage'
+   (a field courses do not have) so `language` stays ours. */
 
 export const CourseModel = mongoose.model<ICourse>('Course', CourseSchema)
 
