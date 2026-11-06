@@ -584,6 +584,69 @@ function ShareLinkButton({ url, admissionUrl, title }: { url?: string; admission
    row: the list refetches every 15 s, and a class just switched to a link can
    leave a filtered list (In-App), which would unmount a row-owned dialog and
    take the new link and its Copy button with it. */
+/* ── Table pager ─────────────────────────────────────── */
+const TABLE_PAGE_SIZE = 50
+
+/* Prev / numbered pages (at most 7, with gaps) / Next — the Courses table's
+   pager, plus "Today" whenever another page is open. */
+function TablePager({ page, totalPages, total, onPage, onToday }: {
+  page: number; totalPages: number; total: number
+  onPage: (p: number) => void; onToday?: () => void
+}) {
+  const start = total === 0 ? 0 : (page - 1) * TABLE_PAGE_SIZE + 1
+  const end   = Math.min(page * TABLE_PAGE_SIZE, total)
+  const pages: (number | '…')[] = []
+  if (totalPages <= 7) {
+    for (let i = 1; i <= totalPages; i++) pages.push(i)
+  } else {
+    pages.push(1)
+    if (page > 3) pages.push('…')
+    for (let i = Math.max(2, page - 1); i <= Math.min(totalPages - 1, page + 1); i++) pages.push(i)
+    if (page < totalPages - 2) pages.push('…')
+    pages.push(totalPages)
+  }
+  return (
+    <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-3"
+      style={{ borderTop: '1px solid rgba(255,255,255,0.06)', background: 'rgba(255,255,255,0.015)' }}>
+      <p className="text-xs" style={{ color: 'rgba(255,255,255,0.28)' }}>
+        Showing {start.toLocaleString()}–{end.toLocaleString()} of {total.toLocaleString()}
+      </p>
+      {totalPages > 1 && (
+        <div className="flex items-center gap-1">
+          {onToday && (
+            <button onClick={onToday}
+              className="mr-1 rounded-lg px-2.5 py-1 text-xs font-semibold transition-colors"
+              style={{ color: '#4d9fff', background: 'rgba(0,87,184,0.12)', border: '1px solid rgba(0,87,184,0.25)' }}>
+              Today
+            </button>
+          )}
+          <button onClick={() => onPage(page - 1)} disabled={page <= 1} aria-label="Previous page"
+            className="flex h-7 w-7 items-center justify-center rounded-lg transition-colors disabled:opacity-30"
+            style={{ color: 'rgba(255,255,255,0.55)' }}>
+            <ChevronLeft size={13} />
+          </button>
+          {pages.map((p, i) =>
+            p === '…'
+              ? <span key={`e${i}`} className="px-1 text-xs" style={{ color: 'rgba(255,255,255,0.25)' }}>…</span>
+              : <button key={p} onClick={() => onPage(p)} aria-current={p === page ? 'page' : undefined}
+                  className="flex h-7 min-w-7 items-center justify-center rounded-lg px-1 text-xs font-semibold transition-all"
+                  style={p === page
+                    ? { background: 'rgba(0,87,184,0.2)', color: '#0057b8', boxShadow: '0 0 0 1px rgba(0,87,184,0.3)' }
+                    : { color: 'rgba(255,255,255,0.38)' }}>
+                  {p}
+                </button>
+          )}
+          <button onClick={() => onPage(page + 1)} disabled={page >= totalPages} aria-label="Next page"
+            className="flex h-7 w-7 items-center justify-center rounded-lg transition-colors disabled:opacity-30"
+            style={{ color: 'rgba(255,255,255,0.55)' }}>
+            <ChevronRight size={13} />
+          </button>
+        </div>
+      )}
+    </div>
+  )
+}
+
 function TableRow({ live, index, showInstructor, onBackup }: { live: LiveClass; index: number; showInstructor: boolean; onBackup: (l: LiveClass) => void }) {
   const router      = useRouter()
   const isLiveNow   = live.status === 'live'
@@ -2138,16 +2201,72 @@ export default function LiveClassesPage() {
   }, [allItems])
 
   /* Group by date */
+  /* ── Table pages ─────────────────────────────────────
+     The table drew every session in its window — ~1,900 rows in November
+     2026, redrawn on every 15-second refresh — and the page crawled. It now
+     draws TABLE_PAGE_SIZE at a time. Filters, search and the stats still see
+     every session; only the drawing is split.
+
+     `page` in the address bar, 1-based. 0 (absent) means "the page holding
+     today": the list runs newest first, so page 1 is the far end of the
+     window and opening there would bury today. Any filter change drops the
+     explicit page and lands on today's again. */
+  const [pageParam, setPageParam] = useQueryState('page', 0)
+  const totalPages = Math.max(1, Math.ceil(items.length / TABLE_PAGE_SIZE))
+  const todayPage = useMemo(() => {
+    const today = new Date().toDateString()
+    let at = items.findIndex(i => new Date(i.scheduledStart).toDateString() === today)
+    /* No class today: the nearest one — the first that has already started
+       (newest first), or the last row when everything is still ahead. */
+    if (at < 0) {
+      const now = Date.now()
+      at = items.findIndex(i => new Date(i.scheduledStart).getTime() <= now)
+      if (at < 0) at = items.length - 1
+    }
+    return Math.floor(Math.max(0, at) / TABLE_PAGE_SIZE) + 1
+  }, [items])
+  const page = pageParam > 0 ? Math.min(pageParam, totalPages) : todayPage
+  const pageItems = useMemo(
+    () => items.slice((page - 1) * TABLE_PAGE_SIZE, page * TABLE_PAGE_SIZE),
+    [items, page])
+
+  /* Back to today's page when what is listed changes — not on first render,
+     so a reload or a shared link keeps its page. */
+  const filterSig = [activeFilter, typeFilter, deliveryFilter, courseFilter, languageFilter,
+    instructorFilter, search, dateFrom, dateTo, timeFrom, timeTo].join('|')
+  const lastFilterSig = useRef(filterSig)
+  useEffect(() => {
+    if (lastFilterSig.current === filterSig) return
+    lastFilterSig.current = filterSig
+    setQueryParams({ page: null }, 'replace')
+  }, [filterSig])
+
+  const tableTopRef = useRef<HTMLDivElement>(null)
+  const goToPage = (p: number) => {
+    setPageParam(Math.min(Math.max(1, p), totalPages))
+    tableTopRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  }
+
+  /* A day's heading counts the whole day, not just the part on this page. */
+  const dayCounts = useMemo(() => {
+    const m = new Map<string, number>()
+    for (const item of items) {
+      const key = new Date(item.scheduledStart).toDateString()
+      m.set(key, (m.get(key) ?? 0) + 1)
+    }
+    return m
+  }, [items])
+
   const grouped = useMemo(() => {
     const map = new Map<string, LiveClass[]>()
-    for (const item of items) {
+    for (const item of pageItems) {
       const key = new Date(item.scheduledStart).toDateString()
       if (!map.has(key)) map.set(key, [])
       map.get(key)!.push(item)
     }
     return Array.from(map.entries())
-      .map(([key, list]) => ({ key, label: fmtDate(list[0]!.scheduledStart), list }))
-  }, [items])
+      .map(([key, list]) => ({ key, label: fmtDate(list[0]!.scheduledStart), list, total: dayCounts.get(key) ?? list.length }))
+  }, [pageItems, dayCounts])
 
   const liveNowCount = allItems.filter(l => l.status === 'live').length
 
@@ -2515,7 +2634,7 @@ export default function LiveClassesPage() {
           )}
 
           {!isLoading && !isError && grouped.length > 0 && (
-            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
+            <motion.div ref={tableTopRef} initial={{ opacity: 0 }} animate={{ opacity: 1 }} style={{ scrollMarginTop: 80 }}>
               <div className="overflow-hidden rounded-2xl" style={{ border: '1px solid rgba(255,255,255,0.07)' }}>
                 <div className="overflow-x-auto">
                   <table className="w-full min-w-[720px]">
@@ -2544,7 +2663,8 @@ export default function LiveClassesPage() {
                                   {group.label}
                                 </span>
                                 <span className="text-[10px]" style={{ color: 'rgba(255,255,255,0.2)' }}>
-                                  · {group.list.length} {group.list.length === 1 ? 'session' : 'sessions'}
+                                  · {group.total} {group.total === 1 ? 'session' : 'sessions'}
+                                  {group.total > group.list.length && ` (${group.list.length} on this page)`}
                                 </span>
                               </div>
                             </td>
@@ -2564,6 +2684,8 @@ export default function LiveClassesPage() {
                     </tbody>
                   </table>
                 </div>
+                <TablePager page={page} totalPages={totalPages} total={items.length} onPage={goToPage}
+                  onToday={pageParam > 0 && page !== todayPage ? () => { setQueryParams({ page: null }); tableTopRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }) } : undefined} />
               </div>
             </motion.div>
           )}
