@@ -13,7 +13,7 @@ import {
   UserCheck, LayoutGrid, Building2, MapPin, UserPlus,
   ChevronDown, User, Globe, Share2, Check, FileSpreadsheet, LifeBuoy, Link2, Send,
 } from 'lucide-react'
-import { useAllLiveClasses, useCreateLiveClass, useMyMeetings, markInstructorJoined, type LiveClass, type LiveClassType, type MentorMeeting } from '@/lib/api/liveClasses'
+import { useAllLiveClasses, defaultClassWindow, gridClassWindow, dayFromToday, useCreateLiveClass, useMyMeetings, markInstructorJoined, type LiveClass, type LiveClassType, type MentorMeeting } from '@/lib/api/liveClasses'
 import { CLASS_LANGUAGES, withFlagAndNative } from '@/lib/languages'
 import { datetimeLocalToISO, isoToDatetimeLocal, getActiveTimeZone, zoneOf, foreignZoneTag } from '@/lib/timezone'
 import { useCourses } from '@/lib/api/courses'
@@ -2018,15 +2018,47 @@ export default function LiveClassesPage() {
      showing only classes would say they were free when they are not. */
   const { data: myMeetings = [] } = useMyMeetings(me?.id)
 
-  const { data: rawItems = [], isLoading, isError } = useAllLiveClasses(activeFilter)
+  /* THE DATES THIS SCREEN SHOWS, asked of the server (lib/api/liveClasses.ts
+     useAllLiveClasses). The month view: its 6-week grid, from the same `date`
+     address-bar key CalendarView reads. The table and grid: the date filter
+     when one is set, otherwise the last 14 days and the next 45. Every
+     midnight-based, so the key holds steady all day. */
+  const [monthKey] = useQueryState('date', '')
+  const today = dayFromToday(0).getTime()
+  const classWindow = useMemo(() => {
+    const ymd = (k: string) => { const [y, m, d] = k.split('-').map(Number); return new Date(y!, m! - 1, d!) }
+    const plus = (d: Date, n: number) => { const x = new Date(d); x.setDate(x.getDate() + n); return x }
+    if (view === 'month') {
+      const mm = /^(\d{4})-(\d{2})-\d{2}$/.exec(monthKey)
+      const first = mm ? new Date(Number(mm[1]), Number(mm[2]) - 1, 1) : dayFromToday(0)
+      if (!mm) first.setDate(1)
+      return gridClassWindow(plus(first, -first.getDay()))
+    }
+    const okKey = (k: string) => /^\d{4}-\d{2}-\d{2}$/.test(k)
+    if (okKey(dateFrom) || okKey(dateTo)) {
+      /* A day of slack each side: the filter reads each class on its own
+         academy's clock, which can sit either side of this browser's. */
+      const from = okKey(dateFrom) ? plus(ymd(dateFrom), -1) : plus(ymd(dateTo), -60)
+      const to   = okKey(dateTo)   ? plus(ymd(dateTo), 2)    : plus(ymd(dateFrom), 61)
+      return { from: from.toISOString(), to: to.toISOString() }
+    }
+    return defaultClassWindow()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [view, monthKey, dateFrom, dateTo, today])
+  const statsWindow = useMemo(() => defaultClassWindow(),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [today])
+
+  const { data: rawItems = [], isLoading, isError } = useAllLiveClasses(activeFilter, classWindow)
   const { data: coursesData } = useCourses({ per_page: 200 })
   const courses = coursesData?.docs ?? []
   /* Pre-fetch instructors so they're in TanStack cache before the modal mounts */
   const { data: instructorsData } = useUsers('instructor', { per_page: 200 })
   const instructors = instructorsData?.docs ?? []
 
-  /* For stats bar, always use the full unfiltered list */
-  const { data: allItems = [] } = useAllLiveClasses('all')
+  /* For stats bar: every status, the last 14 days and the next 45 — the same
+     query (and cache entry) as the table's when no filter is set. */
+  const { data: allItems = [] } = useAllLiveClasses('all', statsWindow)
 
   /* Each class's start as "YYYY-MM-DDTHH:mm" on its academy's clock. Worked out
      once per load, and only while a date or time filter is set — not on every

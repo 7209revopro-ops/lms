@@ -11,7 +11,7 @@ import {
   AlertCircle, CalendarDays, Monitor, Pencil, Video,
   Building2, MapPin,
 } from 'lucide-react'
-import { useAllLiveClasses, useAcademySchedule, useCreateLiveClass, type LiveClass, type LiveClassType } from '@/lib/api/liveClasses'
+import { useAllLiveClasses, gridClassWindow, useAcademySchedule, useCreateLiveClass, type LiveClass, type LiveClassType } from '@/lib/api/liveClasses'
 import { useCourses } from '@/lib/api/courses'
 import { useCourseOutline } from '@/lib/api/outline'
 import { useProgramInstructors, useDropInstructorOutside } from '@/lib/api/users'
@@ -580,7 +580,11 @@ export default function TimetablePage() {
     Array.from({ length: 6 }, (_, wi) => calDays.slice(wi * 7, wi * 7 + 7))
   , [calDays])
 
-  const { data: allClasses, isLoading: ownLoading } = useAllLiveClasses('all')
+  /* Only the 6 weeks on screen — an unwindowed list stops at the server's
+     cap, farthest date first, and dropped this week once November 2026 passed
+     1,000 upcoming classes. */
+  const classWindow = useMemo(() => gridClassWindow(gridStart), [gridStart])
+  const { data: allClasses, isLoading: ownLoading } = useAllLiveClasses('all', classWindow)
 
   /* A mentor's own list is just their classes; "All mentors" swaps in the
      academy's whole timetable, read-only (GET /admin/live-classes/academy-schedule).

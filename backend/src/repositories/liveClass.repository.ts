@@ -142,6 +142,9 @@ export class LiveClassRepository extends BaseRepository<ILiveClass> {
     courseIds?:      string[]
     organizationId?: string
     instructorId?:   string
+    /** Only classes starting in [from, to). Each end optional. */
+    from?:           Date
+    to?:             Date
   } = {}): Promise<ILiveClass[]> {
     const now      = Date.now()
     // Use a generous 12-hour lookback so any class up to 12h long is captured;
@@ -238,6 +241,19 @@ export class LiveClassRepository extends BaseRepository<ILiveClass> {
       } else {
         query['status'] = filter.status   // 'cancelled'
       }
+    }
+
+    /* THE DATES THE SCREEN SHOWS. With the cap below and the farthest-first
+       sort, a busy schedule (November 2026: 1,000+ upcoming classes once the
+       in-person copies went in) pushed the nearest days out of an unbounded
+       list — the admin calendar was blank from today to a week out. A screen
+       that names its window gets every class in it. Under $and: the status
+       buckets above set scheduledStart / $or themselves. */
+    if (filter.from || filter.to) {
+      const range: Record<string, Date> = {}
+      if (filter.from) range['$gte'] = filter.from
+      if (filter.to)   range['$lt']  = filter.to
+      andFilter(query, { scheduledStart: range })
     }
 
     /* The bound exists only to keep a runaway collection from flattening the

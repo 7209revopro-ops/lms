@@ -1089,7 +1089,22 @@ export class LiveClassController {
       /* Ceiling, not pagination: the admin UI filters client-side and needs the
          full set. 100/200 was low enough that weekly-repeat series pushed this
          week's classes out of the capped, farthest-future-first response. */
-      const limit  = Math.min(Number(req.query['limit'] ?? 1000), 2000)
+      /* Optional window (ISO instants): the screen asks for the dates it shows,
+         so the cap can never drop the days in front of it. A windowed ask may
+         take up to 5,000 — a 6-week month grid in November 2026 is ~2,500
+         classes — and an unwindowed one keeps the old 2,000 ceiling. */
+      const when = (k: string): Date | undefined => {
+        const v = req.query[k]
+        if (typeof v !== 'string' || !v) return undefined
+        const d = new Date(v)
+        return Number.isNaN(d.getTime()) ? undefined : d
+      }
+      const from = when('from')
+      const to   = when('to')
+      if ((req.query['from'] && !from) || (req.query['to'] && !to)) {
+        res.status(400).json({ success: false, error: { code: 'INVALID_DATE', message: 'from and to must be ISO dates.' } }); return
+      }
+      const limit = Math.min(Number(req.query['limit'] ?? 1000) || 1000, from || to ? 5000 : 2000)
       const isInstructor = req.user?.role === 'instructor'
       const scope  = isInstructor ? undefined : req.user?.categoryScope
       let courseIds: string[] | undefined
@@ -1118,6 +1133,8 @@ export class LiveClassController {
            query and dropping it would hand each academy the other's timetable. */
         organizationId: isInstructor ? undefined : req.user?.organizationId,
         instructorId:   isInstructor ? req.user?.id : undefined,
+        from,
+        to,
       })
       sendSuccess(res, docs.map(d => toDTO(d)))
     } catch (err) { next(err) }

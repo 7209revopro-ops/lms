@@ -156,14 +156,42 @@ export const liveClassKeys = {
 }
 
 /* GET /admin/live-classes — all classes across all courses (global overview page) */
-export function useAllLiveClasses(status: string = 'all') {
+/** A window of class START times, ISO instants: [from, to). */
+export interface ClassWindow { from: string; to: string }
+
+/* Midnight on the browser's clock, `days` from today — stable for the whole
+   day, so a window built from it keeps one query key (and one cache entry)
+   instead of a new one every render. */
+export function dayFromToday(days: number): Date {
+  const d = new Date(); d.setHours(0, 0, 0, 0); d.setDate(d.getDate() + days); return d
+}
+
+/* What a list with no date filter of its own asks for: the last 14 days and
+   the next 45. ~60 classes a day in November 2026 puts that near 3,500 —
+   inside the server's 5,000 for a windowed ask. */
+export function defaultClassWindow(): ClassWindow {
+  return { from: dayFromToday(-14).toISOString(), to: dayFromToday(46).toISOString() }
+}
+
+/* The days a 42-cell month grid shows, a day of slack each side: the grid is
+   built on the browser's clock and each chip lands on its academy's. */
+export function gridClassWindow(gridStart: Date): ClassWindow {
+  const from = new Date(gridStart); from.setDate(from.getDate() - 1)
+  const to   = new Date(gridStart); to.setDate(to.getDate() + 43)
+  return { from: from.toISOString(), to: to.toISOString() }
+}
+
+export function useAllLiveClasses(status: string = 'all', window?: ClassWindow) {
   return useQuery({
-    queryKey:        ['admin', 'live-classes', 'all', status],
-    /* limit is a guard-rail, not pagination — without it the server's default
-       cap silently dropped the nearest-dated classes once weekly-repeat series
-       pushed the collection past the cap (they looked deleted in this UI
-       while students could still book them). */
-    queryFn:         () => apiGet<LiveClass[]>('/admin/live-classes', { status, limit: 1000 }),
+    queryKey:        ['admin', 'live-classes', 'all', status, window?.from ?? '', window?.to ?? ''],
+    /* limit is a guard-rail, not pagination. The server sorts farthest date
+       first and stops at the limit, so an UNWINDOWED list drops the nearest
+       classes once there are more upcoming than the limit — November 2026's
+       in-person copies did exactly that, and the calendar went blank from
+       today to a week out. Screens pass the dates they show (`window`) so
+       everything in view arrives; the sidebar's live badge needs none. */
+    queryFn:         () => apiGet<LiveClass[]>('/admin/live-classes',
+      window ? { status, limit: 5000, from: window.from, to: window.to } : { status, limit: 1000 }),
     staleTime:       10_000,
     refetchInterval: 15_000,   // refresh so live status pulses update
   })

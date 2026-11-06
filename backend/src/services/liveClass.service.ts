@@ -90,7 +90,7 @@ export class LiveClassService {
 
   /* ── Public list — slug-based for the course page ─── */
   /* Admin — list all live classes across all courses */
-  async listAll(filter: { status?: string; limit?: number; courseIds?: string[]; organizationId?: string; instructorId?: string } = {}): Promise<ILiveClass[]> {
+  async listAll(filter: { status?: string; limit?: number; courseIds?: string[]; organizationId?: string; instructorId?: string; from?: Date; to?: Date } = {}): Promise<ILiveClass[]> {
     return this.liveRepo.listAll(filter)
   }
 
