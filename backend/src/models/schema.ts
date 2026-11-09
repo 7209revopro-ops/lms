@@ -3386,7 +3386,8 @@ export const ProgramGuestModel = mongoose.model<IProgramGuest>('ProgramGuest', P
 ───────────────────────────────────────────────────── */
 export type MentorMeetingKind = 'staff' | 'student' | 'client'
 /** What a meeting is for (the portal's categories, 2026-10-25) — beside its kind; optional, '' for none. */
-export const MENTOR_MEETING_CATEGORIES = ['course_pitch', 'overview', 'other'] as const
+/** course_upgrade (2026-11-09): a meeting about upgrading to a course, which `course` names. */
+export const MENTOR_MEETING_CATEGORIES = ['course_pitch', 'overview', 'other', 'course_upgrade'] as const
 export type MentorMeetingCategory = (typeof MENTOR_MEETING_CATEGORIES)[number]
 
 export interface IMentorMeeting extends Document {
@@ -3396,6 +3397,8 @@ export interface IMentorMeeting extends Document {
   title:          string
   kind:           MentorMeetingKind
   category?:      MentorMeetingCategory | ''
+  /** The course a Course Upgradation meeting is about (the portal's course names: DWT, MSNR, DSLP …), '' otherwise. */
+  course?:        string
   scheduledStart: Date
   durationMins:   number
   /* Where to join. Pasted by whoever booked it, or minted as a Google Meet
@@ -3536,6 +3539,7 @@ const MentorMeetingSchema = new Schema<IMentorMeeting>(
     title:          { type: String, required: true, trim: true, maxlength: 255 },
     kind:           { type: String, enum: ['staff', 'student', 'client'], required: true },
     category:       { type: String, enum: ['', ...MENTOR_MEETING_CATEGORIES], default: '' },
+    course:         { type: String, default: '', trim: true, maxlength: 60 },
     scheduledStart: { type: Date, required: true, index: true },
     durationMins:   { type: Number, required: true, min: 5, max: 600 },
     meetingUrl:     { type: String, default: '' },

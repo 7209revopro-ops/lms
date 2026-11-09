@@ -470,8 +470,10 @@ export interface PortalMentor {
     id: string
     title: string
     kind: string
-    /** course_pitch | overview | other, or '' (2026-10-25). */
+    /** course_pitch | overview | other | course_upgrade, or '' (2026-10-25). */
     category: string
+    /** A Course Upgradation meeting's course, '' otherwise (2026-11-09). */
+    course: string
     startsAt: string
     durationMins: number
     /* Names only in the listing. The calendar needs to say who, not how to
@@ -569,7 +571,7 @@ export async function listMentorsForPortal(input: {
       scheduledStart: { $gte: from, $lte: to },
       cancelledAt: null,
     })
-      .select('title kind category mentorId scheduledStart durationMins attendees bookedByEmail isOnline location')
+      .select('title kind category course mentorId scheduledStart durationMins attendees bookedByEmail isOnline location')
       .lean(),
     timeOffBetween(ids, from, to),
   ])
@@ -596,6 +598,7 @@ export async function listMentorsForPortal(input: {
       title: m.title ?? '',
       kind: String(m.kind ?? ''),
       category: String((m as { category?: string }).category ?? ''),
+      course: String((m as { course?: string }).course ?? ''),
       startsAt: new Date(m.scheduledStart).toISOString(),
       durationMins: m.durationMins ?? 0,
       attendeeNames: (m.attendees ?? []).map((a) => a.name).filter(Boolean),
@@ -675,6 +678,7 @@ export interface PortalMentorMeeting {
   title: string
   kind: 'staff' | 'student' | 'client'
   category: string
+  course: string
   startsAt: string
   durationMins: number
   attendees: { name: string; email?: string }[]
@@ -763,11 +767,19 @@ function placeOf(inPerson: boolean, location: unknown): string {
  * records what was decided.
  */
 /** A meeting's category from the caller: one of MENTOR_MEETING_CATEGORIES, or '' for none; anything else refused. */
-function categoryOf(v: unknown): '' | 'course_pitch' | 'overview' | 'other' {
+function categoryOf(v: unknown): '' | 'course_pitch' | 'overview' | 'other' | 'course_upgrade' {
   const c = String(v ?? '').trim()
   if (!c) return ''
-  if (!['course_pitch', 'overview', 'other'].includes(c)) throw httpError('category must be course_pitch, overview or other', 400)
-  return c as 'course_pitch' | 'overview' | 'other'
+  if (!['course_pitch', 'overview', 'other', 'course_upgrade'].includes(c)) throw httpError('category must be course_pitch, overview, other or course_upgrade', 400)
+  return c as 'course_pitch' | 'overview' | 'other' | 'course_upgrade'
+}
+
+/** The course of a Course Upgradation meeting (2026-11-09): required for one, '' for any other category. */
+function courseOf(category: string, v: unknown): string {
+  if (category !== 'course_upgrade') return ''
+  const c = String(v ?? '').trim().slice(0, 60)
+  if (!c) throw httpError('A Course Upgradation meeting needs its course', 400)
+  return c
 }
 
 export async function createMentorMeetingForPortal(input: {
@@ -776,6 +788,7 @@ export async function createMentorMeetingForPortal(input: {
   title?: string
   kind?: string
   category?: string
+  course?: string
   scheduledStart?: string
   durationMins?: number
   meetingUrl?: string
@@ -801,6 +814,7 @@ export async function createMentorMeetingForPortal(input: {
     throw httpError('kind must be staff, student or client', 400)
   }
   const category = categoryOf(input.category)
+  const course = courseOf(category, input.course)
 
   /* At least one person, and only the ones actually named. A row somebody
      started and abandoned in the form should not become an attendee with an
@@ -892,6 +906,7 @@ export async function createMentorMeetingForPortal(input: {
     title,
     kind,
     category,
+    course,
     scheduledStart: start,
     durationMins,
     meetingUrl,
@@ -946,6 +961,7 @@ export async function createMentorMeetingForPortal(input: {
       title,
       kind: kind as 'staff' | 'student' | 'client',
       category,
+      course,
       startsAt: start.toISOString(),
       durationMins,
       attendees,
@@ -1001,6 +1017,7 @@ export async function getMentorMeetingForPortal(input: {
     title: meeting.title,
     kind: meeting.kind,
     category: String(meeting.category ?? ''),
+    course: String(meeting.course ?? ''),
     startsAt: new Date(meeting.scheduledStart).toISOString(),
     durationMins: meeting.durationMins,
     meetingUrl: meeting.meetingUrl ?? '',
@@ -1033,6 +1050,7 @@ export async function updateMentorMeetingForPortal(input: {
   title?: string
   kind?: string
   category?: string
+  course?: string
   scheduledStart?: string
   durationMins?: number
   meetingUrl?: string
@@ -1064,6 +1082,7 @@ export async function updateMentorMeetingForPortal(input: {
     throw httpError('kind must be staff, student or client', 400)
   }
   const category = input.category === undefined ? (meeting.category ?? '') : categoryOf(input.category)
+  const course = input.course === undefined && input.category === undefined ? String(meeting.course ?? '') : courseOf(category, input.course ?? meeting.course)
 
   const start = input.scheduledStart === undefined
     ? new Date(meeting.scheduledStart)
@@ -1137,6 +1156,7 @@ export async function updateMentorMeetingForPortal(input: {
   meeting.title = title
   meeting.kind = kind as typeof meeting.kind
   meeting.category = category
+  meeting.course = course
   meeting.scheduledStart = start
   meeting.durationMins = durationMins
   meeting.attendees = attendees
