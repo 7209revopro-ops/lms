@@ -2810,6 +2810,45 @@ router.delete('/courses/:courseId/exam', audit('exam.delete', 'Exam'), async (re
   } catch (err) { next(err) }
 })
 
+/* GET every exam (the Exams page, 2026-11-09): its course, size, published or not, and how its attempts stand —
+   submitted, passed, failed, waiting for a grade, started and not submitted. The caller's academy and department only. */
+router.get('/exams', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { ExamModel, ExamAttemptModel, CourseModel } = await import('@/models/schema.ts')
+    const exams = await ExamModel.find({}).select('courseId title durationMinutes passPercent isPublished questions updatedAt').lean()
+    const courseFilter: Record<string, unknown> = { _id: { $in: exams.map((e) => e.courseId) } }
+    if (req.user!.organizationId) courseFilter['$or'] = [{ organizationId: req.user!.organizationId }, { sharedAcademies: true }]
+    if (req.user!.categoryScope) courseFilter['program'] = req.user!.categoryScope
+    const courses = await CourseModel.find(courseFilter).select('title programId').lean()
+    const courseOf = new Map(courses.map((c) => [String(c._id), c]))
+    const mine = exams.filter((e) => courseOf.has(String(e.courseId)))
+    const stats = await ExamAttemptModel.aggregate([
+      { $match: { examId: { $in: mine.map((e) => e._id) } } },
+      { $group: {
+        _id: '$examId',
+        submitted:  { $sum: { $cond: [{ $eq: ['$status', 'submitted'] }, 1, 0] } },
+        passed:     { $sum: { $cond: [{ $and: [{ $eq: ['$status', 'submitted'] }, { $eq: ['$passed', true] }] }, 1, 0] } },
+        failed:     { $sum: { $cond: [{ $and: [{ $eq: ['$status', 'submitted'] }, { $eq: ['$passed', false] }] }, 1, 0] } },
+        inProgress: { $sum: { $cond: [{ $eq: ['$status', 'in_progress'] }, 1, 0] } },
+        suspended:  { $sum: { $cond: [{ $eq: ['$status', 'suspended'] }, 1, 0] } },
+        lastSubmittedAt: { $max: '$submittedAt' },
+      } },
+    ])
+    const statOf = new Map(stats.map((x: any) => [String(x._id), x]))
+    sendSuccess(res, mine.map((e) => {
+      const c: any = courseOf.get(String(e.courseId))
+      const st: any = statOf.get(String(e._id)) ?? {}
+      const submitted = st.submitted ?? 0, passed = st.passed ?? 0, failed = st.failed ?? 0
+      return {
+        id: String(e._id), courseId: String(e.courseId), courseTitle: c?.title ?? '', isProgram: !!c?.programId,
+        title: e.title, questions: (e.questions ?? []).length, durationMinutes: e.durationMinutes, passPercent: e.passPercent,
+        isPublished: !!e.isPublished, updatedAt: e.updatedAt,
+        attempts: { submitted, passed, failed, needsGrading: Math.max(0, submitted - passed - failed), inProgress: st.inProgress ?? 0, suspended: st.suspended ?? 0, lastSubmittedAt: st.lastSubmittedAt ?? null },
+      }
+    }).sort((a, b) => a.courseTitle.localeCompare(b.courseTitle)))
+  } catch (err) { next(err) }
+})
+
 /* GET every student's attempt on an exam (attempts table / grading queue). */
 router.get('/exams/:examId/attempts', async (req: Request, res: Response, next: NextFunction) => {
   try {

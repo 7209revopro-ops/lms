@@ -105,6 +105,23 @@ export const examKeys = {
   attempt:   (examId: string, attemptId: string) => ['admin', 'exams', 'attempt', examId, attemptId] as const,
 }
 
+/* ─── Every exam with how its attempts stand (the Exams page, 2026-11-09) ── */
+export interface ExamSummary {
+  id: string; courseId: string; courseTitle: string; isProgram: boolean; title: string; questions: number
+  durationMinutes: number; passPercent: number; isPublished: boolean; updatedAt: string
+  attempts: { submitted: number; passed: number; failed: number; needsGrading: number; inProgress: number; suspended: number; lastSubmittedAt: string | null }
+}
+export function useExamList() {
+  return useQuery({
+    queryKey: [...examKeys.all, 'list'] as const,
+    queryFn: async () => {
+      const res = await api.get<{ success: true; data: ExamSummary[] }>('/admin/exams')
+      return res.data.data
+    },
+    staleTime: 30_000,
+  })
+}
+
 /* ─── The exam for a course (null if none) ────────── */
 export function useCourseExam(courseId: string) {
   return useQuery({
