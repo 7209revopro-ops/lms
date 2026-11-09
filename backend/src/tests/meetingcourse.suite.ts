@@ -60,6 +60,13 @@ try {
   const c2db: any = await M.MentorMeetingModel.findById(a.meeting.id).lean()
   check('C. back to Course Upgradation with MSNR', c2db?.course === 'MSNR' && (!c2 || c2.course === 'MSNR'), JSON.stringify({ db: c2db?.course, api: c2?.course }))
 
+  // E. a silent cancel (CS Portal's meeting status check, 2026-11-09): cancelled, the reason kept, nobody emailed
+  const { cancelMentorMeetingForPortal } = await import('@/services/portal.service.ts') as any
+  const e1 = await createMentorMeetingForPortal({ ...base, scheduledStart: new Date(when.getTime() + 9 * 3600e3).toISOString(), category: 'overview' })
+  const sent = await cancelMentorMeetingForPortal({ remoteOrgId: String(org._id), meetingId: e1.meeting.id, actorEmail: 'x@portal.local', actorIsRootAdmin: true, silent: true, reason: 'Student not reachable', allAcademies: true })
+  const e1db: any = await M.MentorMeetingModel.findById(e1.meeting.id).lean()
+  check('E. a silent cancel: cancelled, reason kept, not emailed', sent.emailed === false && !!e1db?.cancelledAt && e1db?.cancelReason === 'Student not reachable', JSON.stringify({ sent, r: e1db?.cancelReason }))
+
   const { mentorReportForPortal } = await import('@/services/portalMentorReport.service.ts') as any
   if (typeof mentorReportForPortal === 'function') {
     const r = await mentorReportForPortal({ remoteOrgId: String(org._id), from: new Date(Date.now() - 864e5).toISOString().slice(0, 10), to: new Date(Date.now() + 9 * 864e5).toISOString().slice(0, 10) }).catch((e: any) => ({ err: String(e?.message) }))

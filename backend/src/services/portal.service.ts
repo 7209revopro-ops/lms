@@ -1220,13 +1220,19 @@ export async function cancelMentorMeetingForPortal(input: {
   meetingId?: string
   actorEmail?: string
   actorIsRootAdmin?: boolean
+  /** CS Portal's meeting status check (2026-11-09): cancelled with nobody emailed — the CS has told them. */
+  silent?: boolean
+  /** Why it was cancelled, kept on the meeting. */
+  reason?: string
+  /** Either academy's meeting — the portal books both (listMentorsForPortal allAcademies). */
+  allAcademies?: boolean
 }) {
   const org = await resolveOrg(input.remoteOrgId)
   const { MentorMeetingModel, UserModel } = await import('@/models/schema.ts')
 
   const meeting = await MentorMeetingModel.findOne({
     _id: String(input.meetingId ?? ''),
-    organizationId: org._id,
+    ...(input.allAcademies ? {} : { organizationId: org._id }),
     cancelledAt: null,
   })
   if (!meeting) throw httpError('No such meeting', 404)
@@ -1237,7 +1243,10 @@ export async function cancelMentorMeetingForPortal(input: {
   }
 
   meeting.cancelledAt = new Date()
+  const reason = String(input.reason ?? '').trim().slice(0, 500)
+  if (reason) meeting.cancelReason = reason
   await meeting.save()
+  if (input.silent) return { id: String(meeting._id), cancelled: true, emailed: false }
 
   const mentor = await UserModel.findById(meeting.mentorId).select('name email').lean()
   const attendees = (meeting.attendees ?? []).map((a) => ({ name: a.name, email: a.email ?? '' }))

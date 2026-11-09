@@ -354,7 +354,7 @@ export async function meetingsForPortal(query: Record<string, unknown>, now = ne
         attendees: (m.attendees ?? []).map((a) => ({ name: a.name, email: a.email ?? '' })),
         bookedByEmail: m.bookedByEmail,
         mentor: { name: mentor?.name ?? '', email: mentor?.email ?? '' },
-        status, cancelledAt: m.cancelledAt ? new Date(m.cancelledAt).toISOString() : null,
+        status, cancelledAt: m.cancelledAt ? new Date(m.cancelledAt).toISOString() : null, cancelReason: (m as { cancelReason?: string }).cancelReason ?? '',
         outcome: outcomeOut(m.outcome),
       }
     }),

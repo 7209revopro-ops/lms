@@ -3432,6 +3432,8 @@ export interface IMentorMeeting extends Document {
   askOutcome?:    boolean
   outcome?:       IMeetingOutcome | null
   cancelledAt?:   Date
+  /** Why it was cancelled — CS Portal's meeting status check (2026-11-09). */
+  cancelReason?:  string
   createdAt:      Date
   updatedAt:      Date
 }
@@ -3562,6 +3564,7 @@ const MentorMeetingSchema = new Schema<IMentorMeeting>(
     askOutcome:     { type: Boolean, default: undefined },
     outcome:        { type: MeetingOutcomeSchema, default: null },
     cancelledAt:    { type: Date, default: null },
+    cancelReason:   { type: String, default: "", trim: true, maxlength: 500 },
   },
   baseSchemaOptions,
 )
