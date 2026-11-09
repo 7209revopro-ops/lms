@@ -3444,6 +3444,8 @@ export type MeetingOutcomeStage = (typeof MEETING_OUTCOME_STAGES)[number]
 export const MEETING_FOLLOW_UP_KINDS = ['cse_follow_up', 'revision_needed'] as const
 /** How an interested client means to pay — the sales CRMs' methods. */
 export const MEETING_PAYMENT_MODES = ['Cash', 'Card', 'Bank Transfer', 'Tabby', 'Tamara', 'INR Transfer', 'Payment link'] as const
+/** How firm the student's payment was, as the mentor heard it (2026-11-09) — the CS verifies it with the student after. */
+export const MEETING_PAYMENT_INTENTS = ['explicit_plan', 'interested_no_commitment', 'not_discussed'] as const
 export const MEETING_NOT_INTERESTED_REASONS = ['Price', 'Time', 'Not convinced', 'Joined elsewhere', 'Other'] as const
 /** The second step, about the client (2026-10-27). */
 export const MEETING_EXPERIENCE = ['fresher', 'beginner', 'expert'] as const
@@ -3484,6 +3486,8 @@ export interface IMeetingOutcome {
   courseTitle?:  string
   /** Interested: when and how they mean to pay. */
   paymentDate?:  string
+  /** explicit_plan · interested_no_commitment · not_discussed (an interested outcome, 2026-11-09). */
+  paymentIntent?: string
   paymentMode?:  string
   /** Follow-up: the CSE's follow-up or a revision, and when. */
   followUpKind?: string
@@ -3515,6 +3519,7 @@ const MeetingOutcomeSchema = new Schema<IMeetingOutcome>({
   courseId:        { type: Schema.Types.ObjectId, ref: 'Course', default: null },
   courseTitle:     { type: String, default: '' },
   paymentDate:     { type: String, default: '' },
+  paymentIntent:   { type: String, default: '' },
   paymentMode:     { type: String, default: '' },
   followUpKind:    { type: String, default: '' },
   followUpDate:    { type: String, default: '' },

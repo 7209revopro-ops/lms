@@ -18,14 +18,14 @@ export interface ClientProfile {
   country: string; familyInDubai: boolean | null; occupation: string
 }
 export interface OutcomeOptions {
-  stages: OutcomeStage[]; followUpKinds: string[]; paymentModes: string[]; notInterestedReasons: string[]
+  stages: OutcomeStage[]; followUpKinds: string[]; paymentModes: string[]; paymentIntents?: string[]; notInterestedReasons: string[]
   experience: string[]; lossWays: string[]; lossCurrencies: string[]
   courses: { id: string; title: string; modules: { id: string; title: string }[] }[]
   mentors: { id: string; name: string; email: string }[]
 }
 export interface OutcomeInput {
   stage: OutcomeStage; remark: string; concern: string; profile?: ClientProfile
-  courseId?: string; paymentDate?: string; paymentMode?: string
+  courseId?: string; paymentDate?: string; paymentMode?: string; paymentIntent?: string
   followUpKind?: string; followUpDate?: string
   withMentorEmail?: string; moduleId?: string; reason?: string
 }

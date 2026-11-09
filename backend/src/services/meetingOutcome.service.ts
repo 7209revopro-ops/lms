@@ -3,7 +3,7 @@ import { PortalError } from '@/services/portal.service.ts'
 import {
   MEETING_OUTCOME_STAGES,
   MEETING_FOLLOW_UP_KINDS,
-  MEETING_PAYMENT_MODES,
+  MEETING_PAYMENT_MODES, MEETING_PAYMENT_INTENTS,
   MEETING_NOT_INTERESTED_REASONS,
   MEETING_EXPERIENCE,
   MEETING_LOSS_WAYS,
@@ -116,6 +116,7 @@ export async function outcomeOptions() {
     stages: MEETING_OUTCOME_STAGES,
     followUpKinds: MEETING_FOLLOW_UP_KINDS,
     paymentModes: MEETING_PAYMENT_MODES,
+    paymentIntents: MEETING_PAYMENT_INTENTS,
     notInterestedReasons: MEETING_NOT_INTERESTED_REASONS,
     experience: MEETING_EXPERIENCE,
     lossWays: MEETING_LOSS_WAYS,
@@ -131,7 +132,7 @@ export function outcomeOut(o: IMeetingOutcome | null | undefined) {
   return {
     stage: o.stage,
     courseId: o.courseId ? String(o.courseId) : '', courseTitle: o.courseTitle ?? '',
-    paymentDate: o.paymentDate ?? '', paymentMode: o.paymentMode ?? '',
+    paymentDate: o.paymentDate ?? '', paymentMode: o.paymentMode ?? '', paymentIntent: (o as { paymentIntent?: string }).paymentIntent ?? '',
     followUpKind: o.followUpKind ?? '', followUpDate: o.followUpDate ?? '',
     withMentorId: o.withMentorId ? String(o.withMentorId) : '', withMentorName: o.withMentorName ?? '', withMentorEmail: o.withMentorEmail ?? '',
     moduleId: o.moduleId ? String(o.moduleId) : '', moduleTitle: o.moduleTitle ?? '',
@@ -213,10 +214,20 @@ async function outcomeFrom(body: Record<string, unknown>): Promise<Omit<IMeeting
 
   if (stage === 'interested') {
     await course(true)
-    out.paymentDate = date(body.paymentDate, 'the payment date')
-    const mode = str(body.paymentMode, 40)
-    if (!(MEETING_PAYMENT_MODES as readonly string[]).includes(mode)) throw httpError('Pick how they will pay', 400)
-    out.paymentMode = mode
+    // How firm it was (2026-11-09): an older form that doesn't ask counts as a plan the student explicitly gave.
+    const intent = str(body.paymentIntent, 40) || 'explicit_plan'
+    if (!(MEETING_PAYMENT_INTENTS as readonly string[]).includes(intent)) throw httpError("Pick the student's payment intention", 400)
+    ;(out as { paymentIntent?: string }).paymentIntent = intent
+    // Not discussed: the date and the mode may be left out.
+    if (intent === 'not_discussed' && !str(body.paymentDate, 10) && !str(body.paymentMode, 40)) { out.paymentDate = ''; out.paymentMode = '' }
+    else {
+      out.paymentDate = intent === 'not_discussed' && !str(body.paymentDate, 10) ? '' : date(body.paymentDate, 'the expected payment date')
+      const mode = str(body.paymentMode, 40)
+      if (mode || intent !== 'not_discussed') {
+        if (!(MEETING_PAYMENT_MODES as readonly string[]).includes(mode)) throw httpError('Pick the expected payment method', 400)
+        out.paymentMode = mode
+      }
+    }
   } else if (stage === 'follow_up') {
     const kind = str(body.followUpKind, 40)
     if (!(MEETING_FOLLOW_UP_KINDS as readonly string[]).includes(kind)) throw httpError('Pick a CSE follow-up or a revision', 400)

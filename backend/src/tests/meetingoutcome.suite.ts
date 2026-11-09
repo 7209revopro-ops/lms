@@ -72,6 +72,8 @@ try {
   check('no stage', await refused(fill(done1._id, { remark: 'x' }), 400, 'client stands') === true)
   check('interested without a course', await refused(fill(done1._id, { stage: 'interested', remark: 'x', paymentDate: '2026-10-30', paymentMode: 'Card' }), 400, 'course') === true)
   check('interested without a date', await refused(fill(done1._id, { stage: 'interested', remark: 'x', courseId: String(course._id), paymentMode: 'Card' }), 400, 'payment date') === true)
+  // The payment intention (2026-11-09): a made-up one refused
+  check('interested with a made-up payment intention', await refused(fill(done1._id, { stage: 'interested', remark: 'x', courseId: String(course._id), paymentDate: '2026-10-30', paymentMode: 'Card', paymentIntent: 'maybe' }), 400, 'intention') === true)
   check('interested with a made-up mode', await refused(fill(done1._id, { stage: 'interested', remark: 'x', courseId: String(course._id), paymentDate: '2026-10-30', paymentMode: 'Gold' }), 400, 'pay') === true)
   check('follow-up without the kind', await refused(fill(done1._id, { stage: 'follow_up', remark: 'x', followUpDate: '2026-10-30' }), 400, 'CSE') === true)
   check('follow-up with a bad date', await refused(fill(done1._id, { stage: 'follow_up', remark: 'x', followUpKind: 'cse_follow_up', followUpDate: '30/10' }), 400, 'date') === true)
@@ -103,6 +105,7 @@ try {
     && j(r1.outcome.profile.lossHow) === j(['scammed', 'self_trading']) && r1.outcome.profile.country === 'UAE' && r1.outcome.profile.familyInDubai === true && r1.outcome.profile.occupation === 'Engineer', j(r1.outcome))
   check('interested: course, date, mode, remark, who, where', r1.outcome.stage === 'interested' && r1.outcome.courseTitle === 'Market Breakout' && r1.outcome.paymentDate === '2026-11-02'
     && r1.outcome.paymentMode === 'Tabby' && r1.outcome.remark === 'Will pay after salary' && r1.outcome.filledByName === 'ANN' && r1.outcome.filledVia === 'portal', j(r1))
+  check('an older form without the intention counts as an explicit plan', r1.outcome.paymentIntent === 'explicit_plan', j(r1.outcome.paymentIntent))
   check('a second fill (LMS admin, the same mentor) is told it was filled', await refused(S.saveOutcomeForUser({ id: String(ann._id), email: 'ann@d.local' }, String(done1._id), { ...base, stage: 'not_interested', reason: 'Price', remark: 'x' }, now), 409, 'Already filled by ANN') === true)
   const r2: any = await S.saveOutcomeForUser({ id: String(ann._id), email: 'ann@d.local' }, String(done2._id), { ...base, stage: 'revision', remark: 'Lost on entries', courseId: String(course._id), moduleId: String(mod1._id), withMentorEmail: 'bob@d.local', profile: { experience: 'fresher', years: 7, hadLosses: false, lossAmount: 900, lossHow: ['scammed'], country: 'India', familyInDubai: false, occupation: 'Student' } }, new Date(now.getTime() + 1000))
   check('revision from LMS admin: course, module, preferred mentor', r2.outcome.moduleTitle === 'Price action' && r2.outcome.withMentorName === 'BOB' && r2.outcome.filledVia === 'lms', j(r2))

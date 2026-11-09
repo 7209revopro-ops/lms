@@ -64,6 +64,13 @@ function Pills<T extends string | boolean>({ value, options, onPick }: { value: 
   )
 }
 
+/** How firm the payment was, as the mentor heard it (2026-11-09) — the student's CS verifies it with them after. */
+const INTENTS: [string, string][] = [
+  ['explicit_plan', 'Student explicitly mentioned a payment plan'],
+  ['interested_no_commitment', 'Student expressed interest, but no firm commitment'],
+  ['not_discussed', 'Payment was not discussed'],
+]
+
 export function MeetingOutcomeGate() {
   const { data: me } = useCurrentUser()
   const isMentor = me?.role === 'instructor'
@@ -92,7 +99,9 @@ export function MeetingOutcomeGate() {
 
   const missing = (): string => {
     if (!form.stage) return 'Pick where the client stands'
-    if (form.stage === 'interested' && (!form.courseId || !form.paymentDate || !form.paymentMode)) return 'Pick the course, the payment date and how they will pay'
+    if (form.stage === 'interested' && !form.courseId) return 'Pick the course'
+    if (form.stage === 'interested' && !form.paymentIntent) return "Pick the student's payment intention"
+    if (form.stage === 'interested' && form.paymentIntent !== 'not_discussed' && (!form.paymentDate || !form.paymentMode)) return 'Pick the expected payment date and method'
     if (form.stage === 'follow_up' && (!form.followUpKind || !form.followUpDate)) return 'Pick the follow-up and its date'
     if (form.stage === 'meeting_with' && !form.withMentorEmail) return 'Pick the mentor they will meet'
     if (form.stage === 'revision' && !form.courseId) return 'Pick the course to revise'
@@ -260,11 +269,22 @@ export function MeetingOutcomeGate() {
             )}
 
             {form.stage === 'interested' && (
+              <Field label="Student's payment intention">
+                <div className="space-y-1.5">
+                  {INTENTS.map(([k, l]) => (
+                    <label key={k} className="flex cursor-pointer items-center gap-2 text-sm">
+                      <input type="radio" name="paymentIntent" checked={form.paymentIntent === k} onChange={() => set({ paymentIntent: k })} />{l}
+                    </label>
+                  ))}
+                </div>
+              </Field>
+            )}
+            {form.stage === 'interested' && (
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                <Field label="Payment date">
+                <Field label={form.paymentIntent === 'not_discussed' ? 'Expected payment date (optional)' : 'Expected payment date (mentor-reported)'}>
                   <input type="date" className={fieldCls} style={fieldStyle} value={form.paymentDate ?? ''} onChange={(e) => set({ paymentDate: e.target.value })} />
                 </Field>
-                <Field label="Payment mode">
+                <Field label={form.paymentIntent === 'not_discussed' ? 'Expected payment method (optional)' : 'Expected payment method'}>
                   <select className={fieldCls} style={fieldStyle} value={form.paymentMode ?? ''} onChange={(e) => set({ paymentMode: e.target.value })}>
                     <option value="">Pick…</option>
                     {options.data?.paymentModes.map((m) => <option key={m} value={m}>{m}</option>)}
