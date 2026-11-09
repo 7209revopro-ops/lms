@@ -2076,6 +2076,8 @@ const liveUpdateSchema = withCohortRules(z.object({
   rescheduleReason:  z.string().max(2000).optional(),
   /* Required by the controller when this edit cancels the class. */
   cancelReason:      z.string().trim().max(500).optional(),
+  /* Who caused it — required with the reason (2026-11-09, mentor KPIs). */
+  cancelCause:       z.enum(['mentor', 'student', 'admin', 'system']).optional(),
   guestCohorts:      cohortsField,
   overflowSeats:     overflowField,
   bothAcademies:     z.boolean().optional(),

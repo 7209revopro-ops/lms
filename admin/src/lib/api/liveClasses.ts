@@ -117,6 +117,8 @@ export interface LiveClass {
   cancelReason?:      string
   cancelledAt?:       string
   cancelledByName?:   string
+  /* Who caused it (2026-11-09) — only the mentor's own count against them in Root's mentor KPIs. */
+  cancelCause?:       CancelCause
 
   /* Weekly-repeat grouping tag — shared by every class generated from
      the same "repeat weekly" action. Absent on one-off classes. */
@@ -307,7 +309,18 @@ export interface UpdateLiveClassInput {
   rescheduleReason?: string
   /* Required by the server when this update cancels the class. */
   cancelReason?:     string
+  /* Also required then (2026-11-09): who caused it. */
+  cancelCause?:      CancelCause
 }
+
+/** Who caused a class's cancellation (2026-11-09, Root's mentor KPIs — only the mentor's own count against them). */
+export type CancelCause = 'mentor' | 'student' | 'admin' | 'system'
+export const CANCEL_CAUSES: { value: CancelCause; label: string }[] = [
+  { value: 'mentor',  label: 'The mentor' },
+  { value: 'student', label: 'Students / low booking' },
+  { value: 'admin',   label: 'Admin / schedule change' },
+  { value: 'system',  label: 'System / technical' },
+]
 
 /* ── Availability types ─────────────────────── */
 export interface AvailabilitySlot {

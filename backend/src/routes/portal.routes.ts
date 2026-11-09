@@ -237,6 +237,7 @@ router.post('/mentor-meetings/:id/cancel', wrap(async (req, res) => {
     actorIsRootAdmin: body.actorIsRootAdmin === true,
     silent: body.silent === true,
     reason: typeof body.reason === 'string' ? body.reason : undefined,
+    cancelledBy: typeof body.cancelledBy === 'string' ? body.cancelledBy : undefined,
     allAcademies: body.allAcademies === true,
   }), 'Meeting cancelled')
 }))

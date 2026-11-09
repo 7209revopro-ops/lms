@@ -8,8 +8,8 @@ import {
   MapPin, Building2, Wifi, Info, Repeat,
 } from 'lucide-react'
 import {
-  useUpdateLiveClass, useDeleteLiveClass, useRepeatLiveClassWeekly,
-  type LiveClass, type LiveClassType, type LiveClassStatus,
+  useUpdateLiveClass, useDeleteLiveClass, useRepeatLiveClassWeekly, CANCEL_CAUSES,
+  type LiveClass, type LiveClassType, type LiveClassStatus, type CancelCause,
 } from '@/lib/api/liveClasses'
 import { useCourses } from '@/lib/api/courses'
 import { useCourseOutline } from '@/lib/api/outline'
@@ -88,6 +88,8 @@ export function EditLiveClassModal({ live, onClose, onSuccess }: Props) {
   const [status,           setStatus]           = useState<LiveClassStatus>(live.status)
   /* Cancelling here asks why (2026-10-27) — students are told the reason. */
   const [cancelReason,     setCancelReason]     = useState<string>('')
+  /* …and who caused it (2026-11-09): only the mentor's own count against them in Root's mentor KPIs. */
+  const [cancelCause,      setCancelCause]      = useState<CancelCause | ''>('')
   const cancelling = status === 'cancelled' && live.status !== 'cancelled'
   const originalInstructorId =
     typeof live.instructor === 'object' ? (live.instructor?.id ?? '') : (live.instructorId ?? '')
@@ -182,6 +184,10 @@ export function EditLiveClassModal({ live, onClose, onSuccess }: Props) {
       setError('Please say why this class is cancelled — students will see it.')
       return
     }
+    if (cancelling && !cancelCause) {
+      setError('Please say who caused the cancellation.')
+      return
+    }
     if (timeChanged && !rescheduleReason.trim()) {
       setError('Please provide a reason for rescheduling this class.')
       return
@@ -217,6 +223,7 @@ export function EditLiveClassModal({ live, onClose, onSuccess }: Props) {
           room:             !isOnline ? room.trim() : undefined,
           rescheduleReason: timeChanged ? rescheduleReason.trim() : undefined,
           cancelReason:     cancelling ? cancelReason.trim() : undefined,
+          cancelCause:      cancelling && cancelCause ? cancelCause : undefined,
           recordingUrl:     recordingUrl.trim() || undefined,
           status,
           instructorId:     instructorId || undefined,
@@ -620,6 +627,16 @@ export function EditLiveClassModal({ live, onClose, onSuccess }: Props) {
                   className={base} style={{ ...iStyle, resize: 'none' }} />
                 <p className="mt-1 text-[10px]" style={{ color: 'rgba(255,255,255,0.28)' }}>
                   Students who booked or are enrolled will see this reason in their notice and email.
+                </p>
+                <span className="mb-1 mt-3 block text-[10px] font-bold uppercase tracking-widest" style={{ color: '#F87171' }}>
+                  Who caused it? <span style={{ color: '#EF4444' }}>*</span>
+                </span>
+                <select value={cancelCause} onChange={e => setCancelCause(e.target.value as CancelCause | '')} className={base} style={{ ...selStyle }} aria-label="Who caused the cancellation">
+                  <option value="">Choose…</option>
+                  {CANCEL_CAUSES.map(c => <option key={c.value} value={c.value}>{c.label}</option>)}
+                </select>
+                <p className="mt-1 text-[10px]" style={{ color: 'rgba(255,255,255,0.28)' }}>
+                  Staff only — only a cancellation the mentor caused counts against them.
                 </p>
               </div>
             )}

@@ -1964,6 +1964,11 @@ export class LiveClassController {
         if (reason.length < 3) {
           throw new LiveClassError('CANCEL_REASON_REQUIRED', 'Please say why this class is cancelled — students will see it.', 400)
         }
+        /* And who caused it (2026-11-09): only a mentor-caused cancellation counts against the mentor in Root's KPIs. */
+        const cause = dto['cancelCause']
+        if (cause !== 'mentor' && cause !== 'student' && cause !== 'admin' && cause !== 'system') {
+          throw new LiveClassError('CANCEL_CAUSE_REQUIRED', 'Please say who caused the cancellation: the mentor, the students (or low booking), admin (a schedule change), or the system.', 400)
+        }
         const { UserModel } = await import('@/models/schema.ts')
         const actor = await UserModel.findById(req.user!.id).select('name email').lean<{ name?: string; email?: string }>()
         Object.assign(data, {
@@ -1971,6 +1976,7 @@ export class LiveClassController {
           cancelledAt:     new Date(),
           cancelledBy:     req.user!.id,
           cancelledByName: actor?.name ?? actor?.email ?? req.user!.email,
+          cancelCause:     cause,
         })
       }
 

@@ -379,7 +379,7 @@ try {
     resetMail()
     await NotificationModel.deleteMany({})
     const r = await call('PATCH', `/admin/live-classes/${session._id}`, {
-      jar: adminJar, body: { status: 'cancelled', cancelReason: 'Mentor unwell', instructorId: String(teacherB._id) },
+      jar: adminJar, body: { status: 'cancelled', cancelReason: 'Mentor unwell', cancelCause: 'mentor', instructorId: String(teacherB._id) },
     })
     check('the admin can cancel the session', ok(r), why(r))
     await until(async () => (await notesFor(booked._id, /cancelled/i)).length > 0)

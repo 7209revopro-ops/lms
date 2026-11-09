@@ -35,6 +35,14 @@ const baseSchemaOptions = {
 /* ─────────────────────────────────────────────────────
    ORGANIZATION
 ───────────────────────────────────────────────────── */
+
+/* Mentor KPIs (2026-11-09): who caused a class's cancellation, and who called a meeting off — only the mentor's own
+   count against them in Root's mentor KPIs. */
+export const CLASS_CANCEL_CAUSES = ['mentor', 'student', 'admin', 'system'] as const
+export type ClassCancelCause = (typeof CLASS_CANCEL_CAUSES)[number]
+export const MEETING_CANCELLED_BY = ['student', 'mentor', 'cs', 'other'] as const
+export type MeetingCancelledBy = (typeof MEETING_CANCELLED_BY)[number]
+
 export interface IOrganization extends Document {
   id:             string
   name:           string
@@ -1418,6 +1426,8 @@ export interface ILiveClass extends Document {
   cancelledAt?:     Date
   cancelledBy?:     Types.ObjectId
   cancelledByName?: string
+  /** Who caused it (2026-11-09, mentor KPIs): only the mentor's own count against them. Absent on older ones. */
+  cancelCause?:     ClassCancelCause
 
   /* Instructor reminder tracking */
   reminderInstructor15MinSent: boolean
@@ -1614,6 +1624,7 @@ const LiveClassSchema = new Schema<ILiveClass>(
     cancelledAt:                 { type: Date },
     cancelledBy:                 { type: Schema.Types.ObjectId, ref: 'User' },
     cancelledByName:             { type: String, maxlength: 200 },
+    cancelCause:                 { type: String, enum: CLASS_CANCEL_CAUSES },
     reminderInstructor15MinSent: { type: Boolean, default: false },
     mentorWhatsApp10MinSent:     { type: Boolean, default: false },
     verifyRequestedAt:           { type: Date },
@@ -3434,6 +3445,8 @@ export interface IMentorMeeting extends Document {
   cancelledAt?:   Date
   /** Why it was cancelled — CS Portal's meeting status check (2026-11-09). */
   cancelReason?:  string
+  /** Who called it off — CS Portal's meeting status check (2026-11-09, mentor KPIs): only the mentor's count against them. */
+  cancelledBy?:   MeetingCancelledBy
   createdAt:      Date
   updatedAt:      Date
 }
@@ -3570,6 +3583,7 @@ const MentorMeetingSchema = new Schema<IMentorMeeting>(
     outcome:        { type: MeetingOutcomeSchema, default: null },
     cancelledAt:    { type: Date, default: null },
     cancelReason:   { type: String, default: "", trim: true, maxlength: 500 },
+    cancelledBy:    { type: String, enum: MEETING_CANCELLED_BY },
   },
   baseSchemaOptions,
 )

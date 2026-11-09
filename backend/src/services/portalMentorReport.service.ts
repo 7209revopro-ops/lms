@@ -42,8 +42,26 @@ type Day = {
   reviews: number; ratingSum: number; lowRatings: number
   /** How many of each star, 1 … 5 (2026-10-23: the breakdown). */
   r1: number; r2: number; r3: number; r4: number; r5: number
+  /* For Root's mentor KPIs (2026-11-09). Cancellations by cause — the mentor's own, and older ones with none recorded. */
+  classesCancelledByMentor: number; classesCancelledUnclassified: number
+  /** Program classes held, and their bookings attended / missed (the rest is regular classes). */
+  programHeld: number; programAttended: number; programMissed: number
+  /** Class assignments sent in the dates (by when sent): reviewed, due (reviewed, or waiting over 24 hours), hours to review. */
+  assignmentsSubmitted: number; assignmentsReviewed: number; assignmentsDue: number; reviewHoursSum: number; reviewsTimed: number
+  /** Meetings over and not cancelled; booked by CS Portal (askOutcome) or by the mentor themselves; called off by the mentor. */
+  meetingsHeld: number; meetingsHeldCs: number; meetingsHeldOwn: number; meetingsCancelledByMentor: number
+  /** CS Portal meetings' reports: due (filled, or 24 hours past the end), filled within 24 hours, filled, interested. */
+  reportsDue: number; reportsOnTime: number; reportsFilled: number; meetingsInterested: number
 }
-const blank = (): Day => ({ classes: 0, held: 0, classesCancelled: 0, bookings: 0, bookingsCancelled: 0, attended: 0, missed: 0, meetings: 0, meetingsCancelled: 0, mCoursePitch: 0, mOverview: 0, mOther: 0, mCourseUpgrade: 0, mNone: 0, lateJoins: 0, lateMinutes: 0, notJoined: 0, reviews: 0, ratingSum: 0, lowRatings: 0, r1: 0, r2: 0, r3: 0, r4: 0, r5: 0 })
+const blank = (): Day => ({
+  classes: 0, held: 0, classesCancelled: 0, bookings: 0, bookingsCancelled: 0, attended: 0, missed: 0, meetings: 0, meetingsCancelled: 0,
+  mCoursePitch: 0, mOverview: 0, mOther: 0, mCourseUpgrade: 0, mNone: 0, lateJoins: 0, lateMinutes: 0, notJoined: 0, reviews: 0, ratingSum: 0,
+  lowRatings: 0, r1: 0, r2: 0, r3: 0, r4: 0, r5: 0,
+  classesCancelledByMentor: 0, classesCancelledUnclassified: 0, programHeld: 0, programAttended: 0, programMissed: 0,
+  assignmentsSubmitted: 0, assignmentsReviewed: 0, assignmentsDue: 0, reviewHoursSum: 0, reviewsTimed: 0,
+  meetingsHeld: 0, meetingsHeldCs: 0, meetingsHeldOwn: 0, meetingsCancelledByMentor: 0,
+  reportsDue: 0, reportsOnTime: 0, reportsFilled: 0, meetingsInterested: 0,
+})
 const dayOf = (d: Date) => new Date(d.getTime() + 4 * 3600_000).toISOString().slice(0, 10)
 
 export async function mentorReportForPortal(q: { from?: unknown; to?: unknown; emails?: unknown }) {
@@ -55,7 +73,7 @@ export async function mentorReportForPortal(q: { from?: unknown; to?: unknown; e
   const emails = typeof q.emails === 'string' && q.emails.trim()
     ? [...new Set(q.emails.split(',').map(e => e.trim().toLowerCase()).filter(Boolean))] : null
 
-  const { UserModel, LiveClassModel, ClassBookingModel, MentorMeetingModel, InstructorReviewModel } = await import('@/models/schema.ts')
+  const { UserModel, LiveClassModel, ClassBookingModel, MentorMeetingModel, InstructorReviewModel, ClassAssignmentModel } = await import('@/models/schema.ts')
   // Only these instructors when the portal names them (a chief's team); otherwise everyone who taught, met or was reviewed.
   const named = emails
     ? await UserModel.find({ email: { $in: emails } }, { name: 1, email: 1 }).lean() as any[]
@@ -64,7 +82,7 @@ export async function mentorReportForPortal(q: { from?: unknown; to?: unknown; e
 
   const classes = await LiveClassModel.find(
     { scheduledStart: { $gte: start, $lt: end }, ...(only ? { instructorId: only } : {}) },
-    { instructorId: 1, scheduledStart: 1, status: 1, startedAt: 1, instructorJoinedAt: 1 },
+    { instructorId: 1, scheduledStart: 1, status: 1, startedAt: 1, instructorJoinedAt: 1, cancelCause: 1, programId: 1 },
   ).lean() as any[]
   const classById = new Map(classes.map(c => [String(c._id), c]))
   const bookings = classes.length
@@ -75,7 +93,15 @@ export async function mentorReportForPortal(q: { from?: unknown; to?: unknown; e
     : []
   const meetings = await MentorMeetingModel.find(
     { scheduledStart: { $gte: start, $lt: end }, ...(only ? { mentorId: only } : {}) },
-    { mentorId: 1, scheduledStart: 1, cancelledAt: 1, category: 1 },
+    { mentorId: 1, scheduledStart: 1, durationMins: 1, cancelledAt: 1, cancelledBy: 1, category: 1, askOutcome: 1, bookedByEmail: 1, 'outcome.stage': 1, 'outcome.filledAt': 1 },
+  ).lean() as any[]
+  // Whose own bookings a meeting is (booked by the mentor themselves): their addresses.
+  const mentorIds = [...new Set(meetings.map(m => String(m.mentorId)))].filter(id => mongoose.isValidObjectId(id))
+  const emailOf = new Map(((await UserModel.find({ _id: { $in: mentorIds.map(id => new mongoose.Types.ObjectId(id)) } }, { email: 1 }).lean()) as any[])
+    .map(u => [String(u._id), String(u.email ?? '').toLowerCase()]))
+  const assignments = await ClassAssignmentModel.find(
+    { submittedAt: { $gte: start, $lt: end }, ...(only ? { instructorId: only } : {}) },
+    { instructorId: 1, submittedAt: 1, reviewedAt: 1, status: 1 },
   ).lean() as any[]
   const reviews = await InstructorReviewModel.find(
     { createdAt: { $gte: start, $lt: end }, ...(only ? { instructorId: only } : {}) },
@@ -95,9 +121,17 @@ export async function mentorReportForPortal(q: { from?: unknown; to?: unknown; e
   }
   for (const c of classes) {
     const d = cell(c.instructorId, c.scheduledStart)
-    if (c.status === 'cancelled') { d.classesCancelled++; continue }
+    if (c.status === 'cancelled') {
+      d.classesCancelled++
+      if (c.cancelCause === 'mentor') d.classesCancelledByMentor++
+      else if (!c.cancelCause) d.classesCancelledUnclassified++
+      continue
+    }
     d.classes++
-    if (c.status === 'ended' || c.status === 'live' || c.startedAt) d.held++
+    if (c.status === 'ended' || c.status === 'live' || c.startedAt) {
+      d.held++
+      if (c.programId) d.programHeld++
+    }
     const join = joinOf(c)
     if (join.state === 'late') { d.lateJoins++; d.lateMinutes += join.lateMins }
     else if (join.state === 'none') d.notJoined++
@@ -115,12 +149,39 @@ export async function mentorReportForPortal(q: { from?: unknown; to?: unknown; e
     const d = cell(c.instructorId, c.scheduledStart)
     d.bookings += b.n
     if (b._id.s === 'cancelled') d.bookingsCancelled += b.n
-    else if (b._id.s === 'attended') d.attended += b.n
-    else if (b._id.s === 'missed') d.missed += b.n
+    else if (b._id.s === 'attended') { d.attended += b.n; if (c.programId) d.programAttended += b.n }
+    else if (b._id.s === 'missed') { d.missed += b.n; if (c.programId) d.programMissed += b.n }
+  }
+  const now = Date.now()
+  for (const a of assignments) {
+    const d = cell(a.instructorId, a.submittedAt)
+    d.assignmentsSubmitted++
+    if (a.status !== 'pending') {
+      d.assignmentsReviewed++; d.assignmentsDue++
+      const hours = a.reviewedAt ? (new Date(a.reviewedAt).getTime() - new Date(a.submittedAt).getTime()) / 3_600_000 : -1
+      if (hours >= 0) { d.reviewHoursSum += hours; d.reviewsTimed++ }
+    } else if (now - new Date(a.submittedAt).getTime() > DAY_MS) d.assignmentsDue++
   }
   for (const m of meetings) {
     const d = cell(m.mentorId, m.scheduledStart)
     d.meetings++
+    const over = new Date(m.scheduledStart).getTime() + (Number(m.durationMins) || 0) * 60_000
+    if (m.cancelledAt) {
+      if (m.cancelledBy === 'mentor') d.meetingsCancelledByMentor++
+    } else if (over <= now) {
+      d.meetingsHeld++
+      if (m.askOutcome === true) d.meetingsHeldCs++
+      if (String(m.bookedByEmail ?? '').toLowerCase() === emailOf.get(String(m.mentorId))) d.meetingsHeldOwn++
+      if (m.askOutcome === true) {
+        const filled = m.outcome?.filledAt ? new Date(m.outcome.filledAt).getTime() : null
+        if (filled != null || now > over + DAY_MS) d.reportsDue++
+        if (filled != null) {
+          d.reportsFilled++
+          if (filled <= over + DAY_MS) d.reportsOnTime++
+          if (m.outcome?.stage === 'interested') d.meetingsInterested++
+        }
+      }
+    }
     if (m.cancelledAt) d.meetingsCancelled++
     else if (m.category === 'course_pitch') d.mCoursePitch++
     else if (m.category === 'overview') d.mOverview++
@@ -139,7 +200,7 @@ export async function mentorReportForPortal(q: { from?: unknown; to?: unknown; e
   const people = named ?? await UserModel.find({ _id: { $in: [...table.keys()].filter(id => mongoose.isValidObjectId(id)).map(id => new mongoose.Types.ObjectId(id)) } }, { name: 1, email: 1 }).lean() as any[]
   const finish = (d: Day) => {
     const { ratingSum, r1, r2, r3, r4, r5, ...rest } = d
-    return { ...rest, avgRating: d.reviews ? Math.round((ratingSum / d.reviews) * 10) / 10 : null, ratingCounts: { 1: r1, 2: r2, 3: r3, 4: r4, 5: r5 } }
+    return { ...rest, reviewHoursSum: Math.round(d.reviewHoursSum * 10) / 10, avgRating: d.reviews ? Math.round((ratingSum / d.reviews) * 10) / 10 : null, ratingCounts: { 1: r1, 2: r2, 3: r3, 4: r4, 5: r5 } }
   }
   return {
     from: q.from, to: q.to, timezone: 'Asia/Dubai',

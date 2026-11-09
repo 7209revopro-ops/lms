@@ -1025,6 +1025,7 @@ export class LiveClassService {
     cancelledAt:       Date
     cancelledBy:       string
     cancelledByName:   string
+    cancelCause:       'mentor' | 'student' | 'admin' | 'system'
     guestCohorts:      Array<{ organizationId: string; courseId: string; sectionId?: string; seatFloor: number }>
     overflowSeats:     number
   }>): Promise<ILiveClass> {

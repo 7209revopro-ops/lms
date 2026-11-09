@@ -1224,6 +1224,8 @@ export async function cancelMentorMeetingForPortal(input: {
   silent?: boolean
   /** Why it was cancelled, kept on the meeting. */
   reason?: string
+  /** Who called it off (2026-11-09, mentor KPIs): student, mentor, cs or other — CS Portal's meeting status check. */
+  cancelledBy?: string
   /** Either academy's meeting — the portal books both (listMentorsForPortal allAcademies). */
   allAcademies?: boolean
 }) {
@@ -1245,6 +1247,8 @@ export async function cancelMentorMeetingForPortal(input: {
   meeting.cancelledAt = new Date()
   const reason = String(input.reason ?? '').trim().slice(0, 500)
   if (reason) meeting.cancelReason = reason
+  const by = String(input.cancelledBy ?? '')
+  if (by === 'student' || by === 'mentor' || by === 'cs' || by === 'other') meeting.cancelledBy = by
   await meeting.save()
   if (input.silent) return { id: String(meeting._id), cancelled: true, emailed: false }
 

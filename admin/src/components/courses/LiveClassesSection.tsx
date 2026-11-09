@@ -13,8 +13,8 @@ import {
 import {
   useLiveClassesForCourse, useCreateLiveClass, useDeleteLiveClass,
   useUpdateLiveClass, useStartLiveStream, useEndLiveStream, useStreamCredentials,
-  isInteractiveRoom,
-  type LiveClass, type LiveClassType, type LiveClassStatus,
+  isInteractiveRoom, CANCEL_CAUSES,
+  type LiveClass, type LiveClassType, type LiveClassStatus, type CancelCause,
 } from '@/lib/api/liveClasses'
 import { useCourseOutline } from '@/lib/api/outline'
 import { datetimeLocalToISO } from '@/lib/timezone'
@@ -147,6 +147,8 @@ function LiveRow({
   const router          = useRouter()
   const [confirming,    setConfirming]    = useState<'cancel' | 'delete' | null>(null)
   const [cancelReason,  setCancelReason]  = useState('')
+  /* Who caused it (2026-11-09): only the mentor's own count against them in Root's mentor KPIs. */
+  const [cancelCause,   setCancelCause]   = useState<CancelCause | ''>('')
   const [showCreds,     setShowCreds]     = useState(false)
   const [startError,    setStartError]    = useState<string | null>(null)
   const [editOpen,      setEditOpen]      = useState(false)
@@ -388,9 +390,15 @@ function LiveRow({
                   placeholder="Why? Students will see this"
                   className="w-44 rounded-lg px-2 py-1 text-[10px] outline-none"
                   style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(245,158,11,0.4)', color: '#fff' }} />
+                <select value={cancelCause} onChange={e => setCancelCause(e.target.value as CancelCause | '')} aria-label="Who caused the cancellation"
+                  className="rounded-lg px-1.5 py-1 text-[10px] outline-none"
+                  style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(245,158,11,0.4)', color: '#fff' }}>
+                  <option value="">Who caused it?</option>
+                  {CANCEL_CAUSES.map(c => <option key={c.value} value={c.value}>{c.label}</option>)}
+                </select>
                 <button
-                  disabled={cancelReason.trim().length < 3}
-                  onClick={() => { updateMutation.mutate({ id: live.id, data: { status: 'cancelled', cancelReason: cancelReason.trim() } }); setConfirming(null); setCancelReason('') }}
+                  disabled={cancelReason.trim().length < 3 || !cancelCause}
+                  onClick={() => { if (!cancelCause) return; updateMutation.mutate({ id: live.id, data: { status: 'cancelled', cancelReason: cancelReason.trim(), cancelCause } }); setConfirming(null); setCancelReason(''); setCancelCause('') }}
                   className="rounded-lg px-2 py-1 text-[10px] font-semibold text-white disabled:opacity-40"
                   style={{ background: '#F59E0B' }}>Confirm cancel</button>
               </span>

@@ -82,10 +82,17 @@ try {
   check('...and so is a blank one', blank.status === 400, String(blank.status))
   check('...the class is still scheduled', (await M.LiveClassModel.findById(lc._id).lean())?.status === 'scheduled')
 
-  const ok = await call('PATCH', `/admin/live-classes/${lc._id}`, adminJar, { status: 'cancelled', cancelReason: `  ${REASON} ` })
-  check('cancelling with a reason is accepted', ok.status === 200, `${ok.status} ${JSON.stringify(ok.body?.error)}`)
+  // Who caused it is asked too (2026-11-09, mentor KPIs): a reason alone, or a cause that isn't one, is refused.
+  const noCause = await call('PATCH', `/admin/live-classes/${lc._id}`, adminJar, { status: 'cancelled', cancelReason: REASON })
+  check('a reason but no cause is refused', noCause.status === 400 && noCause.body?.error?.code === 'CANCEL_CAUSE_REQUIRED', `${noCause.status} ${JSON.stringify(noCause.body?.error)}`)
+  const badCause = await call('PATCH', `/admin/live-classes/${lc._id}`, adminJar, { status: 'cancelled', cancelReason: REASON, cancelCause: 'weather' })
+  check('...and so is a cause that isn\'t one', [400, 422].includes(badCause.status) && (await M.LiveClassModel.findById(lc._id).lean())?.status === 'scheduled', String(badCause.status))
+
+  const ok = await call('PATCH', `/admin/live-classes/${lc._id}`, adminJar, { status: 'cancelled', cancelReason: `  ${REASON} `, cancelCause: 'mentor' })
+  check('cancelling with a reason and who caused it is accepted', ok.status === 200, `${ok.status} ${JSON.stringify(ok.body?.error)}`)
   const row = await M.LiveClassModel.findById(lc._id).lean() as any
   check('the reason is stored, trimmed', row?.cancelReason === REASON, row?.cancelReason)
+  check('...and who caused it', row?.cancelCause === 'mentor', row?.cancelCause)
   check('...with who cancelled', String(row?.cancelledBy) === String(admin._id) && row?.cancelledByName === 'Ops Lead', `${row?.cancelledBy} ${row?.cancelledByName}`)
   check('...and when', row?.cancelledAt && Math.abs(Date.now() - new Date(row.cancelledAt).getTime()) < 60_000)
   check('the admin response carries reason, name and time', ok.body?.data?.cancelReason === REASON && ok.body?.data?.cancelledByName === 'Ops Lead' && !!ok.body?.data?.cancelledAt)
