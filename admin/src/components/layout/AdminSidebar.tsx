@@ -9,7 +9,7 @@ import {
   Tag, Star, Settings, ChevronLeft, ChevronRight, LogOut, X,
   ShoppingBag, Ticket, Map, ClipboardList, Video, CalendarDays, Repeat, BarChart3, ShieldCheck, UserCog, LifeBuoy,
   ClipboardCheck, Film, MonitorSmartphone, FileCheck2, Megaphone, Mail, UserX, Award, MessageCircle, MessagesSquare, Send, ListChecks, DoorOpen, GitMerge,
-  WalletCards,
+  WalletCards, Gauge,
 } from 'lucide-react'
 import { useStaffUnread } from '@/lib/api/chat'
 import { useUIStore } from '@/store/ui.store'
@@ -36,6 +36,8 @@ const adminNavItems = [
   { label: 'Class Verification', href: '/class-verification', icon: ListChecks },
   { label: 'Instructor Attendance', href: '/instructor-attendance', icon: UserX },
   { label: 'Instructor Reviews', href: '/instructor-reviews', icon: Award },
+  /* Mentor KPIs, from Root (2026-11-09): the academy's mentors, view only. */
+  { label: 'Mentor KPIs', href: '/mentor-kpis', icon: Gauge },
   { label: 'Recordings',     href: '/recordings',        icon: Film },
   { label: 'Bookings',       href: '/bookings',          icon: CalendarDays },
   { label: 'Assignments',    href: '/assignments',       icon: ClipboardCheck },
@@ -72,6 +74,8 @@ const scopedAdminNavItems = [
   { label: 'Class Verification', href: '/class-verification', icon: ListChecks },
   { label: 'Instructor Attendance', href: '/instructor-attendance', icon: UserX },
   { label: 'Instructor Reviews', href: '/instructor-reviews', icon: Award },
+  /* Mentor KPIs, from Root (2026-11-09): the academy's mentors, view only. */
+  { label: 'Mentor KPIs', href: '/mentor-kpis', icon: Gauge },
   { label: 'Recordings',       href: '/recordings',             icon: Film },
   { label: 'Bookings',         href: '/bookings',               icon: CalendarDays },
   { label: 'Assignments',      href: '/assignments',            icon: ClipboardCheck },
@@ -88,6 +92,8 @@ const instructorNavItems = [
   { label: 'Class Verification', href: '/class-verification', icon: ListChecks },
   { label: 'Bookings',      href: '/bookings',           icon: CalendarDays },
   { label: 'Availability',  href: '/availability',       icon: CalendarDays },
+  /* My KPIs, from Root (2026-11-09): their own points, view only — no ranking. */
+  { label: 'My KPIs',       href: '/mentor-kpis',        icon: Gauge },
   { label: 'Mentor Calendar', href: '/mentor-calendar',   icon: CalendarDays },
   /* The HRMS meeting pods online classes are given, and who has each (2026-10-18). */
   { label: 'Pods',            href: '/pods',              icon: DoorOpen },

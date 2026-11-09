@@ -2271,6 +2271,28 @@ router.post('/programs/:id/stop', requireInstructor, async (req: Request, res: R
 
 /* The HRMS meeting pods online classes are given (2026-10-18, services/classPod.service.ts) and who has each
    over a stretch — staff meetings too — for the mentors' Pods page. At most 31 days at a time. */
+/* Mentor KPIs (2026-11-09): planned, approved and worked out in Root, shown here view only — an instructor their own
+   month, an admin or sub-admin their academy's mentors, a super admin every mentor; a correction to a frozen month can
+   be asked for (a root admin decides in Root). Root answers once a root admin has opened it. */
+const kpiViewer = (req: Request) => ({ id: String(req.user?.id ?? ''), email: req.user?.email, role: String(req.user?.role ?? ''), organizationId: req.user?.organizationId })
+const kpiRoute = (fn: (req: Request) => Promise<unknown>) => async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    sendSuccess(res, await fn(req))
+  } catch (err) {
+    const { KpiError } = await import('@/services/mentorKpis.service.ts')
+    if (err instanceof KpiError) { res.status(err.status).json({ success: false, error: { code: 'MENTOR_KPIS', message: err.message } }); return }
+    next(err)
+  }
+}
+router.get('/mentor-kpis/me', requireInstructor, kpiRoute(async (req) =>
+  (await import('@/services/mentorKpis.service.ts')).myKpis(kpiViewer(req), req.query['month'])))
+router.get('/mentor-kpis/team', requireInstructor, kpiRoute(async (req) =>
+  (await import('@/services/mentorKpis.service.ts')).teamKpis(kpiViewer(req), req.query['month'])))
+router.get('/mentor-kpis/mentor', requireInstructor, kpiRoute(async (req) =>
+  (await import('@/services/mentorKpis.service.ts')).mentorKpis(kpiViewer(req), req.query['email'], req.query['month'])))
+router.post('/mentor-kpis/corrections', requireInstructor, kpiRoute(async (req) =>
+  (await import('@/services/mentorKpis.service.ts')).askKpiCorrection(kpiViewer(req), (req.body ?? {}) as Record<string, unknown>)))
+
 router.get('/pods', requireInstructor, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { podsView } = await import('@/services/classPod.service.ts')

@@ -15,6 +15,7 @@ import { CompletionWidget } from '@/components/analytics/CompletionWidget'
 import { useCourses } from '@/lib/api/courses'
 import { useAdminStats } from '@/lib/api/stats'
 import { useCurrentUser } from '@/lib/api/user'
+import { MyKpisCard } from '@/components/mentor-kpis/MentorKpiViews'
 import Link from 'next/link'
 import Spinner from '@/components/ui/Spinner'
 import { useOrgCurrency, formatCoursePrice } from '@/lib/currency'
@@ -100,6 +101,9 @@ export default function DashboardPage() {
 
       {/* ── My wallet, first in the row (2026-11-04) ── */}
       <WalletCard />
+
+      {/* ── An instructor's KPI points, from Root (2026-11-09) — shows only once there are some ── */}
+      {currentUser?.role === 'instructor' && <MyKpisCard />}
 
       {/* ── Stat cards ──────────────────────────────── */}
       <div className={`grid grid-cols-1 gap-4 sm:grid-cols-2 ${departmentScoped ? 'xl:grid-cols-3' : 'xl:grid-cols-4'}`}>
