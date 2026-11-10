@@ -9,7 +9,7 @@ import {
   Tag, Star, Settings, ChevronLeft, ChevronRight, LogOut, X,
   ShoppingBag, Ticket, Map, ClipboardList, Video, CalendarDays, Repeat, BarChart3, ShieldCheck, UserCog, LifeBuoy,
   ClipboardCheck, Film, MonitorSmartphone, FileCheck2, Megaphone, Mail, UserX, Award, MessageCircle, MessagesSquare, Send, ListChecks, DoorOpen, GitMerge,
-  WalletCards, Gauge,
+  WalletCards, Gauge, CalendarClock, CalendarCheck,
 } from 'lucide-react'
 import { useStaffUnread } from '@/lib/api/chat'
 import { useUIStore } from '@/store/ui.store'
@@ -18,6 +18,7 @@ import { useAllLiveClasses } from '@/lib/api/liveClasses'
 import { useCurrentUser, logout } from '@/lib/api/user'
 import { useEnrollmentRequests } from '@/lib/api/enrollmentRequests'
 import { useUnreadSupportCount } from '@/lib/api/support'
+import { useCsMentor } from '@/lib/api/csMeetings'
 import { useRouter } from 'next/navigation'
 
 /* ── All nav items (admin sees all) ──────────────────── */
@@ -95,6 +96,10 @@ const instructorNavItems = [
   /* My KPIs, from Root (2026-11-09): their own points, view only — no ranking. */
   { label: 'My KPIs',       href: '/mentor-kpis',        icon: Gauge },
   { label: 'Mentor Calendar', href: '/mentor-calendar',   icon: CalendarDays },
+  /* The CS Portal's Meeting requests and Meetings done (2026-11-10) — shown once the CS Portal knows them as a mentor
+     (Meeting requests for a Senior / Junior / Sub-junior; a Chief books instead). */
+  { label: 'Meeting Requests', href: '/meeting-requests', icon: CalendarClock },
+  { label: 'Meetings Done',   href: '/meetings-done',     icon: CalendarCheck },
   /* The HRMS meeting pods online classes are given, and who has each (2026-10-18). */
   { label: 'Pods',            href: '/pods',              icon: DoorOpen },
   { label: 'Programs',        href: '/programs',          icon: Repeat },
@@ -148,6 +153,8 @@ function SidebarContent({ collapsed, onClose }: SidebarContentProps) {
   const pendingCount = canSeeRequests ? (pendingData?.meta?.total_count ?? 0) : 0
   const { data: unreadSupport = 0 } = useUnreadSupportCount()
   const { data: unreadChat = 0 } = useStaffUnread(isInstructor)
+  const { data: csMentor } = useCsMentor(isInstructor)
+  const csHides = (href: string) => (href === '/meeting-requests' && !(csMentor?.mentor && csMentor.asks)) || (href === '/meetings-done' && !csMentor?.mentor)
   const baseNavItems = isInstructor ? instructorNavItems : isManager ? scopedAdminNavItems : adminNavItems
   /* Support sits in the admin nav but may not reach a classroom, live or
      recorded. Offering the link anyway would just hand them a 403. */
@@ -177,7 +184,7 @@ function SidebarContent({ collapsed, onClose }: SidebarContentProps) {
         { label: 'Duplicates', href: '/duplicates',  icon: GitMerge },
       ]
     : user?.role === 'admin' ? [...withClassroom, sendItem] : withClassroom
-  const navItems = allNavItems.filter(i => canView(i.href))
+  const navItems = allNavItems.filter(i => canView(i.href) && !csHides(i.href))
   const roleLabel = isInstructor ? 'Instructor' : isManager ? 'Manager' : 'Admin'
   const bottomItems = (isInstructor ? [] : [settingsItem]).filter(i => canView(i.href))
 

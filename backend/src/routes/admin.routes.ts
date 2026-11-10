@@ -2128,10 +2128,23 @@ router.get('/mentor-calendar/classes/:id', requireInstructor, async (req: Reques
   } catch (err) { next(err) }
 })
 
+/* A Senior, Junior or Sub-junior Mentor asks for a student meeting (Meeting requests) rather than booking it here, as
+   in the CS Portal (2026-11-10) — the student's CS picks the time and approves. Instructors only; an admin books as
+   before. If the CS Portal can't say, booking goes on. */
+async function refuseStudentBooking(req: Request, res: Response, kind: unknown): Promise<boolean> {
+  if (req.user?.role !== 'instructor' || String(kind ?? '') !== 'student') return false
+  const { mustAskForStudentMeetings, ASK_INSTEAD_MESSAGE } = await import('@/services/csPortalMeetings.service.ts')
+  if (!(await mustAskForStudentMeetings(req.user?.email))) return false
+  const { sendError } = await import('@/utils/response.ts')
+  sendError(res, 'ASK_FOR_STUDENT_MEETINGS', ASK_INSTEAD_MESSAGE, 403)
+  return true
+}
+
 router.post('/mentor-calendar/meetings', requireInstructor, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { createMentorMeetingForPortal } = await import('@/services/portal.service.ts')
     const body = (req.body ?? {}) as Record<string, unknown>
+    if (await refuseStudentBooking(req, res, body['kind'])) return
     sendSuccess(res, await createMentorMeetingForPortal({ ...body, remoteOrgId: await mentorCalendarOrg(req), bookedByEmail: String(req.user?.email ?? ''), bookedVia: 'lms' } as any), 'Meeting booked')
   } catch (err) { next(err) }
 })
@@ -2147,6 +2160,12 @@ router.patch('/mentor-calendar/meetings/:id', requireInstructor, async (req: Req
   try {
     const { updateMentorMeetingForPortal } = await import('@/services/portal.service.ts')
     const body = (req.body ?? {}) as Record<string, unknown>
+    /* Made into a student meeting by an edit: the same as booking one. */
+    if (body['kind'] === 'student' && req.user?.role === 'instructor') {
+      const { MentorMeetingModel } = await import('@/models/schema.ts')
+      const was = await MentorMeetingModel.findById(String(req.params['id'] ?? '')).select('kind').lean().catch(() => null) as { kind?: string } | null
+      if (was && was.kind !== 'student' && await refuseStudentBooking(req, res, 'student')) return
+    }
     sendSuccess(res, await updateMentorMeetingForPortal({ ...body, remoteOrgId: await mentorCalendarOrg(req), meetingId: String(req.params['id'] ?? ''), ...actorOf(req) } as any), 'Meeting updated')
   } catch (err) { next(err) }
 })
@@ -2292,6 +2311,23 @@ router.get('/mentor-kpis/mentor', requireInstructor, kpiRoute(async (req) =>
   (await import('@/services/mentorKpis.service.ts')).mentorKpis(kpiViewer(req), req.query['email'], req.query['month'])))
 router.post('/mentor-kpis/corrections', requireInstructor, kpiRoute(async (req) =>
   (await import('@/services/mentorKpis.service.ts')).askKpiCorrection(kpiViewer(req), (req.body ?? {}) as Record<string, unknown>)))
+
+/* Meeting requests and Meetings done (the user, 2026-11-10: "do same as the commission portal also in the lms admin"):
+   kept in the CS Portal and asked of it as the instructor signed in here — their own address, never one the page sends
+   (services/csPortalMeetings.service.ts). A Junior / Senior / Sub-junior Mentor asks for student meetings, sees and
+   takes back their own, and sees their Meeting mentor commission; a Chief their team's meetings and commission. The CS
+   Portal decides what each may do; nobody approves from here. Instructors only — admins use the CS Portal. */
+router.post('/cs-meetings/:action', requireInstructor, async (req: Request, res: Response, next: NextFunction) => {
+  const { askCsPortal, CsMeetingsError } = await import('@/services/csPortalMeetings.service.ts')
+  const { sendError } = await import('@/utils/response.ts')
+  try {
+    if (req.user?.role !== 'instructor') { sendError(res, 'FOR_MENTORS', 'Meeting requests are for mentors', 403); return }
+    sendSuccess(res, await askCsPortal(req.user?.email, String(req.params['action'] ?? ''), req.body ?? {}))
+  } catch (err) {
+    if (err instanceof CsMeetingsError) { sendError(res, 'CS_PORTAL', err.message, err.status); return }
+    next(err)
+  }
+})
 
 router.get('/pods', requireInstructor, async (req: Request, res: Response, next: NextFunction) => {
   try {

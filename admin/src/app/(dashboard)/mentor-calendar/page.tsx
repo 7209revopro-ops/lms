@@ -9,6 +9,8 @@ import { useCurrentUser } from '@/lib/api/user'
 import { useQueryState, setQueryParams } from '@/lib/useQueryState'
 import { useMentorCalendar, useBookMeeting, useCancelMeeting, useMentorClass, useRemoveTimeOff, wallInZone, timeOffLabel, refusal, type CalendarMentor, type MentorTimeOff } from '@/lib/api/mentorCalendar'
 import { TimeOffDialog } from '@/components/live-classes/TimeOffDialog'
+import { useCsMentor } from '@/lib/api/csMeetings'
+import Link from 'next/link'
 
 /* Mentor Calendar (CS Portal's user, 2026-10-08): every mentor's week — the hours they set as free,
    their classes and the sessions booked with them — for instructors as well as admins, and a session booked
@@ -249,6 +251,11 @@ function ClassInfoDialog({ id, tz, onClose }: { id: string; tz: string; onClose:
 
 function BookDialog({ mentor, tz, onClose }: { mentor: CalendarMentor; tz: string; onClose: () => void }) {
   const book = useBookMeeting()
+  /* A Senior, Junior or Sub-junior Mentor asks for a student meeting on Meeting requests instead (2026-11-10), as in
+     the CS Portal — the student's CS picks the time. The server refuses it too. */
+  const { data: me } = useCurrentUser()
+  const { data: cs } = useCsMentor((me as any)?.role === 'instructor')
+  const asks = !!(cs?.mentor && cs.asks)
   const [f, setF] = useState({ date: new Date().toLocaleDateString('en-CA', { timeZone: tz }), time: '10:00', durationMins: 30, title: '', kind: 'staff' as 'staff' | 'student' | 'client', name: '', email: '', inPerson: false, location: '', notes: '' })
   const [err, setErr] = useState('')
   const set = (k: string, v: unknown) => setF(x => ({ ...x, [k]: v }))
@@ -274,7 +281,8 @@ function BookDialog({ mentor, tz, onClose }: { mentor: CalendarMentor; tz: strin
           <input type="time" className={field} value={f.time} onChange={e => set('time', e.target.value)} />
           <select className={field} value={f.durationMins} onChange={e => set('durationMins', Number(e.target.value))}>{[15, 30, 45, 60, 90].map(n => <option key={n} value={n}>{n} min</option>)}</select>
         </div>
-        <select className={field} value={f.kind} onChange={e => set('kind', e.target.value)}><option value="staff">With staff</option><option value="student">With a student</option><option value="client">With a client</option></select>
+        <select className={field} value={f.kind} onChange={e => set('kind', e.target.value)}><option value="staff">With staff</option>{!asks && <option value="student">With a student</option>}<option value="client">With a client</option></select>
+        {asks && <p className="text-xs text-white/50">A meeting with a student? <Link href="/meeting-requests?new=1" className="text-[#60A5FA] hover:underline">Ask for it on Meeting requests</Link> — the student's CS picks the time.</p>}
         <div className="grid grid-cols-2 gap-2">
           <input className={field} placeholder="Their name" value={f.name} onChange={e => set('name', e.target.value)} />
           <input className={field} placeholder="Their email" value={f.email} onChange={e => set('email', e.target.value)} />
