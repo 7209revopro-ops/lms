@@ -25,6 +25,21 @@ const FINANCE_FILTER_CAP = 3_000
    session itself still runs for IMPERSONATION_EXPIRES_IN. */
 const HANDOFF_TTL_MS = 60_000
 
+/* The Forex programme, as courses and approvals name it. */
+const FOREX_PROGRAM = '4x-trading'
+/* What an instructor's Students page shows of a student (2026-11-10) — the table's columns and nothing else: not
+   their application, documents, devices or anything an admin edits. */
+const INSTRUCTOR_STUDENT_FIELDS = ['id', 'name', 'email', 'secondaryEmails', 'phone', 'avatarUrl', 'role', 'category', 'categories',
+  'enrolledPrograms', 'isActive', 'createdAt', 'tetraCs'] as const
+export function studentRowForInstructor(row: unknown): Record<string, unknown> {
+  const r = row as Record<string, unknown>
+  const out: Record<string, unknown> = {}
+  for (const k of INSTRUCTOR_STUDENT_FIELDS) if (r[k] !== undefined) out[k] = r[k]
+  const applied = (r['enrollmentApplication'] as { phone?: unknown } | undefined)?.phone
+  if (!r['phone'] && applied) out['enrollmentApplication'] = { phone: applied }
+  return out
+}
+
 export class AdminController {
   private readonly courseService   = new CourseService()
   private readonly categoryService = new CategoryService()
@@ -301,7 +316,10 @@ export class AdminController {
       const role             = q['role'] as UserRole | undefined
       const search           = q['search']?.trim() || undefined
       const category         = q['category'] as string | undefined
-      const effectiveCategory = req.user!.categoryScope ? req.user!.categoryScope as string : category
+      /* An instructor reads every Forex student of their academy, whatever their own programme (2026-11-10; the
+         route lets them list students only). */
+      const forexReader      = req.user!.role === 'instructor'
+      const effectiveCategory = forexReader ? FOREX_PROGRAM : req.user!.categoryScope ? req.user!.categoryScope as string : category
       const status           = q['status'] as 'active' | 'inactive' | undefined
       const excludeStudents  = Boolean(q['exclude_students'])
       const enrollmentStatus = q['enrollmentStatus'] as 'pending' | 'approved' | 'rejected' | 'cancelled' | undefined
@@ -316,7 +334,7 @@ export class AdminController {
       const rows = docs.map(d => d.role === 'student'
         ? { ...d.toJSON(), enrolledPrograms: enrolled.get(String(d._id)) ?? [] }
         : d)
-      sendSuccess(res, rows, undefined, 200, meta)
+      sendSuccess(res, forexReader ? rows.map(studentRowForInstructor) : rows, undefined, 200, meta)
     } catch (err) { next(err) }
   }
 

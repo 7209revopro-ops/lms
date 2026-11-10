@@ -9,7 +9,7 @@ import {
   Tag, Star, Settings, ChevronLeft, ChevronRight, LogOut, X,
   ShoppingBag, Ticket, Map, ClipboardList, Video, CalendarDays, Repeat, BarChart3, ShieldCheck, UserCog, LifeBuoy,
   ClipboardCheck, Film, MonitorSmartphone, FileCheck2, Megaphone, Mail, UserX, Award, MessageCircle, MessagesSquare, Send, ListChecks, DoorOpen, GitMerge,
-  WalletCards, Gauge, CalendarClock, CalendarCheck,
+  WalletCards, Gauge, CalendarClock, CalendarCheck, Coins,
 } from 'lucide-react'
 import { useStaffUnread } from '@/lib/api/chat'
 import { useUIStore } from '@/store/ui.store'
@@ -41,6 +41,8 @@ const adminNavItems = [
   /* The CS Portal's Meeting requests and Meetings done (2026-11-10), read through their own CS Portal account. */
   { label: 'Meeting Requests', href: '/meeting-requests', icon: CalendarClock },
   { label: 'Meetings Done',   href: '/meetings-done',     icon: CalendarCheck },
+  /* The CS Portal's Commission report (2026-11-10: "the commission also they can see from the lms") — by the same email. */
+  { label: 'Commission',      href: '/commission',        icon: Coins },
   { label: 'Recordings',     href: '/recordings',        icon: Film },
   { label: 'Bookings',       href: '/bookings',          icon: CalendarDays },
   { label: 'Assignments',    href: '/assignments',       icon: ClipboardCheck },
@@ -82,6 +84,8 @@ const scopedAdminNavItems = [
   /* The CS Portal's Meeting requests and Meetings done (2026-11-10), read through their own CS Portal account. */
   { label: 'Meeting Requests', href: '/meeting-requests', icon: CalendarClock },
   { label: 'Meetings Done',   href: '/meetings-done',     icon: CalendarCheck },
+  /* The CS Portal's Commission report (2026-11-10: "the commission also they can see from the lms") — by the same email. */
+  { label: 'Commission',      href: '/commission',        icon: Coins },
   { label: 'Recordings',       href: '/recordings',             icon: Film },
   { label: 'Bookings',         href: '/bookings',               icon: CalendarDays },
   { label: 'Assignments',      href: '/assignments',            icon: ClipboardCheck },
@@ -105,6 +109,8 @@ const instructorNavItems = [
      meeting done and meeting request"); each page says what the CS Portal lets them see. */
   { label: 'Meeting Requests', href: '/meeting-requests', icon: CalendarClock },
   { label: 'Meetings Done',   href: '/meetings-done',     icon: CalendarCheck },
+  /* The CS Portal's Commission report (2026-11-10: "the commission also they can see from the lms") — by the same email. */
+  { label: 'Commission',      href: '/commission',        icon: Coins },
   /* Instructor Reviews (2026-11-10): their own reviews and the other mentors' of their academy, with filters. */
   { label: 'Instructor Reviews', href: '/instructor-reviews', icon: Award },
   /* The HRMS meeting pods online classes are given, and who has each (2026-10-18). */
@@ -165,7 +171,7 @@ function SidebarContent({ collapsed, onClose }: SidebarContentProps) {
      recorded. Offering the link anyway would just hand them a 403. */
   const forRole = user?.role === 'support'
     /* The CS Portal's meeting pages are for mentors and admins (the server refuses support). */
-    ? baseNavItems.filter(i => i.href !== '/meeting-requests' && i.href !== '/meetings-done')
+    ? baseNavItems.filter(i => !['/meeting-requests', '/meetings-done', '/commission'].includes(i.href))
     : baseNavItems
   const withClassroom = mayReachClassroom(user?.role)
     ? forRole

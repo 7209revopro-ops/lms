@@ -17,6 +17,8 @@ export interface CsMentor {
   /** A Senior / Junior / Sub-junior asks for student meetings; a Chief books them. */
   asks?: boolean
   meetings_done?: Array<'meetings' | 'commission'>
+  /** The CS Portal's Commission report reaches here (2026-11-10) — missing from a CS Portal before that update. */
+  commission_report?: boolean
 }
 export interface MeetingRequest {
   id: string; number: string; status: 'pending' | 'booking' | 'approved' | 'rejected' | 'cancelled' | 'blocked'; view: string
@@ -113,4 +115,51 @@ export function useMeetingsDone(filters: { from: string; to: string; status: str
     queryFn: () => ask<MeetingsDone>('getMeetingsDone', filters),
     enabled, retry: false, placeholderData: prev => prev,
   })
+}
+
+/* ── The Commission report (the user, 2026-11-10: "the commission also they can see from the lms also same as the
+   commission portal have") — the CS Portal's own, with its reach: a Senior / Junior / Sub-junior their team's, a Chief
+   their people's, an admin's account everyone's (a CS Manager their location's). Money is USD there, shown in AED at
+   the portal's 3.67. ── */
+export const AED_PER_USD = 3.67
+export interface CommissionSums {
+  count: number; usd: number; own: number; own_usd: number; pool: number; pool_usd: number
+  bonus: number; bonus_usd: number; deposit: number; deposit_usd: number; students: number
+}
+export interface CommissionReportRow extends Partial<CommissionSums> {
+  id?: string; name?: string; team_id?: string; team?: string; location?: 'dubai' | 'bangalore' | string; month?: string
+}
+export interface CommissionReport {
+  period: string; since: string | null; until: string | null
+  /** Whose figures: everyone, a location's (a CS Manager), a team's, or their own. */
+  scope: 'all' | 'location' | 'team' | 'own'; locked_location: string | null
+  total: CommissionSums; people: CommissionReportRow[]; teams: CommissionReportRow[]; months: CommissionReportRow[]
+}
+export interface CommissionCredit {
+  id: string; student_id: string; student_name: string; student_code: string; at: string | null
+  usd: number; base_usd: number; pct: number; position: string; level: number | null; pool: string
+  course: string; ref: string; type: 'BONUS' | 'DEPOSIT'; initiator: string; plan: string; status: string
+  /** Who it is paid to, and their team. */
+  raised_by: string; team: string
+}
+export interface ReportFilterOptions {
+  scope: CommissionReport['scope']; locked_location: string | null
+  teams: { id: string; name: string; location: string }[]; people: { id: string; name: string; team_id: string }[]
+}
+export interface CommissionAsk { period: string; from?: string; to?: string; location?: string; team?: string; cs?: string }
+/** Which number's credits: its bucket ("count", "own", "pool", "bonus", "deposit"), and the row — the total, a person, a team or a month. */
+export interface CommissionPick { bucket: string; view: 'total' | 'person' | 'team' | 'month'; key: string }
+
+export function useCommissionReport(params: CommissionAsk, enabled: boolean) {
+  return useQuery({ queryKey: ['cs-meetings', 'commission-report', params], queryFn: () => ask<CommissionReport>('getCommissionReport', { ...params }), enabled, retry: false })
+}
+export function useCommissionCredits(params: CommissionAsk, pick: CommissionPick | null) {
+  return useQuery({
+    queryKey: ['cs-meetings', 'commission-credits', params, pick],
+    queryFn: () => ask<{ details: CommissionCredit[] }>('getCommissionReport', { ...params, details: pick }),
+    enabled: !!pick, retry: false,
+  })
+}
+export function useReportFilterOptions(enabled: boolean) {
+  return useQuery({ queryKey: ['cs-meetings', 'report-filters'], queryFn: () => ask<ReportFilterOptions>('getReportFilters'), enabled, retry: false, staleTime: 5 * 60_000 })
 }

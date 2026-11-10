@@ -56,6 +56,10 @@ export function UserTable({ role, label }: Props) {
      (plan.md §10): the chips that offered the other three become a label. */
   const { data: viewer } = useCurrentUser()
   const viewerDepartment = isProgrammeScoped(viewer) ? categoryScopeOf(viewer) : undefined
+  /* An instructor (the user, 2026-11-10: "every forex student can see by the mentors"): every Forex student of their
+     academy, to read — the server picks the programme and sends only the table's columns; no edit, no actions, no
+     history (its enrolments and orders are the admins'). */
+  const forexReader = role === 'student' && viewer?.role === 'instructor'
   /* Every filter in the address bar (lib/useQueryState.ts): a reload keeps the view, the link can be shared. */
   const [search,      setSearch]      = useQueryState('q', '', { history: 'replace' })
   const [page,        setPage]        = useQueryState('page', 1)
@@ -69,7 +73,7 @@ export function UserTable({ role, label }: Props) {
     search,
     page,
     per_page: 20,
-    category: category || undefined,
+    category: forexReader ? undefined : category || undefined,
     ...(role === 'student' && noPhone ? { no_phone: 'true' as const } : {}),
     ...(role === 'student' && onboarded ? { onboarded } : {}),
   })
@@ -95,8 +99,13 @@ export function UserTable({ role, label }: Props) {
             onBlur={e => { e.currentTarget.style.border = '1px solid rgba(255,255,255,0.08)'; e.currentTarget.style.boxShadow = 'none' }} />
         </div>
 
-        {/* Category filter chips — a fixed label for a department's sub_admin */}
-        {isProgrammeScoped(viewer) ? (
+        {/* Category filter chips — a fixed label for a department's sub_admin, and for an instructor (Forex) */}
+        {forexReader ? (
+          <span className="rounded-xl px-3 py-1.5 text-xs font-semibold"
+            style={{ background: CATEGORY_STYLE['4x-trading']!.bg, color: CATEGORY_STYLE['4x-trading']!.color, border: `1px solid ${CATEGORY_STYLE['4x-trading']!.color}50` }}>
+            Every FOREX student · view only
+          </span>
+        ) : isProgrammeScoped(viewer) ? (
           <span className="rounded-xl px-3 py-1.5 text-xs font-semibold"
             style={viewerDepartment && CATEGORY_STYLE[viewerDepartment]
               ? { background: CATEGORY_STYLE[viewerDepartment].bg, color: CATEGORY_STYLE[viewerDepartment].color, border: `1px solid ${CATEGORY_STYLE[viewerDepartment].color}50` }
@@ -187,8 +196,8 @@ export function UserTable({ role, label }: Props) {
               </td></tr>
             )}
             {!isLoading && data?.docs.map((u, i) => (
-              <UserRow key={u.id} user={u} index={i} onEdit={setEditingUser}
-                onViewHistory={role === 'student' ? setHistoryUser : undefined} />
+              <UserRow key={u.id} user={u} index={i} onEdit={setEditingUser} readOnly={forexReader}
+                onViewHistory={role === 'student' && !forexReader ? setHistoryUser : undefined} />
             ))}
           </tbody>
         </table>
@@ -244,11 +253,13 @@ export function UserTable({ role, label }: Props) {
 /** Their phone — on the account, else the one on their application. */
 const phoneOf = (u: AdminUser): string => (u.phone || u.enrollmentApplication?.phone || '').trim()
 
-function UserRow({ user, index, onEdit, onViewHistory }: {
+function UserRow({ user, index, onEdit, onViewHistory, readOnly = false }: {
   user:          AdminUser
   index:         number
   onEdit:        (u: AdminUser) => void
   onViewHistory?: (u: AdminUser) => void
+  /** To read only (an instructor's Students page): no edit, no actions menu. */
+  readOnly?:     boolean
 }) {
   const update    = useUpdateUser()
   const recheck   = useRecheckCs()
@@ -514,7 +525,7 @@ function UserRow({ user, index, onEdit, onViewHistory }: {
         </div>
       </td>
       <td className="px-4 py-3.5 relative">
-        <div className="flex items-center gap-1">
+        {!readOnly && <div className="flex items-center gap-1">
           <button onClick={() => onEdit(user)}
             className="flex h-7 w-7 items-center justify-center rounded-lg transition-colors hover:bg-white/[0.05]"
             style={{ color: 'rgba(255,255,255,0.45)' }}
@@ -526,7 +537,7 @@ function UserRow({ user, index, onEdit, onViewHistory }: {
             style={{ color: 'rgba(255,255,255,0.45)' }}>
             {update.isPending ? <Spinner size={12} /> : <MoreHorizontal size={13} />}
           </button>
-        </div>
+        </div>}
         <AnimatePresence>
           {menuOpen && (
             <>

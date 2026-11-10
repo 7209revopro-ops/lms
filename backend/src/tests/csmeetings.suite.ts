@@ -131,6 +131,15 @@ try {
   check('not linked: 503, said so', r.status === 503 && /not linked/.test(r.body?.error?.message), j(r.body))
   process.env.COMMISSION_S2S_SECRET = SECRET
 
+  section('B2  the Commission report (2026-11-10)')
+  r = await call('POST', '/admin/cs-meetings/getCommissionReport', senior, { period: 'month', details: { bucket: 'own', view: 'person', key: 'x' }, email: 'chief@cm.local' })
+  check('an instructor asks for the Commission report: passed on as them, with the period and the number opened', r.status === 200 && last()?.email === 'senior@cm.local'
+    && last()?.action === 'getCommissionReport' && last()?.body?.period === 'month' && last()?.body?.details?.bucket === 'own', j(last()))
+  r = await call('POST', '/admin/cs-meetings/getReportFilters', admin, {})
+  check('…its filters, an admin as their own account', r.status === 200 && last()?.email === 'admin@cm.local' && last()?.action === 'getReportFilters', j(last()))
+  r = await call('POST', '/admin/cs-meetings/getCommissionReport', support, { period: 'month' })
+  check('…support staff: refused', r.status === 403, j(r.body))
+
   section('C  the Mentor Calendar')
   forgetAsks()
   const at = new Date(Date.now() + 3 * 864e5); at.setUTCHours(6, 0, 0, 0)

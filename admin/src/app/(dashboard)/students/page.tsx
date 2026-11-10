@@ -14,7 +14,10 @@ export default function StudentsPage() {
   const searchParams = useSearchParams()
   const [modalOpen, setModalOpen] = useState(() => searchParams.get('add') === '1')
   const { data: me } = useCurrentUser()
-  const canAddStudent = ['super_admin', 'admin', 'instructor'].includes(me?.role ?? '')
+  /* Not an instructor: the server never let them create an account (POST /admin/users) — and their Students page is
+     every Forex student of their academy, to read (2026-11-10). */
+  const canAddStudent = ['super_admin', 'admin'].includes(me?.role ?? '')
+  const forexReader = me?.role === 'instructor'
 
   const handleClose = () => {
     setModalOpen(false)
@@ -27,7 +30,7 @@ export default function StudentsPage() {
       <div className="flex items-start justify-between gap-4">
         <PageHeader
           title="Students"
-          subtitle="Everyone enrolled on the platform"
+          subtitle={forexReader ? 'Every Forex student of your academy — view only' : 'Everyone enrolled on the platform'}
           badge={{ label: 'Users', color: '#2F6BFF' }}
         />
         {canAddStudent && (

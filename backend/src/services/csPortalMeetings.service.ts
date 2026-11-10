@@ -25,6 +25,9 @@ import { logger } from '@/utils/logger.ts'
 export const CS_MEETING_ACTIONS = new Set([
   'me', 'listMeetingRequests', 'createMeetingRequest', 'cancelMeetingRequest', 'getMeetingRequestReview',
   'searchMeetingStudents', 'getStudentMeetingHistory', 'getMeetingCommissions', 'getMeetingsDone',
+  /* The CS Portal's Commission report and its filters (2026-11-10: "the commission also they can see from the lms") —
+     the same reach as on its page there. */
+  'getCommissionReport', 'getReportFilters',
 ])
 const TIMEOUT_MS = 30_000
 const base = (v: unknown) => String(v ?? '').trim().replace(/\/+$/, '').replace(/\/api\/v1$/, '')

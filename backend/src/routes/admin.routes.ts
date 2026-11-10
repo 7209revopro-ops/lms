@@ -420,7 +420,10 @@ const userCreateSchema = z.object({
 router.get  ('/users', requirePermission('users','list'),
   validate(usersQuerySchema, 'query'),
   (req: Request, res: Response, next: NextFunction) => {
-    if (req.user!.role === 'instructor') {
+    /* An instructor (the user, 2026-11-10: "every forex student can see by the mentors"): the Students page only —
+       every Forex student of their own academy, to read (listUsers forces the programme and trims each row to what
+       the table shows). Any other list — instructors, staff, everyone — stays refused. */
+    if (req.user!.role === 'instructor' && (req.query as Record<string, unknown>)['role'] !== 'student') {
       res.status(403).json({ success: false, error: { code: 'FORBIDDEN', message: 'Access denied.' } })
       return
     }
@@ -2323,7 +2326,7 @@ router.post('/cs-meetings/:action', requireInstructor, async (req: Request, res:
   const { askCsPortal, CsMeetingsError } = await import('@/services/csPortalMeetings.service.ts')
   const { sendError } = await import('@/utils/response.ts')
   try {
-    if (!['instructor', 'super_admin', 'admin', 'sub_admin'].includes(String(req.user?.role))) { sendError(res, 'FOR_MENTORS', 'Meeting requests are for mentors and admins', 403); return }
+    if (!['instructor', 'super_admin', 'admin', 'sub_admin'].includes(String(req.user?.role))) { sendError(res, 'FOR_MENTORS', 'This is for mentors and admins', 403); return }
     sendSuccess(res, await askCsPortal(req.user?.email, String(req.params['action'] ?? ''), req.body ?? {}))
   } catch (err) {
     if (err instanceof CsMeetingsError) { sendError(res, 'CS_PORTAL', err.message, err.status); return }
