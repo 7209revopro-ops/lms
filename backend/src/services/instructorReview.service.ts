@@ -123,7 +123,7 @@ export class InstructorReviewService {
      `role !== 'super_admin'` version of this same bug). A super_admin with
      no academy selected in the switcher passes orgId=undefined and sees
      every academy; one academy selected narrows exactly like an org admin. */
-  async leaderboard(orgId: string | undefined, scope: string | undefined): Promise<Array<{
+  async leaderboard(orgId: string | undefined, scope: string | undefined, range?: { from?: Date; to?: Date }, reach?: Types.ObjectId[]): Promise<Array<{
     instructorId: string; name: string; email?: string; avatarUrl?: string
     avgRating: number; totalReviews: number
     ratingCounts: Record<1 | 2 | 3 | 4 | 5, number>
@@ -132,6 +132,9 @@ export class InstructorReviewService {
     const match: Record<string, unknown> = {}
     if (orgId && Types.ObjectId.isValid(orgId)) match['organizationId'] = new Types.ObjectId(orgId)
     if (scope) match['program'] = scope
+    // Only the reviews left in these days, and only these mentors (the Instructor Reviews page's filters, 2026-11-10).
+    if (range?.from || range?.to) match['createdAt'] = { ...(range.from ? { $gte: range.from } : {}), ...(range.to ? { $lt: range.to } : {}) }
+    if (reach) match['instructorId'] = { $in: reach }
 
     const rows = await InstructorReviewModel.aggregate([
       { $match: match },

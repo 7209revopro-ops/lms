@@ -85,12 +85,13 @@ try {
   await mkUser({ name: 'Senior', email: 'senior@cm.local', role: 'instructor' })
   await mkUser({ name: 'Chief', email: 'chief@cm.local', role: 'instructor' })
   await mkUser({ name: 'Admin', email: 'admin@cm.local', role: 'admin' })
+  await mkUser({ name: 'Support', email: 'support@cm.local', role: 'support' })
   const login = async (e: string): Promise<Jar> => {
     const jar: Jar = new Map(); const r = await call('POST', '/admin/auth/login', jar, { email: e, password: PW })
     if (r.status !== 200) throw new Error(`login ${e}: ${r.status} ${JSON.stringify(r.body)}`)
     return jar
   }
-  const senior = await login('senior@cm.local'), chief = await login('chief@cm.local'), admin = await login('admin@cm.local')
+  const senior = await login('senior@cm.local'), chief = await login('chief@cm.local'), admin = await login('admin@cm.local'), support = await login('support@cm.local')
   const last = () => asked[asked.length - 1]
 
   section('A  as the instructor signed in')
@@ -101,7 +102,9 @@ try {
   check("an address the page sends is never who it's asked as", last()?.email === 'senior@cm.local' && last()?.action === 'listMeetingRequests' && last()?.body?.box === 'to_decide', j(last()))
   check('…its data back', r.status === 200 && r.body?.data?.action === 'listMeetingRequests', j(r.body))
   r = await call('POST', '/admin/cs-meetings/me', admin, {})
-  check('an admin: refused (they use the CS Portal)', r.status === 403 && r.body?.error?.code === 'FOR_MENTORS', j(r.body))
+  check('an admin: asked as their own CS Portal account (it decides what they read)', r.status === 200 && last()?.email === 'admin@cm.local' && r.body?.data?.mentor === false, j(r.body))
+  r = await call('POST', '/admin/cs-meetings/me', support, {})
+  check('support staff: refused', r.status === 403 && r.body?.error?.code === 'FOR_MENTORS', j(r.body))
   r = await call('POST', '/admin/cs-meetings/me', undefined, {})
   check('signed out: refused', r.status === 401, j(r.body))
   const before = asked.length

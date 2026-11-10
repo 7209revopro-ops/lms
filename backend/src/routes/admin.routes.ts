@@ -2316,12 +2316,14 @@ router.post('/mentor-kpis/corrections', requireInstructor, kpiRoute(async (req) 
    kept in the CS Portal and asked of it as the instructor signed in here — their own address, never one the page sends
    (services/csPortalMeetings.service.ts). A Junior / Senior / Sub-junior Mentor asks for student meetings, sees and
    takes back their own, and sees their Meeting mentor commission; a Chief their team's meetings and commission. The CS
-   Portal decides what each may do; nobody approves from here. Instructors only — admins use the CS Portal. */
+   Portal decides what each may do; nobody approves from here. Admins too (the user, 2026-11-10: "show in the sidebar
+   the meeting done and meeting request"): what their own CS Portal account (same address) may read — a Super Admin's
+   or CS Manager's requests and meetings, never deciding or asking. Support staff: no. */
 router.post('/cs-meetings/:action', requireInstructor, async (req: Request, res: Response, next: NextFunction) => {
   const { askCsPortal, CsMeetingsError } = await import('@/services/csPortalMeetings.service.ts')
   const { sendError } = await import('@/utils/response.ts')
   try {
-    if (req.user?.role !== 'instructor') { sendError(res, 'FOR_MENTORS', 'Meeting requests are for mentors', 403); return }
+    if (!['instructor', 'super_admin', 'admin', 'sub_admin'].includes(String(req.user?.role))) { sendError(res, 'FOR_MENTORS', 'Meeting requests are for mentors and admins', 403); return }
     sendSuccess(res, await askCsPortal(req.user?.email, String(req.params['action'] ?? ''), req.body ?? {}))
   } catch (err) {
     if (err instanceof CsMeetingsError) { sendError(res, 'CS_PORTAL', err.message, err.status); return }

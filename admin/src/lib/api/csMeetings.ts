@@ -9,6 +9,10 @@ const ask = <T,>(action: string, body: Record<string, unknown> = {}) => apiPost<
 
 export interface CsMentor {
   mentor: boolean; message?: string
+  /** An admin's own CS Portal account (Super Admin, Admin, CS Manager): what it may read there, read only. */
+  viewer?: boolean
+  /** Whose requests: their own ("mine"), the ones their account decides ("to_decide", read only), or none (a Chief). */
+  requests?: 'mine' | 'to_decide' | null
   role?: 'junior_mentor' | 'senior_mentor' | 'subjunior_mentor' | 'chief_mentor'; name?: string
   /** A Senior / Junior / Sub-junior asks for student meetings; a Chief books them. */
   asks?: boolean

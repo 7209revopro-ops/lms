@@ -9,15 +9,17 @@ import { MeetingCommissionTab, TeamMeetingsTab } from '@/components/cs-meetings/
 /* Meetings done (the user, 2026-11-10: "do same as the commission portal also in the lms admin") — the CS Portal's
    page for its mentors: a Senior, Junior or Sub-junior Mentor sees the Meeting commission tab only (the meetings that
    earned them commission); a Chief also their team's meetings, how each went, and Converted. Payment verification
-   stays in the CS Portal. The days are Dubai days, this month unless changed. */
+   stays in the CS Portal. The days are Dubai days, this month unless changed. An admin (2026-11-10): what their own CS
+   Portal account sees — a Super Admin or Admin every meeting and everyone's commission, a CS Manager the commission. */
+const READERS = ['instructor', 'super_admin', 'admin', 'sub_admin']
 
 const dubaiToday = () => new Date(Date.now() + 4 * 3600_000).toISOString().slice(0, 10)
 const DAY = /^\d{4}-\d{2}-\d{2}$/
 
 export default function MeetingsDonePage() {
   const { data: user } = useCurrentUser()
-  const isInstructor = user?.role === 'instructor'
-  const me = useCsMentor(isInstructor)
+  const reads = READERS.includes(String(user?.role))
+  const me = useCsMentor(reads)
   const today = dubaiToday()
   const [fromQ, setFrom] = useQueryState('from', '', { history: 'replace' })
   const [toQ, setTo] = useQueryState('to', '', { history: 'replace' })
@@ -35,7 +37,7 @@ export default function MeetingsDonePage() {
         <div className="flex h-10 w-10 items-center justify-center rounded-xl" style={{ background: 'rgba(52,211,153,0.15)', color: '#34D399' }}><CalendarCheck className="h-5 w-5" /></div>
         <div>
           <h1 className="text-2xl font-bold text-white" style={{ fontFamily: 'Bricolage Grotesque, sans-serif' }}>Meetings Done</h1>
-          <p className="text-sm" style={muted}>From the CS Portal — the meetings that earned commission{me.data?.meetings_done?.includes('meetings') ? ', and your team’s meetings with how each went' : ''}.</p>
+          <p className="text-sm" style={muted}>From the CS Portal — the meetings that earned commission{me.data?.meetings_done?.includes('meetings') ? `, and ${me.data?.viewer ? 'every' : 'your team’s'} meeting with how each went` : ''}.</p>
         </div>
         <div className="flex-1" />
         <div className="flex flex-wrap items-center gap-2 text-xs" style={muted}>
@@ -44,10 +46,10 @@ export default function MeetingsDonePage() {
         </div>
       </div>
       {!user ? null
-        : !isInstructor ? <p className="text-sm" style={muted}>Meetings done is for mentors here — admins see it in the CS Portal.</p>
+        : !reads ? <p className="text-sm" style={muted}>Meetings done is for mentors and admins.</p>
         : me.isLoading ? <p className="flex items-center gap-2 text-sm" style={muted}><Loader2 size={14} className="animate-spin" />Loading…</p>
         : me.isError ? <p className="rounded-xl px-4 py-3 text-sm" style={{ color: '#FBBF24', background: 'rgba(245,158,11,0.08)', border: '1px solid rgba(245,158,11,0.3)' }}>{csError(me.error, 'The CS Portal could not be asked')}</p>
-        : !me.data?.mentor ? <p className="text-sm" style={muted}>{me.data?.message || 'Your CS Portal account isn’t a mentor’s'} — this page is for the CS Portal’s mentors.</p>
+        : !me.data?.mentor && !me.data?.viewer ? <p className="text-sm" style={muted}>{me.data?.message || 'Your CS Portal account isn’t a mentor’s'} — this page is for the CS Portal’s mentors and admins (by the same email).</p>
         : (
           <>
             {tabs.length > 1 && (

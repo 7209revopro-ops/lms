@@ -4,6 +4,7 @@ import { authenticate, authenticateAdmin, requireRole, injectCategoryScope, requ
 import { validate } from '@/middleware/validate.middleware.ts'
 import { InstructorReviewService } from '@/services/instructorReview.service.ts'
 import { sendSuccess, buildPaginationMeta, parsePagination } from '@/utils/response.ts'
+import { reviewFeed, readReviewFilters } from '@/services/reviewFeed.service.ts'
 
 const router = Router()
 const svc    = new InstructorReviewService()
@@ -38,17 +39,40 @@ router.post('/', authenticate, validate(submitSchema), async (req: Request, res:
    academy's data on Assignments/Recordings/Announcements earlier this
    session; this never repeats it. ─────────────────────── */
 
+/* Instructors too (the user, 2026-11-10: "they can see their review and others review also"): their own academy's
+   mentors, theirs among them. Days, programme (within an admin's own programme scope) and one mentor as filters. */
+const READERS = ['super_admin', 'admin', 'sub_admin', 'instructor'] as const
+const viewOf = (req: Request) => {
+  const f = readReviewFilters(req.query as Record<string, unknown>)
+  const scope = req.user!.categoryScope
+  // A programme-scoped admin never sees past their programme, whatever is asked.
+  return { ...f, program: scope ?? f.program, orgId: req.user!.organizationId }
+}
+
 router.get(
   '/admin/leaderboard',
   authenticateAdmin,
-  requireRole('super_admin', 'admin', 'sub_admin'),
+  requireRole(...READERS),
   requirePagePermission('instructor-reviews'),
   injectCategoryScope,
   async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const orgId = req.user!.organizationId
-      const scope = req.user!.categoryScope
-      sendSuccess(res, await svc.leaderboard(orgId, scope))
+      const v = viewOf(req)
+      sendSuccess(res, await svc.leaderboard(v.orgId, v.program, { from: v.from, to: v.to }))
+    } catch (err) { next(err) }
+  },
+)
+
+/* All reviews — mentor ratings and class feedback, filtered and paged (services/reviewFeed.service.ts). */
+router.get(
+  '/admin/feed',
+  authenticateAdmin,
+  requireRole(...READERS),
+  requirePagePermission('instructor-reviews'),
+  injectCategoryScope,
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      sendSuccess(res, await reviewFeed(viewOf(req)))
     } catch (err) { next(err) }
   },
 )
@@ -56,7 +80,7 @@ router.get(
 router.get(
   '/admin/instructor/:id',
   authenticateAdmin,
-  requireRole('super_admin', 'admin', 'sub_admin'),
+  requireRole(...READERS),
   requirePagePermission('instructor-reviews'),
   injectCategoryScope,
   async (req: Request, res: Response, next: NextFunction) => {
@@ -64,8 +88,10 @@ router.get(
       const { page, per_page } = parsePagination(req.query as Record<string, unknown>)
       const orgId = req.user!.organizationId
       const scope = req.user!.categoryScope
+      // The page's days (2026-11-10).
+      const f = readReviewFilters(req.query as Record<string, unknown>)
       const { docs, totalCount } = await svc.listForInstructor(
-        String(req.params['id'] ?? ''), orgId, scope, page, per_page,
+        String(req.params['id'] ?? ''), orgId, scope, page, per_page, { from: f.from, to: f.to },
       )
       sendSuccess(res, docs, undefined, 200, buildPaginationMeta(totalCount, page, per_page))
     } catch (err) { next(err) }

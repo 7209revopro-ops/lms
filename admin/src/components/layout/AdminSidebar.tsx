@@ -18,7 +18,6 @@ import { useAllLiveClasses } from '@/lib/api/liveClasses'
 import { useCurrentUser, logout } from '@/lib/api/user'
 import { useEnrollmentRequests } from '@/lib/api/enrollmentRequests'
 import { useUnreadSupportCount } from '@/lib/api/support'
-import { useCsMentor } from '@/lib/api/csMeetings'
 import { useRouter } from 'next/navigation'
 
 /* ── All nav items (admin sees all) ──────────────────── */
@@ -39,6 +38,9 @@ const adminNavItems = [
   { label: 'Instructor Reviews', href: '/instructor-reviews', icon: Award },
   /* Mentor KPIs, from Root (2026-11-09): the academy's mentors, view only. */
   { label: 'Mentor KPIs', href: '/mentor-kpis', icon: Gauge },
+  /* The CS Portal's Meeting requests and Meetings done (2026-11-10), read through their own CS Portal account. */
+  { label: 'Meeting Requests', href: '/meeting-requests', icon: CalendarClock },
+  { label: 'Meetings Done',   href: '/meetings-done',     icon: CalendarCheck },
   { label: 'Recordings',     href: '/recordings',        icon: Film },
   { label: 'Bookings',       href: '/bookings',          icon: CalendarDays },
   { label: 'Assignments',    href: '/assignments',       icon: ClipboardCheck },
@@ -77,6 +79,9 @@ const scopedAdminNavItems = [
   { label: 'Instructor Reviews', href: '/instructor-reviews', icon: Award },
   /* Mentor KPIs, from Root (2026-11-09): the academy's mentors, view only. */
   { label: 'Mentor KPIs', href: '/mentor-kpis', icon: Gauge },
+  /* The CS Portal's Meeting requests and Meetings done (2026-11-10), read through their own CS Portal account. */
+  { label: 'Meeting Requests', href: '/meeting-requests', icon: CalendarClock },
+  { label: 'Meetings Done',   href: '/meetings-done',     icon: CalendarCheck },
   { label: 'Recordings',       href: '/recordings',             icon: Film },
   { label: 'Bookings',         href: '/bookings',               icon: CalendarDays },
   { label: 'Assignments',      href: '/assignments',            icon: ClipboardCheck },
@@ -96,10 +101,12 @@ const instructorNavItems = [
   /* My KPIs, from Root (2026-11-09): their own points, view only — no ranking. */
   { label: 'My KPIs',       href: '/mentor-kpis',        icon: Gauge },
   { label: 'Mentor Calendar', href: '/mentor-calendar',   icon: CalendarDays },
-  /* The CS Portal's Meeting requests and Meetings done (2026-11-10) — shown once the CS Portal knows them as a mentor
-     (Meeting requests for a Senior / Junior / Sub-junior; a Chief books instead). */
+  /* The CS Portal's Meeting requests and Meetings done (2026-11-10), always shown (the user: "show in the sidebar the
+     meeting done and meeting request"); each page says what the CS Portal lets them see. */
   { label: 'Meeting Requests', href: '/meeting-requests', icon: CalendarClock },
   { label: 'Meetings Done',   href: '/meetings-done',     icon: CalendarCheck },
+  /* Instructor Reviews (2026-11-10): their own reviews and the other mentors' of their academy, with filters. */
+  { label: 'Instructor Reviews', href: '/instructor-reviews', icon: Award },
   /* The HRMS meeting pods online classes are given, and who has each (2026-10-18). */
   { label: 'Pods',            href: '/pods',              icon: DoorOpen },
   { label: 'Programs',        href: '/programs',          icon: Repeat },
@@ -153,14 +160,16 @@ function SidebarContent({ collapsed, onClose }: SidebarContentProps) {
   const pendingCount = canSeeRequests ? (pendingData?.meta?.total_count ?? 0) : 0
   const { data: unreadSupport = 0 } = useUnreadSupportCount()
   const { data: unreadChat = 0 } = useStaffUnread(isInstructor)
-  const { data: csMentor } = useCsMentor(isInstructor)
-  const csHides = (href: string) => (href === '/meeting-requests' && !(csMentor?.mentor && csMentor.asks)) || (href === '/meetings-done' && !csMentor?.mentor)
   const baseNavItems = isInstructor ? instructorNavItems : isManager ? scopedAdminNavItems : adminNavItems
   /* Support sits in the admin nav but may not reach a classroom, live or
      recorded. Offering the link anyway would just hand them a 403. */
+  const forRole = user?.role === 'support'
+    /* The CS Portal's meeting pages are for mentors and admins (the server refuses support). */
+    ? baseNavItems.filter(i => i.href !== '/meeting-requests' && i.href !== '/meetings-done')
+    : baseNavItems
   const withClassroom = mayReachClassroom(user?.role)
-    ? baseNavItems
-    : baseNavItems.filter(i => i.href !== '/recordings')
+    ? forRole
+    : forRole.filter(i => i.href !== '/recordings')
   // Role/permission management and the email send log are both
   // platform-wide (span every organization, no org to scope by) — only
   // super_admin sees either, same reasoning as the backend route guard
@@ -184,7 +193,7 @@ function SidebarContent({ collapsed, onClose }: SidebarContentProps) {
         { label: 'Duplicates', href: '/duplicates',  icon: GitMerge },
       ]
     : user?.role === 'admin' ? [...withClassroom, sendItem] : withClassroom
-  const navItems = allNavItems.filter(i => canView(i.href) && !csHides(i.href))
+  const navItems = allNavItems.filter(i => canView(i.href))
   const roleLabel = isInstructor ? 'Instructor' : isManager ? 'Manager' : 'Admin'
   const bottomItems = (isInstructor ? [] : [settingsItem]).filter(i => canView(i.href))
 

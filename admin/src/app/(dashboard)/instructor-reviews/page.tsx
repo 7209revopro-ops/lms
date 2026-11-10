@@ -7,8 +7,11 @@ import {
   MessageSquareQuote, AlertCircle, Trophy,
 } from 'lucide-react'
 import {
-  useInstructorLeaderboard, useInstructorReviews, type InstructorLeaderboardRow,
+  useInstructorLeaderboard, useInstructorReviews, type InstructorLeaderboardRow, type ReviewRange,
 } from '@/lib/api/instructorReviews'
+import { useCurrentUser } from '@/lib/api/user'
+import { useQueryState, setQueryParams } from '@/lib/useQueryState'
+import { AllReviews, PROGRAMS, control } from '@/components/instructor-reviews/AllReviews'
 import { AvatarImg } from '@/components/ui/AvatarImg'
 import Spinner from '@/components/ui/Spinner'
 import { CsTag } from '@/components/ui/CsTag'
@@ -63,9 +66,9 @@ function RatingBars({ counts }: { counts: InstructorLeaderboardRow['ratingCounts
   )
 }
 
-function ReviewsDrawer({ instructorId }: { instructorId: string }) {
+function ReviewsDrawer({ instructorId, range }: { instructorId: string; range: ReviewRange }) {
   const [page, setPage] = useState(1)
-  const { data, isLoading } = useInstructorReviews(instructorId, page)
+  const { data, isLoading } = useInstructorReviews(instructorId, page, range)
 
   return (
     <motion.tr initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
@@ -127,7 +130,7 @@ function ReviewsDrawer({ instructorId }: { instructorId: string }) {
   )
 }
 
-function LeaderboardRow({ row, rank }: { row: InstructorLeaderboardRow; rank: number }) {
+function LeaderboardRow({ row, rank, range }: { row: InstructorLeaderboardRow; rank: number; range: ReviewRange }) {
   const [open, setOpen] = useState(false)
   const rankStyle = RANK_STYLE[rank]
   const needsAttention = row.lowRatingCount > 0
@@ -191,14 +194,27 @@ function LeaderboardRow({ row, rank }: { row: InstructorLeaderboardRow; rank: nu
         </td>
       </motion.tr>
       <AnimatePresence>
-        {open && <ReviewsDrawer instructorId={row.instructorId} />}
+        {open && <ReviewsDrawer instructorId={row.instructorId} range={range} />}
       </AnimatePresence>
     </>
   )
 }
 
+/* 2026-11-10 ("instructor review page also need to show on the lms … full review with filter … they can see their review
+   and others review also"): instructors open it too — their academy's mentors, themselves among them — and two tabs,
+   the Leaderboard and All reviews (components/instructor-reviews/AllReviews.tsx), in the days and programme picked. */
+const DAY = /^\d{4}-\d{2}-\d{2}$/
+
 export default function InstructorReviewsPage() {
-  const { data, isLoading, isError } = useInstructorLeaderboard()
+  const { data: me } = useCurrentUser()
+  const isInstructor = me?.role === 'instructor'
+  const [tab, setTab] = useQueryState<'leaderboard' | 'all'>('tab', 'leaderboard')
+  const [fromQ] = useQueryState('from', '', { history: 'replace' })
+  const [toQ] = useQueryState('to', '', { history: 'replace' })
+  const [program] = useQueryState('program', '', { history: 'replace' })
+  const range: ReviewRange = { from: DAY.test(fromQ) ? fromQ : '', to: DAY.test(toQ) ? toQ : '', program }
+  const wrongWay = !!range.from && !!range.to && range.from > range.to
+  const { data, isLoading, isError } = useInstructorLeaderboard(wrongWay ? { program } : range)
 
   return (
     <div className="space-y-6">
@@ -213,9 +229,33 @@ export default function InstructorReviewsPage() {
           </h1>
         </div>
         <p className="mt-1 text-sm" style={{ color: 'rgba(255,255,255,0.4)' }}>
-          Student ratings collected after each class, ranked highest-rated first. Click a row to read individual reviews.
+          Student ratings collected after each class{isInstructor ? ' — yours and every other mentor’s in your academy' : ''}. Leaderboard ranks them highest-rated first (click a row to read its reviews); All reviews lists every one, with filters.
         </p>
       </div>
+
+      <div className="flex flex-wrap items-center gap-2">
+        <div role="tablist" className="inline-flex rounded-xl p-1" style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)' }}>
+          {([['leaderboard', 'Leaderboard'], ['all', 'All reviews']] as const).map(([k, l]) => (
+            <button key={k} type="button" role="tab" aria-selected={tab === k} onClick={() => setTab(k)}
+              className="rounded-lg px-3 py-1.5 text-sm font-medium" style={tab === k ? { background: '#0057b8', color: '#fff' } : { color: 'rgba(255,255,255,0.7)' }}>{l}</button>
+          ))}
+        </div>
+        <div className="flex-1" />
+        <label className="flex items-center gap-1.5 text-xs" style={{ color: 'rgba(255,255,255,0.45)' }}>From
+          <input type="date" className={control} value={range.from} onChange={e => setQueryParams({ from: e.target.value || null }, 'replace')} style={{ colorScheme: 'dark' }} /></label>
+        <label className="flex items-center gap-1.5 text-xs" style={{ color: 'rgba(255,255,255,0.45)' }}>To
+          <input type="date" className={control} value={range.to} onChange={e => setQueryParams({ to: e.target.value || null }, 'replace')} style={{ colorScheme: 'dark' }} /></label>
+        <select className={control} value={program} onChange={e => setQueryParams({ program: e.target.value || null }, 'replace')} aria-label="Programme" style={{ colorScheme: 'dark' }}>
+          <option value="">Every programme</option>
+          {PROGRAMS.map(([k, l]) => <option key={k} value={k}>{l}</option>)}
+        </select>
+        {(range.from || range.to || program) && (
+          <button type="button" onClick={() => setQueryParams({ from: null, to: null, program: null }, 'replace')} className="text-xs underline-offset-2 hover:underline" style={{ color: 'rgba(255,255,255,0.6)' }}>Clear</button>
+        )}
+      </div>
+      {wrongWay && <p className="text-sm text-rose-400">The From day is after the To day.</p>}
+
+      {tab === 'all' ? <AllReviews range={wrongWay ? { program } : range} mentors={data ?? []} myId={isInstructor ? String(me?.id ?? '') || null : null} /> : (
 
       <div className="overflow-hidden rounded-2xl"
         style={{ background: 'rgba(255,255,255,0.025)', border: '1px solid rgba(255,255,255,0.07)' }}>
@@ -243,16 +283,17 @@ export default function InstructorReviewsPage() {
                 <tr><td colSpan={5} className="py-16 text-center">
                   <div className="flex flex-col items-center gap-2">
                     <Star size={22} style={{ color: 'rgba(255,255,255,0.2)' }} />
-                    <p className="text-sm" style={{ color: 'rgba(255,255,255,0.4)' }}>No reviews submitted yet.</p>
+                    <p className="text-sm" style={{ color: 'rgba(255,255,255,0.4)' }}>{range.from || range.to || program ? 'No reviews for these filters.' : 'No reviews submitted yet.'}</p>
                   </div>
                 </td></tr>
               ) : data.map((row, i) => (
-                <LeaderboardRow key={row.instructorId} row={row} rank={i + 1} />
+                <LeaderboardRow key={row.instructorId} row={row} rank={i + 1} range={wrongWay ? {} : range} />
               ))}
             </tbody>
           </table>
         </div>
       </div>
+      )}
     </div>
   )
 }

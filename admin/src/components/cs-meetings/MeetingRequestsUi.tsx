@@ -246,7 +246,7 @@ function EligibilityBox({ e }: { e?: Eligibility }) {
 }
 
 /** A request of theirs opened: who, what, their reason, the 7-day check, where it stands; take back one still waiting. */
-export function RequestReviewDialog({ request: initial, onClose }: { request: MeetingRequest; onClose: () => void }) {
+export function RequestReviewDialog({ request: initial, onClose, readOnly = false }: { request: MeetingRequest; onClose: () => void; readOnly?: boolean }) {
   const toast = useToast()
   const rev = useMeetingRequestReview(initial.id)
   const takeBack = useTakeBackRequest()
@@ -262,10 +262,11 @@ export function RequestReviewDialog({ request: initial, onClose }: { request: Me
       </div>
       <div className="rounded-xl px-3 py-2" style={panel}>
         <Row label="Student">{r.student.name}{r.student.code ? ` · ${r.student.code}` : ''}</Row>
+        {readOnly && <Row label="Requesting mentor">{r.mentor.name}</Row>}
         <Row label="Their CS">{r.student.cs_name || '—'}</Row>
         <Row label="For">{categoryText(r.category, r.course) || '—'}</Row>
         <Row label="Length · where">{r.duration_mins} min · {modeText(r)}</Row>
-        {r.notes && <div className="mt-1 border-t border-white/10 pt-2"><p className="text-xs" style={muted}>Your reason</p><p className="whitespace-pre-wrap text-sm text-white/90">{r.notes}</p></div>}
+        {r.notes && <div className="mt-1 border-t border-white/10 pt-2"><p className="text-xs" style={muted}>{readOnly ? 'Mentor’s reason' : 'Your reason'}</p><p className="whitespace-pre-wrap text-sm text-white/90">{r.notes}</p></div>}
       </div>
       {rev.isLoading ? <p className="text-xs" style={muted}>Checking the 7-day rule…</p> : rev.isError ? <p className="text-xs text-rose-400">{csError(rev.error)}</p> : <EligibilityBox e={rev.data?.eligibility} />}
       {r.escalated && ['pending', 'blocked'].includes(r.status) && <p className="rounded-lg px-3 py-2 text-sm" style={{ background: 'rgba(251,146,60,0.1)', color: '#FDBA74' }}>With the CS Managers — escalated by {r.escalated.by_name} · {when(r.escalated.at)}{r.escalated.note ? ` — ${r.escalated.note}` : ''}</p>}
@@ -274,15 +275,17 @@ export function RequestReviewDialog({ request: initial, onClose }: { request: Me
       {r.status === 'rejected' && <p className="rounded-lg px-3 py-2 text-sm" style={{ background: 'rgba(248,113,113,0.1)', color: '#FCA5A5' }}>Rejected{r.decided_by_name ? ` by ${r.decided_by_name}` : ''}: {r.reason}</p>}
       <StudentMeetingHistory studentId={r.student.id} />
       <div className="flex justify-end gap-2">
-        {r.status === 'pending' && <button type="button" disabled={takeBack.isPending} onClick={back} className="rounded-lg border border-rose-500/30 px-4 py-2 text-sm text-rose-300 disabled:opacity-50">Take back</button>}
+        {readOnly && ['pending', 'blocked'].includes(r.status) && <p className="mr-auto self-center text-xs" style={muted}>Approve or reject it in the CS Portal.</p>}
+        {!readOnly && r.status === 'pending' && <button type="button" disabled={takeBack.isPending} onClick={back} className="rounded-lg border border-rose-500/30 px-4 py-2 text-sm text-rose-300 disabled:opacity-50">Take back</button>}
         <button type="button" onClick={onClose} className="rounded-lg border border-white/10 px-4 py-2 text-sm text-white/80">Close</button>
       </div>
     </Modal>
   )
 }
 
-/** Their requests: search, a tab per where each stands with its count, a card each that opens it. */
-export function MeetingRequestInbox({ onNew }: { onNew: () => void }) {
+/** Their requests (read only: the ones their CS Portal account decides): search, a tab per where each stands with its
+    count, a card each that opens it. */
+export function MeetingRequestInbox({ onNew, readOnly = false }: { onNew?: () => void; readOnly?: boolean }) {
   const res = useMyMeetingRequests()
   const [q, setQ] = useState('')
   const [tab, setTab] = useState('all')
@@ -291,15 +294,15 @@ export function MeetingRequestInbox({ onNew }: { onNew: () => void }) {
   const counts = res.data?.counts ?? {}
   const needle = q.trim().toLowerCase()
   const list = all.filter(r => (tab === 'all' || r.view === tab)
-    && (!needle || [r.student.name, r.student.code, r.number, r.student.cs_name, categoryText(r.category, r.course)].some(v => String(v || '').toLowerCase().includes(needle))))
+    && (!needle || [r.student.name, r.student.code, r.number, r.student.cs_name, r.mentor.name, categoryText(r.category, r.course)].some(v => String(v || '').toLowerCase().includes(needle))))
   return (
     <div className="space-y-3">
       <div className="flex flex-wrap items-center gap-2">
         <div className="relative min-w-[220px] flex-1">
           <Search size={14} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2" style={muted} />
-          <input value={q} onChange={e => setQ(e.target.value)} placeholder="Search student, request or CS" className={`${field} rounded-full pl-8`} />
+          <input value={q} onChange={e => setQ(e.target.value)} placeholder={readOnly ? 'Search student, request, mentor or CS' : 'Search student, request or CS'} className={`${field} rounded-full pl-8`} />
         </div>
-        <button type="button" onClick={onNew} className="inline-flex items-center gap-1.5 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white"><CalendarPlus size={15} />Request a meeting</button>
+        {onNew && <button type="button" onClick={onNew} className="inline-flex items-center gap-1.5 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white"><CalendarPlus size={15} />Request a meeting</button>}
       </div>
       <div className="flex flex-wrap gap-2">
         {[['all', 'All'] as [string, string], ...VIEWS.map(([k, l]) => [k, l] as [string, string])].map(([k, l]) => (
@@ -321,6 +324,7 @@ export function MeetingRequestInbox({ onNew }: { onNew: () => void }) {
                 <div className="min-w-0 space-y-0.5">
                   <div className="flex flex-wrap items-center gap-2"><span className="font-semibold text-white">{r.student.name}</span><ViewBadge view={r.view} /></div>
                   <p className="text-xs" style={muted}>{[r.number, r.student.code, r.student.cs_name && `CS ${r.student.cs_name}`].filter(Boolean).join(' · ')}</p>
+                  {readOnly && <p className="text-xs text-white/80">{r.mentor.name}</p>}
                   <p className="text-xs text-white/70">{categoryText(r.category, r.course)} · {r.duration_mins} min · {modeText(r, false)}{r.scheduled_start ? ` · ${when(r.scheduled_start)}` : ''}</p>
                 </div>
                 <ChevronRight size={16} className="shrink-0" style={muted} />
@@ -328,7 +332,7 @@ export function MeetingRequestInbox({ onNew }: { onNew: () => void }) {
             ))}
           </div>
         )}
-      {opened && <RequestReviewDialog request={opened} onClose={() => setOpened(null)} />}
+      {opened && <RequestReviewDialog request={opened} onClose={() => setOpened(null)} readOnly={readOnly} />}
     </div>
   )
 }

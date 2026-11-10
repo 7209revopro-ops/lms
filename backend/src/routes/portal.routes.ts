@@ -366,9 +366,23 @@ router.get('/student-emails/:id', wrap(async (req, res) => {
 
 /* Instructor reviews (2026-10-22): the students' ratings after each class — the leaderboard of every academy, with each
    instructor's address so the portal can show a chief only their own team's, and one instructor's reviews. Read only. */
-router.get('/instructor-reviews', wrap(async (_req, res) => {
+router.get('/instructor-reviews', wrap(async (req, res) => {
   const { InstructorReviewService } = await import('@/services/instructorReview.service.ts')
-  sendSuccess(res, await new InstructorReviewService().leaderboard(undefined, undefined), 'Instructor reviews')
+  // ?from=&to= (Dubai days) and ?program= (2026-11-10, the Instructor Reviews page's filters); none = every review.
+  const { readReviewFilters } = await import('@/services/reviewFeed.service.ts')
+  const f = readReviewFilters(req.query as Record<string, unknown>)
+  sendSuccess(res, await new InstructorReviewService().leaderboard(undefined, f.program, { from: f.from, to: f.to }), 'Instructor reviews')
+}))
+
+/* All reviews (2026-11-10, reviewFeed.service.ts) for the CS Portal's Instructor Reviews page: every academy; ?emails=
+   (its team's mentors, by address) narrows to them — none of them known here is nobody. Before /:id, which would take
+   "feed" for an id. */
+router.get('/instructor-reviews/feed', wrap(async (req, res) => {
+  const { reviewFeed, readReviewFilters, instructorIdsByEmail } = await import('@/services/reviewFeed.service.ts')
+  const q = req.query as Record<string, unknown>
+  const emails = typeof q['emails'] === 'string' ? q['emails'].split(',') : null
+  const reach = emails ? await instructorIdsByEmail(emails) : undefined
+  sendSuccess(res, await reviewFeed({ ...readReviewFilters(q), ...(reach ? { reach } : {}) }), 'Reviews')
 }))
 
 router.get('/instructor-reviews/:id', wrap(async (req, res) => {
