@@ -116,6 +116,20 @@ function GroupCard({ group, orgName, dismissed, index, onReview }: {
   )
 }
 
+/** What CS Portal made of a merge (services/csPortalMerge.service.ts in the backend). */
+function CsPortalNote({ m }: { m: MergeRecord }) {
+  const line = (text: string, color: string, title?: string | null) =>
+    <p className="mt-1 max-w-[220px] text-[11px]" style={{ color }} title={title ?? undefined}>{text}</p>
+  if (m.origin === 'cs_portal') return line('Asked for by CS Portal', '#A78BFA')
+  if (m.csPortalUndo?.state === 'pending') return line('CS Portal: undo waiting — tried again every minute', '#FBBF24', m.csPortalUndo.error)
+  const st = m.csPortal?.state
+  if (st === 'done') return line(m.csPortal?.action === 'relink' ? 'CS Portal: student moved onto the kept account' : 'CS Portal: students merged too', '#4ADE80')
+  if (st === 'pending') return line('CS Portal: waiting — tried again every minute', '#FBBF24', m.csPortal?.error)
+  if (st === 'failed') return line('CS Portal refused', '#F87171', m.csPortal?.error)
+  if (st === 'nothing') return line('CS Portal: nothing to merge', muted)
+  return null
+}
+
 const STATUS: Record<MergeRecord['status'], { label: string; bg: string; text: string }> = {
   done:    { label: 'Merged',  bg: 'rgba(74,222,128,0.15)',  text: '#4ADE80' },
   undone:  { label: 'Undone',  bg: 'rgba(148,163,184,0.15)', text: '#CBD5E1' },
@@ -178,6 +192,7 @@ function MergeHistory() {
                     <span className="inline-flex rounded-lg px-2 py-0.5 text-[11px] font-semibold" style={{ background: s.bg, color: s.text }}>{s.label}</span>
                     {m.error && <p className="mt-1 max-w-[220px] text-[11px]" style={{ color: '#F87171' }}>{m.error}</p>}
                     {m.undoNotes?.map((n, i) => <p key={i} className="mt-1 max-w-[220px] text-[11px]" style={{ color: '#FBBF24' }}>{n}</p>)}
+                    <CsPortalNote m={m} />
                   </td>
                   <td className="whitespace-nowrap px-4 py-3 text-right">
                     {(m.status === 'done' || m.status === 'failed') && (

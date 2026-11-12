@@ -4284,11 +4284,18 @@ export interface IAccountMerge extends Document {
   summary:     { model: string; label: string; moved: number; dropped: number }[]
   status:      'running' | 'done' | 'failed' | 'undone'
   error?:      string
-  mergedBy:    Types.ObjectId
+  /** Absent when CS Portal asked for the merge (origin 'cs_portal'). */
+  mergedBy?:   Types.ObjectId
   mergedByEmail?: string
   undoneAt?:   Date
   undoneBy?:   Types.ObjectId
   undoNotes?:  string[]
+  /** Where the merge came from: this admin, or CS Portal merging two students (services/csPortalMerge.service.ts). */
+  origin?:     'lms' | 'cs_portal'
+  /** CS Portal's side: the CS chosen, and whether it has been told (pending / done / nothing / failed / not_linked) — or, from it, its merge id. */
+  csPortal?:   Record<string, unknown>
+  csPortalUndo?: Record<string, unknown>
+  undoneFrom?: 'cs_portal'
   createdAt:   Date
   updatedAt:   Date
 }
@@ -4306,15 +4313,21 @@ const AccountMergeSchema = new Schema<IAccountMerge>(
     summary:        { type: Schema.Types.Mixed, default: () => [] },
     status:         { type: String, enum: ['running', 'done', 'failed', 'undone'], default: 'running', index: true },
     error:          { type: String },
-    mergedBy:       { type: Schema.Types.ObjectId, ref: 'User', required: true },
+    mergedBy:       { type: Schema.Types.ObjectId, ref: 'User' },
     mergedByEmail:  { type: String },
     undoneAt:       { type: Date },
     undoneBy:       { type: Schema.Types.ObjectId, ref: 'User' },
     undoNotes:      { type: [String], default: undefined },
+    origin:         { type: String, enum: ['lms', 'cs_portal'], default: 'lms' },
+    csPortal:       { type: Schema.Types.Mixed },
+    csPortalUndo:   { type: Schema.Types.Mixed },
+    undoneFrom:     { type: String },
   },
   baseSchemaOptions,
 )
 AccountMergeSchema.index({ createdAt: -1 })
+AccountMergeSchema.index({ 'csPortal.csMergeId': 1 }, { sparse: true })
+AccountMergeSchema.index({ 'csPortal.state': 1, 'csPortal.nextAt': 1 }, { sparse: true })
 
 export const AccountMergeModel = mongoose.model<IAccountMerge>('AccountMerge', AccountMergeSchema)
 

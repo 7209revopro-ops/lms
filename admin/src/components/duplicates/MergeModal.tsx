@@ -7,8 +7,8 @@ import { AvatarImg } from '@/components/ui/AvatarImg'
 import Spinner from '@/components/ui/Spinner'
 import { useToast } from '@/store/ui.store'
 import {
-  useCompareAccounts, useMergePreview, useMergeAccounts,
-  type CompareAccount, type PickGroup, type Picks,
+  useCompareAccounts, useMergePreview, useMergeAccounts, useCsPortalPreview,
+  type CompareAccount, type PickGroup, type Picks, type Side, type CsPortalPreview,
 } from '@/lib/api/duplicates'
 
 /* ─────────────────────────────────────────────────────
@@ -18,7 +18,10 @@ import {
       whose email was proven and who signs in is suggested).
    2. Detail by detail, whose value the kept account carries.
    3. What will move, straight from the server's dry run.
-   4. Typing the closed account's email, then Merge.
+   4. CS Portal (2026-11-12): who they are there, and — both there with
+      different CSs — which CS keeps the student (the other can stay as a
+      Common CS). CS Portal follows the merge, and its undo.
+   5. Typing the closed account's email, then Merge.
 ───────────────────────────────────────────────────── */
 
 const GROUPS: { key: PickGroup; label: string }[] = [
@@ -85,6 +88,60 @@ function AccountCard({ a, keep, suggested, onKeep, countLabels }: {
   )
 }
 
+/** What CS Portal has for the two accounts, and the CS choice when both are students there with different CSs. */
+function CsPortalSection({ cs, loading, csFrom, setCsFrom, asCommon, setAsCommon, keptEmail, closedEmail }: {
+  cs: CsPortalPreview | undefined; loading: boolean; csFrom: Side | null; setCsFrom: (v: Side) => void
+  asCommon: boolean; setAsCommon: (v: boolean) => void; keptEmail: string; closedEmail: string
+}) {
+  const who = (s?: CsPortalPreview['primary']) => s ? `${s.code} · ${s.open ? 'Delta Open Students' : s.cs || 'no CS'}${s.team ? ` · ${s.team}` : ''}` : 'not in CS Portal'
+  return (
+    <section>
+      <h3 className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase tracking-wider" style={{ color: muted }}>
+        4 · CS Portal {loading && <Spinner size={11} variant="muted" />}
+      </h3>
+      <div className="space-y-2 rounded-xl p-4 text-xs" style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.07)', color: 'rgba(255,255,255,0.75)' }}>
+        {!cs ? <p style={{ color: muted }}>…</p>
+          : !cs.linked ? <p style={{ color: muted }}>CS Portal is not linked to this server — nothing changes there.</p>
+          : cs.unavailable ? (
+            <p className="flex items-start gap-2" style={{ color: '#FBBF24' }}>
+              <AlertTriangle size={12} className="mt-0.5 flex-shrink-0" />
+              <span>CS Portal could not be asked ({cs.unavailable}). The merge still goes ahead; CS Portal is told once it answers, keeping the kept account's CS.</span>
+            </p>
+          ) : (
+            <>
+              <p><b className="text-white">{keptEmail}</b>: {who(cs.primary)}</p>
+              <p><b className="text-white">{closedEmail}</b>: {who(cs.secondary)}</p>
+              {cs.action === 'nothing' && <p style={{ color: muted }}>Nothing to merge there.</p>}
+              {cs.action === 'relink' && <p style={{ color: muted }}>{cs.secondary?.code} is moved onto {keptEmail} there — its CS stays.</p>}
+              {cs.action === 'merge' && (cs.sameCs ? (
+                <p style={{ color: muted }}>The two students there are merged into {cs.primary?.code}; both are with {cs.primary?.cs || 'nobody'}.</p>
+              ) : (
+                <div className="space-y-1.5 pt-1">
+                  <p className="text-white">The two students there are merged into {cs.primary?.code}. Which CS keeps the student?</p>
+                  {(['primary', 'secondary'] as const).map(side => {
+                    const s = side === 'primary' ? cs.primary : cs.secondary
+                    return (
+                      <label key={side} className="flex cursor-pointer items-center gap-2">
+                        <input type="radio" name="cs-from" checked={csFrom === side} onChange={() => setCsFrom(side)} className="accent-blue-500" />
+                        <span><b className="text-white">{s?.open ? 'Delta Open Students' : s?.cs || 'No CS'}</b>{s?.team ? ` · ${s.team}` : ''}
+                          <span style={{ color: muted }}> — {s?.code}, {s?.deposits ?? 0} deposit(s)</span></span>
+                      </label>
+                    )
+                  })}
+                  <label className="flex cursor-pointer items-center gap-2 pt-1">
+                    <input type="checkbox" checked={asCommon} onChange={e => setAsCommon(e.target.checked)} className="accent-blue-500" />
+                    <span>Keep the other CS on the student as a Common CS</span>
+                  </label>
+                  <p className="text-[11px]" style={{ color: muted }}>Commission already credited stays with the CS who earned it.</p>
+                </div>
+              ))}
+            </>
+          )}
+      </div>
+    </section>
+  )
+}
+
 export default function MergeModal({ ids, onClose }: { ids: [string, string]; onClose: () => void }) {
   const toast = useToast()
   const { data: cmp, isLoading, isError, error } = useCompareAccounts(ids)
@@ -92,6 +149,8 @@ export default function MergeModal({ ids, onClose }: { ids: [string, string]; on
   const [overrides, setOverrides] = useState<Picks>({})
   const [confirm, setConfirm]     = useState('')
   const [keepEmail, setKeepEmail] = useState(true)
+  const [csFrom, setCsFrom] = useState<Side | null>(null)
+  const [asCommon, setAsCommon] = useState(true)
   useEffect(() => { if (cmp && !primaryId) setPrimaryId(cmp.suggestedPrimaryId) }, [cmp, primaryId])
 
   const [left, right] = cmp?.accounts ?? []
@@ -100,6 +159,12 @@ export default function MergeModal({ ids, onClose }: { ids: [string, string]; on
   const { data: preview, isFetching: previewing, isError: previewFailed } =
     useMergePreview(primary?.id ?? null, secondary?.id ?? null, overrides)
   const merge = useMergeAccounts()
+  const { data: cs, isFetching: csLoading } = useCsPortalPreview(primary?.id ?? null, secondary?.id ?? null)
+  /* The CS with deposits there is suggested; the kept one's otherwise. Chosen again when the kept account changes. */
+  useEffect(() => {
+    if (!cs || cs.action !== 'merge' || cs.sameCs) { setCsFrom(null); return }
+    setCsFrom((cs.secondary?.deposits ?? 0) > (cs.primary?.deposits ?? 0) ? 'secondary' : 'primary')
+  }, [cs])
 
   const picks = preview?.picks ?? {}
   /* "primary"/"secondary" are about which account is kept; the columns are fixed. */
@@ -113,7 +178,8 @@ export default function MergeModal({ ids, onClose }: { ids: [string, string]; on
   const doMerge = async () => {
     if (!primary || !secondary) return
     try {
-      await merge.mutateAsync({ primaryId: primary.id, secondaryId: secondary.id, picks, confirmEmail: confirm, keepSecondaryEmail: keepEmail })
+      await merge.mutateAsync({ primaryId: primary.id, secondaryId: secondary.id, picks, confirmEmail: confirm, keepSecondaryEmail: keepEmail,
+        ...(csFrom ? { csFrom, otherCsAsCommon: asCommon } : {}) })
       toast.success(`Merged. ${secondary.email} now signs in to ${primary.email}.`)
       onClose()
     } catch (err: any) {
@@ -247,7 +313,13 @@ export default function MergeModal({ ids, onClose }: { ids: [string, string]; on
                   )}
                 </section>
 
-                {/* 4 — confirm */}
+                {/* 4 — CS Portal */}
+                {secondary && primary && (
+                  <CsPortalSection cs={cs} loading={csLoading} csFrom={csFrom} setCsFrom={setCsFrom} asCommon={asCommon} setAsCommon={setAsCommon}
+                    keptEmail={primary.email} closedEmail={secondary.email} />
+                )}
+
+                {/* 5 — confirm */}
                 {secondary && primary && (
                   <section className="space-y-3">
                     <label className="flex cursor-pointer items-start gap-2.5 rounded-xl p-3 text-xs"

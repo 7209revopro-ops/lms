@@ -13,6 +13,7 @@ import { ClassImportService } from '@/services/classImport.service.ts'
 import { startEmailOutboxJob } from '@/jobs/emailOutbox.job.ts'
 import { startWhatsAppOutboxJob } from '@/jobs/whatsappOutbox.job.ts'
 import { startCommissionStudentsJob } from '@/jobs/commissionStudents.job.ts'
+import { startCsPortalMergesJob } from '@/jobs/csPortalMerges.job.ts'
 import { startClassPodsJob } from '@/jobs/classPods.job.ts'
 import { startTamaraSweepJob } from '@/jobs/tamaraSweep.job.ts'
 import { startAbzerSweepJob } from '@/jobs/abzerSweep.job.ts'
@@ -322,6 +323,7 @@ async function bootstrap() {
     startChatEmailJob()
     startInstructorScheduleJob()
     startCommissionStudentsJob()
+    startCsPortalMergesJob()
     startClassPodsJob()
     startTamaraSweepJob()
     startAbzerSweepJob()

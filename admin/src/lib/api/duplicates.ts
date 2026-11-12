@@ -36,6 +36,21 @@ export interface MergeRecord {
   summary: { label: string; moved: number; dropped: number }[]
   status: 'running' | 'done' | 'failed' | 'undone'; error?: string; mergedByEmail?: string
   undoneAt?: string; undoNotes?: string[]; createdAt: string
+  /** CS Portal (2026-11-12): merged here, or asked for by CS Portal; whether CS Portal followed. */
+  origin?: 'lms' | 'cs_portal'
+  csPortal?: { state: string; action?: string | null; error?: string | null; csFrom?: string | null } | null
+  csPortalUndo?: { state: string; error?: string | null } | null
+}
+
+/** Who the two accounts are in CS Portal, and what merging them does there. */
+export interface CsPortalStudent { id: string; code: string; name: string; cs: string; team: string; open: boolean; deposits: number }
+export interface CsPortalPreview {
+  linked: boolean
+  action?: 'merge' | 'relink' | 'nothing'
+  primary?: CsPortalStudent | null
+  secondary?: CsPortalStudent | null
+  sameCs?: boolean
+  unavailable?: string
 }
 
 const KEYS = {
@@ -74,10 +89,19 @@ export function useMergePreview(primaryId: string | null, secondaryId: string | 
   })
 }
 
+export function useCsPortalPreview(primaryId: string | null, secondaryId: string | null) {
+  return useQuery({
+    queryKey: ['admin', 'duplicates', 'cs-portal', primaryId ?? '', secondaryId ?? ''] as const,
+    queryFn:  () => apiPost<CsPortalPreview>('/admin/duplicates/cs-portal', { primaryId, secondaryId }),
+    enabled:  !!primaryId && !!secondaryId,
+    staleTime: Infinity, refetchOnWindowFocus: false, gcTime: 0,
+  })
+}
+
 export function useMergeAccounts() {
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: (body: { primaryId: string; secondaryId: string; picks: Picks; confirmEmail: string; keepSecondaryEmail: boolean }) =>
+    mutationFn: (body: { primaryId: string; secondaryId: string; picks: Picks; confirmEmail: string; keepSecondaryEmail: boolean; csFrom?: Side; otherCsAsCommon?: boolean }) =>
       apiPost<{ mergeId: string; primaryId: string; secondaryEmail: string; keptSecondaryEmail: boolean; items: PlanItem[] }>('/admin/duplicates/merge', body),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: KEYS.all })

@@ -750,6 +750,9 @@ const mergePairSchema = z.object({
 const mergeSchema = mergePairSchema.extend({
   confirmEmail:       z.string().trim().min(1, 'Type the email of the account being closed'),
   keepSecondaryEmail: z.boolean().optional(),
+  /* CS Portal (2026-11-12): whose CS keeps the student there, and the other as a Common CS. */
+  csFrom:             pickSide.optional(),
+  otherCsAsCommon:    z.boolean().optional(),
 })
 const dismissSchema = z.object({ userIds: z.array(z.string().trim().min(1)).min(2).max(20) })
 
@@ -778,13 +781,22 @@ router.post('/duplicates/preview', requireRole('super_admin'), validate(mergePai
   } catch (err) { next(err) }
 })
 
+/* Who the two accounts are in CS Portal, and what merging them does there — the pop-up's CS choice (services/csPortalMerge.service.ts). */
+router.post('/duplicates/cs-portal', requireRole('super_admin'), validate(mergePairSchema), async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { csPortalPreview } = await import('@/services/csPortalMerge.service.ts')
+    const b = req.body as z.infer<typeof mergePairSchema>
+    sendSuccess(res, await csPortalPreview(b.primaryId, b.secondaryId))
+  } catch (err) { next(err) }
+})
+
 router.post('/duplicates/merge', requireRole('super_admin'), validate(mergeSchema),
   audit('user.merge', 'User', r => String((r.body as { primaryId?: string }).primaryId ?? ''), r => (r as ReqWithMerge).mergeAudit ?? {}),
   async (req: Request, res: Response, next: NextFunction) => {
     try {
       const { mergeAccounts } = await import('@/services/accountMerge.service.ts')
       const b = req.body as z.infer<typeof mergeSchema>
-      const r = await mergeAccounts({ ...b, by: { id: req.user!.id, email: req.user!.email } })
+      const r = await mergeAccounts({ ...b, csPortal: { csFrom: b.csFrom, otherCsAsCommon: b.otherCsAsCommon }, by: { id: req.user!.id, email: req.user!.email } })
       ;(req as ReqWithMerge).mergeAudit = {
         mergeId: r.mergeId, kept: r.primaryId, closed: b.secondaryId, closedEmail: r.secondaryEmail, keptSecondaryEmail: r.keptSecondaryEmail,
         moved: r.items.map(i => `${i.label}: ${i.moved} moved, ${i.dropped} dropped`),

@@ -585,8 +585,14 @@ export async function mergeAccounts(input: {
   primaryId: string; secondaryId: string; picks?: Picks; confirmEmail: string
   /** Save the closed account's email on the kept one as a secondary email (default yes). */
   keepSecondaryEmail?: boolean
-  by: { id: string; email?: string }
-}): Promise<{ mergeId: string; primaryId: string; secondaryEmail: string; keptSecondaryEmail: boolean; items: PlanItem[] }> {
+  /** Who merged — a super admin here; none when CS Portal asked (origin 'cs_portal', services/csPortalMerge.service.ts). */
+  by: { id?: string; email?: string }
+  /** CS Portal's side: which account's CS keeps the student there, and the other as a Common CS (2026-11-12). */
+  csPortal?: { csFrom?: 'primary' | 'secondary'; otherCsAsCommon?: boolean }
+  /** Made because CS Portal merged two students (`csMergeId` there) — not sent back to it. */
+  origin?: 'lms' | 'cs_portal'
+  csMergeId?: string
+}): Promise<{ mergeId: string; primaryId: string; secondaryEmail: string; keptSecondaryEmail: boolean; items: PlanItem[]; csPortal: Record<string, unknown> | null }> {
   const { p, s } = await loadPair(input.primaryId, input.secondaryId)
   if (String(input.confirmEmail ?? '').toLowerCase().trim() !== String(s.email).toLowerCase()) {
     throw new UserError('CONFIRM_MISMATCH', `Type ${s.email} to confirm which account is closed.`, 422)
@@ -612,7 +618,11 @@ export async function mergeAccounts(input: {
     const rec = await AccountMergeModel.create({
       _id: recId, primaryId: P, secondaryId: S, primaryEmail: P0.email, secondaryEmail: S0.email, picks, keptSecondaryEmail: keepEmail,
       before: { primary: primaryBefore, secondary: secondaryBefore },
-      mergedBy: input.by.id, mergedByEmail: input.by.email, status: 'running',
+      ...(input.by.id ? { mergedBy: input.by.id } : {}), mergedByEmail: input.by.email, status: 'running',
+      origin: input.origin ?? 'lms',
+      csPortal: input.origin === 'cs_portal'
+        ? { state: 'origin', csMergeId: input.csMergeId ?? null }
+        : { csFrom: input.csPortal?.csFrom === 'secondary' ? 'secondary' : 'primary', otherCsAsCommon: input.csPortal?.otherCsAsCommon !== false, state: 'pending', attempts: 0 },
     })
     mergeId = String(rec._id)
     const journal = async (ops: Op[]) => { await AccountMergeModel.updateOne({ _id: rec._id }, { $push: { ops: { $each: ops } } }) }
@@ -653,8 +663,11 @@ export async function mergeAccounts(input: {
     await AccountMergeModel.updateOne({ _id: rec._id }, {
       $set: { status: 'done', summary: items.map(i => ({ model: i.model, label: i.label, moved: i.moved, dropped: i.dropped })) },
     })
-    logger.info({ mergeId, primaryId: String(P), secondaryId: String(S), by: input.by.id }, 'student accounts merged')
-    return { mergeId, primaryId: String(P), secondaryEmail: S0.email, keptSecondaryEmail: keepEmail, items }
+    logger.info({ mergeId, primaryId: String(P), secondaryId: String(S), by: input.by.id ?? input.by.email }, 'student accounts merged')
+    // CS Portal follows — unless it asked for this one. Retried by jobs/csPortalMerges.job.ts when it cannot be reached.
+    const { sendMergeToCsPortal } = await import('@/services/csPortalMerge.service.ts')
+    const csPortal = input.origin === 'cs_portal' ? null : await sendMergeToCsPortal(mergeId).catch(() => null)
+    return { mergeId, primaryId: String(P), secondaryEmail: S0.email, keptSecondaryEmail: keepEmail, items, csPortal }
   } catch (err) {
     if (mergeId) {
       await AccountMergeModel.updateOne({ _id: mergeId }, { $set: { status: 'failed', error: String((err as Error)?.message ?? err) } }).catch(() => {})
@@ -673,7 +686,7 @@ export async function mergeAccounts(input: {
    (a message in a ticket that was the secondary's goes back with it). What
    cannot go back (a dropped row whose place is now taken) is reported, not
    forced. */
-export async function undoMerge(mergeId: string, by: string): Promise<{ notes: string[] }> {
+export async function undoMerge(mergeId: string, by: string | undefined, opts: { fromCsPortal?: boolean } = {}): Promise<{ notes: string[]; csPortalUndo?: Record<string, unknown> | null }> {
   if (!Types.ObjectId.isValid(mergeId)) throw new UserError('INVALID_ID', 'Invalid merge id.', 400)
   const { AccountMergeModel, UserModel } = await import('@/models/schema.ts')
   const rec = await AccountMergeModel.findById(mergeId).lean<Lean>()
@@ -725,9 +738,12 @@ export async function undoMerge(mergeId: string, by: string): Promise<{ notes: s
     }
     await restore(rec.primaryId, rec.before?.primary)
     await restore(rec.secondaryId, rec.before?.secondary)
-    await AccountMergeModel.updateOne({ _id: rec._id }, { $set: { status: 'undone', undoneAt: new Date(), undoneBy: by, ...(notes.length ? { undoNotes: notes } : {}) } })
-    logger.info({ mergeId, by, notes: notes.length }, 'account merge undone')
-    return { notes }
+    await AccountMergeModel.updateOne({ _id: rec._id }, { $set: { status: 'undone', undoneAt: new Date(), ...(by ? { undoneBy: by } : {}), ...(opts.fromCsPortal ? { undoneFrom: 'cs_portal' } : {}), ...(notes.length ? { undoNotes: notes } : {}) } })
+    logger.info({ mergeId, by, notes: notes.length, fromCsPortal: !!opts.fromCsPortal }, 'account merge undone')
+    // CS Portal's side follows — unless it asked for this undo.
+    const { sendUndoToCsPortal } = await import('@/services/csPortalMerge.service.ts')
+    const csPortalUndo = opts.fromCsPortal ? null : await sendUndoToCsPortal(mergeId).catch(() => null)
+    return { notes, csPortalUndo }
   } finally {
     await release()
   }
@@ -737,7 +753,7 @@ export async function listMerges(params: { page: number; perPage: number }): Pro
   const { AccountMergeModel } = await import('@/models/schema.ts')
   const [docs, total] = await Promise.all([
     AccountMergeModel.find().sort({ createdAt: -1 }).skip((params.page - 1) * params.perPage).limit(params.perPage)
-      .select('primaryId secondaryId primaryEmail secondaryEmail picks keptSecondaryEmail summary status error mergedByEmail undoneAt undoNotes createdAt').lean<Lean[]>(),
+      .select('primaryId secondaryId primaryEmail secondaryEmail picks keptSecondaryEmail summary status error mergedByEmail undoneAt undoNotes createdAt origin csPortal csPortalUndo undoneFrom').lean<Lean[]>(),
     AccountMergeModel.countDocuments(),
   ])
   return {
@@ -746,6 +762,9 @@ export async function listMerges(params: { page: number; perPage: number }): Pro
       primaryEmail: d.primaryEmail, secondaryEmail: d.secondaryEmail, keptSecondaryEmail: !!d.keptSecondaryEmail, summary: d.summary ?? [],
       status: d.status, error: d.error, mergedByEmail: d.mergedByEmail, undoneAt: d.undoneAt,
       undoNotes: d.undoNotes, createdAt: d.createdAt,
+      origin: d.origin ?? 'lms', undoneFrom: d.undoneFrom,
+      csPortal: d.csPortal ? { state: d.csPortal.state, action: d.csPortal.action ?? null, error: d.csPortal.error ?? null, csFrom: d.csPortal.csFrom ?? null } : null,
+      csPortalUndo: d.csPortalUndo ? { state: d.csPortalUndo.state, error: d.csPortalUndo.error ?? null } : null,
     })),
     total,
   }

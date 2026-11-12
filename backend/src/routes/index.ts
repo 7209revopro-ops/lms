@@ -24,6 +24,7 @@ import couponRoutes        from './coupons.routes.ts'
 import checkoutRoutes      from './checkout.routes.ts'
 import webhookRoutes       from './webhooks.routes.ts'
 import integrationRoutes   from './integrations.routes.ts'
+import csPortalMergeRoutes from './csPortalMerge.routes.ts'
 import orderRoutes         from './orders.routes.ts'
 import discussionRoutes    from './discussion.routes.ts'
 import notesRoutes         from './notes.routes.ts'
@@ -109,6 +110,8 @@ router.use('/streaks',       streakRoutes)
 router.use('/coupons',         couponRoutes)
 router.use('/checkout',        checkoutRoutes)
 router.use('/webhooks',        webhookRoutes)
+// CS Portal merging two students' accounts here (services/csPortalMerge.service.ts).
+router.use('/integrations/cs-portal', csPortalMergeRoutes)
 router.use('/integrations',    integrationRoutes)
 router.use('/orders',          orderRoutes)
 /* 6.1 Q&A — thread/comment routes are nested under /lessons & /threads */
