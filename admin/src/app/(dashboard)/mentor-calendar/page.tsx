@@ -21,26 +21,29 @@ import Link from 'next/link'
    portal's calendar; nothing is booked inside it. */
 
 const DAY_MS = 864e5
-const weekStart = (d: Date) => { const x = new Date(d); x.setHours(0, 0, 0, 0); x.setDate(x.getDate() - ((x.getDay() + 6) % 7)); return x }
+/** Midnight at the start of this date. The calendar shows seven days from today (the user, 2026-11-12: "show from the day
+ *  today"), not a Monday-to-Sunday week; the arrows step seven days at a time, back as well as forward. */
+const dayStart = (d: Date) => { const x = new Date(d); x.setHours(0, 0, 0, 0); return x }
 const pad2 = (n: number) => String(n).padStart(2, '0')
-/** A local date as YYYY-MM-DD — the week's Monday, as the address bar keeps it. */
+/** A local date as YYYY-MM-DD — the first day on show, as the address bar keeps it. */
 const ymd = (d: Date) => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`
 
 export default function MentorCalendarPage() {
   const { data: me } = useCurrentUser()
   const myEmail = String((me as any)?.email ?? '').toLowerCase()
   /* Filters in the address bar (lib/useQueryState.ts): a reload keeps the view, the link can be shared.
-     The week is kept as its Monday (YYYY-MM-DD); none = this week. */
+     The first day on show is kept as YYYY-MM-DD (an older link's Monday still opens there); none = from today. */
   const [week, setWeek] = useQueryState('week', '')
-  const offset = useMemo(() => {
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(week)) return 0
-    const n = Math.round((weekStart(new Date(`${week}T00:00:00`)).getTime() - weekStart(new Date()).getTime()) / (7 * DAY_MS))
-    return Number.isFinite(n) ? n : 0
+  const start = useMemo(() => {
+    const s = /^\d{4}-\d{2}-\d{2}$/.test(week) ? dayStart(new Date(`${week}T00:00:00`)) : null
+    return s && Number.isFinite(s.getTime()) ? s : dayStart(new Date())
   }, [week])
-  const setOffset = (next: number | ((o: number) => number)) => {
-    const n = typeof next === 'function' ? next(offset) : next
-    const s = weekStart(new Date()); s.setDate(s.getDate() + n * 7)
-    setWeek(n === 0 ? '' : ymd(s))
+  const fromToday = ymd(start) === ymd(new Date())
+  /** Seven days back (-1) or forward (+1) from the first day on show; 0 = back to today. */
+  const step = (n: number) => {
+    if (n === 0) return setWeek('')
+    const s = new Date(start); s.setDate(s.getDate() + n * 7)
+    setWeek(ymd(s) === ymd(new Date()) ? '' : ymd(s))
   }
   const [onlyMe, setOnlyMe] = useQueryState('mine', false)
   const [query, setQuery] = useQueryState('mq', '', { history: 'replace' })   // a mentor's name or email
@@ -50,7 +53,6 @@ export default function MentorCalendarPage() {
   const [find, setFind] = useQueryState('q', '', { history: 'replace' })          // a session's title, its course or module, or who a booked one is with
   const [course] = useQueryState('course', '')      // courseId
   const [mod, setMod] = useQueryState('module', '')      // moduleId, within the course
-  const start = useMemo(() => { const s = weekStart(new Date()); s.setDate(s.getDate() + offset * 7); return s }, [offset])
   const days = useMemo(() => Array.from({ length: 7 }, (_, i) => new Date(start.getTime() + i * DAY_MS)), [start])
   const { data, isLoading, error } = useMentorCalendar(new Date(start.getTime() - DAY_MS).toISOString(), new Date(start.getTime() + 8 * DAY_MS).toISOString())
   const cancel = useCancelMeeting()
@@ -103,9 +105,9 @@ export default function MentorCalendarPage() {
     <div className="space-y-6">
       <PageHeader title="Mentor Calendar" subtitle={`Every mentor's free hours, classes, booked sessions and time off — book a session with anyone, never in their time off. Times ${tz.replace('_', ' ')}.`} />
       <div className="flex flex-wrap items-center gap-2">
-        <button type="button" onClick={() => setOffset(o => o - 1)} className="rounded-lg border border-white/10 p-2 hover:bg-white/5" aria-label="Previous week"><ChevronLeft className="h-4 w-4" /></button>
-        <button type="button" onClick={() => setOffset(0)} className="flex items-center gap-1.5 rounded-lg border border-white/10 px-3 py-2 text-sm hover:bg-white/5"><CalendarDays className="h-4 w-4" />{offset === 0 ? 'This week' : days[0].toLocaleDateString(undefined, { day: 'numeric', month: 'short' })}</button>
-        <button type="button" onClick={() => setOffset(o => o + 1)} className="rounded-lg border border-white/10 p-2 hover:bg-white/5" aria-label="Next week"><ChevronRight className="h-4 w-4" /></button>
+        <button type="button" onClick={() => step(-1)} className="rounded-lg border border-white/10 p-2 hover:bg-white/5" aria-label="Previous 7 days"><ChevronLeft className="h-4 w-4" /></button>
+        <button type="button" onClick={() => step(0)} className="flex items-center gap-1.5 rounded-lg border border-white/10 px-3 py-2 text-sm hover:bg-white/5"><CalendarDays className="h-4 w-4" />{fromToday ? 'From today' : days[0].toLocaleDateString(undefined, { day: 'numeric', month: 'short' })}</button>
+        <button type="button" onClick={() => step(1)} className="rounded-lg border border-white/10 p-2 hover:bg-white/5" aria-label="Next 7 days"><ChevronRight className="h-4 w-4" /></button>
         <button type="button" onClick={() => setOnlyMe(v => !v)} className={`rounded-lg px-3 py-2 text-sm ${onlyMe ? 'bg-blue-600 text-white' : 'border border-white/10 hover:bg-white/5'}`}>{onlyMe ? 'Only me — show everyone' : 'Only me'}</button>
         {!onlyMe && <input value={query} onChange={e => setQuery(e.target.value)} placeholder="Find a mentor…" className="min-w-[200px] flex-1 rounded-lg border border-white/10 bg-transparent px-3 py-2 text-sm outline-none" />}
       </div>
@@ -180,7 +182,7 @@ export default function MentorCalendarPage() {
           </div>
         </div>
       ))}
-      {!isLoading && !shownMentors.length && <p className="text-sm opacity-60">{filtering ? 'Nothing this week matches — clear the search or filters.' : 'No mentors to show.'}</p>}
+      {!isLoading && !shownMentors.length && <p className="text-sm opacity-60">{filtering ? 'Nothing in these 7 days matches — clear the search or filters.' : 'No mentors to show.'}</p>}
       {booking && <BookDialog mentor={booking} tz={tz} onClose={() => setBooking(null)} />}
       {infoFor && <ClassInfoDialog id={infoFor} tz={tz} onClose={() => setInfoFor(null)} />}
       {offFor && <TimeOffDialog mentorId={offFor.email.toLowerCase() === myEmail ? 'me' : offFor.id} mentorName={offFor.name} tz={tz} onClose={() => setOffFor(null)} />}
