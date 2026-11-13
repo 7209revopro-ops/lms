@@ -3455,8 +3455,8 @@ export interface IMentorMeeting extends Document {
 export const MEETING_OUTCOME_STAGES = ['interested', 'follow_up', 'meeting_with', 'revision', 'not_interested'] as const
 export type MeetingOutcomeStage = (typeof MEETING_OUTCOME_STAGES)[number]
 export const MEETING_FOLLOW_UP_KINDS = ['cse_follow_up', 'revision_needed'] as const
-/** How an interested client means to pay — the sales CRMs' methods. */
-export const MEETING_PAYMENT_MODES = ['Cash', 'Card', 'Bank Transfer', 'Tabby', 'Tamara', 'INR Transfer', 'Payment link'] as const
+/** How an interested client means to pay — the sales CRMs' methods (POS and Razorpay added 2026-11-13, as in every portal). */
+export const MEETING_PAYMENT_MODES = ['Cash', 'Card', 'POS', 'Bank Transfer', 'Tabby', 'Tamara', 'INR Transfer', 'Razorpay', 'Payment link'] as const
 /** How firm the student's payment was, as the mentor heard it (2026-11-09) — the CS verifies it with the student after. */
 export const MEETING_PAYMENT_INTENTS = ['explicit_plan', 'interested_no_commitment', 'not_discussed'] as const
 export const MEETING_NOT_INTERESTED_REASONS = ['Price', 'Time', 'Not convinced', 'Joined elsewhere', 'Other'] as const
