@@ -183,13 +183,25 @@ export function clearAuthCookies(res: Response): void {
 const adminSameSite = (): 'lax' | 'none' => (isProd() ? 'none' : 'lax')
 
 export function setAdminAuthCookies(res: Response, tokens: TokenPair): void {
+  const sessionMs = parseDurationMs(env.JWT_REFRESH_EXPIRES_IN)
+  /* The access COOKIE lives as long as the session, as the client's does
+     (setAuthCookies above); the JWT inside still expires after
+     JWT_ACCESS_EXPIRES_IN and the API refuses it (TOKEN_EXPIRED).
+
+     A 15-minute lms_admin_at was gone when an admin came back to an open
+     dashboard, and the admin middleware, which can only see this cookie
+     (lms_admin_rt is Path=/api/v1/admin/auth), sent them to /login with 30
+     days of session left (2026-11-14). Kept, the page loads, its first call
+     gets TOKEN_EXPIRED and the admin interceptor refreshes in the background.
+     A session that is really over still ends: adminRefresh clears both
+     cookies when the refresh is refused. */
   res.cookie(ADMIN_ACCESS_COOKIE, tokens.access_token, {
     httpOnly: true,
     secure:   isProd(),
     sameSite: adminSameSite(),
     domain:   cookieDomain(),
     path:     '/',
-    maxAge:   parseDurationMs(env.JWT_ACCESS_EXPIRES_IN),
+    maxAge:   sessionMs,
   })
   res.cookie(ADMIN_REFRESH_COOKIE, tokens.refresh_token, {
     httpOnly: true,
@@ -197,7 +209,7 @@ export function setAdminAuthCookies(res: Response, tokens: TokenPair): void {
     sameSite: adminSameSite(),
     domain:   cookieDomain(),
     path:     ADMIN_REFRESH_PATH,
-    maxAge:   parseDurationMs(env.JWT_REFRESH_EXPIRES_IN),
+    maxAge:   sessionMs,
   })
   evictLegacyCookie(res, ADMIN_ACCESS_COOKIE,  '/')
   evictLegacyCookie(res, ADMIN_REFRESH_COOKIE, ADMIN_REFRESH_PATH)

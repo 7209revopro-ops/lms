@@ -369,10 +369,45 @@ try {
     check('...and the long-lived access cookie is cleared with it',
       find(dead.cookies, 'lms_at', { deleted: true }).length > 0)
 
-    const admin = await post('/admin/auth/login', { email: 'admin@t.local', password: PW })
-    check('the admin access cookie is unchanged for now (~15 minutes)',
-      (find(admin.cookies, 'lms_admin_at', { deleted: false })[0]?.maxAge ?? 0) <= 15 * 60,
-      String(find(admin.cookies, 'lms_admin_at', { deleted: false })[0]?.maxAge))
+  }
+
+  section('J — an admin away for more than 15 minutes is still signed in  ← 2026-11-14')
+  {
+    /* The same fix for the admin portal: its middleware only sees lms_admin_at
+       (lms_admin_rt is Path=/api/v1/admin/auth). */
+    const THIRTY_DAYS_S = 30 * 86_400
+    const r = await post('/admin/auth/login', { email: 'admin@t.local', password: PW })
+    const at = find(r.cookies, 'lms_admin_at', { deleted: false })[0]
+    const rt = find(r.cookies, 'lms_admin_rt', { deleted: false })[0]
+    check('the admin access cookie lasts as long as the session (~30 days)',
+      !!at?.maxAge && Math.abs(at.maxAge - THIRTY_DAYS_S) < 60, String(at?.maxAge))
+    check('...the same as the admin refresh cookie', at?.maxAge === rt?.maxAge, `${at?.maxAge} vs ${rt?.maxAge}`)
+    const exp = decodeJwtExp(at?.value ?? '')
+    const left = exp ? exp - Math.floor(Date.now() / 1000) : -1
+    check('the admin access TOKEN inside still expires in ~15 minutes', left > 0 && left <= 15 * 60 + 5, String(left))
+
+    const { signAccessToken } = await import('@/utils/jwt.ts')
+    const admin = await UserModel.findOne({ email: 'admin@t.local' }).lean()
+    const stale = await signAccessToken({ id: String(admin!._id), email: 'admin@t.local', role: 'admin' }, '1s', 'admin')
+    await new Promise(res => setTimeout(res, 2_500))
+    const back = `lms_admin_at=${stale}; lms_admin_rt=${rt!.value}`
+    const users = await fetch(`${BASE}/admin/users`, { headers: { cookie: back } })
+    const usersBody: any = await users.json().catch(() => null)
+    check('the expired admin token is refused with TOKEN_EXPIRED — the cue to refresh',
+      users.status === 401 && usersBody?.error?.code === 'TOKEN_EXPIRED', `${users.status} ${usersBody?.error?.code}`)
+    const ref = await post('/admin/auth/refresh', undefined, back)
+    check('the admin refresh renews the session', ref.status === 200, `got ${ref.status}`)
+    const renewed = find(ref.cookies, 'lms_admin_at', { deleted: false })[0]
+    check('...and the renewed admin access cookie is session-long too',
+      !!renewed?.maxAge && Math.abs(renewed.maxAge - THIRTY_DAYS_S) < 60, String(renewed?.maxAge))
+    const jar = ref.cookies.filter(c => !c.deleted).map(c => `${c.name}=${c.value}`).join('; ')
+    const again = await fetch(`${BASE}/admin/users`, { headers: { cookie: jar } })
+    check('...and the admin carries on, signed in', again.status === 200, `got ${again.status}`)
+
+    const dead = await post('/admin/auth/refresh', undefined, `lms_admin_at=${stale}`)
+    check('an admin refresh with no session is refused', dead.status === 401, `got ${dead.status}`)
+    check('...and the long-lived admin access cookie is cleared with it',
+      find(dead.cookies, 'lms_admin_at', { deleted: true }).length > 0)
   }
 
 } finally {
