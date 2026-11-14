@@ -3384,7 +3384,8 @@ router.get('/mentors/:id/meetings', requireInstructor, requireDepartmentMember('
       : new Date(Date.now() + 60 * 864e5)
 
     const meetings = await MentorMeetingModel.find({
-      mentorId,
+      /* Theirs, or a staff meeting they are in (2026-11-14). */
+      $or: [{ mentorId }, { staffIds: mentorId }],
       scheduledStart: { $gte: from, $lte: to },
       cancelledAt: null,
     }).sort({ scheduledStart: 1 }).lean()

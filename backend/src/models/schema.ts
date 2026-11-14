@@ -3404,6 +3404,11 @@ export type MentorMeetingCategory = (typeof MENTOR_MEETING_CATEGORIES)[number]
 export interface IMentorMeeting extends Document {
   id:             string
   mentorId:       Types.ObjectId
+  /* The other mentors in a staff meeting (the user, 2026-11-14: a Chief's staff meeting, "staff can be selected…
+     if they have a meeting at that time it shows the specific mentor"). Each is busy then exactly as the meeting's
+     own mentor is: it is on their calendar, and nothing else is booked with them over it. Empty for every other
+     meeting — where the people met are names in `attendees`, with no diary of their own here. */
+  staffIds?:      Types.ObjectId[]
   organizationId?: Types.ObjectId
   title:          string
   kind:           MentorMeetingKind
@@ -3555,6 +3560,7 @@ const MeetingOutcomeSchema = new Schema<IMeetingOutcome>({
 const MentorMeetingSchema = new Schema<IMentorMeeting>(
   {
     mentorId:       { type: Schema.Types.ObjectId, ref: 'User', required: true, index: true },
+    staffIds:       { type: [{ type: Schema.Types.ObjectId, ref: 'User' }], default: [] },
     organizationId: { type: Schema.Types.ObjectId, ref: 'Organization' },
     title:          { type: String, required: true, trim: true, maxlength: 255 },
     kind:           { type: String, enum: ['staff', 'student', 'client'], required: true },

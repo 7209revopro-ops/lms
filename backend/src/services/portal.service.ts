@@ -494,6 +494,10 @@ export interface PortalMentor {
        reach anybody, so it is as fit for the listing as the title. */
     inPerson: boolean
     location: string
+    /* A staff meeting (2026-11-14): it has other mentors in it, and comes under each of them as well as under its
+       own mentor — they are all busy then. `mentorName`: whose meeting it is, for the calendars of the others. */
+    staffMeeting: boolean
+    mentorName: string
   }[]
   /* When the mentor can't be booked (2026-10-23) — drawn as "Not available"; every booking over it is refused. */
   timeOff: import('@/services/mentorTimeOff.service.ts').TimeOffDTO[]
@@ -574,11 +578,12 @@ export async function listMentorsForPortal(input: {
       .select('title instructorId coInstructorIds scheduledStart durationMins status bookedCount sessionCapacity organizationId courseId sectionId isOnline room location pod.state pod.roomName')
       .lean(),
     MentorMeetingModel.find({
-      mentorId: { $in: ids },
+      /* Theirs, or a staff meeting they are in (2026-11-14) — busy then all the same. */
+      $or: [{ mentorId: { $in: ids } }, { staffIds: { $in: ids } }],
       scheduledStart: { $gte: from, $lte: to },
       cancelledAt: null,
     })
-      .select('title kind category course mentorId scheduledStart durationMins attendees bookedByEmail isOnline location')
+      .select('title kind category course mentorId staffIds scheduledStart durationMins attendees bookedByEmail isOnline location')
       .lean(),
     timeOffBetween(ids, from, to),
   ])
@@ -597,8 +602,12 @@ export async function listMentorsForPortal(input: {
   )
 
   const meetingsByMentor = new Map<string, PortalMentor['meetings']>()
+  const listed = new Set(ids.map(String))
+  const nameOf = new Map(mentors.map((m) => [String(m._id), String(m.name ?? '')]))
   for (const m of meetings) {
-    const key = String(m.mentorId)
+    const staff = ((m as { staffIds?: unknown[] }).staffIds ?? []).map(String)
+    /* Under its own mentor and under each mentor in it — only those this listing has. */
+    for (const key of [...new Set([String(m.mentorId), ...staff])].filter((k) => listed.has(k))) {
     const list = meetingsByMentor.get(key) ?? []
     list.push({
       id: String(m._id),
@@ -612,8 +621,11 @@ export async function listMentorsForPortal(input: {
       bookedByEmail: m.bookedByEmail ?? '',
       inPerson: m.isOnline === false,
       location: m.isOnline === false ? (m.location ?? '') : '',
+      staffMeeting: staff.length > 0,
+      mentorName: nameOf.get(String(m.mentorId)) ?? '',
     })
     meetingsByMentor.set(key, list)
+    }
   }
 
   // Each own class's course and module, read once for the whole list.
@@ -707,6 +719,8 @@ export interface PortalMentorMeeting {
   inPerson: boolean
   location: string
   bookedByEmail: string
+  /** A staff meeting's other mentors (2026-11-14); none for any other meeting. */
+  staff?: { name: string; email: string }[]
 }
 
 /**
@@ -803,9 +817,81 @@ function courseOf(category: string, v: unknown): string {
   return c
 }
 
+/* ── A staff meeting's other mentors (the user, 2026-11-14) ───────────────────────────────────────────────────────────
+   A Chief Mentor's staff meeting has several mentors in it. Each is named by address, kept on the meeting (`staffIds`),
+   is busy then as its own mentor is — on their calendar, and nothing else booked with them over it — and is told. A
+   staff meeting is never booked over anybody: it is refused with the people in the way, by name. */
+
+interface StaffMentor { _id: mongoose.Types.ObjectId; name?: string; email: string }
+
+/** The mentors named for a staff meeting — each an instructor this asker may book; never the meeting's own mentor. */
+async function staffNamed(input: unknown, opts: { orgId: unknown; allAcademies: boolean; notEmail: string }): Promise<StaffMentor[]> {
+  const emails = [...new Set((Array.isArray(input) ? input : []).map((e) => String(e ?? '').toLowerCase().trim()).filter(Boolean))]
+    .filter((e) => e !== opts.notEmail.toLowerCase())
+  if (emails.length === 0) return []
+  if (emails.length > 30) throw httpError('At most 30 mentors in a staff meeting', 400)
+  const found = await UserModel.find({
+    email: { $in: emails },
+    role: 'instructor',
+    ...(opts.allAcademies ? {} : { $or: [{ organizationId: opts.orgId }, { sharedAcrossOrgs: true }] }),
+  }).select('name email').lean()
+  const missing = emails.filter((e) => !found.some((u) => String(u.email ?? '').toLowerCase() === e))
+  if (missing.length) throw httpError(`No mentor here with that address: ${missing.join(', ')}`, 404)
+  return found.map((u) => ({ _id: u._id as mongoose.Types.ObjectId, name: u.name ?? '', email: String(u.email ?? '').toLowerCase() }))
+}
+
+/**
+ * Who among these mentors is busy then, and with what: a class they teach or co-mentor, a meeting of their own or a
+ * staff meeting they are in, their time off. One line a person, the first thing in their way.
+ */
+async function staffBusy(staff: StaffMentor[], start: Date, durationMins: number, exceptMeetingId?: unknown): Promise<string[]> {
+  if (staff.length === 0) return []
+  const { LiveClassModel, MentorMeetingModel } = await import('@/models/schema.ts')
+  const { firstTimeOffClash } = await import('@/services/mentorTimeOff.service.ts')
+  const ids = staff.map((s) => s._id)
+  const windowStart = new Date(start.getTime() - 12 * 3600e3)
+  const windowEnd = new Date(start.getTime() + 12 * 3600e3)
+  const [classes, meetings] = await Promise.all([
+    LiveClassModel.find({
+      $or: [{ instructorId: { $in: ids } }, { coInstructorIds: { $in: ids } }],
+      scheduledStart: { $gte: windowStart, $lte: windowEnd },
+      status: { $ne: 'cancelled' },
+    }).select('title instructorId coInstructorIds scheduledStart durationMins').lean(),
+    MentorMeetingModel.find({
+      ...(exceptMeetingId ? { _id: { $ne: exceptMeetingId } } : {}),
+      $or: [{ mentorId: { $in: ids } }, { staffIds: { $in: ids } }],
+      scheduledStart: { $gte: windowStart, $lte: windowEnd },
+      cancelledAt: null,
+    }).select('title mentorId staffIds scheduledStart durationMins').lean(),
+  ])
+  const busy: string[] = []
+  for (const person of staff) {
+    const id = String(person._id)
+    const name = person.name || person.email
+    const c = classes.find((x) =>
+      [String(x.instructorId), ...((x as { coInstructorIds?: unknown[] }).coInstructorIds ?? []).map(String)].includes(id)
+      && overlaps(start, durationMins, new Date(x.scheduledStart), x.durationMins ?? 0))
+    if (c) { busy.push(`${name} (class: ${c.title})`); continue }
+    const m = meetings.find((x) =>
+      [String(x.mentorId), ...((x as { staffIds?: unknown[] }).staffIds ?? []).map(String)].includes(id)
+      && overlaps(start, durationMins, new Date(x.scheduledStart), x.durationMins ?? 0))
+    if (m) { busy.push(`${name} (meeting: ${m.title})`); continue }
+    if (await firstTimeOffClash([id], [{ start, durationMins }])) busy.push(`${name} (not available)`)
+  }
+  return busy
+}
+
+/** Every mentor of a staff meeting among the people invited, so each gets the invitation and the link. */
+function withStaffInvited(attendees: { name: string; email: string }[], staff: StaffMentor[]): { name: string; email: string }[] {
+  const have = new Set(attendees.map((a) => a.email).filter(Boolean))
+  return [...attendees, ...staff.filter((s) => !have.has(s.email)).map((s) => ({ name: s.name || s.email, email: s.email }))].slice(0, 60)
+}
+
 export async function createMentorMeetingForPortal(input: {
   remoteOrgId?: string
   mentorEmail?: string
+  /** A staff meeting (2026-11-14): the other mentors in it, by address — each checked, blocked and told. */
+  staffEmails?: unknown
   title?: string
   kind?: string
   category?: string
@@ -840,7 +926,7 @@ export async function createMentorMeetingForPortal(input: {
   /* At least one person, and only the ones actually named. A row somebody
      started and abandoned in the form should not become an attendee with an
      empty name, and an address without a name is nobody. */
-  const attendees = (Array.isArray(input.attendees) ? input.attendees : [])
+  let attendees = (Array.isArray(input.attendees) ? input.attendees : [])
     .map((a) => {
       const row = (a ?? {}) as { name?: unknown; email?: unknown }
       return {
@@ -851,7 +937,9 @@ export async function createMentorMeetingForPortal(input: {
     .filter((a) => a.name.length > 0)
     .slice(0, 25)
 
-  if (attendees.length === 0) throw httpError('Say who the mentor is meeting', 400)
+  /* A staff meeting's mentors are its attendees too (added below, once they are known) — so nobody need be typed. */
+  const namesStaff = Array.isArray(input.staffEmails) && input.staffEmails.length > 0
+  if (attendees.length === 0 && !namesStaff) throw httpError('Say who the mentor is meeting', 400)
 
   const bookedByEmail = String(input.bookedByEmail ?? '').toLowerCase().trim()
   if (!bookedByEmail) throw httpError('bookedByEmail is required', 400)
@@ -882,6 +970,11 @@ export async function createMentorMeetingForPortal(input: {
   }).select('name email meetEmail').lean()
   if (!mentor) throw httpError('No mentor here with that address', 404)
 
+  /* A staff meeting's other mentors (2026-11-14), and everybody in it among those invited. */
+  const staff = await staffNamed(input.staffEmails, { orgId: org._id, allAcademies: input.allAcademies === true, notEmail: String(mentor.email ?? wanted) })
+  attendees = withStaffInvited(attendees, staff)
+  if (attendees.length === 0) throw httpError('Say who the mentor is meeting', 400)
+
   const windowStart = new Date(start.getTime() - 12 * 3600e3)
   const windowEnd = new Date(start.getTime() + 12 * 3600e3)
 
@@ -892,7 +985,8 @@ export async function createMentorMeetingForPortal(input: {
       status: { $ne: 'cancelled' },
     }).select('title scheduledStart durationMins').lean(),
     MentorMeetingModel.find({
-      mentorId: mentor._id,
+      /* Their own, or a staff meeting they are in (2026-11-14): busy then all the same. */
+      $or: [{ mentorId: mentor._id }, { staffIds: mentor._id }],
       scheduledStart: { $gte: windowStart, $lte: windowEnd },
       cancelledAt: null,
     }).select('title scheduledStart durationMins').lean(),
@@ -910,6 +1004,9 @@ export async function createMentorMeetingForPortal(input: {
   }
   /* The mentor's time off (2026-10-23): never booked over, from any portal. */
   await refuseOverTimeOff(mentor._id, start, durationMins)
+  /* A staff meeting is booked over nobody in it: refused with whoever is in the way, by name. */
+  const staffInTheWay = await staffBusy(staff, start, durationMins)
+  if (staffInTheWay.length) throw httpError(`Busy then: ${staffInTheWay.join('; ')}`, 409)
 
   /* A pasted link is used as given; an empty one is an invitation to make a
      Google Meet. In person there is nothing to join: no link is made, and one
@@ -923,6 +1020,7 @@ export async function createMentorMeetingForPortal(input: {
 
   const created = await MentorMeetingModel.create({
     mentorId: mentor._id,
+    staffIds: staff.map((s) => s._id),
     organizationId: org._id,
     title,
     kind,
@@ -990,6 +1088,7 @@ export async function createMentorMeetingForPortal(input: {
       inPerson,
       location,
       bookedByEmail,
+      staff: staff.map((s) => ({ name: s.name || s.email, email: s.email })),
     },
   }
 }
@@ -1032,10 +1131,15 @@ export async function getMentorMeetingForPortal(input: {
   }
 
   const mentor = await UserModel.findById(meeting.mentorId).select('name email').lean()
+  const staffIds = (meeting.staffIds ?? []) as unknown[]
+  const staff = staffIds.length ? await UserModel.find({ _id: { $in: staffIds } }).select('name email').lean() : []
 
   return {
     id: String(meeting._id),
     title: meeting.title,
+    /* A staff meeting's other mentors (2026-11-14) — they are among `attendees` too, where the form tells them apart
+       by address. */
+    staff: staff.map((s) => ({ name: s.name ?? '', email: String(s.email ?? '').toLowerCase() })),
     kind: meeting.kind,
     category: String(meeting.category ?? ''),
     course: String(meeting.course ?? ''),
@@ -1079,6 +1183,10 @@ export async function updateMentorMeetingForPortal(input: {
   location?: string
   attendees?: unknown
   notes?: string
+  /** A staff meeting's other mentors (2026-11-14), by address — unsaid is unchanged; [] takes them all off. */
+  staffEmails?: unknown
+  /** Any academy's mentors may be named for it — the portal's calendar lists both. */
+  allAcademies?: boolean
 }) {
   const org = await resolveOrg(input.remoteOrgId)
   const { MentorMeetingModel, LiveClassModel, UserModel } = await import('@/models/schema.ts')
@@ -1124,8 +1232,25 @@ export async function updateMentorMeetingForPortal(input: {
       })
       .filter((a) => a.name.length > 0)
       .slice(0, 25)
-    if (attendees.length === 0) throw httpError('Say who the mentor is meeting', 400)
   }
+
+  /* A staff meeting's other mentors (2026-11-14): as they were, or as now named. Whoever was taken off is no longer
+     invited; whoever is in it is — so the list of people follows the list of mentors. */
+  const mentorRow = await UserModel.findById(meeting.mentorId).select('email').lean()
+  const hadStaffIds = ((meeting.staffIds ?? []) as unknown[]).map(String)
+  const hadStaff: StaffMentor[] = hadStaffIds.length
+    ? (await UserModel.find({ _id: { $in: hadStaffIds } }).select('name email').lean())
+      .map((u) => ({ _id: u._id as mongoose.Types.ObjectId, name: u.name ?? '', email: String(u.email ?? '').toLowerCase() }))
+    : []
+  const staff = input.staffEmails === undefined
+    ? hadStaff
+    : await staffNamed(input.staffEmails, { orgId: org._id, allAcademies: input.allAcademies === true, notEmail: String(mentorRow?.email ?? '') })
+  const staffNow = new Set(staff.map((s) => String(s._id)))
+  const removedStaff = hadStaff.filter((s) => !staffNow.has(String(s._id)))
+  const staffChanged = removedStaff.length > 0 || staff.some((s) => !hadStaffIds.includes(String(s._id)))
+  const goneEmails = new Set(removedStaff.map((s) => s.email))
+  attendees = withStaffInvited(attendees.filter((a) => !a.email || !goneEmails.has(a.email)), staff)
+  if (attendees.length === 0) throw httpError('Say who the mentor is meeting', 400)
 
   /* Unsaid is unchanged: a caller that has never heard of in person keeps the
      meeting whatever it was. */
@@ -1144,7 +1269,8 @@ export async function updateMentorMeetingForPortal(input: {
     }).select('title scheduledStart durationMins').lean(),
     MentorMeetingModel.find({
       _id: { $ne: meeting._id },   // itself, excluded
-      mentorId: meeting.mentorId,
+      /* Their own, or a staff meeting they are in (2026-11-14). */
+      $or: [{ mentorId: meeting.mentorId }, { staffIds: meeting.mentorId }],
       scheduledStart: { $gte: windowStart, $lte: windowEnd },
       cancelledAt: null,
     }).select('title scheduledStart durationMins').lean(),
@@ -1167,13 +1293,21 @@ export async function updateMentorMeetingForPortal(input: {
   /* Moved into the mentor's time off: refused. Left where it is — a title edit of a meeting that time off was later
      marked over — it stays editable. */
   if (timeMoved) await refuseOverTimeOff(meeting.mentorId, start, durationMins)
+  /* A staff meeting moved, or with somebody new in it: nobody in it is booked over (2026-11-14). Left where it is
+     with the same people, it stays editable whatever was put beside it since. */
+  if (timeMoved || staffChanged) {
+    const check = timeMoved ? staff : staff.filter((s) => !hadStaffIds.includes(String(s._id)))
+    const staffInTheWay = await staffBusy(check, start, durationMins, meeting._id)
+    if (staffInTheWay.length) throw httpError(`Busy then: ${staffInTheWay.join('; ')}`, 409)
+  }
   /* Off a call and into a room, back again, or to another room: somewhere else
      to be, which people act on as surely as a new time. */
   const placeChanged = wasInPerson !== inPerson || (inPerson && String(meeting.location ?? '') !== location)
-  const movedOrChanged = timeMoved || meeting.title !== title || placeChanged
+  const movedOrChanged = timeMoved || meeting.title !== title || placeChanged || staffChanged
 
   const mentor = await UserModel.findById(meeting.mentorId).select('name email meetEmail').lean()
 
+  meeting.staffIds = staff.map((s) => s._id)
   meeting.title = title
   meeting.kind = kind as typeof meeting.kind
   meeting.category = category
@@ -1218,12 +1352,17 @@ export async function updateMentorMeetingForPortal(input: {
         if (!a.email) continue
         await sendMentorMeetingUpdate(a.email, a.name, { ...common, withWhom: mentor?.name ?? mentor?.email ?? '' }).catch(() => {})
       }
+      /* A mentor taken off a staff meeting is told it is off for them — else they keep the hour for nothing. */
+      for (const s of removedStaff) {
+        await sendMentorMeetingUpdate(s.email, s.name ?? '', { ...common, cancelled: true, withWhom: mentor?.name ?? mentor?.email ?? '' }).catch(() => {})
+      }
     })()
   }
 
   return {
     id: String(meeting._id), title, startsAt: start.toISOString(), durationMins,
     inPerson, location, meetingUrl: meeting.meetingUrl ?? '', notified: movedOrChanged, linkNote,
+    staff: staff.map((s) => ({ name: s.name || s.email, email: s.email })),
   }
 }
 
