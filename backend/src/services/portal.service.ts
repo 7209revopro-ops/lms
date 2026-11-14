@@ -449,6 +449,13 @@ export interface PortalMentorClass {
   course: string | null
   moduleId: string | null
   module: string | null
+  /* Where it is held, for a screen that tells mentors where to go (Root's Class TV, 2026-11-14): whether it is
+     online, the place — the pod or room booked for it in the HRMS, else the room typed on the class, else an
+     in-person class's venue ('' when there is none) — and the academy the class itself belongs to (a lent mentor
+     teaches in both). The place like the title: only for the asking academy's own classes. */
+  online: boolean
+  place: string | null
+  academy: string | null
 }
 
 export interface PortalMentor {
@@ -564,7 +571,7 @@ export async function listMentorsForPortal(input: {
       $or: [{ instructorId: { $in: ids } }, { coInstructorIds: { $in: ids } }],
       scheduledStart: { $gte: from, $lte: to },
     })
-      .select('title instructorId coInstructorIds scheduledStart durationMins status bookedCount sessionCapacity organizationId courseId sectionId')
+      .select('title instructorId coInstructorIds scheduledStart durationMins status bookedCount sessionCapacity organizationId courseId sectionId isOnline room location pod.state pod.roomName')
       .lean(),
     MentorMeetingModel.find({
       mentorId: { $in: ids },
@@ -620,6 +627,17 @@ export async function listMentorsForPortal(input: {
   const courseTitles = new Map(courseRows.map((c) => [String(c._id), String((c as { title?: string }).title ?? '')]))
   const moduleTitles = new Map(sectionRows.map((m) => [String(m._id), String((m as { title?: string }).title ?? '')]))
 
+  // The academy each class belongs to — a lent mentor's classes are not all their own academy's.
+  const classOrgIds = [...new Set(classes.map((c) => String(c.organizationId ?? '')).filter((id) => id && !academyNames.has(id)))]
+  if (classOrgIds.length) {
+    for (const o of await OrganizationModel.find({ _id: { $in: classOrgIds } }).select('name').lean()) {
+      academyNames.set(String(o._id), String((o as { name?: string }).name ?? ''))
+    }
+  }
+  /** The pod or room booked in the HRMS, else the room typed on the class, else an in-person class's venue. */
+  const placeOf = (c: { isOnline?: boolean; room?: string; location?: string; pod?: { state?: string; roomName?: string } }): string =>
+    (c.pod?.state === 'booked' && c.pod.roomName ? c.pod.roomName : '') || String(c.room ?? '').trim() || (c.isOnline === false ? String(c.location ?? '').trim() : '')
+
   const classesByMentor = new Map<string, PortalMentorClass[]>()
   for (const c of classes) {
     // Every academy's, asked for all of them — the title, course and module of each.
@@ -640,6 +658,9 @@ export async function listMentorsForPortal(input: {
       course: mine && c.courseId ? courseTitles.get(String(c.courseId)) ?? null : null,
       moduleId: mine && (c as { sectionId?: unknown }).sectionId ? String((c as { sectionId?: unknown }).sectionId) : null,
       module: mine && (c as { sectionId?: unknown }).sectionId ? moduleTitles.get(String((c as { sectionId?: unknown }).sectionId)) ?? null : null,
+      online: (c as { isOnline?: boolean }).isOnline !== false,
+      place: mine ? placeOf(c as Parameters<typeof placeOf>[0]) : null,
+      academy: c.organizationId ? academyNames.get(String(c.organizationId)) ?? null : null,
     })
     classesByMentor.set(key, list)
     }
