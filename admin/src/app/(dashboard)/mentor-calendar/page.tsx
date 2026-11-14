@@ -1,13 +1,14 @@
 'use client'
 
 import { useMemo, useState } from 'react'
-import { CalendarDays, ChevronLeft, ChevronRight, CircleSlash, Plus, X } from 'lucide-react'
+import { CalendarDays, ChevronLeft, ChevronRight, CircleSlash, Plus, Users, X } from 'lucide-react'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { PodBadge } from '@/components/live-classes/PodBadge'
 import Spinner from '@/components/ui/Spinner'
 import { useCurrentUser } from '@/lib/api/user'
 import { useQueryState, setQueryParams } from '@/lib/useQueryState'
-import { useMentorCalendar, useBookMeeting, useCancelMeeting, useMentorClass, useRemoveTimeOff, wallInZone, timeOffLabel, refusal, type CalendarMentor, type MentorTimeOff } from '@/lib/api/mentorCalendar'
+import { useMentorCalendar, useBookMeeting, useCancelMeeting, useMentorClass, useRemoveTimeOff, useStaffMeetingReach, wallInZone, timeOffLabel, refusal, type CalendarMentor, type MentorTimeOff } from '@/lib/api/mentorCalendar'
+import { StaffMeetingDialog } from '@/components/live-classes/StaffMeetingDialog'
 import { TimeOffDialog } from '@/components/live-classes/TimeOffDialog'
 import { useCsMentor } from '@/lib/api/csMeetings'
 import Link from 'next/link'
@@ -50,6 +51,10 @@ export default function MentorCalendarPage() {
   const [booking, setBooking] = useState<CalendarMentor | null>(null)
   const [infoFor, setInfoFor] = useState<string | null>(null)   // the class whose Info is open
   const [offFor, setOffFor] = useState<CalendarMentor | null>(null)   // marking this mentor not available
+  /* A staff meeting with several mentors in it (2026-11-14) — an admin with anyone, a Chief Mentor (the CS Portal says)
+     with their team. */
+  const staffReach = useStaffMeetingReach()
+  const [staffOpen, setStaffOpen] = useState(false)
   const [find, setFind] = useQueryState('q', '', { history: 'replace' })          // a session's title, its course or module, or who a booked one is with
   const [course] = useQueryState('course', '')      // courseId
   const [mod, setMod] = useQueryState('module', '')      // moduleId, within the course
@@ -108,6 +113,10 @@ export default function MentorCalendarPage() {
         <button type="button" onClick={() => step(-1)} className="rounded-lg border border-white/10 p-2 hover:bg-white/5" aria-label="Previous 7 days"><ChevronLeft className="h-4 w-4" /></button>
         <button type="button" onClick={() => step(0)} className="flex items-center gap-1.5 rounded-lg border border-white/10 px-3 py-2 text-sm hover:bg-white/5"><CalendarDays className="h-4 w-4" />{fromToday ? 'From today' : days[0].toLocaleDateString(undefined, { day: 'numeric', month: 'short' })}</button>
         <button type="button" onClick={() => step(1)} className="rounded-lg border border-white/10 p-2 hover:bg-white/5" aria-label="Next 7 days"><ChevronRight className="h-4 w-4" /></button>
+        {staffReach.data?.may && (
+          <button type="button" onClick={() => setStaffOpen(true)} data-testid="staff-meeting-button"
+            className="flex items-center gap-1.5 rounded-lg bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-500"><Users className="h-4 w-4" />Staff meeting</button>
+        )}
         <button type="button" onClick={() => setOnlyMe(v => !v)} className={`rounded-lg px-3 py-2 text-sm ${onlyMe ? 'bg-blue-600 text-white' : 'border border-white/10 hover:bg-white/5'}`}>{onlyMe ? 'Only me — show everyone' : 'Only me'}</button>
         {!onlyMe && <input value={query} onChange={e => setQuery(e.target.value)} placeholder="Find a mentor…" className="min-w-[200px] flex-1 rounded-lg border border-white/10 bg-transparent px-3 py-2 text-sm outline-none" />}
       </div>
@@ -169,8 +178,8 @@ export default function MentorCalendarPage() {
                     </button>
                   ))}
                   {meetings.map(v => (
-                    <p key={v.id} className="mb-1 flex items-start justify-between gap-1 rounded bg-violet-500/10 px-1 text-violet-300" title={`${v.title} · ${v.attendeeNames.join(', ')}${v.inPerson ? ` · in person, ${v.location}` : ''}`}>
-                      <span>{at(v.startsAt)} {v.title}</span>
+                    <p key={v.id} className="mb-1 flex items-start justify-between gap-1 rounded bg-violet-500/10 px-1 text-violet-300" title={`${v.staffMeeting ? `Staff meeting${v.mentorName ? ` (${v.mentorName}'s)` : ''} · ` : ''}${v.title} · ${v.attendeeNames.join(', ')}${v.inPerson ? ` · in person, ${v.location}` : ''}`}>
+                      <span>{at(v.startsAt)} {v.title}{v.staffMeeting && <span className="block opacity-60">Staff meeting · {v.attendeeNames.length + 1} mentors</span>}</span>
                       {(v.bookedByEmail.toLowerCase() === myEmail || (me as any)?.role !== 'instructor') && (
                         <button type="button" disabled={cancel.isPending} onClick={() => { if (confirm(`Cancel "${v.title}"? Everyone on it is emailed.`)) cancel.mutate(v.id) }} aria-label="Cancel this session" className="opacity-60 hover:opacity-100"><X className="h-3 w-3" /></button>
                       )}
@@ -184,6 +193,9 @@ export default function MentorCalendarPage() {
       ))}
       {!isLoading && !shownMentors.length && <p className="text-sm opacity-60">{filtering ? 'Nothing in these 7 days matches — clear the search or filters.' : 'No mentors to show.'}</p>}
       {booking && <BookDialog mentor={booking} tz={tz} onClose={() => setBooking(null)} />}
+      {staffOpen && staffReach.data?.may && (
+        <StaffMeetingDialog mentors={data?.mentors ?? []} team={staffReach.data.team} myEmail={myEmail} days={days} tz={tz} onClose={() => setStaffOpen(false)} />
+      )}
       {infoFor && <ClassInfoDialog id={infoFor} tz={tz} onClose={() => setInfoFor(null)} />}
       {offFor && <TimeOffDialog mentorId={offFor.email.toLowerCase() === myEmail ? 'me' : offFor.id} mentorName={offFor.name} tz={tz} onClose={() => setOffFor(null)} />}
     </div>
