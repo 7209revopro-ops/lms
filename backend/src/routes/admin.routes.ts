@@ -4471,6 +4471,8 @@ router.get('/class-verification', requireInstructor, async (req: Request, res: R
         course: c.courseId ? { id: String(c.courseId._id), title: c.courseId.title } : null,
         status: verifyStatusOf(c), verifiedAt: c.verifiedAt ?? null, verifiedBy: c.verifiedBy?.name ?? null,
         rating: c.mentorReview?.rating ?? null,
+        screenshots: c.mentorReview?.screenshots?.length ?? 0,
+        hasSummary: !!c.mentorReview?.summary,
         students: tally(c._id, 'all'), attended: tally(c._id, 'attended'), missed: tally(c._id, 'missed'),
       })),
     })
@@ -4501,7 +4503,12 @@ router.get('/class-verification/:id', requireInstructor, requireDepartmentLiveCl
       ended: Date.now() >= endMs,
       status: c.verifyRequestedAt ? verifyStatusOf(c) : (c.verifiedAt ? 'verified' : 'pending'),
       verifiedAt: c.verifiedAt ?? null, verifiedBy: c.verifiedBy?.name ?? null,
-      review: { rating: c.mentorReview?.rating ?? null, topics: c.mentorReview?.topics ?? '', issues: c.mentorReview?.issues ?? '' },
+      review: {
+        rating: c.mentorReview?.rating ?? null, topics: c.mentorReview?.topics ?? '', issues: c.mentorReview?.issues ?? '',
+        summary: c.mentorReview?.summary ?? '',
+        /* Keys only — the page shows each through the signed-in route below. */
+        screenshots: (c.mentorReview?.screenshots ?? []) as string[],
+      },
       students: seats
         .map(b => ({
           bookingId: String(b._id),
@@ -4530,6 +4537,11 @@ const verifySubmitSchema = z.object({
   rating: z.number().int().min(1).max(5),
   topics: z.string().trim().max(2000).optional(),
   issues: z.string().trim().max(2000).optional(),
+  /* "How did the class go?" and the students-on-screen screenshots — keys
+     from POST /class-verification/:id/screenshot; the handler checks each
+     belongs to THIS class. Both optional. */
+  summary:     z.string().trim().max(3000).optional(),
+  screenshots: z.array(z.string().regex(/^kyc\/class-reports\/[0-9a-f]{24}\/[\w.-]+$/)).max(MAX_CLASS_SCREENSHOTS).optional(),
 })
 
 router.post('/class-verification/:id', requireInstructor, requireDepartmentLiveClass('id'), validate(verifySubmitSchema),
@@ -4550,6 +4562,10 @@ router.post('/class-verification/:id', requireInstructor, requireDepartmentLiveC
       res.status(400).json({ success: false, error: { code: 'CLASS_NOT_ENDED', message: 'Attendance can be verified once the class has ended.' } }); return
     }
     const body = req.body as z.infer<typeof verifySubmitSchema>
+    const shots = [...new Set(body.screenshots ?? [])]
+    if (shots.some(k => !k.startsWith(`kyc/class-reports/${String(c._id)}/`))) {
+      res.status(400).json({ success: false, error: { code: 'INVALID_SCREENSHOT', message: 'A screenshot belongs to another class — upload it again here.' } }); return
+    }
     let updated = 0
     for (const m of body.marks) {
       /* Only this class's live seats — never a cancelled one (the attendance route's own rule). */
@@ -4561,10 +4577,64 @@ router.post('/class-verification/:id', requireInstructor, requireDepartmentLiveC
     }
     await LiveClassModel.updateOne({ _id: c._id }, { $set: {
       verifiedAt: new Date(), verifiedBy: new Types.ObjectId(req.user!.id),
-      mentorReview: { rating: body.rating, topics: body.topics ?? '', issues: body.issues ?? '' },
+      mentorReview: { rating: body.rating, topics: body.topics ?? '', issues: body.issues ?? '', summary: body.summary ?? '', screenshots: shots },
       verifyRequestedAt: c.verifyRequestedAt ?? new Date(),
     } })
     sendSuccess(res, { verified: true, marked: updated }, 'Attendance verified')
+  } catch (err) { next(err) }
+})
+
+/* ── Class report screenshots ─────────────────────────
+   Students on screen, so PRIVATE: stored under kyc/ (never served publicly —
+   app.ts blocks /uploads/kyc, and on R2 it is the KYC bucket), read back only
+   through the signed-in route below by whoever may open this class's
+   verification. Uploaded one at a time BEFORE submitting; the submit saves
+   the list. A screenshot uploaded and then removed stays as an orphan object
+   nothing points at — harmless, and unreadable through the route (it only
+   serves keys saved on the class). */
+const MAX_CLASS_SCREENSHOTS = 6
+
+router.post('/class-verification/:id/screenshot', requireInstructor, requireDepartmentLiveClass('id'),
+  async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const id = String(req.params['id'] ?? '')
+    if (!(await callerMayManageSession(req, id))) {
+      res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Class not found' } }); return
+    }
+    const { imageUpload, verifyFileSignature, safeUploadName } = await import('@/middleware/upload.middleware.ts')
+    await new Promise<void>((resolve, reject) => imageUpload.single('file')(req, res, (err: unknown) => err ? reject(err) : resolve()))
+      .catch((err: Error) => { res.status(400).json({ success: false, error: { code: 'UPLOAD_ERROR', message: err.message } }) })
+    if (res.headersSent) return
+    const file = (req as Request & { file?: { buffer: Buffer; mimetype: string; size: number } }).file
+    if (!file) { res.status(400).json({ success: false, error: { code: 'NO_FILE', message: 'No file provided. Use the "file" field.' } }); return }
+    if (!verifyFileSignature(file.buffer, file.mimetype)) {
+      res.status(400).json({ success: false, error: { code: 'UPLOAD_ERROR', message: 'That file is not the image it says it is.' } }); return
+    }
+    const { makeKey, uploadKycFile } = await import('@/services/r2.service.ts')
+    const key = await uploadKycFile(file.buffer, makeKey(safeUploadName(file.mimetype), `kyc/class-reports/${id}`), file.mimetype)
+    sendSuccess(res, { key, size: file.size }, undefined, 201)
+  } catch (err) { next(err) }
+})
+
+router.get('/class-verification/:id/screenshot', requireInstructor, requireDepartmentLiveClass('id'),
+  async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const id  = String(req.params['id'] ?? '')
+    const key = String(req.query['key'] ?? '')
+    const notFound = () => res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Screenshot not found' } })
+    if (!(await callerMayManageSession(req, id))) { notFound(); return }
+    const { LiveClassModel } = await import('@/models/schema.ts')
+    const c = await LiveClassModel.findById(id).select('mentorReview.screenshots').lean() as any
+    /* Only a key SAVED on this class — never an arbitrary storage path. */
+    if (!c || !(c.mentorReview?.screenshots ?? []).includes(key)) { notFound(); return }
+    const { isR2Configured, generatePresignedGetUrl } = await import('@/services/r2.service.ts')
+    res.setHeader('Cache-Control', 'private, no-store')
+    if (isR2Configured()) { res.redirect(302, await generatePresignedGetUrl(key, 300)); return }
+    const pathMod = await import('path'), fsMod = await import('fs')
+    const root = pathMod.join(process.cwd(), 'uploads')
+    const abs  = pathMod.join(root, key)
+    if (!abs.startsWith(root + pathMod.sep) || !fsMod.existsSync(abs)) { notFound(); return }
+    res.sendFile(abs)
   } catch (err) { next(err) }
 })
 

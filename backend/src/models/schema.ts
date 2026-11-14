@@ -1440,7 +1440,10 @@ export interface ILiveClass extends Document {
   verifyFinalReminderAt?: Date     // 9 AM next morning — from here it shows as Overdue
   verifiedAt?:            Date
   verifiedBy?:            Types.ObjectId
-  mentorReview?: { rating?: number; topics?: string; issues?: string }
+  /* summary: "how did the class go"; screenshots: PRIVATE storage keys under
+     kyc/class-reports/<classId>/ — students' faces, never a public URL. Read
+     through GET /admin/class-verification/:id/screenshot. */
+  mentorReview?: { rating?: number; topics?: string; issues?: string; summary?: string; screenshots?: string[] }
 
   /* Mentor no-show detection.
      instructorJoinedAt is set two different ways depending on `type`:
@@ -1636,6 +1639,8 @@ const LiveClassSchema = new Schema<ILiveClass>(
       rating: { type: Number, min: 1, max: 5 },
       topics: { type: String, maxlength: 2000 },
       issues: { type: String, maxlength: 2000 },
+      summary:     { type: String, maxlength: 3000 },
+      screenshots: { type: [String], default: undefined },
     },
     instructorJoinedAt:          { type: Date },
     mentorReminderSent:          { type: Boolean, default: false },
