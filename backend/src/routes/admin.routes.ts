@@ -4528,6 +4528,13 @@ router.get('/class-verification/:id', requireInstructor, requireDepartmentLiveCl
   } catch (err) { next(err) }
 })
 
+/* Declared before verifySubmitSchema, which reads it. Both are module-level
+   consts evaluated at import time, so declaring it *after* the schema left it
+   in the temporal dead zone and threw "Cannot access 'MAX_CLASS_SCREENSHOTS'
+   before initialization" — and this module failing to import takes the whole
+   API down with it, not just this route. */
+const MAX_CLASS_SCREENSHOTS = 6
+
 const verifySubmitSchema = z.object({
   marks:  z.array(z.object({
     bookingId: z.string().regex(/^[0-9a-f]{24}$/i),
@@ -4592,7 +4599,6 @@ router.post('/class-verification/:id', requireInstructor, requireDepartmentLiveC
    the list. A screenshot uploaded and then removed stays as an orphan object
    nothing points at — harmless, and unreadable through the route (it only
    serves keys saved on the class). */
-const MAX_CLASS_SCREENSHOTS = 6
 
 router.post('/class-verification/:id/screenshot', requireInstructor, requireDepartmentLiveClass('id'),
   async (req: Request, res: Response, next: NextFunction) => {
