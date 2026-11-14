@@ -94,7 +94,35 @@ export async function mustAskForStudentMeetings(email: unknown): Promise<boolean
   }
 }
 
+/* ── A staff meeting from the Mentor Calendar here (the user, 2026-11-14: "in the LMS also a separate button") ──
+   Several mentors in one meeting, booked by a Chief Mentor with their own team, as in the CS Portal. The LMS has no
+   Chief of its own: the CS Portal says who is one and who is in their team (its `me`, staff_meeting). An LMS admin
+   books one with anyone, without asking. Kept five minutes, as the answer above. */
+export interface StaffMeetingReach { may: boolean; team: string[] | null; reason?: string }
+const reachCache = new Map<string, { at: number; reach: StaffMeetingReach }>()
+
+/** Whether an instructor books a staff meeting from here, and with whom (`team` null: anyone). */
+export async function staffMeetingReachFor(email: unknown): Promise<StaffMeetingReach> {
+  const address = String(email ?? '').trim().toLowerCase()
+  if (!address.includes('@')) return { may: false, team: [], reason: 'Your account has no email' }
+  if (!csMeetingsConfigured()) return { may: false, team: [], reason: 'The CS Portal is not linked to this server' }
+  const hit = reachCache.get(address)
+  if (hit && Date.now() - hit.at < ASKS_TTL_MS) return hit.reach
+  try {
+    const me = await askCsPortal(address, 'me')
+    const s = (me['staff_meeting'] ?? null) as { may?: unknown; team?: unknown } | null
+    const reach: StaffMeetingReach = s && s.may === true
+      ? { may: true, team: Array.isArray(s.team) ? s.team.map((e) => String(e ?? '').trim().toLowerCase()).filter(Boolean) : null }
+      : { may: false, team: [], reason: s ? 'Only a Chief Mentor books a staff meeting' : 'This needs the CS Portal update (its API deploy)' }
+    reachCache.set(address, { at: Date.now(), reach })
+    return reach
+  } catch (err) {
+    // Not kept: the next look asks again.
+    return { may: false, team: [], reason: err instanceof Error ? err.message : 'The CS Portal could not be reached' }
+  }
+}
+
 /** For the suite: forget what was asked. */
-export function forgetAsks(): void { asksCache.clear() }
+export function forgetAsks(): void { asksCache.clear(); reachCache.clear() }
 
 export const ASK_INSTEAD_MESSAGE = "Ask for a student meeting on Meeting requests — the student's CS picks the time and approves it, as in the CS Portal."

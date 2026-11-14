@@ -10,7 +10,11 @@ export interface MentorClass {
   /** The course and module it is a class of — this academy's classes only; absent from an older server. */
   courseId?: string | null; course?: string | null; moduleId?: string | null; module?: string | null
 }
-export interface MentorMeeting { id: string; title: string; kind: string; startsAt: string; durationMins: number; attendeeNames: string[]; bookedByEmail: string; inPerson: boolean; location: string }
+export interface MentorMeeting {
+  id: string; title: string; kind: string; startsAt: string; durationMins: number; attendeeNames: string[]; bookedByEmail: string; inPerson: boolean; location: string
+  /** A staff meeting with several mentors in it (2026-11-14), and whose it is — under each of them; absent from an older server. */
+  staffMeeting?: boolean; mentorName?: string
+}
 /* A mentor's time off (2026-10-23): nothing is booked with them inside it, from any portal. The reason only for the
    mentor and the admins — null for everyone else. */
 export interface MentorTimeOff { id: string; mentorId: string; startsAt: string; endsAt: string; allDay: boolean; reason: string | null; createdByName: string }
@@ -49,6 +53,20 @@ export function useMentorClass(id: string | null) {
 export interface BookMeetingInput {
   mentorEmail: string; title: string; kind: 'staff' | 'student' | 'client'; scheduledStart: string; durationMins: number
   attendees: { name: string; email: string }[]; inPerson: boolean; location?: string; notes?: string
+  /** A staff meeting's other mentors, by address (2026-11-14) — a Chief Mentor's team, an admin anyone. */
+  staffEmails?: string[]
+}
+
+/* Whether the signed-in person books a staff meeting with several mentors in it, and with whom (2026-11-14): an
+   admin with anyone (team null); an instructor the CS Portal calls a Chief Mentor with their team; nobody else. */
+export interface StaffMeetingReach { may: boolean; team: string[] | null; reason?: string }
+export function useStaffMeetingReach() {
+  return useQuery({
+    queryKey: ['admin', 'mentor-calendar', 'staff-meeting'],
+    queryFn: () => apiGet<StaffMeetingReach>('/admin/mentor-calendar/staff-meeting'),
+    staleTime: 5 * 60_000,
+    retry: false,
+  })
 }
 export function useBookMeeting() {
   const qc = useQueryClient()

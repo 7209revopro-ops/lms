@@ -121,7 +121,7 @@ export async function bookedWithin(mentorId: IdLike, span: Span) {
       status: { $ne: 'cancelled' },
       scheduledStart: { $gte: lookBack, $lt: span.endsAt },
     }).select('title scheduledStart durationMins').lean(),
-    MentorMeetingModel.find({ mentorId: id, cancelledAt: null, scheduledStart: { $gte: lookBack, $lt: span.endsAt } })
+    MentorMeetingModel.find({ $or: [{ mentorId: id }, { staffIds: id }], cancelledAt: null, scheduledStart: { $gte: lookBack, $lt: span.endsAt } })
       .select('title scheduledStart durationMins').lean(),
   ])
   const inside = (x: { scheduledStart: Date; durationMins?: number }) =>

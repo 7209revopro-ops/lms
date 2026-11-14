@@ -46,6 +46,27 @@ try {
   check('B. each with its academy', rajRow?.academy?.name === 'Bangalore Academy' && b.mentors.find(m => m.email === 'moiz@pm.local')?.academy?.name === 'Dubai Academy', JSON.stringify(rajRow?.academy))
   check('B. the other academy\'s class with its title', rajRow?.classes?.[0]?.title === 'Bangalore live' && rajRow?.classes?.[0]?.mine === true, JSON.stringify(rajRow?.classes))
 
+  // D. where each class is held (Root's Class TV, 2026-11-14): the pod booked, the room typed, an in-person venue;
+  //    the class's own academy; another academy's place kept back when not asked for all of them.
+  const moiz = await M.UserModel.findOne({ email: 'moiz@pm.local' })
+  await M.LiveClassModel.collection.insertMany([
+    { title: 'Pod class', instructorId: moiz!._id, organizationId: dubai._id, scheduledStart: new Date(start.getTime() + 3600e3), durationMins: 60, status: 'scheduled', bookedCount: 0, sessionCapacity: 30, isOnline: true, room: 'Old room', pod: { state: 'booked', roomName: 'Pod 6' } },
+    { title: 'Room class', instructorId: moiz!._id, organizationId: dubai._id, scheduledStart: new Date(start.getTime() + 2 * 3600e3), durationMins: 60, status: 'scheduled', bookedCount: 0, sessionCapacity: 30, isOnline: false, room: 'Class Room 1', location: 'Head office' },
+    { title: 'Off-site class', instructorId: moiz!._id, organizationId: dubai._id, scheduledStart: new Date(start.getTime() + 3 * 3600e3), durationMins: 60, status: 'scheduled', bookedCount: 0, sessionCapacity: 30, isOnline: false, location: 'The villa' },
+    { title: 'No pod yet', instructorId: moiz!._id, organizationId: dubai._id, scheduledStart: new Date(start.getTime() + 4 * 3600e3), durationMins: 60, status: 'scheduled', bookedCount: 0, sessionCapacity: 30, isOnline: true, location: 'ignored online', pod: { state: 'no_room' } },
+    { title: 'Lent to Bangalore', instructorId: moiz!._id, organizationId: blr._id, scheduledStart: new Date(start.getTime() + 5 * 3600e3), durationMins: 60, status: 'scheduled', bookedCount: 0, sessionCapacity: 30, isOnline: true, pod: { state: 'booked', roomName: 'Pod 9' } },
+  ] as any[])
+  const d = await listMentorsForPortal({ remoteOrgId: String(dubai._id), from, to, allAcademies: true })
+  const byTitle = new Map((d.mentors.find(m => m.email === 'moiz@pm.local')?.classes ?? []).map(c => [c.title, c]))
+  check('D. the pod booked for it, over the room typed', byTitle.get('Pod class')?.place === 'Pod 6' && byTitle.get('Pod class')?.online === true, JSON.stringify(byTitle.get('Pod class')))
+  check('D. an in-person class: its room', byTitle.get('Room class')?.place === 'Class Room 1' && byTitle.get('Room class')?.online === false, JSON.stringify(byTitle.get('Room class')))
+  check('D. in person with no room: its venue', byTitle.get('Off-site class')?.place === 'The villa', JSON.stringify(byTitle.get('Off-site class')))
+  check('D. online with no pod: no place', byTitle.get('No pod yet')?.place === '', JSON.stringify(byTitle.get('No pod yet')))
+  check('D. each class with its own academy', byTitle.get('Pod class')?.academy === 'Dubai Academy' && byTitle.get('Lent to Bangalore')?.academy === 'Bangalore Academy' && byTitle.get('Lent to Bangalore')?.place === 'Pod 9', JSON.stringify(byTitle.get('Lent to Bangalore')))
+  const own = await listMentorsForPortal({ remoteOrgId: String(dubai._id), from, to })
+  const lent = (own.mentors.find(m => m.email === 'moiz@pm.local')?.classes ?? []).find(c => c.mine === false)
+  check('D. another academy\'s class, not asked for all: no title and no place, still its academy', !!lent && lent.title === null && lent.place === null && lent.academy === 'Bangalore Academy', JSON.stringify(lent))
+
   const when = new Date(Date.now() + 3 * 864e5).toISOString()
   const base = { remoteOrgId: String(dubai._id), mentorEmail: 'raj@pm.local', title: 'Strategy review', kind: 'staff', scheduledStart: when, durationMins: 30, attendees: [{ name: 'A CS' }], bookedByEmail: 'cs@portal.local', inPerson: true, location: 'Office' }
   let refused = false

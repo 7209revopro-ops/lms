@@ -2155,11 +2155,40 @@ async function refuseStudentBooking(req: Request, res: Response, kind: unknown):
   return true
 }
 
+/* A staff meeting with several mentors in it (2026-11-14), from the Mentor Calendar here: an admin with anyone; an
+   instructor who is a Chief Mentor in the CS Portal with their own team (csPortalMeetings.service.ts). */
+async function staffMeetingReach(req: Request) {
+  if (req.user?.role !== 'instructor') return { may: true, team: null as string[] | null }
+  const { staffMeetingReachFor } = await import('@/services/csPortalMeetings.service.ts')
+  return staffMeetingReachFor(req.user?.email)
+}
+/** Refused (sent) when mentors are named for a meeting this person may not put them in. */
+async function refuseStaff(req: Request, res: Response, staffEmails: unknown, alsoEmail: unknown, kind: unknown): Promise<boolean> {
+  const named = (Array.isArray(staffEmails) ? staffEmails : []).map((e) => String(e ?? '').trim().toLowerCase()).filter(Boolean)
+  if (!named.length) return false
+  const { sendError } = await import('@/utils/response.ts')
+  if (kind !== undefined && String(kind) !== 'staff') { sendError(res, 'STAFF_MEETING_ONLY', 'A staff meeting is a meeting with staff', 400); return true }
+  const reach = await staffMeetingReach(req)
+  if (!reach.may) { sendError(res, 'NOT_A_CHIEF', reach.reason || 'Only a Chief Mentor books a staff meeting', 403); return true }
+  if (reach.team) {
+    const team = new Set(reach.team)
+    const outside = [...new Set([String(alsoEmail ?? '').trim().toLowerCase(), ...named])].filter((e) => e && !team.has(e))
+    if (outside.length) { sendError(res, 'NOT_IN_TEAM', `Not in your team: ${outside.join(', ')}`, 403); return true }
+  }
+  return false
+}
+
+/* Whether the signed-in person books a staff meeting here, and with whom — the page's Staff meeting button. */
+router.get('/mentor-calendar/staff-meeting', requireInstructor, async (req: Request, res: Response, next: NextFunction) => {
+  try { sendSuccess(res, await staffMeetingReach(req)) } catch (err) { next(err) }
+})
+
 router.post('/mentor-calendar/meetings', requireInstructor, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { createMentorMeetingForPortal } = await import('@/services/portal.service.ts')
     const body = (req.body ?? {}) as Record<string, unknown>
     if (await refuseStudentBooking(req, res, body['kind'])) return
+    if (await refuseStaff(req, res, body['staffEmails'], body['mentorEmail'], body['kind'])) return
     sendSuccess(res, await createMentorMeetingForPortal({ ...body, remoteOrgId: await mentorCalendarOrg(req), bookedByEmail: String(req.user?.email ?? ''), bookedVia: 'lms' } as any), 'Meeting booked')
   } catch (err) { next(err) }
 })
@@ -2175,6 +2204,8 @@ router.patch('/mentor-calendar/meetings/:id', requireInstructor, async (req: Req
   try {
     const { updateMentorMeetingForPortal } = await import('@/services/portal.service.ts')
     const body = (req.body ?? {}) as Record<string, unknown>
+    /* Mentors put in it: the same as booking a staff meeting (an empty list takes them all off, as anybody may). */
+    if (await refuseStaff(req, res, body['staffEmails'], '', undefined)) return
     /* Made into a student meeting by an edit: the same as booking one. */
     if (body['kind'] === 'student' && req.user?.role === 'instructor') {
       const { MentorMeetingModel } = await import('@/models/schema.ts')
@@ -3384,7 +3415,8 @@ router.get('/mentors/:id/meetings', requireInstructor, requireDepartmentMember('
       : new Date(Date.now() + 60 * 864e5)
 
     const meetings = await MentorMeetingModel.find({
-      mentorId,
+      /* Theirs, or a staff meeting they are in (2026-11-14). */
+      $or: [{ mentorId }, { staffIds: mentorId }],
       scheduledStart: { $gte: from, $lte: to },
       cancelledAt: null,
     }).sort({ scheduledStart: 1 }).lean()

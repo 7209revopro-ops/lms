@@ -69,7 +69,8 @@ export async function buildScheduleFor(
       .populate<{ courseId: { title?: string } | null }>('courseId', 'title')
       .lean(),
     MentorMeetingModel.find({
-      mentorId: instructorId,
+      /* Theirs, or a staff meeting they are in (2026-11-14). */
+      $or: [{ mentorId: instructorId }, { staffIds: instructorId }],
       cancelledAt: null,
       scheduledStart: { $gte: start, $lt: end },
     })
