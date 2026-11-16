@@ -1799,9 +1799,24 @@ export class LiveClassService {
     // Give Meet a few minutes to process the recording before first poll
     await new Promise(r => setTimeout(r, INTERVAL_MS))
 
+    /* Read as the room's owner, the class's own conference only (googleMeet.service.ts). */
+    const cls = await LiveClassModel.findById(classId)
+      .select('googleMeetCode meetSpace scheduledStart durationMins instructorId')
+      .populate('instructorId', 'email').lean<{
+        googleMeetCode?: string; meetSpace?: MeetSpaceRecord | null; scheduledStart?: Date; durationMins?: number
+        instructorId?: { email?: string } | null
+      }>()
+    const subject = {
+      meetSpace:       cls?.meetSpace ?? null,
+      googleMeetCode:  cls?.googleMeetCode ?? meetingCode,
+      instructorEmail: cls?.instructorId?.email ?? null,
+      scheduledStart:  cls?.scheduledStart ?? null,
+      durationMins:    cls?.durationMins ?? null,
+    }
+
     for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
       try {
-        const url = await fetchMeetRecordingUrl(meetingCode)
+        const url = await fetchMeetRecordingUrl(subject)
         if (url) {
           await LiveClassModel.findByIdAndUpdate(classId, { recordingUrl: url })
           logger.info({ classId, meetingCode, url }, 'meet-recording: auto-saved recording URL')

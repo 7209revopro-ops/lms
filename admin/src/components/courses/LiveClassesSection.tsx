@@ -329,8 +329,8 @@ function LiveRow({
             </button>
           )}
 
-          {/* Internal: Watch recording */}
-          {isInternal && isEnded && live.recordingUrl && (
+          {/* Watch recording — the in-app stream's, or the Google Meet recording in Drive (2026-11-16) */}
+          {isEnded && live.recordingUrl && (
             <a href={live.recordingUrl} target="_blank" rel="noreferrer"
               className="flex items-center gap-1 rounded-lg px-2.5 py-1 text-[10px] font-semibold transition-colors hover:bg-white/10"
               style={{ color: '#22C55E' }}>

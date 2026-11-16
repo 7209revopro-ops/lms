@@ -22,9 +22,17 @@ function makeOAuth2Client() {
   return client
 }
 
+/* Sharing a Meet recording, as the mailbox that owns it (2026-11-16). A token
+   of its OWN, with only this scope: Google refuses a whole token when any one
+   scope is missing from the domain-wide delegation entry, so asking for Drive
+   in the Meet token would stop class rooms being made until an admin adds it.
+   This way only the sharing waits for it. Needs the Drive API enabled in the
+   service account's Cloud project, and this scope in its DWD entry. */
+const DRIVE_SCOPE = 'https://www.googleapis.com/auth/drive'
+
 // Uses Domain-Wide Delegation to impersonate a Workspace user when creating Calendar events.
 // The service account JSON key must be at backend/google-service-account.json.
-function makeServiceAccountAuth(impersonateEmail: string) {
+function makeServiceAccountAuth(impersonateEmail: string, onlyScopes?: string[]) {
   const keyPath = path.join(process.cwd(), 'google-service-account.json')
 
   let key: { client_email: string; private_key: string }
@@ -44,7 +52,7 @@ function makeServiceAccountAuth(impersonateEmail: string) {
   return new google.auth.JWT({
     email:   key.client_email,
     key:     key.private_key,
-    scopes:  [
+    scopes:  onlyScopes ?? [
       'https://www.googleapis.com/auth/calendar',
       'https://www.googleapis.com/auth/calendar.events',
       /* Needed to open the room after Calendar creates it. Requesting it here
@@ -275,6 +283,62 @@ export async function setMeetAccessType(
   }
 }
 
+/* ── Auto-recording (the user, 2026-11-16: "record all the meetings") ───────
+   Every room this LMS makes records itself: Google starts the recording when
+   someone allowed to record joins (the owner or a co-host — staff, mentor),
+   and the file lands in the owner's Drive. The recording job then attaches it
+   to the class (fetchMeetRecordingUrl). On by default; MEET_AUTO_RECORD=off
+   stops it for rooms made from then on. scripts/meet-autorecord.ts switches
+   rooms already made.
+
+   Best-effort, like join-as-viewer: switched by a PATCH after the room exists,
+   never inside the create call, so a Workspace that refuses it still gets its
+   class — just not recorded. Sent as a raw REST call: the installed googleapis
+   client predates artifactConfig. */
+export function meetAutoRecord(): boolean {
+  return !/^(off|false|no|0)$/i.test((process.env['MEET_AUTO_RECORD'] ?? 'on').trim())
+}
+
+const AUTO_RECORD_MASK = 'config.artifactConfig.recordingConfig.autoRecordingGeneration'
+type GoogleAuth = ReturnType<typeof makeOAuth2Client> | ReturnType<typeof makeServiceAccountAuth>
+
+/** Null when Google now has it as asked; otherwise why not. Never throws. */
+async function patchAutoRecord(auth: GoogleAuth, spaceName: string, on: boolean): Promise<string | null> {
+  const want = on ? 'ON' : 'OFF'
+  try {
+    const res = await (auth as ServiceAccountAuth).request<{ config?: { artifactConfig?: { recordingConfig?: { autoRecordingGeneration?: string } } } }>({
+      url: `${MEET_API}/${spaceName}?updateMask=${AUTO_RECORD_MASK}`, method: 'PATCH',
+      data: { config: { artifactConfig: { recordingConfig: { autoRecordingGeneration: want } } } },
+    })
+    const got = res.data?.config?.artifactConfig?.recordingConfig?.autoRecordingGeneration
+    return !got || got === want ? null : `Google kept it ${got}`
+  } catch (err) {
+    return describeGoogleError(err)
+  }
+}
+
+/** Switch auto-recording on (or off) on a room that already exists, as its
+    owner — the same owner rule createGoogleMeetLink made it with: the host
+    mailbox for a Meet-API room, a Workspace instructor for a room on their own
+    calendar, else the OAuth account's calendar. Null when done, else why not. */
+export async function setMeetAutoRecordFor(
+  room: { meetSpace?: MeetSpaceRecord | null; googleMeetCode?: string | null; instructorEmail?: string | null },
+  on = true,
+): Promise<string | null> {
+  try {
+    if (room.meetSpace?.name && room.meetSpace.host) {
+      return await patchAutoRecord(makeServiceAccountAuth(room.meetSpace.host), room.meetSpace.name, on)
+    }
+    if (!room.googleMeetCode) return 'no Meet room'
+    const domain   = process.env.GOOGLE_WORKSPACE_DOMAIN ?? 'deltagroups.ae'
+    const internal = !!room.instructorEmail && room.instructorEmail.toLowerCase().endsWith(`@${domain}`)
+    const auth     = internal ? makeServiceAccountAuth(room.instructorEmail!) : makeOAuth2Client()
+    return await patchAutoRecord(auth, `spaces/${room.googleMeetCode}`, on)
+  } catch (err) {
+    return describeGoogleError(err)
+  }
+}
+
 export interface MeetSpaceRecord {
   name:             string
   host:             string
@@ -352,6 +416,11 @@ async function createCoHostedMeetingWith(auth: ServiceAccountAuth, o: CoHostedMe
   if (o.joinAsViewer) {
     if (invitee && !cohost) console.warn(`[googleMeet] join-as-viewer NOT applied to ${space.meetingCode} — the instructor is not a co-host and would be muted`)
     else await setJoinAsViewer(auth, space.name)
+  }
+
+  if (meetAutoRecord()) {
+    const why = await patchAutoRecord(auth, space.name, true)
+    if (why) console.warn(`[googleMeet] auto-record NOT applied to ${space.meetingCode}: ${why}`)
   }
 
   let calendarEventId: string | undefined
@@ -619,6 +688,12 @@ export async function createGoogleMeetLink(opts: {
      its settings — the support@ token cannot patch a space it does not host. */
   const accessType = await setMeetAccessType(meetingCode, auth)
 
+  /* Same owner rule for the recording switch. */
+  if (meetAutoRecord() && meetingCode) {
+    const why = await patchAutoRecord(auth, `spaces/${meetingCode}`, true)
+    if (why) console.warn(`[googleMeet] auto-record NOT applied to ${meetingCode}: ${why}`)
+  }
+
   return { meetingUrl: meetLink, meetingCode, accessType, ...(invitedEmail ? { invitedEmail } : {}) }
 }
 
@@ -660,83 +735,102 @@ export async function fetchMeetConferences(cls: { meetSpace?: MeetSpaceRecord | 
   }
 }
 
-/**
- * Polls the Google Meet REST API v2 to find the recording for a given meeting code.
- * Returns the Google Drive shareable URL of the first completed recording, or null if not ready.
- * Also automatically sets the Drive file to "anyone with the link can view" so students can watch.
- *
- * Requires the OAuth2 refresh token to have scopes:
- *   https://www.googleapis.com/auth/meetings.space.readonly
- *   https://www.googleapis.com/auth/drive.file  (for sharing the recording)
- */
-export async function fetchMeetRecordingUrl(meetingCode: string): Promise<string | null> {
-  let oauth2Client: ReturnType<typeof makeOAuth2Client>
+/* ── A class's Meet recording (rewritten 2026-11-16) ──────────────────────
+   Two things kept every Meet recording off the LMS before this:
+     · it waited for state 'COMPLETED', which Google never sends — a finished
+       file is FILE_GENERATED (ENDED means "still being made");
+     · it asked as the OAuth account, by meeting code, which does not own the
+       rooms this LMS makes and so saw no recordings of them.
+   Now the room is read as its OWNER, by the same rule as fetchMeetConferences
+   (and setMeetAutoRecordFor), and only the conference held around the class
+   counts. The file is in the owner's Drive; it is shared "anyone with the
+   link" — the LMS hands the link only to those entitled to the class
+   (liveClass.controller entitled / liveClass.service held) — and a link is
+   returned ONLY once that worked, so students never get one they cannot
+   open: until Drive sharing is set up the job simply finds it again on its
+   next round. */
+export interface RecordingSubject {
+  meetSpace?: MeetSpaceRecord | null
+  googleMeetCode?: string | null
+  instructorEmail?: string | null
+  scheduledStart?: Date | string | null
+  durationMins?: number | null
+}
+
+type Requester = { request: <T>(o: { url: string; method?: string; data?: unknown }) => Promise<{ data: T }> }
+type RecordingRow = { state?: string; driveDestination?: { file?: string; exportUri?: string } }
+
+/** The recording's shareable link, or null: none yet, none at all, or not shareable yet. Never throws. */
+export async function fetchMeetRecordingUrl(subject: RecordingSubject | string): Promise<string | null> {
+  const cls: RecordingSubject = typeof subject === 'string' ? { googleMeetCode: subject } : subject
+  let meetAuth: Requester, driveAuth: Requester, filter: string
   try {
-    oauth2Client = makeOAuth2Client()
+    if (cls.meetSpace?.name && cls.meetSpace.host) {
+      meetAuth  = makeServiceAccountAuth(cls.meetSpace.host) as unknown as Requester
+      driveAuth = makeServiceAccountAuth(cls.meetSpace.host, [DRIVE_SCOPE]) as unknown as Requester
+      filter    = `space.name = "${cls.meetSpace.name}"`
+    } else if (cls.googleMeetCode) {
+      const domain   = process.env.GOOGLE_WORKSPACE_DOMAIN ?? 'deltagroups.ae'
+      const owner    = cls.instructorEmail?.toLowerCase()
+      const internal = !!owner && owner.endsWith(`@${domain}`)
+      meetAuth  = (internal ? makeServiceAccountAuth(owner!) : makeOAuth2Client()) as unknown as Requester
+      driveAuth = (internal ? makeServiceAccountAuth(owner!, [DRIVE_SCOPE]) : makeOAuth2Client()) as unknown as Requester
+      filter    = `space.meeting_code = "${cls.googleMeetCode}"`
+    } else return null
   } catch {
-    return null
+    return null                                   // Google not configured on this server
   }
+  return fetchMeetRecordingWith(meetAuth, driveAuth, filter, cls)
+}
 
+async function fetchMeetRecordingWith(meetAuth: Requester, driveAuth: Requester, filter: string, cls: RecordingSubject): Promise<string | null> {
+  let rows: Array<{ name?: string; startTime?: string }>
   try {
-    const meet = google.meet({ version: 'v2', auth: oauth2Client })
-
-    // Find the conference record for this meeting code
-    const recordsRes = await meet.conferenceRecords.list({
-      filter: `space.meetingCode = "${meetingCode}"`,
+    const res = await meetAuth.request<{ conferenceRecords?: Array<{ name?: string; startTime?: string }> }>({
+      url: `${MEET_API}/conferenceRecords?filter=${encodeURIComponent(filter)}`, method: 'GET',
     })
-
-    const records = recordsRes.data.conferenceRecords
-    if (!records?.length) return null
-
-    // Use the most recent conference record
-    const record = records[0]
-    if (!record) return null
-    const recordName = record.name
-    if (!recordName) return null
-
-    // Get recordings for this conference
-    const recordingsRes = await meet.conferenceRecords.recordings.list({
-      parent: recordName,
-    })
-
-    const recordings = recordingsRes.data.recordings
-    if (!recordings?.length) return null
-
-    // Find first completed recording with a Drive destination
-    for (const rec of recordings) {
-      if (rec.state === 'COMPLETED' && rec.driveDestination?.file) {
-        const fileId = rec.driveDestination.file.replace('files/', '')
-
-        // Auto-share the Drive file so anyone with the link can view it
-        try {
-          const drive = google.drive({ version: 'v3', auth: oauth2Client })
-          await drive.permissions.create({
-            fileId,
-            requestBody: { role: 'reader', type: 'anyone' },
-          })
-        } catch (shareErr: any) {
-          // Non-fatal — URL is still usable if sharing fails (admin can share manually)
-          console.warn('[googleMeet] Could not auto-share recording:', shareErr?.message)
-        }
-
-        // Return a clean shareable Drive link
-        return `https://drive.google.com/file/d/${fileId}/view?usp=sharing`
-      }
-    }
-
-    return null
-  } catch (err: any) {
-    // 403 = scope not granted; 404 = no conference found yet — both are non-fatal during polling
-    const status = err?.response?.status ?? err?.status
-    if (status === 403) {
-      console.warn(
-        '[googleMeet] fetchMeetRecordingUrl: 403 — refresh token lacks meetings.space.readonly scope. ' +
-        'Re-authorize with support@deltagroups.ae and add the scope.',
-      )
-    }
+    rows = res.data.conferenceRecords ?? []
+  } catch (err) {
+    console.warn(`[googleMeet] recording: could not read conferences (${filter}): ${describeGoogleError(err)}`)
     return null
   }
+
+  /* The class's own conference: begun from an hour before it to its end (the
+     same window as runMeetClassEnd). Without a timetable, any — oldest first. */
+  const start = cls.scheduledStart ? new Date(cls.scheduledStart).getTime() : NaN
+  const end   = start + (cls.durationMins ?? 0) * 60_000
+  const inWindow = Number.isFinite(start)
+    ? rows.filter(r => { const t = r.startTime ? Date.parse(r.startTime) : NaN; return t >= start - 3_600_000 && t <= end })
+    : rows
+  inWindow.sort((a, b) => Date.parse(a.startTime ?? '') - Date.parse(b.startTime ?? ''))
+
+  for (const conf of inWindow) {
+    if (!conf.name) continue
+    let recordings: RecordingRow[]
+    try {
+      recordings = (await meetAuth.request<{ recordings?: RecordingRow[] }>({ url: `${MEET_API}/${conf.name}/recordings`, method: 'GET' })).data.recordings ?? []
+    } catch (err) {
+      console.warn(`[googleMeet] recording: could not list recordings of ${conf.name}: ${describeGoogleError(err)}`)
+      return null
+    }
+    const done = recordings.find(r => r.state === 'FILE_GENERATED' && r.driveDestination?.file)
+    if (!done) continue
+    const fileId = done.driveDestination!.file!.replace(/^files\//, '')
+    try {
+      await driveAuth.request({
+        url: `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}/permissions?supportsAllDrives=true`,
+        method: 'POST', data: { role: 'reader', type: 'anyone' },
+      })
+    } catch (err) {
+      console.warn(`[googleMeet] recording ${fileId} is ready but could not be shared, so it is not on the class yet: ` +
+        `${describeGoogleError(err)} — enable the Drive API in the service account's Cloud project and add ${DRIVE_SCOPE} ` +
+        'to its domain-wide delegation')
+      return null
+    }
+    return `https://drive.google.com/file/d/${fileId}/view?usp=sharing`
+  }
+  return null
 }
 
 /* For the suite only: the two co-host paths with the owner's auth handed in. */
-export const __test = { createCoHostedMeetingWith, syncMeetSpaceWith }
+export const __test = { createCoHostedMeetingWith, syncMeetSpaceWith, fetchMeetRecordingWith, patchAutoRecord }

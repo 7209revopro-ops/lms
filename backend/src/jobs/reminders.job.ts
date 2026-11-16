@@ -1025,7 +1025,8 @@ async function runRecordingPoller(): Promise<void> {
       googleMeetCode: { $exists: true, $ne: '' },
       recordingUrl:  { $exists: false },
       scheduledStart: { $gte: earliest, $lt: new Date(now.getTime() - 10 * 60 * 1000) },
-    }).lean()
+    }).select('googleMeetCode meetSpace scheduledStart durationMins instructorId')
+      .populate('instructorId', 'email').lean()
 
     // Filter to those whose scheduled end time has passed
     const ended = candidates.filter(c => {
@@ -1035,7 +1036,14 @@ async function runRecordingPoller(): Promise<void> {
 
     let found = 0
     for (const cls of ended) {
-      const url = await fetchMeetRecordingUrl(cls.googleMeetCode!)
+      /* Read as the room's owner, the class's own conference only (googleMeet.service.ts). */
+      const url = await fetchMeetRecordingUrl({
+        meetSpace:       (cls as { meetSpace?: { name: string; host: string } | null }).meetSpace ?? null,
+        googleMeetCode:  cls.googleMeetCode ?? null,
+        instructorEmail: (cls.instructorId as unknown as { email?: string } | null)?.email ?? null,
+        scheduledStart:  cls.scheduledStart,
+        durationMins:    cls.durationMins,
+      })
       if (url) {
         found++
         await LiveClassModel.findByIdAndUpdate(cls._id, { recordingUrl: url })

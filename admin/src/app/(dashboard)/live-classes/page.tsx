@@ -890,6 +890,19 @@ function TableRow({ live, index, showInstructor, onBackup }: { live: LiveClass; 
               </a>
             )}
 
+            {/* Recording — a Google Meet recording in Drive, or the in-app stream's (2026-11-16) */}
+            {isEnded && live.recordingUrl && (
+              <a
+                href={live.recordingUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex h-7 w-7 items-center justify-center rounded-lg transition-colors hover:bg-white/10"
+                style={{ color: '#22C55E' }}
+                title="Open the recording">
+                <BookOpen size={13} />
+              </a>
+            )}
+
             {/* OWNER ONLY, below. Managing a class stays with the academy that
                 owns it — only seats are shared — so monitor, edit and
                 book-for-student all funnel through callerMayManageSession and

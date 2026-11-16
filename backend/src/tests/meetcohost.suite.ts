@@ -23,17 +23,17 @@ function check(label: string, ok: boolean, detail = '') {
 }
 function section(n: string) { lines.push(`\n${n}`) }
 
-const { staffMeetCohosts, ensureMeetCohosts, meetJoinAsViewer, __test } = await import('@/services/googleMeet.service.ts')
+const { staffMeetCohosts, ensureMeetCohosts, meetJoinAsViewer, meetAutoRecord, __test } = await import('@/services/googleMeet.service.ts')
 
 /* A stand-in for Google: one meeting space, its members, and every request. */
 function fakeGoogle(o: { members?: string[]; refuse?: string[]; listFails?: boolean; refusePatch?: boolean } = {}) {
-  const calls: Array<{ method: string; url: string; email?: string }> = []
+  const calls: Array<{ method: string; url: string; email?: string; data?: unknown }> = []
   const members = new Map((o.members ?? []).map((e, i) => [`spaces/s1/members/m${i}`, e.toLowerCase()]))
   let n = members.size
   const auth = {
     request: async (r: { url?: string; method?: string; data?: { email?: string } }) => {
       const method = String(r.method ?? 'GET'), url = String(r.url ?? '')
-      calls.push({ method, url, ...(r.data?.email ? { email: r.data.email } : {}) })
+      calls.push({ method, url, ...(r.data?.email ? { email: r.data.email } : {}), data: r.data })
       if (method === 'POST' && url.endsWith('/v2/spaces')) {
         return { data: { name: 'spaces/s1', meetingUri: 'https://meet.google.com/abc-defg-hij', meetingCode: 'abc-defg-hij', config: { accessType: 'OPEN' } } }
       }
@@ -171,6 +171,105 @@ try {
     const g = fakeGoogle({ members: ['old@gmail.com'] })
     await __test.syncMeetSpaceWith(g.auth, space, { cohost: 'new@gmail.com' })
     check('Y3 a meeting made before this gets the staff co-host on its next instructor change', g.members().includes(STAFF), JSON.stringify(g.members()))
+  }
+
+  /* ── R ────────────────────────────────────────────── */
+  section('R  every room records itself (2026-11-16)')
+  const RECMASK = 'config.artifactConfig.recordingConfig.autoRecordingGeneration'
+  const recPatch = (g: ReturnType<typeof fakeGoogle>) =>
+    g.calls.find(c => c.method === 'PATCH' && c.url.endsWith(`/v2/spaces/s1?updateMask=${RECMASK}`))
+  const recValue = (c: { data?: unknown } | undefined) =>
+    (c?.data as { config?: { artifactConfig?: { recordingConfig?: { autoRecordingGeneration?: string } } } } | undefined)
+      ?.config?.artifactConfig?.recordingConfig?.autoRecordingGeneration
+  delete process.env['MEET_AUTO_RECORD']
+  check('R1 on by default', meetAutoRecord() === true)
+  process.env['MEET_AUTO_RECORD'] = ' Off '
+  check('R2 MEET_AUTO_RECORD=off turns it off', meetAutoRecord() === false)
+  delete process.env['MEET_AUTO_RECORD']
+  {
+    const g = fakeGoogle()
+    await __test.createCoHostedMeetingWith(g.auth, { ...base, cohostEmail: 'teacher@gmail.com', staffCohosts: [STAFF] })
+    check('R3 a new class room is switched to record itself', recValue(recPatch(g)) === 'ON', JSON.stringify(g.calls))
+    const create = g.calls.find(c => c.method === 'POST' && c.url.endsWith('/v2/spaces'))
+    check('R4 ...after the room exists, never inside the create call (a refusal cannot cost the class)',
+      !JSON.stringify(create?.data ?? {}).includes('artifactConfig'), JSON.stringify(create?.data))
+  }
+  {
+    const g = fakeGoogle()
+    await __test.createCoHostedMeetingWith(g.auth, { ...base, cohostEmail: 'mentor@gmail.com' })
+    check('R5 mentor and staff meetings record too', recValue(recPatch(g)) === 'ON', JSON.stringify(g.calls))
+  }
+  {
+    process.env['MEET_AUTO_RECORD'] = 'off'
+    const g = fakeGoogle()
+    await __test.createCoHostedMeetingWith(g.auth, { ...base, cohostEmail: 'teacher@gmail.com', staffCohosts: [STAFF] })
+    check('R6 with MEET_AUTO_RECORD=off nothing is switched', recPatch(g) === undefined, JSON.stringify(g.calls))
+    delete process.env['MEET_AUTO_RECORD']
+  }
+  {
+    const g = fakeGoogle({ refusePatch: true })
+    const m = await __test.createCoHostedMeetingWith(g.auth, { ...base, cohostEmail: 'teacher@gmail.com', staffCohosts: [STAFF] })
+    check('R7 Google refusing auto-record still leaves a working room', m.meetingCode === 'abc-defg-hij' && m.meetSpace?.cohost === 'teacher@gmail.com', JSON.stringify(m))
+  }
+  {
+    const g = fakeGoogle()
+    const off = await __test.patchAutoRecord(g.auth, 'spaces/s1', false)
+    check('R8 an existing room can be switched off again (the script\'s --off)', off === null && recValue(recPatch(g)) === 'OFF', JSON.stringify(g.calls))
+    const r = await __test.patchAutoRecord(fakeGoogle({ refusePatch: true }).auth, 'spaces/s1', true)
+    check('R9 a refusal comes back as a reason, never a throw', typeof r === 'string' && r.includes('400'), String(r))
+  }
+
+  /* ── G ────────────────────────────────────────────── */
+  section('G  the recording reaches the class')
+  /* A stand-in for Google's conference records, recordings and Drive. */
+  function fakeRecordings(o: { confs: Array<{ name: string; startTime: string }>; recs: Record<string, Array<{ state: string; file?: string }>>; shareFails?: boolean }) {
+    const calls: Array<{ method: string; url: string; data?: unknown }> = []
+    const meet = { request: async (r: { url: string; method?: string }) => {
+      calls.push({ method: String(r.method ?? 'GET'), url: r.url })
+      if (r.url.includes('/conferenceRecords?filter=')) return { data: { conferenceRecords: o.confs } }
+      const conf = r.url.replace(/^.*\/v2\//, '').replace(/\/recordings$/, '')
+      return { data: { recordings: (o.recs[conf] ?? []).map(x => ({ state: x.state, ...(x.file ? { driveDestination: { file: x.file } } : {}) })) } }
+    } }
+    const drive = { request: async (r: { url: string; method?: string; data?: unknown }) => {
+      calls.push({ method: String(r.method ?? 'GET'), url: r.url, data: r.data })
+      if (o.shareFails) throw Object.assign(new Error('Google Drive API has not been used in project'), { status: 403 })
+      return { data: {} }
+    } }
+    const shares = () => calls.filter(c => c.url.includes('/drive/v3/files/'))
+    return { meet: meet as any, drive: drive as any, calls, shares }
+  }
+  const cls = { scheduledStart: new Date('2026-11-16T15:00:00Z'), durationMins: 90 }
+  const FILTER = 'space.name = "spaces/s1"'
+  {
+    const f = fakeRecordings({ confs: [{ name: 'conferenceRecords/c1', startTime: '2026-11-16T14:58:00Z' }], recs: { 'conferenceRecords/c1': [{ state: 'FILE_GENERATED', file: 'files/f1' }] } })
+    const url = await __test.fetchMeetRecordingWith(f.meet, f.drive, FILTER, cls)
+    check('G1 a finished recording (FILE_GENERATED) comes back as its Drive link', url === 'https://drive.google.com/file/d/f1/view?usp=sharing', String(url))
+    const s = f.shares()[0]
+    check('G2 ...shared with anyone holding the link, as a viewer', s?.method === 'POST' && JSON.stringify(s?.data) === JSON.stringify({ role: 'reader', type: 'anyone' }), JSON.stringify(f.shares()))
+    check('G3 the room is looked up as asked (by its space name)', decodeURIComponent(f.calls[0]?.url ?? '').includes(FILTER), f.calls[0]?.url)
+  }
+  {
+    const f = fakeRecordings({ confs: [{ name: 'conferenceRecords/c1', startTime: '2026-11-16T14:58:00Z' }], recs: { 'conferenceRecords/c1': [{ state: 'ENDED' }] } })
+    const url = await __test.fetchMeetRecordingWith(f.meet, f.drive, FILTER, cls)
+    check('G4 a recording still being made (ENDED) is not ready yet', url === null && f.shares().length === 0, String(url))
+  }
+  {
+    const f = fakeRecordings({ confs: [{ name: 'conferenceRecords/c0', startTime: '2026-11-09T15:00:00Z' }], recs: { 'conferenceRecords/c0': [{ state: 'FILE_GENERATED', file: 'files/old' }] } })
+    const url = await __test.fetchMeetRecordingWith(f.meet, f.drive, FILTER, cls)
+    check('G5 a recording from another day in the same room is not this class\'s', url === null, String(url))
+  }
+  {
+    const f = fakeRecordings({
+      confs: [{ name: 'conferenceRecords/c2', startTime: '2026-11-16T15:20:00Z' }, { name: 'conferenceRecords/c1', startTime: '2026-11-16T14:58:00Z' }],
+      recs: { 'conferenceRecords/c1': [], 'conferenceRecords/c2': [{ state: 'FILE_GENERATED', file: 'files/f2' }] },
+    })
+    const url = await __test.fetchMeetRecordingWith(f.meet, f.drive, FILTER, cls)
+    check('G6 a class that dropped and restarted: the recording of the later call is found', url === 'https://drive.google.com/file/d/f2/view?usp=sharing', String(url))
+  }
+  {
+    const f = fakeRecordings({ confs: [{ name: 'conferenceRecords/c1', startTime: '2026-11-16T14:58:00Z' }], recs: { 'conferenceRecords/c1': [{ state: 'FILE_GENERATED', file: 'files/f1' }] }, shareFails: true })
+    const url = await __test.fetchMeetRecordingWith(f.meet, f.drive, FILTER, cls)
+    check('G7 not shareable yet → no link (students never get one they cannot open); found again next round', url === null, String(url))
   }
 } catch (err) {
   fail++

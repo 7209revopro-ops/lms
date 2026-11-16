@@ -285,7 +285,13 @@ export default function MonitorPage({ params }: { params: Promise<{ id: string }
           {isEnded && (
             <div className="mt-6 rounded-2xl p-4"
               style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.07)' }}>
-              {live.recordingUrl ? (
+              {live.recordingUrl && !/^https:\/\/stream\.mux\.com\//.test(live.recordingUrl) ? (
+                /* A Google Meet recording in Drive (2026-11-16) — the Mux player cannot play it. */
+                <p className="flex items-center justify-center gap-2 text-sm font-semibold" style={{ color: '#22C55E' }}>
+                  ✅ Recording is ready —
+                  <a href={live.recordingUrl} target="_blank" rel="noreferrer" className="underline">open it in Google Drive</a>
+                </p>
+              ) : live.recordingUrl ? (
                 <>
                   <p className="mb-3 text-sm font-semibold" style={{ color: '#22C55E' }}>
                     ✅ Recording is ready
