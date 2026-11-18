@@ -371,3 +371,46 @@ export async function meetingsForPortal(query: Record<string, unknown>, now = ne
     }),
   }
 }
+
+/** Where a meeting someone booked stands (2026-11-18): `waiting` only for one that asks the mentor how it went. */
+export type BookedMeetingStatus = 'upcoming' | 'done' | 'waiting' | 'cancelled'
+
+/**
+ * The meetings these people booked (2026-11-18, the user: "in the salesperson or CS page, a report of the meetings
+ * they added and done") — every kind, from any portal, by `bookedByEmail`. ?emails= (comma-separated, needed) and
+ * ?from=&to= (Dubai days, `to` included, needed; at most 400 days) by when they started. Done = over and not called
+ * off — and, for a meeting that asks the mentor how it went (CS Portal's student meetings), with that filled in;
+ * over without it is `waiting`. Read only; newest first; with the counts per status.
+ */
+export async function meetingsBookedBy(query: Record<string, unknown>, now = new Date()) {
+  const { MentorMeetingModel, UserModel } = await import('@/models/schema.ts')
+  const emails = String(query.emails ?? '').split(',').map((e) => e.trim().toLowerCase()).filter((e) => e.includes('@')).slice(0, 50)
+  const from = dubaiDay(query.from), to = dubaiDay(query.to, 1)
+  if (!emails.length) throw httpError('Say whose meetings (emails)', 400)
+  if (!from || !to || to <= from) throw httpError('Say which days (from, to)', 400)
+  if (to.getTime() - from.getTime() > 400 * DAY_MS) throw httpError('At most 400 days at a time', 400)
+  const rows = await MentorMeetingModel.find({ bookedByEmail: { $in: emails }, scheduledStart: { $gte: from, $lt: to } })
+    .sort({ scheduledStart: -1 }).limit(2000).lean()
+  const mentors = await UserModel.find({ _id: { $in: [...new Set(rows.map((r) => String(r.mentorId)))] } }).select('name email').lean()
+  const mentorOf = new Map(mentors.map((m) => [String(m._id), m]))
+  const counts: Record<BookedMeetingStatus, number> = { upcoming: 0, done: 0, waiting: 0, cancelled: 0 }
+  const meetings = rows.map((m) => {
+    const ends = endOf(m)
+    const over = ends.getTime() <= now.getTime()
+    const status: BookedMeetingStatus = m.cancelledAt ? 'cancelled' : !over ? 'upcoming' : m.askOutcome && !m.outcome ? 'waiting' : 'done'
+    counts[status]++
+    const mentor = mentorOf.get(String(m.mentorId))
+    return {
+      id: String(m._id), title: m.title, kind: m.kind, category: String(m.category ?? ''),
+      startsAt: new Date(m.scheduledStart).toISOString(), endsAt: ends.toISOString(), durationMins: m.durationMins,
+      inPerson: m.isOnline === false,
+      attendees: (m.attendees ?? []).map((a) => ({ name: a.name, email: a.email ?? '' })),
+      bookedByEmail: m.bookedByEmail, bookedVia: m.bookedVia ?? null,
+      mentor: { name: mentor?.name ?? '', email: mentor?.email ?? '' },
+      status, cancelledAt: m.cancelledAt ? new Date(m.cancelledAt).toISOString() : null,
+      cancelReason: (m as { cancelReason?: string }).cancelReason ?? '', cancelledBy: (m as { cancelledBy?: string }).cancelledBy ?? null,
+      outcome: outcomeOut(m.outcome),
+    }
+  })
+  return { from: query.from, to: query.to, total: meetings.length, counts, meetings }
+}

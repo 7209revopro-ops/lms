@@ -263,6 +263,13 @@ router.get('/meeting-outcomes/meetings', wrap(async (req, res) => {
   sendSuccess(res, await meetingsForPortal(req.query as Record<string, unknown>), 'Meetings')
 }))
 
+/* The meetings these people booked — every kind, from any portal (2026-11-18): Root's salesperson and CS pages.
+   ?emails= and ?from=&to= (Dubai days). Read only. */
+router.get('/meetings-booked', wrap(async (req, res) => {
+  const { meetingsBookedBy } = await import('@/services/meetingOutcome.service.ts')
+  sendSuccess(res, await meetingsBookedBy(req.query as Record<string, unknown>), 'Meetings booked')
+}))
+
 router.get('/meeting-outcomes', wrap(async (req, res) => {
   const { outcomesSince } = await import('@/services/meetingOutcome.service.ts')
   sendSuccess(res, await outcomesSince(req.query['since'], Number(req.query['limit'] ?? 200) || 200), 'Meeting outcomes')
