@@ -26,6 +26,7 @@ import { useUsers, useProgramInstructors, useDropInstructorOutside } from '@/lib
 import { useCurrentUser } from '@/lib/api/user'
 import { useQueryState, setQueryParams } from '@/lib/useQueryState'
 import { EditLiveClassModal } from '@/components/live-classes/EditLiveClassModal'
+import { WeekCalendarView, weekWindow } from '@/components/live-classes/WeekCalendarView'
 import {
   useViewerAcademy, useAcademyView, academyViewOf,
   SharedAcademiesChip, GuestReadOnlyNote, seatBarColor, seatBreakdown,
@@ -2084,7 +2085,7 @@ export default function LiveClassesPage() {
   const [offlineCreateOpen,  setOfflineCreateOpen]  = useState(false)
   /* The one Backup dialog — see TableRow's onBackup. */
   const [backupLive,         setBackupLive]         = useState<LiveClass | null>(null)
-  const [view,               setView]               = useQueryState<'table' | 'month' | 'grid'>('view', 'table')
+  const [view,               setView]               = useQueryState<'table' | 'week' | 'day' | 'month' | 'grid'>('view', 'table')
 
   const { data: me } = useCurrentUser()
   const isInstructor = me?.role === 'instructor'
@@ -2100,10 +2101,13 @@ export default function LiveClassesPage() {
      when one is set, otherwise the last 14 days and the next 45. Every
      midnight-based, so the key holds steady all day. */
   const [monthKey] = useQueryState('date', '')
+  /* The week / day calendar's day (WeekCalendarView): the week around it. */
+  const [calendarDay] = useQueryState('day', '')
   const today = dayFromToday(0).getTime()
   const classWindow = useMemo(() => {
     const ymd = (k: string) => { const [y, m, d] = k.split('-').map(Number); return new Date(y!, m! - 1, d!) }
     const plus = (d: Date, n: number) => { const x = new Date(d); x.setDate(x.getDate() + n); return x }
+    if (view === 'week' || view === 'day') return weekWindow(calendarDay)
     if (view === 'month') {
       const mm = /^(\d{4})-(\d{2})-\d{2}$/.exec(monthKey)
       const first = mm ? new Date(Number(mm[1]), Number(mm[2]) - 1, 1) : dayFromToday(0)
@@ -2120,7 +2124,7 @@ export default function LiveClassesPage() {
     }
     return defaultClassWindow()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [view, monthKey, dateFrom, dateTo, today])
+  }, [view, monthKey, calendarDay, dateFrom, dateTo, today])
   const statsWindow = useMemo(() => defaultClassWindow(),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [today])
@@ -2351,6 +2355,8 @@ export default function LiveClassesPage() {
             style={{ border: '1px solid rgba(255,255,255,0.08)' }}>
             {([
               { key: 'table', icon: <LayoutList size={13} />,   label: 'Table'  },
+              { key: 'day',   icon: <Calendar size={13} />,      label: 'Day'    },
+              { key: 'week',  icon: <CalendarDays size={13} />,  label: 'Week'   },
               { key: 'month', icon: <CalendarRange size={13} />, label: 'Month'  },
               { key: 'grid',  icon: <LayoutGrid size={13} />,    label: 'Grid'   },
             ] as const).map(v => (
@@ -2594,6 +2600,12 @@ export default function LiveClassesPage() {
           </Button>
         )}
       </div>
+
+      {/* Week / day calendar — classes with the meetings and time off beside them (2026-11-18) */}
+      {(view === 'week' || view === 'day') && (
+        <WeekCalendarView items={items} mode={view} onMode={setView}
+          mentorFilter={instructorFilter} search={search} me={me} />
+      )}
 
       {/* Monthly calendar view */}
       {view === 'month' && (
