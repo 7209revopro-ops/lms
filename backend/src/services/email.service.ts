@@ -296,7 +296,9 @@ function buildTransport(keys: MailboxKeys, name: string): PooledTransport | null
   if (!cfg) return null
   const { host, port, user, pass, secure, from } = cfg
 
-  const transporter = nodemailer.createTransport({ host, port, secure, auth: { user, pass } })
+  /* One connection kept open per mailbox and used for email after email (2026-11-18): signing in again for each one
+     is what made Gmail refuse the account — "454 4.7.0 Too many login attempts" — after a burst of emails. */
+  const transporter = nodemailer.createTransport({ host, port, secure, auth: { user, pass }, pool: true, maxConnections: 2, maxMessages: 100 })
 
   void transporter.verify()
     .then(() => logger.info({ name, host, port, secure, from }, 'mailbox verified'))
