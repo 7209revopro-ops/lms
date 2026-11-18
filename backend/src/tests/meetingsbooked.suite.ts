@@ -31,7 +31,7 @@ try {
     outcome: null, cancelledAt: null, createdAt: now, updatedAt: now, ...extra })
   const outcome = { stage: 'interested', remark: 'ok', filledAt: at('2026-11-10T11:00:00+04:00'), filledByName: 'Mentor Ann' }
   await M.MentorMeetingModel.collection.insertMany([
-    mt('Sales: held', '2026-11-10T10:00:00+04:00'),                                                   // done (no outcome asked)
+    mt('Sales: held', '2026-11-10T10:00:00+04:00', { notes: 'Wants the evening batch' }),            // done (no outcome asked)
     mt('Sales: later today', '2026-11-18T15:00:00+04:00'),                                            // upcoming
     mt('Sales: called off', '2026-11-12T10:00:00+04:00', { cancelledAt: at('2026-11-11T10:00:00+04:00'), cancelReason: 'Client busy', cancelledBy: 'cs' }),
     mt('Sales: last month', '2026-10-20T10:00:00+04:00'),                                             // outside the days
@@ -49,12 +49,13 @@ try {
   const off = r.meetings[1]
   check('a cancelled one: when, why, who', off.cancelReason === 'Client busy' && off.cancelledBy === 'cs' && !!off.cancelledAt, j(off))
   check('the mentor, the client, the kind', r.meetings[2].mentor.name === 'Mentor Ann' && r.meetings[2].attendees[0].name === 'Client A' && r.meetings[2].kind === 'client', j(r.meetings[2]))
+  check('the booker\'s notes; none is ""', r.meetings[2].notes === 'Wants the evening batch' && r.meetings[0].notes === '', j(r.meetings.map((m: any) => m.notes)))
 
   console.log('\nA CS')
   r = await S.meetingsBookedBy({ emails: ' CS@Portal.local ', from: '2026-11-01', to: '2026-11-30' }, now)
   const by = (t: string) => r.meetings.find((m: any) => m.title === t)
   check('every kind they booked, the staff one too', r.total === 3 && !!by('CS: staff'), j(r.meetings.map((m: any) => m.title)))
-  check('outcome filled = done, with the stage', by('CS: outcome in')?.status === 'done' && by('CS: outcome in')?.outcome?.stage === 'interested', j(by('CS: outcome in')))
+  check('outcome filled = done, with the stage and the mentor\'s remark', by('CS: outcome in')?.status === 'done' && by('CS: outcome in')?.outcome?.stage === 'interested' && by('CS: outcome in')?.outcome?.remark === 'ok', j(by('CS: outcome in')))
   check('over, outcome not filled = waiting', by('CS: no outcome yet')?.status === 'waiting')
   check('where it was booked', by('CS: outcome in')?.bookedVia === 'portal' && by('CS: staff')?.bookedVia === null)
   r = await S.meetingsBookedBy({ emails: 'cs@portal.local,sales@crm.local', from: '2026-11-18', to: '2026-11-18' }, now)

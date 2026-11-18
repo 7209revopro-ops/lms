@@ -406,6 +406,8 @@ export async function meetingsBookedBy(query: Record<string, unknown>, now = new
       inPerson: m.isOnline === false,
       attendees: (m.attendees ?? []).map((a) => ({ name: a.name, email: a.email ?? '' })),
       bookedByEmail: m.bookedByEmail, bookedVia: m.bookedVia ?? null,
+      // What the booker wrote when booking it (2026-11-18: the notes on Root's salesperson and CS pages).
+      notes: m.notes ?? '',
       mentor: { name: mentor?.name ?? '', email: mentor?.email ?? '' },
       status, cancelledAt: m.cancelledAt ? new Date(m.cancelledAt).toISOString() : null,
       cancelReason: (m as { cancelReason?: string }).cancelReason ?? '', cancelledBy: (m as { cancelledBy?: string }).cancelledBy ?? null,
