@@ -550,15 +550,18 @@ export async function runFiveMinReminders(): Promise<void> {
          academy clock. On a shared class the student's academy and the class's
          differ, and an unlabelled ninety-minute gap is a missed class. */
       .populate<{ userId: BookingWithRefs['userId'] }>('userId', 'name email organizationId enrollmentApplication.phone')
-      .populate<{ liveClassId: BookingWithRefs['liveClassId'] }>('liveClassId', 'id title scheduledStart meetingUrl muxPlaybackId status isOnline programId')
+      .populate<{ liveClassId: BookingWithRefs['liveClassId'] }>('liveClassId', 'id title scheduledStart meetingUrl muxPlaybackId status isOnline programId courseId')
       .lean({ virtuals: true }) as unknown as BookingWithRefs[]
 
     const due = dueBetween(bookings, from, to)
+    /* CMA classes get their 5-minute join link on WhatsApp too (services/cmaAutoBook.service.ts). */
+    const cmaCourses = due.length ? await (await import('@/services/cmaAutoBook.service.ts')).cmaCourseIds() : new Set<string>()
 
     for (const b of due) {
       const userId  = b.userId.id ?? b.userId._id?.toString()
       const classAt = new Date(b.liveClassId.scheduledStart)
       const code    = await joinCodeFor(b, userId)
+      const cmaUse  = cmaCourses.has(String((b.liveClassId as { courseId?: unknown }).courseId ?? '')) ? 'cma' : undefined
       // A Meet class's link carries its meeting code too: the /j page's way straight in when joining is slow.
       const meet    = meetCodeOf(b.liveClassId.meetingUrl)
       const joinUrl = code ? joinLinkUrl(code, meet) : getJoinUrl(b.liveClassId)
@@ -590,7 +593,7 @@ export async function runFiveMinReminders(): Promise<void> {
           : code
           ? () => sendClassStartsIn5MinV2WhatsApp(
               phone, b.userId.name, b.liveClassId.title,
-              fmtShortDay(classAt, slug), fmtTime(classAt, slug), joinLinkPath(code, meet),
+              fmtShortDay(classAt, slug), fmtTime(classAt, slug), joinLinkPath(code, meet), cmaUse,
             )
           : () => sendClassStartsIn5MinWhatsApp(
               phone, b.userId.name, b.liveClassId.title,
@@ -1481,6 +1484,13 @@ export function startReminderJobs(): void {
 
   // Every 5 min — a Meet class past its timetable end: has Google Meet recorded it ending?
   cron.schedule('*/5 * * * *', exclusive('meet-class-end', () => runMeetClassEnd()))
+
+  // Every 2 min — CMA classes book their students themselves and tell them once (CMA_AUTO_BOOK=on;
+  // services/cmaAutoBook.service.ts)
+  cron.schedule('*/2 * * * *', exclusive('cma-auto-book', async () => {
+    const { runCmaAutoBook } = await import('@/services/cmaAutoBook.service.ts')
+    await runCmaAutoBook()
+  }))
 
   // Every minute — an online class with no bookings 10 min before its start: cancelled (AUTO_CANCEL_EMPTY=on), or
   // only noted (report, the default). services/classOutcome.service.ts.

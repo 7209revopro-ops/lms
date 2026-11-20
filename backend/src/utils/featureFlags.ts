@@ -55,6 +55,9 @@ const DEFAULT_WHATSAPP_TEMPLATES_ON = [
      (services/program.service.ts) — program WhatsApps go only from here, never from a CS's own WhatsApp (the
      CS Portal, PROGRAM_CS_WHATSAPP). The Send message page's course_update_v1 stays off. */
   'course_update_v1@program',
+  /* CMA classes (2026-11-20, services/cmaAutoBook.service.ts): the "you're booked" message with its sign-in link,
+     and the 5-minute join link — for CMA only; every other class keeps them off. */
+  'new_class_scheduled_v1@cma', 'class_starts_in_5_min_v2@cma',
 ]
 const WHATSAPP_ON: ReadonlySet<string> | 'all' = (() => {
   const raw = (process.env['WHATSAPP_TEMPLATES_ON'] ?? '').trim()

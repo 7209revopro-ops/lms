@@ -397,13 +397,15 @@ export async function sendClassHasStartedWhatsApp(
 export async function sendClassStartsIn5MinV2WhatsApp(
   to: string | null | undefined, studentName: string, sessionTitle: string,
   dateLabel: string, timeLabel: string, joinCode: string,
+  /* 'cma': a CMA class's — let out for CMA only (featureFlags "class_starts_in_5_min_v2@cma"). */
+  use?: string,
 ): Promise<void> {
   if (!joinCode) {
     logger.warn({ templateName: 'class_starts_in_5_min_v2' }, 'WhatsApp join reminder skipped — no join code for its button')
     return
   }
   await sendTemplate(to, 'class_starts_in_5_min_v2', [studentName || 'there', sessionTitle, dateLabel, timeLabel],
-    { category: 'utility', buttonParam: joinCode })
+    { category: 'utility', buttonParam: joinCode, ...(use ? { use } : {}) })
 }
 
 export async function sendClassHasStartedV2WhatsApp(
@@ -424,10 +426,12 @@ export async function sendClassHasStartedV2WhatsApp(
 export async function sendNewClassScheduledWhatsApp(
   to: string | null | undefined, studentName: string, courseTitle: string,
   sessionTitle: string, dateLabel: string, timeLabel: string, signinCode: string,
+  /* 'cma': a CMA auto-booking's (services/cmaAutoBook.service.ts) — let out for CMA only ("new_class_scheduled_v1@cma"). */
+  use?: string,
 ): Promise<void> {
   if (!signinCode) return
   await sendTemplate(to, 'new_class_scheduled_v1', [studentName || 'there', courseTitle, sessionTitle, dateLabel, timeLabel],
-    { category: 'utility', buttonParam: signinCode })
+    { category: 'utility', buttonParam: signinCode, ...(use ? { use } : {}) })
 }
 
 export async function sendTodaysClassesWhatsApp(

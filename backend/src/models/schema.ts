@@ -3690,6 +3690,10 @@ export interface IClassBooking extends Document {
   todaysNoticeSent?:      boolean   // in the morning "your classes today" (bell + push, 2026-10-21)
   todaysWhatsAppSent?:    boolean   // in the morning "today's classes" WhatsApp
   reminderAtTimeSent:     boolean   // at-time reminder (with link)
+  /* A CMA class's seat the LMS booked by itself (2026-11-20, services/cmaAutoBook.service.ts), and when the student
+     was told — one message for all of a sweep's new seats. */
+  autoBookedAt?:     Date
+  autoNoticeSentAt?: Date
   createdAt:   Date
   updatedAt:   Date
 }
@@ -3717,6 +3721,8 @@ const ClassBookingSchema = new Schema<IClassBooking>(
     todaysNoticeSent:       { type: Boolean },
     todaysWhatsAppSent:     { type: Boolean, default: false },
     reminderAtTimeSent:     { type: Boolean, default: false },
+    autoBookedAt:           { type: Date },
+    autoNoticeSentAt:       { type: Date },
   },
   baseSchemaOptions,
 )
