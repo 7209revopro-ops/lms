@@ -198,7 +198,14 @@ function SidebarContent({ collapsed, onClose }: SidebarContentProps) {
         /* Merging two accounts of one student — super admin only, as the routes are. */
         { label: 'Duplicates', href: '/duplicates',  icon: GitMerge },
       ]
-    : user?.role === 'admin' ? [...withClassroom, sendItem] : withClassroom
+    : user?.role === 'admin' ? [...withClassroom, sendItem]
+    /* A department's sub admin (2026-11-20): the email and WhatsApp messages sent to their students — the server
+       keeps it to them (backend utils/logScope.ts). */
+    : isManager ? [...withClassroom,
+        { label: 'Email Logs', href: '/email-logs',  icon: Mail },
+        { label: 'WhatsApp Logs', href: '/whatsapp-logs', icon: MessageCircle },
+      ]
+    : withClassroom
   const navItems = allNavItems.filter(i => canView(i.href))
   const roleLabel = isInstructor ? 'Instructor' : isManager ? 'Manager' : 'Admin'
   const bottomItems = (isInstructor ? [] : [settingsItem]).filter(i => canView(i.href))

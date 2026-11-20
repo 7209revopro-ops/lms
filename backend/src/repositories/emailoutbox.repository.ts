@@ -12,8 +12,11 @@ export class EmailOutboxRepository {
     q?:      string
     from?:   string
     until?:  string
+    /* Only mail to these addresses — a sub admin's students (utils/logScope.ts). */
+    toIn?:   string[]
   } = {}): Promise<{ docs: IEmailOutbox[]; totalCount: number }> {
     const q: Record<string, unknown> = {}
+    if (filter.toIn) q['$and'] = [{ to: { $in: filter.toIn } }]
 
     /* String()-coerce before comparing against the enum: req.query can
        smuggle an object or array (?status[$ne]=sent) that Mongo would

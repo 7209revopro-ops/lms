@@ -11,6 +11,7 @@
      E. CMA_AUTO_BOOK off: the sweep does nothing
    Run: bun --no-env-file src/tests/cmaautobook.suite.ts
 ───────────────────────────────────────────────────────────── */
+export {}
 process.env.DATABASE_URL = 'mongodb://localhost:27017/lms_cmaautobook'
 process.env.NODE_ENV = 'test'
 process.env.SMTP_HOST = ''; process.env.SMTP_BACKUP_HOST = ''; process.env.EMAIL_OUTBOX = 'off'

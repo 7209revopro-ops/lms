@@ -10,13 +10,16 @@
 import { Router, type Request, type Response, type NextFunction } from 'express'
 import { createHash } from 'node:crypto'
 import { LINK_MAX_SIGNINS } from '@/services/auth.service.ts'
-import { authenticateAdmin, requireSuperAdmin } from '@/middleware/auth.middleware.ts'
+import { authenticateAdmin, requireRole } from '@/middleware/auth.middleware.ts'
+import { logRecipientScope } from '@/utils/logScope.ts'
 import { sendSuccess, parsePagination, buildPaginationMeta } from '@/utils/response.ts'
 import { createdBetween, escapeRegex, outboxSummary } from '@/utils/outboxLog.ts'
 import { renderWhatsApp, WHATSAPP_TEMPLATES } from '@/utils/whatsappTemplates.ts'
 
 const router = Router()
-router.use(authenticateAdmin, requireSuperAdmin)
+/* super_admin: every message; a department's sub_admin (2026-11-20): those to their students (utils/logScope.ts),
+   with the one-time sign-in / join links masked — a link is a way into the student's account. */
+router.use(authenticateAdmin, requireRole('super_admin', 'sub_admin'))
 
 /* A stored phone ending in these digits, however it is written — "+971 50
    402 7626", "0504027626" — any spaces, dashes or brackets between them. */
@@ -35,6 +38,8 @@ router.get('/', async (req: Request, res: Response, next: NextFunction) => {
     if (template && /^[a-z0-9_]{1,80}$/.test(template)) filter['templateName'] = template
     const range = createdBetween(qs['from'], qs['until'])
     if (range) Object.assign(filter, range)
+    const scope = await logRecipientScope(req)
+    if (scope) filter['$and'] = [{ to: { $in: scope.phones } }]
 
     /* Search: a phone fragment, or a student's name / email. */
     const search = qs['q'] ? String(qs['q']).trim().slice(0, 80) : ''
@@ -69,7 +74,7 @@ router.get('/', async (req: Request, res: Response, next: NextFunction) => {
 
     /* A one-tap button's link is shown in full here (super admin only) with
        where it stands: its code's expiry and sign-ins used, from AuthToken. */
-    const rendered = rows.map(r => renderWhatsApp(r.templateName, r.params ?? [], r.buttonParam, { reveal: true }))
+    const rendered = rows.map(r => renderWhatsApp(r.templateName, r.params ?? [], r.buttonParam, { reveal: !scope }))
     const codeOf = (p: unknown) => String(p ?? '').split('?')[0]!
     const hashes = rows.flatMap((r, i) => rendered[i]!.login ? [createHash('sha256').update(codeOf(r.buttonParam)).digest('hex')] : [])
     const tokens = new Map((hashes.length
@@ -99,18 +104,20 @@ router.get('/', async (req: Request, res: Response, next: NextFunction) => {
 })
 
 /* GET /whatsapp-logs/summary — sent / failed / pending, today and last 7 days. */
-router.get('/summary', async (_req: Request, res: Response, next: NextFunction) => {
+router.get('/summary', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { WhatsAppOutboxModel } = await import('@/models/schema.ts')
-    sendSuccess(res, await outboxSummary(WhatsAppOutboxModel))
+    const scope = await logRecipientScope(req)
+    sendSuccess(res, await outboxSummary(WhatsAppOutboxModel, scope ? { to: { $in: scope.phones } } : {}))
   } catch (err) { next(err) }
 })
 
 /* GET /whatsapp-logs/templates — every template name in the log, labelled. */
-router.get('/templates', async (_req: Request, res: Response, next: NextFunction) => {
+router.get('/templates', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { WhatsAppOutboxModel } = await import('@/models/schema.ts')
-    const names = (await WhatsAppOutboxModel.distinct('templateName')) as string[]
+    const scope = await logRecipientScope(req)
+    const names = (await WhatsAppOutboxModel.distinct('templateName', scope ? { to: { $in: scope.phones } } : {})) as string[]
     sendSuccess(res, names.sort().map(n => ({ name: n, label: WHATSAPP_TEMPLATES[n]?.label ?? n })))
   } catch (err) { next(err) }
 })

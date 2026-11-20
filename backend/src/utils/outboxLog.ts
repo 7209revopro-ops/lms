@@ -19,8 +19,8 @@ export function createdBetween(from?: unknown, to?: unknown): Record<string, unk
 
 export interface StatusCounts { sent: number; failed: number; pending: number; total: number }
 
-async function countsSince(model: Model<any>, since: Date): Promise<StatusCounts> {
-  const rows = await model.aggregate([{ $match: { createdAt: { $gte: since } } }, { $group: { _id: '$status', n: { $sum: 1 } } }])
+async function countsSince(model: Model<any>, since: Date, match: Record<string, unknown> = {}): Promise<StatusCounts> {
+  const rows = await model.aggregate([{ $match: { ...match, createdAt: { $gte: since } } }, { $group: { _id: '$status', n: { $sum: 1 } } }])
   const c: StatusCounts = { sent: 0, failed: 0, pending: 0, total: 0 }
   for (const r of rows as Array<{ _id: string; n: number }>) {
     if (r._id === 'sent' || r._id === 'failed' || r._id === 'pending') c[r._id] = r.n
@@ -30,11 +30,11 @@ async function countsSince(model: Model<any>, since: Date): Promise<StatusCounts
 }
 
 /** Today (Dubai) and the last 7 days, by status. */
-export async function outboxSummary(model: Model<any>): Promise<{ today: StatusCounts; last7Days: StatusCounts }> {
+export async function outboxSummary(model: Model<any>, match: Record<string, unknown> = {}): Promise<{ today: StatusCounts; last7Days: StatusCounts }> {
   const today = zoneDateKey(new Date(), ZONE)
   const [t, w] = await Promise.all([
-    countsSince(model, zoneDayBounds(today, ZONE).start),
-    countsSince(model, zoneDayBounds(addDaysToDateKey(today, -6), ZONE).start),
+    countsSince(model, zoneDayBounds(today, ZONE).start, match),
+    countsSince(model, zoneDayBounds(addDaysToDateKey(today, -6), ZONE).start, match),
   ])
   return { today: t, last7Days: w }
 }

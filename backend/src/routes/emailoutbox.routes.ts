@@ -1,5 +1,9 @@
 import { Router, type Request, type Response, type NextFunction } from 'express'
-import { authenticateAdmin, requireSuperAdmin } from '@/middleware/auth.middleware.ts'
+import { authenticateAdmin, requireSuperAdmin, requireRole } from '@/middleware/auth.middleware.ts'
+import { logRecipientScope } from '@/utils/logScope.ts'
+
+/* super_admin: every email; a department's sub_admin: those to their students (utils/logScope.ts), read-only. */
+const requireLogViewer = requireRole('super_admin', 'sub_admin')
 import { sendSuccess, sendError, parsePagination, buildPaginationMeta } from '@/utils/response.ts'
 import { EmailOutboxRepository } from '@/repositories/emailoutbox.repository.ts'
 import { Types } from 'mongoose'
@@ -7,21 +11,20 @@ import { Types } from 'mongoose'
 const router = Router()
 const repo   = new EmailOutboxRepository()
 
-/* GET /email-logs — super_admin only.
-   Unlike audit-logs (admin + super_admin, org-scoped), the send log is
-   platform-wide with no organizationId to scope by — an academy admin has
-   no natural subset of it that means anything, so this stays off
-   requireAdmin entirely rather than fake a scope that doesn't exist. */
+/* GET /email-logs — super_admin, and (since 2026-11-20) a department's sub_admin for mail to their students.
+   An academy admin still has no natural subset of this platform-wide log, so it stays off requireAdmin. */
 router.get(
   '/',
   authenticateAdmin,
-  requireSuperAdmin,
+  requireLogViewer,
   async (req: Request, res: Response, next: NextFunction) => {
     try {
       const { page, per_page } = parsePagination(req.query as Record<string, unknown>)
       const q = req.query as Record<string, string | undefined>
+      const scope = await logRecipientScope(req)
 
       const { docs, totalCount } = await repo.list(page, per_page, {
+        ...(scope ? { toIn: scope.emails } : {}),
         status: q['status'],
         to:     q['to'],
         q:      q['q'],
@@ -36,11 +39,12 @@ router.get(
 )
 
 /* GET /email-logs/summary — sent / failed / pending, today and the last 7 days. */
-router.get('/summary', authenticateAdmin, requireSuperAdmin, async (_req: Request, res: Response, next: NextFunction) => {
+router.get('/summary', authenticateAdmin, requireLogViewer, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { EmailOutboxModel } = await import('@/models/schema.ts')
     const { outboxSummary } = await import('@/utils/outboxLog.ts')
-    sendSuccess(res, await outboxSummary(EmailOutboxModel))
+    const scope = await logRecipientScope(req)
+    sendSuccess(res, await outboxSummary(EmailOutboxModel, scope ? { to: { $in: scope.emails } } : {}))
   } catch (err) { next(err) }
 })
 
@@ -53,13 +57,23 @@ router.get('/summary', authenticateAdmin, requireSuperAdmin, async (_req: Reques
 router.get(
   '/:id/html',
   authenticateAdmin,
-  requireSuperAdmin,
+  requireLogViewer,
   async (req: Request, res: Response, next: NextFunction) => {
     try {
       const id = typeof req.params['id'] === 'string' ? req.params['id'] : undefined
       if (!id || !Types.ObjectId.isValid(id)) {
         sendError(res, 'INVALID_ID', 'That is not a valid email log id.', 400)
         return
+      }
+      /* A sub admin: only an email to one of their students — any other answers as missing. */
+      const scope = await logRecipientScope(req)
+      if (scope) {
+        const { EmailOutboxModel } = await import('@/models/schema.ts')
+        const row = await EmailOutboxModel.findById(id).select('to').lean<{ to?: string }>()
+        if (!row || !scope.emails.includes(String(row.to ?? ''))) {
+          sendError(res, 'NOT_FOUND', 'No email log entry with that id.', 404)
+          return
+        }
       }
       const html = await repo.findHtml(id)
       if (html === null) {

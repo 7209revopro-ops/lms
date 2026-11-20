@@ -10,6 +10,7 @@ import { useEmailLogs, useEmailLogSummary, fetchEmailLogHtml, useSendEmailNow, t
 import { LogSummary, DateRange } from '@/components/logs/LogSummary'
 import Spinner from '@/components/ui/Spinner'
 import { useQueryState, setQueryParams } from '@/lib/useQueryState'
+import { useCurrentUser } from '@/lib/api/user'
 
 /* ─── Helpers ──────────────────────────────────────────── */
 function fmtDate(iso: string): string {
@@ -115,6 +116,8 @@ function StatusDropdown({ value, onChange }: { value: EmailLogStatus | ''; onCha
 
 /* ─── Row ──────────────────────────────────────────────── */
 function LogRow({ log, index }: { log: EmailLog; index: number }) {
+  const { data: me } = useCurrentUser()
+  const canSend = me?.role === 'super_admin'
   const [expanded, setExpanded] = useState(false)
   const [html,     setHtml]     = useState<string | null>(null)
   const [loading,  setLoading]  = useState(false)
@@ -188,7 +191,8 @@ function LogRow({ log, index }: { log: EmailLog; index: number }) {
 
         {/* Send now (not yet sent) + expand indicator */}
         <td className="px-4 py-3 whitespace-nowrap">
-          {log.status !== 'sent' && <SendNow id={log.id} />}
+          {/* Super admin only — a sub admin reads their students' mail log, nothing more. */}
+          {log.status !== 'sent' && canSend && <SendNow id={log.id} />}
           <span className="text-[10px] font-semibold" style={{ color: 'rgba(255,255,255,0.25)' }}>
             {expanded ? '▲ hide' : '▼ view'}
           </span>

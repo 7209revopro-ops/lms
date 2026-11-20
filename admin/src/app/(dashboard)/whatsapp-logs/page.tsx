@@ -3,7 +3,7 @@
 /* ─────────────────────────────────────────────────────────────
    WhatsApp Logs — every template message the platform has sent: who it went
    to, the message as they read it, and whether it went (sent = WhatsApp
-   accepted it; delivered / read are not reported to us). super_admin only.
+   accepted it; delivered / read are not reported to us). super_admin; a sub_admin sees their students' messages (links masked).
 ───────────────────────────────────────────────────────────── */
 import { useState, useEffect } from 'react'
 import { motion } from 'framer-motion'
