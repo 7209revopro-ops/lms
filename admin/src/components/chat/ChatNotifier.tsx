@@ -6,6 +6,7 @@ import { useStaffConversations, useStaffUnread } from '@/lib/api/chat'
 import { useCurrentUser } from '@/lib/api/user'
 import { useUIStore } from '@/store/ui.store'
 import { showDesktopAlert } from '@/lib/desktopAlerts'
+import { teaches } from '@/lib/teaching'
 
 /* WhatsApp-style ping for an instructor (plan.md §11.6): when a student's
    message arrives anywhere but that very conversation, a toast says who and
@@ -16,7 +17,7 @@ import { showDesktopAlert } from '@/lib/desktopAlerts'
    Rides the inbox's and the badge's own 15 s polls; adds no request of its own. */
 export function ChatNotifier() {
   const { data: me } = useCurrentUser()
-  const isInstructor = me?.role === 'instructor'
+  const isInstructor = teaches(me)
   const { firstPage } = useStaffConversations(isInstructor)
   const { data: unread = 0 } = useStaffUnread(isInstructor)
   const pathname = usePathname()

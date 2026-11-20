@@ -2,6 +2,7 @@ import { Types } from 'mongoose'
 import {
   UserModel, CourseModel, EnrollmentModel, ReviewModel, OrderModel,
 } from '@/models/schema.ts'
+import { teacherMatch, teacherFilter } from '@/utils/teaching.ts'
 
 /* ─────────────────────────────────────────────────────
    AdminService — dashboard-level stats. Counts only;
@@ -13,11 +14,8 @@ import {
    unscoped caller (super_admin) keeps the plain role match. */
 function instructorCountFilter(orgMatch: Record<string, unknown>): Record<string, unknown> {
   const orgId = orgMatch['organizationId']
-  if (!orgId) return { role: 'instructor' }
-  return {
-    role: 'instructor',
-    $or: [{ organizationId: orgId }, { sharedAcrossOrgs: true }],
-  }
+  if (!orgId) return teacherMatch()
+  return teacherFilter({ $or: [{ organizationId: orgId }, { sharedAcrossOrgs: true }] })
 }
 
 export class AdminService {

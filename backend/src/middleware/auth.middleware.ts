@@ -33,6 +33,7 @@ interface AccountState {
   organizationId?: string
   program?:        ProgramType
   customRoleId?:   string
+  alsoTeaches?:    boolean
 }
 
 async function loadAccountState(userId: string | undefined): Promise<AccountState | null> {
@@ -42,13 +43,13 @@ async function loadAccountState(userId: string | undefined): Promise<AccountStat
 
   const { UserModel } = await import('@/models/schema.ts')
   const user = await UserModel.findById(userId)
-    .select('role isActive organizationId program customRoleId')
+    .select('role isActive organizationId program customRoleId alsoTeaches')
     .lean()
   if (!user) return null
 
   const u = user as {
     role?: UserRole; isActive?: boolean; organizationId?: unknown
-    program?: unknown; customRoleId?: unknown
+    program?: unknown; customRoleId?: unknown; alsoTeaches?: unknown
   }
   return {
     role:           u.role as UserRole,
@@ -60,6 +61,8 @@ async function loadAccountState(userId: string | undefined): Promise<AccountStat
        matrix, and only for accounts that actually carry a custom role — which
        is why this costs nothing for everyone else. */
     customRoleId:   u.customRoleId ? String(u.customRoleId) : undefined,
+    /* Only a sub admin can also teach (utils/teaching.ts). */
+    alsoTeaches:    u.role === 'sub_admin' && u.alsoTeaches === true,
   }
 }
 
@@ -604,6 +607,7 @@ export async function authenticateAdmin(
     if (req.user.role !== 'super_admin') {
       if (account!.organizationId) req.user.organizationId = account!.organizationId
       if (account!.program)        req.user.program        = account!.program
+      if (account!.alsoTeaches)    req.user.alsoTeaches    = true
     } else {
       /* super_admin selects the active org via X-Organization-Id.
          Validated as an ObjectId before it is trusted (B-05): it flows into

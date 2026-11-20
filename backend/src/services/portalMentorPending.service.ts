@@ -1,3 +1,4 @@
+import { teacherMatch } from '@/utils/teaching.ts'
 import mongoose from 'mongoose'
 
 /* ─────────────────────────────────────────────────────────────
@@ -22,7 +23,7 @@ export async function mentorPendingForPortal(q: { emails?: unknown }, now = new 
   const { UserModel, MentorMeetingModel, LiveClassModel, ChatConversationModel } = await import('@/models/schema.ts')
   const emails = typeof q.emails === 'string' && q.emails.trim()
     ? [...new Set(q.emails.split(',').map(e => e.trim().toLowerCase()).filter(Boolean))] : null
-  const mentors = await UserModel.find({ role: 'instructor', ...(emails ? { email: { $in: emails } } : { isActive: { $ne: false } }) }, { name: 1, email: 1, isActive: 1 }).lean() as any[]
+  const mentors = await UserModel.find({ ...teacherMatch(), ...(emails ? { email: { $in: emails } } : { isActive: { $ne: false } }) }, { name: 1, email: 1, isActive: 1 }).lean() as any[]
   const ids = mentors.map(m => m._id as mongoose.Types.ObjectId)
   if (!ids.length) return { generatedAt: now.toISOString(), mentors: [] }
 

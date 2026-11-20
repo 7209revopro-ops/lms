@@ -574,7 +574,7 @@ export class AdminController {
   updateUser = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     try {
       const id = String(req.params['id'] ?? '')
-      const dto = req.body as { role?: UserRole; isActive?: boolean; isVerified?: boolean; name?: string; email?: string; category?: '4x-trading' | 'digital-marketing' | 'ai' | 'jura' | 'cma' | null; categories?: ('4x-trading' | 'digital-marketing' | 'ai' | 'jura' | 'cma')[]; headline?: string; bio?: string; phone?: string; avatarUrl?: string; program?: 'ai' | 'digital_marketing' | 'forex' | 'jura' | 'cma'; sharedAcrossOrgs?: boolean }
+      const dto = req.body as { role?: UserRole; isActive?: boolean; isVerified?: boolean; name?: string; email?: string; category?: '4x-trading' | 'digital-marketing' | 'ai' | 'jura' | 'cma' | null; categories?: ('4x-trading' | 'digital-marketing' | 'ai' | 'jura' | 'cma')[]; headline?: string; bio?: string; phone?: string; avatarUrl?: string; program?: 'ai' | 'digital_marketing' | 'forex' | 'jura' | 'cma'; sharedAcrossOrgs?: boolean; alsoTeaches?: boolean }
       const user = await this.userService.adminUpdate(id, dto)
       sendSuccess(res, user, 'User updated')
     } catch (err) { next(err) }

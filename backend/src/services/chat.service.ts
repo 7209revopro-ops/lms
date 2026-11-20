@@ -2,6 +2,7 @@ import { Types } from 'mongoose'
 import { logger } from '@/utils/logger.ts'
 import { enrolledProgramsOf } from '@/utils/enrolledPrograms.ts'
 import { NotificationService } from '@/services/notification.service.ts'
+import { teacherMatch } from '@/utils/teaching.ts'
 
 /* ─────────────────────────────────────────────────────
    Student ↔ instructor chat — the rules of plan.md §11.2 live here, so the
@@ -64,11 +65,12 @@ async function loadStudent(studentId: Id) {
 
 function instructorFilter(student: any, programs: string[]) {
   return {
-    role: 'instructor', isActive: true,
+    isActive: true,
     /* Their own academy only — plan §11.2 C2. null matches a student and an
        instructor who both predate the field, and nobody else. */
     organizationId: student.organizationId ?? null,
-    $or: [{ category: { $in: programs } }, { categories: { $in: programs } }],
+    /* An instructor, or a sub admin who also teaches (utils/teaching.ts). */
+    $and: [teacherMatch(), { $or: [{ category: { $in: programs } }, { categories: { $in: programs } }] }],
   }
 }
 

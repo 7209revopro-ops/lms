@@ -40,6 +40,8 @@ export interface CurrentAdmin {
   role:            'student' | 'instructor' | 'admin' | 'sub_admin' | 'support' | 'super_admin'
   organizationId?: string
   program?:        'ai' | 'digital_marketing' | 'forex' | 'jura' | 'cma'
+  /** A sub admin who also teaches classes — see lib/teaching.ts. */
+  alsoTeaches?:    boolean
   headline?:       string
   bio?:            string
   isVerified:      boolean

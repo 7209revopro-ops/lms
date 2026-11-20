@@ -7,6 +7,8 @@ export interface DiscussionAuthor {
   name:      string
   avatarUrl?: string
   role:      string
+  /** A sub admin who also teaches — shown as a mentor. */
+  alsoTeaches?: boolean
 }
 
 export interface DiscussionThread {

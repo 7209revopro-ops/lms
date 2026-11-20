@@ -7,6 +7,7 @@ import { useCurrentUser } from '@/lib/api/user'
 import { ChatPanel } from '@/components/chat/ChatPanel'
 import Spinner from '@/components/ui/Spinner'
 import { useQueryState } from '@/lib/useQueryState'
+import { teaches } from '@/lib/teaching'
 
 /* Typing asks the server once the typist pauses, not on every keystroke. */
 function useSettled(value: string, ms = 300) {
@@ -18,7 +19,7 @@ function useSettled(value: string, ms = 300) {
 /* An instructor's inbox — only students who wrote to them (plan.md §11.2 C1). */
 function Inbox() {
   const { data: me } = useCurrentUser()
-  const isInstructor = me?.role === 'instructor'
+  const isInstructor = teaches(me)
   /* The search box in the address bar beside ?c (lib/useQueryState.ts). */
   const [search, setSearch] = useQueryState('q', '', { history: 'replace' })
   const list = useStaffConversations(isInstructor, useSettled(search))

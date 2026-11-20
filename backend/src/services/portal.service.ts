@@ -1,3 +1,4 @@
+import { teacherMatch, teacherFilter } from '@/utils/teaching.ts'
 import crypto from 'node:crypto'
 import mongoose from 'mongoose'
 import { UserModel, RoleModel, OrganizationModel } from '@/models/schema.ts'
@@ -549,10 +550,9 @@ export async function listMentorsForPortal(input: {
   const { UserModel, MentorAvailabilityModel } = await import('@/models/schema.ts')
   const { LiveClassModel, MentorMeetingModel } = await import('@/models/schema.ts')
 
-  const mentors = await UserModel.find({
-    role: 'instructor',
-    ...(all ? {} : { $or: [{ organizationId: org._id }, { sharedAcrossOrgs: true }] }),
-  })
+  const mentors = await UserModel.find(teacherFilter(
+    all ? {} : { $or: [{ organizationId: org._id }, { sharedAcrossOrgs: true }] },
+  ))
     .select('name email organizationId sharedAcrossOrgs')
     .lean()
   const academyNames = new Map(
@@ -830,11 +830,10 @@ async function staffNamed(input: unknown, opts: { orgId: unknown; allAcademies: 
     .filter((e) => e !== opts.notEmail.toLowerCase())
   if (emails.length === 0) return []
   if (emails.length > 30) throw httpError('At most 30 mentors in a staff meeting', 400)
-  const found = await UserModel.find({
+  const found = await UserModel.find(teacherFilter({
     email: { $in: emails },
-    role: 'instructor',
     ...(opts.allAcademies ? {} : { $or: [{ organizationId: opts.orgId }, { sharedAcrossOrgs: true }] }),
-  }).select('name email').lean()
+  })).select('name email').lean()
   const missing = emails.filter((e) => !found.some((u) => String(u.email ?? '').toLowerCase() === e))
   if (missing.length) throw httpError(`No mentor here with that address: ${missing.join(', ')}`, 404)
   return found.map((u) => ({ _id: u._id as mongoose.Types.ObjectId, name: u.name ?? '', email: String(u.email ?? '').toLowerCase() }))
@@ -963,11 +962,10 @@ export async function createMentorMeetingForPortal(input: {
   /* The same reach rule the listing uses: this academy's own instructors, plus
      the ones lent to it. Booking somebody another academy cannot even see would
      put an hour in a stranger's diary. */
-  const mentor = await UserModel.findOne({
+  const mentor = await UserModel.findOne(teacherFilter({
     email: wanted,
-    role: 'instructor',
     ...(input.allAcademies === true ? {} : { $or: [{ organizationId: org._id }, { sharedAcrossOrgs: true }] }),
-  }).select('name email meetEmail').lean()
+  })).select('name email meetEmail').lean()
   if (!mentor) throw httpError('No mentor here with that address', 404)
 
   /* A staff meeting's other mentors (2026-11-14), and everybody in it among those invited. */
@@ -1816,7 +1814,7 @@ async function mentorByEmail(email: unknown) {
   const { UserModel } = await import('@/models/schema.ts')
   const wanted = String(email ?? '').toLowerCase().trim()
   if (!wanted) throw httpError('mentorEmail is required', 400)
-  const mentor = await UserModel.findOne({ email: wanted, role: 'instructor' }).select('_id name email').lean<{ _id: unknown; name?: string; email?: string }>()
+  const mentor = await UserModel.findOne({ email: wanted, ...teacherMatch() }).select('_id name email').lean<{ _id: unknown; name?: string; email?: string }>()
   if (!mentor) throw httpError('No mentor with that address', 404)
   return mentor
 }

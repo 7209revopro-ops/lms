@@ -1,3 +1,4 @@
+import { teacherMatch } from '@/utils/teaching.ts'
 import { Types } from 'mongoose'
 
 /* ────────────────────────────────────────────────────────────────────────────
@@ -151,7 +152,7 @@ export async function addTimeOff(input: {
 }) {
   const { UserModel, MentorTimeOffModel } = await import('@/models/schema.ts')
   if (!Types.ObjectId.isValid(String(input.mentorId))) throw new TimeOffError('No such mentor', 404)
-  const mentor = await UserModel.findOne({ _id: oid(input.mentorId), role: 'instructor' }).select('name email').lean<{ _id: Types.ObjectId; name?: string; email?: string }>()
+  const mentor = await UserModel.findOne({ _id: oid(input.mentorId), ...teacherMatch() }).select('name email').lean<{ _id: Types.ObjectId; name?: string; email?: string }>()
   if (!mentor) throw new TimeOffError('No such mentor', 404)
 
   const startsAt = new Date(String(input.startsAt ?? ''))

@@ -11,7 +11,7 @@ import { useCurrentUser } from '@/lib/api/user'
 import Spinner from '@/components/ui/Spinner'
 import { AvatarImg } from '@/components/ui/AvatarImg'
 
-function authorInfo(a: DiscussionAuthor | string): { id?: string; name: string; avatarUrl?: string; role: string } {
+function authorInfo(a: DiscussionAuthor | string): { id?: string; name: string; avatarUrl?: string; role: string; alsoTeaches?: boolean } {
   if (typeof a === 'string') return { id: a, name: 'User', avatarUrl: undefined, role: 'student' }
   return a
 }
@@ -66,7 +66,8 @@ function CommentList({ thread, lessonId }: { thread: DiscussionThread; lessonId:
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2 flex-wrap">
                   <span className="text-[11px] font-semibold" style={{ color: 'var(--color-text-secondary)' }}>{auth.name}</span>
-                  {auth.role === 'instructor' && (
+                  {/* A mentor — an instructor, or a sub admin who also teaches (2026-11-20). */}
+                  {(auth.role === 'instructor' || (auth.role === 'sub_admin' && auth.alsoTeaches === true)) && (
                     <span className="rounded-full px-1.5 py-0.5 text-[9px] font-bold"
                       style={{ background: 'rgba(0,87,184,0.12)', color: 'var(--color-primary)' }}>
                       Instructor

@@ -1,3 +1,4 @@
+import { teaches } from '@/utils/teaching.ts'
 import { Types } from 'mongoose'
 import { UserRepository, RefreshTokenRepository } from '@/repositories/user.repository.ts'
 import { hashPassword } from '@/utils/hash.ts'
@@ -102,7 +103,7 @@ export class UserService {
   async adminUpdate(
     id: string,
     dto: {
-      sharedAcrossOrgs?: boolean; meetEmail?: string; role?: UserRole; isActive?: boolean; isVerified?: boolean; name?: string; email?: string; category?: '4x-trading' | 'digital-marketing' | 'ai' | 'jura' | 'cma' | null; categories?: ('4x-trading' | 'digital-marketing' | 'ai' | 'jura' | 'cma')[]; avatarUrl?: string; headline?: string; bio?: string; phone?: string; program?: import('@/types/index.ts').ProgramType },
+      sharedAcrossOrgs?: boolean; alsoTeaches?: boolean; meetEmail?: string; role?: UserRole; isActive?: boolean; isVerified?: boolean; name?: string; email?: string; category?: '4x-trading' | 'digital-marketing' | 'ai' | 'jura' | 'cma' | null; categories?: ('4x-trading' | 'digital-marketing' | 'ai' | 'jura' | 'cma')[]; avatarUrl?: string; headline?: string; bio?: string; phone?: string; program?: import('@/types/index.ts').ProgramType },
   ): Promise<IUser> {
     if (!Types.ObjectId.isValid(id)) {
       throw new UserError('INVALID_ID', 'Invalid user id', 400)
@@ -162,6 +163,22 @@ export class UserService {
         )
       }
     }
+    /* A SUB ADMIN WHO ALSO TEACHES (utils/teaching.ts). Judged on the role
+       after the patch, like sharing above: asking for it on anyone else is
+       refused, and moving a teaching sub admin to another role switches it
+       off — an instructor already teaches, and on any other role it would
+       quietly make them a mentor. */
+    if (dto.role !== undefined || dto.alsoTeaches !== undefined) {
+      const current  = await this.repo.findById(id)
+      if (!current) throw new UserError('USER_NOT_FOUND', 'User not found.', 404)
+      const nextRole = dto.role ?? current.role
+      if (dto.alsoTeaches === true && nextRole !== 'sub_admin') {
+        throw new UserError('INVALID_ALSO_TEACHES',
+          nextRole === 'instructor' ? 'An instructor already teaches — this is for sub admins.' : 'Only a sub admin can also teach classes.', 400)
+      }
+      if (dto.alsoTeaches !== undefined) update.alsoTeaches = dto.alsoTeaches
+      else if (nextRole !== 'sub_admin' && current.alsoTeaches) update.alsoTeaches = false
+    }
     if (dto.categories !== undefined) {
       /* Multi-select path: set categories directly, keep category in sync with first */
       update.categories = dto.categories as any
@@ -206,7 +223,7 @@ export class UserService {
        their Gmail arriving after classes were already scheduled. Re-point the
        co-host on their upcoming classes; classes already right are skipped, so
        a form re-saved unchanged costs one query. Never fails the save. */
-    if (updated.role === 'instructor' && (dto.meetEmail !== undefined || dto.email !== undefined)) {
+    if (teaches(updated as { role?: string; alsoTeaches?: boolean }) && (dto.meetEmail !== undefined || dto.email !== undefined)) {
       void import('@/services/liveClass.service.ts')
         .then(({ LiveClassService }) => new LiveClassService().resyncMeetCohostsFor(id))
         .then(n => { if (n) logger.info({ instructorId: id, classes: n }, 'meet co-host re-pointed after address change') })
@@ -243,6 +260,8 @@ export class UserService {
     /* Lend this instructor to the other academy. Gated to admin/super_admin in
        the route; the schema validator refuses it on any non-instructor. */
     sharedAcrossOrgs?: boolean
+    /* A sub admin who also teaches (utils/teaching.ts). Kept only on a sub admin. */
+    alsoTeaches?:    boolean
   }): Promise<IUser> {
     const exists = await this.repo.emailExists(dto.email)
     if (exists) {
@@ -276,6 +295,7 @@ export class UserService {
     if (dto.sharedAcrossOrgs && dto.role === 'instructor') {
       ;(patch as any).sharedAcrossOrgs = true
     }
+    if (dto.alsoTeaches === true && dto.role === 'sub_admin') (patch as any).alsoTeaches = true
     if (dto.role === 'student' && dto.approvedBy) {
       const { Types } = await import('mongoose')
       ;(patch as any).enrollmentStatus = 'approved'

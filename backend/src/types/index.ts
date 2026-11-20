@@ -18,6 +18,8 @@ export interface AuthUser {
   categoryScope?:  ProgramCategory
   organizationId?: string    // ObjectId as string — set by authenticateAdmin; undefined for super_admin with no org header
   program?:        ProgramType  // sub_admin only
+  /** A sub admin who also teaches classes — see utils/teaching.ts. */
+  alsoTeaches?:    boolean
   /* Present ONLY when this request is being made through an impersonation
      token (M-04). `id`/`email`/`role` remain the impersonated user — that is
      what authorisation must judge — while these record who is really behind

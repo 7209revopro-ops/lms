@@ -1,3 +1,4 @@
+import { teacherMatch } from '@/utils/teaching.ts'
 import { Router } from 'express'
 import type { Request, Response, NextFunction } from 'express'
 import { UserModel } from '@/models/schema.ts'
@@ -9,7 +10,7 @@ const router = Router()
 router.get('/', async (_req: Request, res: Response, next: NextFunction) => {
   try {
     const instructors = await UserModel
-      .find({ role: 'instructor', isActive: true })
+      .find({ ...teacherMatch(), isActive: true })
       .select('name avatarUrl headline')
       .sort({ name: 1 })
       .lean()

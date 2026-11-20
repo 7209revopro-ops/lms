@@ -1,3 +1,4 @@
+import { teaches } from '@/utils/teaching.ts'
 import { Router } from 'express'
 import { recheckTetraCs, recheckTetraCsLater, TetraCsUnavailableError } from '@/services/tetraCsRecheck.service.ts'
 import { resolveClassEntitlement } from '@/services/classEntitlement.service.ts'
@@ -382,6 +383,9 @@ const userUpdateSchema = z.object({
   /* Lend this instructor to the other academy. Who may SET it is enforced in
      the route, not here — a schema cannot see the caller's role. */
   sharedAcrossOrgs: z.boolean().optional(),
+  /* A sub admin who also teaches classes (utils/teaching.ts). Refused on any
+     other role by adminUpdate. This route is requireAdmin. */
+  alsoTeaches: z.boolean().optional(),
 }).refine(d => Object.keys(d).length > 0, { message: 'Provide at least one field' })
 
 const userCreateSchema = z.object({
@@ -407,6 +411,8 @@ const userCreateSchema = z.object({
   phone:      z.string().trim().max(30).optional(),
   /* Lend this instructor to the other academy — see userUpdateSchema. */
   sharedAcrossOrgs: z.boolean().optional(),
+  /* A sub admin who also teaches — see userUpdateSchema. */
+  alsoTeaches: z.boolean().optional(),
   courses:    z.array(z.object({
     courseId:       z.string().min(1),
     blockedLessons: z.array(z.string()).default([]),
@@ -2269,9 +2275,10 @@ const classOutcomeSchema = z.union([
 ])
 router.get('/class-outcomes/pending', requireInstructor, async (req: Request, res: Response, next: NextFunction) => {
   try {
-    if (req.user?.role !== 'instructor') { sendSuccess(res, { classes: [], next: null }); return }
+    /* A mentor — including a sub admin who also teaches (utils/teaching.ts). */
+    if (!teaches(req.user)) { sendSuccess(res, { classes: [], next: null }); return }
     const { pendingClassOutcomes } = await import('@/services/classOutcome.service.ts')
-    sendSuccess(res, await pendingClassOutcomes(String(req.user.id)))
+    sendSuccess(res, await pendingClassOutcomes(String(req.user!.id)))
   } catch (err) { next(err) }
 })
 router.post('/class-outcomes/:id', requireInstructor, validate(classOutcomeSchema),

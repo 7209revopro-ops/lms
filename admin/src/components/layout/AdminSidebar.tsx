@@ -19,6 +19,7 @@ import { useCurrentUser, logout } from '@/lib/api/user'
 import { useEnrollmentRequests } from '@/lib/api/enrollmentRequests'
 import { useUnreadSupportCount } from '@/lib/api/support'
 import { useRouter } from 'next/navigation'
+import { teaches } from '@/lib/teaching'
 
 /* ── All nav items (admin sees all) ──────────────────── */
 const adminNavItems = [
@@ -165,7 +166,10 @@ function SidebarContent({ collapsed, onClose }: SidebarContentProps) {
   const { data: pendingData } = useEnrollmentRequests('pending', undefined)
   const pendingCount = canSeeRequests ? (pendingData?.meta?.total_count ?? 0) : 0
   const { data: unreadSupport = 0 } = useUnreadSupportCount()
-  const { data: unreadChat = 0 } = useStaffUnread(isInstructor)
+  /* A sub admin who also teaches (lib/teaching.ts) keeps the Manager pages and
+     gets their own mentor ones too. */
+  const teachingManager = isManager && teaches(user)
+  const { data: unreadChat = 0 } = useStaffUnread(isInstructor || teachingManager)
   const baseNavItems = isInstructor ? instructorNavItems : isManager ? scopedAdminNavItems : adminNavItems
   /* Support sits in the admin nav but may not reach a classroom, live or
      recorded. Offering the link anyway would just hand them a 403. */
@@ -204,6 +208,11 @@ function SidebarContent({ collapsed, onClose }: SidebarContentProps) {
     : isManager ? [...withClassroom,
         { label: 'Email Logs', href: '/email-logs',  icon: Mail },
         { label: 'WhatsApp Logs', href: '/whatsapp-logs', icon: MessageCircle },
+        ...(teachingManager ? [
+          { label: 'Messages',        href: '/messages',        icon: MessageCircle },
+          { label: 'Availability',    href: '/availability',    icon: CalendarDays },
+          { label: 'Mentor Calendar', href: '/mentor-calendar', icon: CalendarDays },
+        ] : []),
       ]
     : withClassroom
   const navItems = allNavItems.filter(i => canView(i.href))

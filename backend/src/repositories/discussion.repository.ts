@@ -17,7 +17,7 @@ export class DiscussionThreadRepository {
   async findById(id: string | Types.ObjectId): Promise<IDiscussionThread | null> {
     return DiscussionThreadModel
       .findById(id)
-      .populate('authorId', 'name avatarUrl role')
+      .populate('authorId', 'name avatarUrl role alsoTeaches')
       .exec()
   }
 
@@ -30,7 +30,7 @@ export class DiscussionThreadRepository {
     const [docs, total] = await Promise.all([
       DiscussionThreadModel
         .find(filter)
-        .populate('authorId', 'name avatarUrl role')
+        .populate('authorId', 'name avatarUrl role alsoTeaches')
         .sort({ isPinned: -1, createdAt: -1 })
         .skip((page - 1) * perPage)
         .limit(perPage)
@@ -100,7 +100,7 @@ export class DiscussionCommentRepository {
   async listByThread(threadId: string | Types.ObjectId): Promise<IDiscussionComment[]> {
     return DiscussionCommentModel
       .find({ threadId, parentId: { $exists: false } })
-      .populate('authorId', 'name avatarUrl role')
+      .populate('authorId', 'name avatarUrl role alsoTeaches')
       .sort({ isInstructorAnswer: -1, upvoteCount: -1, createdAt: 1 })
       .exec()
   }
@@ -108,7 +108,7 @@ export class DiscussionCommentRepository {
   async listReplies(parentId: string | Types.ObjectId): Promise<IDiscussionComment[]> {
     return DiscussionCommentModel
       .find({ parentId })
-      .populate('authorId', 'name avatarUrl role')
+      .populate('authorId', 'name avatarUrl role alsoTeaches')
       .sort({ createdAt: 1 })
       .exec()
   }

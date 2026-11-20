@@ -32,6 +32,7 @@ import { zoneForAcademy } from '@/utils/academyClock.ts'
 import { zoneDateKey, zoneHourMinute, addDaysToDateKey, zoneDayBounds } from '@/utils/zoneDay.ts'
 import { wantsStaffEmail, type EmailPrefs } from '@/utils/emailPrefs.ts'
 import { sendInstructorDailySchedule, mentorJoinUrl, podLine, type ScheduleMailItem } from '@/services/email.service.ts'
+import { teacherMatch } from '@/utils/teaching.ts'
 
 export const SCHEDULE_MAIL_HOUR = (() => {
   const raw = Number(process.env['INSTRUCTOR_SCHEDULE_HOUR'])
@@ -159,7 +160,7 @@ export async function runInstructorScheduleMail(
   await ensureOrgSlugs().catch(() => {/* non-fatal — falls back to the default zone */})
 
   const instructors = await UserModel.find({
-    role: 'instructor',
+    ...teacherMatch(),   /* a sub admin who also teaches gets their day too */
     isActive: true,
     email: { $exists: true, $nin: [null, ''] },
   })

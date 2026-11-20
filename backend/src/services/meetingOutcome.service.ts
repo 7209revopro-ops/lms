@@ -1,3 +1,4 @@
+import { teacherMatch } from '@/utils/teaching.ts'
 import { Types } from 'mongoose'
 import { PortalError } from '@/services/portal.service.ts'
 import {
@@ -85,7 +86,7 @@ async function mentorByEmail(email: unknown) {
   const e = str(email).toLowerCase()
   if (!e) return null
   const { UserModel } = await import('@/models/schema.ts')
-  return UserModel.findOne({ email: e, role: 'instructor' }).select('name email').lean()
+  return UserModel.findOne({ email: e, ...teacherMatch() }).select('name email').lean()
 }
 
 /** LMS admin: the signed-in mentor's. */
@@ -103,7 +104,7 @@ export async function outcomeOptions() {
   const { CourseModel, SectionModel, UserModel } = await import('@/models/schema.ts')
   const [courses, mentors] = await Promise.all([
     CourseModel.find({ status: 'published' }).select('title').sort({ title: 1 }).lean(),
-    UserModel.find({ role: 'instructor', isActive: { $ne: false } }).select('name email').sort({ name: 1 }).lean(),
+    UserModel.find({ ...teacherMatch(), isActive: { $ne: false } }).select('name email').sort({ name: 1 }).lean(),
   ])
   const sections = await SectionModel.find({ courseId: { $in: courses.map((c) => c._id) } }).select('courseId title order').sort({ order: 1 }).lean()
   const modulesOf = new Map<string, { id: string; title: string }[]>()

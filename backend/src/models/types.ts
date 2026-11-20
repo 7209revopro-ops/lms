@@ -57,6 +57,9 @@ const SAFE_USER_FIELDS = [
   'emailPrefs',
   'aiUsage',
   'customRoleId', 'organizationId', 'program',
+  /* A sub admin who also teaches — the admin dashboard shows them their
+     mentor pages (utils/teaching.ts). */
+  'alsoTeaches',
   'category', 'categories',
   'signupType',
   'enrollmentStatus', 'enrollmentCancellationReason',

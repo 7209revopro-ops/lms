@@ -1,3 +1,4 @@
+import { teaches } from '@/utils/teaching.ts'
 import { Router, type Request, type Response, type NextFunction } from 'express'
 import { z } from 'zod'
 import {
@@ -26,7 +27,12 @@ const q = (req: Request) => req.query as Record<string, string | undefined>
 
 /* ── Instructor ─────────────────────────────────────── */
 const staff = Router()
-staff.use(authenticateAdmin, requireRole('instructor'))
+/* A mentor's own inbox: an instructor, or a sub admin who also teaches
+   (utils/teaching.ts). */
+staff.use(authenticateAdmin, (req, res, next) => {
+  if (teaches(req.user)) { next(); return }
+  sendError(res, 'FORBIDDEN', 'Insufficient permissions', 403)
+})
 staff.get('/conversations', wrap(async (req, res) => {
   sendSuccess(res, await chat.conversationsForInstructor(req.user!.id, q(req)))
 }))

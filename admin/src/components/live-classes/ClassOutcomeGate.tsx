@@ -7,6 +7,7 @@ import { useToast } from '@/store/ui.store'
 import { getActiveTimeZone, isoToDatetimeLocal, datetimeLocalToISO } from '@/lib/timezone'
 import { usePendingClassOutcomes, useAnswerClassOutcome, type PendingClass } from '@/lib/api/classOutcomes'
 import { markInstructorJoined } from '@/lib/api/liveClasses'
+import { teaches } from '@/lib/teaching'
 
 /* "Did the class end?" (the user, 2026-11-18: "after 30 min it will show a popup — ended or not, with review — it
    will never close"). For mentors, on every page: their classes 30 minutes after each starts, oldest first, one at
@@ -31,7 +32,7 @@ const dayOf = (iso: string, tz: string) => new Date(iso).toLocaleDateString('en-
 
 export function ClassOutcomeGate() {
   const { data: me } = useCurrentUser()
-  const isMentor = me?.role === 'instructor'
+  const isMentor = teaches(me)
   const pending = usePendingClassOutcomes(isMentor)
   const classes = pending.data?.classes ?? []
   const nextClass = pending.data?.next ?? null

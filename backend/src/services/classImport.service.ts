@@ -36,6 +36,7 @@
    unique in the database. A resume, a retry, or importing the same file twice
    cannot create the same class twice.
 ───────────────────────────────────────────────────── */
+import { teaches } from '@/utils/teaching.ts'
 import { Types, type HydratedDocument } from 'mongoose'
 import { logger } from '@/utils/logger.ts'
 import { ensureOrgSlugs, orgSlugFor } from '@/utils/orgSlugs.ts'
@@ -395,8 +396,10 @@ export class ClassImportService {
         ? { $or: [{ organizationId: course.organizationId }, { sharedAcrossOrgs: true }, { organizationId: { $exists: false } }] }
         : {}),
       ...deptOnly,
-    }).select('name email role').sort({ name: 1 }).lean<Array<{ _id: Types.ObjectId; name?: string; email?: string; role: string }>>()
-    const instructors = staff.map(u => ({ id: String(u._id), name: u.name ?? u.email ?? 'Unnamed', email: u.email ?? '', role: u.role }))
+    }).select('name email role alsoTeaches').sort({ name: 1 }).lean<Array<{ _id: Types.ObjectId; name?: string; email?: string; role: string; alsoTeaches?: boolean }>>()
+    /* A sub admin who also teaches is matched as a mentor, not as "other staff"
+       (utils/teaching.ts). */
+    const instructors = staff.map(u => ({ id: String(u._id), name: u.name ?? u.email ?? 'Unnamed', email: u.email ?? '', role: teaches(u) ? 'instructor' : u.role }))
     const byId = new Map(instructors.map(i => [i.id, i]))
 
     const matchMentor = (name: string, email: string): { inst: typeof instructors[number] | null; by: PreviewRow['matchedBy'] } => {

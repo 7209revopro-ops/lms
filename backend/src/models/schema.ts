@@ -164,6 +164,9 @@ export interface IUser extends Document {
   organizationId?: Types.ObjectId
   /** Instructor lent to the other academy — see the schema comment. */
   sharedAcrossOrgs?: boolean
+  /** A department's sub admin who also teaches classes (2026-11-20) — counts
+      as a mentor everywhere; see utils/teaching.ts. Sub admins only. */
+  alsoTeaches?: boolean
   /* The Google account this person signs in to Meet with, when it differs
      from their login email. Most instructors log in with a Zoho-hosted
      @deltainstitutions.com address that is not a Google account, so they
@@ -298,6 +301,9 @@ const UserSchema = new Schema<IUser>(
        the class of leak N-07 was, so it is made unpersistable rather than left
        to every write path to remember. */
     sharedAcrossOrgs: { type: Boolean, default: false, index: true },
+    /* A sub admin who also teaches (utils/teaching.ts). Meaningless on any
+       other role, so the validator below drops it there. */
+    alsoTeaches:    { type: Boolean },
     meetEmail:      { type: String, trim: true, lowercase: true, maxlength: 255 },
     program:        { type: String, enum: ['ai', 'digital_marketing', 'forex', 'jura', 'cma'] },
     lastLoginAt:    { type: Date },
@@ -422,6 +428,9 @@ UserSchema.pre('validate', function (next) {
     next(new Error('sharedAcrossOrgs may only be set on an instructor'))
     return
   }
+  /* Only a sub admin can also teach — an instructor already does, and on
+     any other role it would quietly make them a mentor. */
+  if (this.alsoTeaches && this.role !== 'sub_admin') this.alsoTeaches = undefined
   next()
 })
 

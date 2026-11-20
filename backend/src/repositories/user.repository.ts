@@ -2,6 +2,7 @@ import { Types } from 'mongoose'
 import { BaseRepository } from './base.repository.ts'
 import { UserModel, RefreshTokenModel, AuthTokenModel, PushTokenModel } from '@/models/schema.ts'
 import { sharedInstructorFilter, andFilter } from '@/utils/tenancy.ts'
+import { teacherMatch } from '@/utils/teaching.ts'
 import type {
   IUser, IRefreshToken, IAuthToken, AuthTokenPurpose, RefreshTokenRevokeReason,
 } from '@/models/schema.ts'
@@ -194,7 +195,9 @@ export class UserRepository extends BaseRepository<IUser> {
 
     if (params.excludeStudents) {
       filter['role'] = { $ne: 'student' }
-    } else if (role) {
+    } else if (role && role !== 'instructor') {
+      /* role 'instructor' is applied below, after the search clauses — they
+         assign filter.$and outright. */
       filter['role'] = role
     }
 
@@ -261,6 +264,11 @@ export class UserRepository extends BaseRepository<IUser> {
     } else if (searchAnd.length) {
       filter['$and'] = searchAnd
     }
+
+    /* The mentor lists and pickers: an instructor, or a sub admin who also
+       teaches (utils/teaching.ts). Added to $and AFTER the assignments above,
+       which would otherwise overwrite it and drop the role entirely. */
+    if (role === 'instructor' && !params.excludeStudents) andFilter(filter, teacherMatch())
 
     /* No phone: neither on the account nor on the application. Under $and,
        like the academy below, so the search and programme clauses stay. */

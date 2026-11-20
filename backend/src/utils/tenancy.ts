@@ -1,3 +1,4 @@
+import { teaches } from '@/utils/teaching.ts'
 import { Types } from 'mongoose'
 import { CROSS_ORG_CLASSES_ENABLED } from '@/utils/featureFlags.ts'
 import type { Request, Response, NextFunction } from 'express'
@@ -270,9 +271,11 @@ export async function instructorOwnsSession(
   live: { instructorId?: unknown; courseId?: unknown } | null | undefined,
 ): Promise<boolean> {
   if (!live) return false
-  if (req.user?.role !== 'instructor') return false
+  /* An instructor — or a sub admin who also teaches (utils/teaching.ts), for
+     a class of theirs outside their department. Still only THEIR class. */
+  if (!teaches(req.user)) return false
 
-  const userId = String(req.user.id)
+  const userId = String(req.user!.id)
   if (live.instructorId) return String(live.instructorId) === userId
 
   if (live.courseId) {

@@ -13,6 +13,7 @@
      POST …/corrections                       x-portal-secret: ROOT_ERP_SECRET
 ───────────────────────────────────────────────────────────── */
 
+import { teacherMatch, teaches } from '@/utils/teaching.ts'
 const MONTH = /^\d{4}-(0[1-9]|1[0-2])$/
 const base = (v: unknown) => String(v ?? '').trim().replace(/\/+$/, '').replace(/\/api\/v1$/, '')
 const str = (v: unknown, max = 2000) => String(v ?? '').trim().slice(0, max)
@@ -48,15 +49,15 @@ async function callRoot(path: string, init: { method?: 'GET' | 'POST'; body?: un
   throw new KpiError(message, res.status >= 500 || res.status === 401 ? 502 : res.status)
 }
 
-type Viewer = { id: string; email?: string; role: string; organizationId?: unknown }
+type Viewer = { id: string; email?: string; role: string; organizationId?: unknown; alsoTeaches?: boolean }
 const TEAM_ROLES = new Set(['super_admin', 'admin', 'sub_admin'])
 
 /** The mentors (instructors) this person may see, by address: their own; an admin their academy's; a super admin all. */
 export async function kpiReach(user: Viewer): Promise<{ emails: Set<string>; team: boolean }> {
   const { UserModel } = await import('@/models/schema.ts')
   const own = str(user.email).toLowerCase()
-  if (!TEAM_ROLES.has(user.role)) return { emails: new Set(user.role === 'instructor' && own ? [own] : []), team: false }
-  const filter: Record<string, unknown> = { role: 'instructor', isActive: { $ne: false } }
+  if (!TEAM_ROLES.has(user.role)) return { emails: new Set(teaches(user) && own ? [own] : []), team: false }
+  const filter: Record<string, unknown> = { ...teacherMatch(), isActive: { $ne: false } }
   if (user.role !== 'super_admin') {
     if (!user.organizationId) return { emails: new Set(), team: true }
     filter['organizationId'] = user.organizationId
@@ -67,7 +68,7 @@ export async function kpiReach(user: Viewer): Promise<{ emails: Set<string>; tea
 
 /** An instructor's own month. */
 export async function myKpis(user: Viewer, month: unknown) {
-  if (user.role !== 'instructor' || !str(user.email).includes('@')) throw new KpiError('My KPIs are for mentors', 403)
+  if (!teaches(user) || !str(user.email).includes('@')) throw new KpiError('My KPIs are for mentors', 403)
   return callRoot(`/mentor?${new URLSearchParams({ email: str(user.email).toLowerCase(), month: kpiMonth(month) })}`)
 }
 

@@ -202,6 +202,8 @@ export function EditUserModal({ user, me, onClose, onSuccess }: Props) {
   })
   const [isActive,      setIsActive]      = useState(user.isActive)
   const [isVerified,    setIsVerified]    = useState(user.isVerified)
+  /* A sub admin who also teaches classes (lib/teaching.ts). */
+  const [alsoTeaches,   setAlsoTeaches]   = useState(user.alsoTeaches === true)
   const [meetEmail,     setMeetEmail]     = useState(user.meetEmail ?? '')
   const [avatarPreview, setAvatarPreview] = useState<string | null>(user.avatarUrl ?? null)
   const [avatarFile,    setAvatarFile]    = useState<File | null>(null)
@@ -257,6 +259,14 @@ export function EditUserModal({ user, me, onClose, onSuccess }: Props) {
         }
       } else if (!needsProgram(activeRole)) {
         dto.category = null
+      }
+      /* Also teaches — sub admins only; the server switches it off on any
+         other role. A teaching sub admin also carries their department as a
+         mentor's category, which is what chat, the mentor pickers and the
+         timetable import match mentors on. */
+      if (activeRole === 'sub_admin') {
+        if (alsoTeaches !== (user.alsoTeaches === true)) dto.alsoTeaches = alsoTeaches
+        if (alsoTeaches && program) dto.category = PROGRAM_TO_CATEGORY[program]
       }
       if (meetEmail.trim() !== (user.meetEmail ?? '')) dto.meetEmail = meetEmail.trim()
 
@@ -437,8 +447,18 @@ export function EditUserModal({ user, me, onClose, onSuccess }: Props) {
                 />
               )}
 
-              {/* Google account for Meet — instructors only */}
-              {activeRole === 'instructor' && (
+              {/* Also teaches — a sub admin who takes classes too */}
+              {activeRole === 'sub_admin' && (
+                <div className="rounded-xl px-3 py-2.5" style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)' }}>
+                  <Toggle label="Also teaches classes" checked={alsoTeaches} onChange={setAlsoTeaches} color="#8b5cf6" />
+                  <p className="mt-1 text-[11px]" style={{ color: 'rgba(255,255,255,0.45)' }}>
+                    Counts as a mentor too: can be given classes, gets the class-end questions, mentor chat and schedule emails.
+                  </p>
+                </div>
+              )}
+
+              {/* Google account for Meet — instructors, and sub admins who teach */}
+              {(activeRole === 'instructor' || (activeRole === 'sub_admin' && alsoTeaches)) && (
                 <MeetEmailField
                   value={meetEmail}
                   onChange={setMeetEmail}

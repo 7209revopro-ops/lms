@@ -6,6 +6,7 @@ import { useCurrentUser } from '@/lib/api/user'
 import { useToast } from '@/store/ui.store'
 import Spinner from '@/components/ui/Spinner'
 import { getActiveTimeZone } from '@/lib/timezone'
+import { teaches } from '@/lib/teaching'
 import {
   usePendingMeetingOutcomes, useMeetingOutcomeOptions, useSaveMeetingOutcome,
   type ClientProfile, type OutcomeInput, type OutcomeStage, type PendingMeeting,
@@ -73,7 +74,7 @@ const INTENTS: [string, string][] = [
 
 export function MeetingOutcomeGate() {
   const { data: me } = useCurrentUser()
-  const isMentor = me?.role === 'instructor'
+  const isMentor = teaches(me)
   const pending = usePendingMeetingOutcomes(isMentor)
   const meetings = pending.data ?? []
   const options = useMeetingOutcomeOptions(isMentor && meetings.length > 0)
