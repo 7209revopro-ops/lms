@@ -227,6 +227,11 @@ const financeEnrolmentSchema = z.object({
      whichever CRM sold it. Absent from an older finance: the Banglore CRM's are
      Bangalore, the rest as before. */
   academy: z.enum(SALE_ACADEMIES).optional(),
+  /* DUBAI-STUD (2026-11-20): sold for the Bangalore academy by the Sales CRM,
+     Draw or Remote. Its money is Bangalore's, but the student is a Dubai
+     student — a new one is put in the Dubai academy. Absent from an older
+     finance, and on every other enrolment. */
+  dubaiStudent: z.boolean().optional(),
 })
 
 router.post('/finance/enrolment', validate(financeEnrolmentSchema), async (req: Request, res: Response, next: NextFunction) => {
@@ -242,13 +247,14 @@ router.post('/finance/enrolment', validate(financeEnrolmentSchema), async (req: 
       return
     }
 
-    const { email, name, phone, courseSlug, invoiceId, invoiceNumber, amount, amountMinor, currency, paymentStatus, feeSummary, crm, academy } = req.body as {
+    const { email, name, phone, courseSlug, invoiceId, invoiceNumber, amount, amountMinor, currency, paymentStatus, feeSummary, crm, academy, dubaiStudent } = req.body as {
       email: string; name?: string; phone?: string; courseSlug: string
       invoiceId: string; invoiceNumber?: string; amount?: number; amountMinor?: number; currency?: string
       paymentStatus?: PaymentAccessStatus
       feeSummary?: Parameters<typeof orderSvc.provisionFinanceEnrolment>[0]['feeSummary']
       crm?: SalesCrm
       academy?: SaleAcademy
+      dubaiStudent?: boolean
     }
 
     let result
@@ -264,6 +270,7 @@ router.post('/finance/enrolment', validate(financeEnrolmentSchema), async (req: 
         ...(feeSummary ? { feeSummary } : {}),
         ...(crm ? { salesCrm: crm } : {}),
         ...(academy ? { academy } : {}),
+        ...(dubaiStudent === true ? { dubaiStudent: true } : {}),
       })
     } catch (err) {
       /* An unmapped or renamed slug is the caller's mistake and will fail the

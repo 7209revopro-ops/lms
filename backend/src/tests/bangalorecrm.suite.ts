@@ -171,6 +171,29 @@ step('F. The academy picked at the close')
   check('an unknown academy is refused with a 422, nobody created', bad.status === 422 && !(await userOf('bad.academy@t.local')), `${bad.status}`)
 }
 
+step('G. DUBAI-STUD (2026-11-20): sold for Bangalore by the Dubai side, a Dubai student')
+{
+  const blrCourse = await new CourseModel({
+    instructorId: instructor._id,
+    title: 'Bangalore-run course', slug: 'blr-run-suite', program: '4x-trading',
+    organizationId: bangalore._id, price: 25000, isPublished: true,
+  }).save()
+  const r1 = await enrol('ds.new@t.local', 'delta', { academy: 'bangalore', dubaiStudent: true, courseSlug: blrCourse.slug, currency: 'INR' })
+  check('a new DUBAI-STUD is created in the Dubai academy, though Bangalore runs the course', r1.status === 200 && same((await userOf('ds.new@t.local'))?.organizationId, dubai._id), `${r1.status} ${JSON.stringify(r1.body?.error ?? '')}`)
+  const dsUser = await userOf('ds.new@t.local')
+  const dsEnrolment = dsUser ? await EnrollmentModel.findOne({ userId: dsUser._id, courseId: blrCourse._id }).lean() as any : null
+  check('...enrolled on that course, tagged with its CRM', dsEnrolment?.salesCrm === 'delta')
+  await enrol('ds.remote@t.local', 'remote', { academy: 'bangalore', dubaiStudent: true })
+  check('a Remote DUBAI-STUD on a Dubai-run course: in Dubai', same((await userOf('ds.remote@t.local'))?.organizationId, dubai._id))
+  await enrol('ds.false@t.local', 'draw', { academy: 'bangalore', dubaiStudent: false })
+  check('dubaiStudent false is an ordinary Bangalore close: in Bangalore', same((await userOf('ds.false@t.local'))?.organizationId, bangalore._id))
+  await UserModel.create({ name: 'Bangalore Student 2', email: 'blr.two@t.local', role: 'student', organizationId: bangalore._id, enrollmentStatus: 'approved' } as never)
+  const left = await enrol('blr.two@t.local', 'delta', { academy: 'bangalore', dubaiStudent: true })
+  check('an existing Bangalore student as a DUBAI-STUD: enrolled, left where they are (the backfill moves them)', left.status === 200 && same((await userOf('blr.two@t.local'))?.organizationId, bangalore._id) && !!(await enrolmentOf('blr.two@t.local')))
+  const odd = await enrol('ds.odd@t.local', 'delta', { academy: 'bangalore', dubaiStudent: 'yes' })
+  check('a dubaiStudent that is not true/false is refused, nobody created', odd.status >= 400 && odd.status < 500 && !(await userOf('ds.odd@t.local')), `${odd.status}`)
+}
+
 server.close()
 await mongoose.connection.dropDatabase()
 await mongoose.disconnect()

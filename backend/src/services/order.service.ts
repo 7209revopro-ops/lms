@@ -2201,6 +2201,8 @@ export class OrderService {
     salesCrm?: SalesCrm
     /** Which academy the close was sold for. Absent from an older finance. */
     academy?: SaleAcademy
+    /** DUBAI-STUD (2026-11-20): sold for Bangalore by the Dubai side — a new student goes in the Dubai academy. */
+    dubaiStudent?: boolean
   }): Promise<{
     userId: string
     created: boolean
@@ -2267,8 +2269,25 @@ export class OrderService {
        out of that academy's lists, reports and staff's reach without anybody
        deciding it. */
     let userOrganizationId: unknown
-    const forBangalore = input.academy ? input.academy === 'bangalore' : input.salesCrm === 'banglore'
-    if (forBangalore) {
+    /* DUBAI-STUD (2026-11-20): a close the Sales CRM, Draw or Remote sold for
+       the Bangalore academy. Its money is Bangalore's, the student is Dubai's:
+       a new account goes in the Dubai academy, whichever academy runs the
+       course. One already in another academy is left there, as below — the
+       DUBAI-STUD backfill moves those (scripts/move-student-org.ts). */
+    const forDubaiStudent = input.dubaiStudent === true
+    const forBangalore = !forDubaiStudent && (input.academy ? input.academy === 'bangalore' : input.salesCrm === 'banglore')
+    if (forDubaiStudent) {
+      const { OrganizationModel } = await import('@/models/schema.ts')
+      const dubai = await OrganizationModel.findOne({ slug: 'dubai' }).select('_id').lean()
+      if (dubai?._id) userOrganizationId = dubai._id
+      else logger.warn({ externalId: input.externalId, salesCrm: input.salesCrm }, 'DUBAI-STUD enrolment: no organisation with slug "dubai" — the course\'s academy is used')
+      const existing = await UserModel.findOne({ email: input.email.toLowerCase().trim() }).select('organizationId').lean()
+      const theirs = (existing as { organizationId?: unknown } | null)?.organizationId
+      if (dubai?._id && theirs && String(theirs) !== String(dubai._id)) {
+        logger.warn({ externalId: input.externalId, userId: String(existing!._id), salesCrm: input.salesCrm },
+          'DUBAI-STUD enrolment for a student of another academy — left in their academy, not moved to Dubai')
+      }
+    } else if (forBangalore) {
       const { OrganizationModel } = await import('@/models/schema.ts')
       const bangalore = await OrganizationModel.findOne({ slug: 'bangalore' }).select('_id').lean()
       if (bangalore?._id) userOrganizationId = bangalore._id
