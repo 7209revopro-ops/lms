@@ -34,7 +34,47 @@ export const ATTEMPT_TIMEOUT_MS = 45_000
     the budget survives for the genuine second try a student may still need. */
 export const ATTEMPTS = 2
 
-const RETRY_DELAY_MS = 1200
+/* The profile photo gets one more try (2026-11-20). It is the smallest of the
+   three (≤ ~0.6 MB after shrinking) and the one students reported failing, so
+   a third, later attempt costs little and outlasts a longer blip. Worst case
+   per submit: 2 + 2 + 3 = 7 files against the 45/hour bucket. */
+export const PHOTO_ATTEMPTS = 3
+
+/** Wait before attempt 2, 3 — growing, so a phone that dropped off the
+    network has a few seconds to come back rather than 1.2. */
+const RETRY_DELAYS_MS = [2000, 5000]
+
+/** The browser can no longer read the file the student picked. Retrying the
+    network will never fix this, and "check your internet" sends them the
+    wrong way: they must choose the file again. Carries the File so the form
+    can tell which box to send them back to. */
+export class UnreadableFileError extends Error {
+  constructor(readonly file: File, label: string) {
+    super(`We could not read your ${label} from your phone any more. Please go back, choose it again, then tap Submit.`)
+    this.name = 'UnreadableFileError'
+  }
+}
+
+/** True when the browser can still read this file's bytes. */
+export async function canRead(file: Blob): Promise<boolean> {
+  try { await file.slice(0, 1).arrayBuffer(); return true } catch { return false }
+}
+
+/**
+ * Copy a picked file into the page's memory (2026-11-20).
+ *
+ * On Android a picked file is a pointer to the gallery (a content:// URI),
+ * read only when the upload is sent. The photo is picked on the first screen
+ * and sent four screens and an email code later, by which time the browser
+ * may no longer be allowed to read it — the upload then dies with no response
+ * ("Failed to fetch"), every retry the same, and the student was told to check
+ * their internet. A copy taken at pick time is always readable. Throws when
+ * the file cannot be read even now, so the form can say so at once.
+ */
+export async function holdInMemory(file: File): Promise<File> {
+  const bytes = await file.arrayBuffer()
+  return new File([bytes], file.name, { type: file.type, lastModified: file.lastModified })
+}
 
 export interface UploadDeps {
   fetchImpl?: typeof fetch
@@ -62,9 +102,13 @@ export async function uploadSignupDoc(
 
   const doFetch = deps.fetchImpl ?? fetch
   const sleep   = deps.sleep ?? ((ms: number) => new Promise<void>(r => setTimeout(r, ms)))
+  const tries   = kind === 'photo' ? PHOTO_ATTEMPTS : ATTEMPTS
+
+  /* Not readable: no amount of network will send it. */
+  if (!await canRead(file)) throw new UnreadableFileError(file, label)
 
   let lastErr: unknown
-  for (let attempt = 1; attempt <= ATTEMPTS; attempt++) {
+  for (let attempt = 1; attempt <= tries; attempt++) {
     /* AbortController rather than AbortSignal.timeout: this page is the first
        thing a new student loads, on whatever phone they own, and the static
        method is too new to assume. */
@@ -84,8 +128,8 @@ export async function uploadSignupDoc(
       res = await doFetch('/api/v1/uploads/signup-doc', { method: 'POST', body: fd, signal: ac.signal })
     } catch (err) {
       lastErr = err
-      if (!isTransportError(err) || attempt === ATTEMPTS) break
-      await sleep(RETRY_DELAY_MS)
+      if (!isTransportError(err) || attempt === tries) break
+      await sleep(RETRY_DELAYS_MS[attempt - 1] ?? RETRY_DELAYS_MS[RETRY_DELAYS_MS.length - 1]!)
       continue
     } finally {
       clearTimeout(timer)
@@ -125,7 +169,9 @@ export async function uploadSignupDoc(
 
   /* Every attempt failed before a response arrived. Name the document, and
      say the finished ones are kept — the next tap really is cheaper, and
-     nothing on screen would otherwise suggest it. */
+     nothing on screen would otherwise suggest it. But first: if the file has
+     become unreadable, that — not the connection — is why nothing came back. */
+  if (!await canRead(file)) throw new UnreadableFileError(file, label)
   const why = describeTransportError(lastErr) ?? 'The upload did not complete.'
   throw new Error(
     `${why.replace(/\.$/, '')} — your ${label} did not finish uploading. ` +

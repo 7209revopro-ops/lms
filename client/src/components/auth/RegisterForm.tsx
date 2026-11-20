@@ -16,7 +16,7 @@ import { TermsModal } from './TermsModal'
 import Spinner from '@/components/ui/Spinner'
 import { PROGRAMS, PROGRAM_GROUPS, programLabel, CMA_PROGRAM_ID } from '@/lib/programs'
 import { describeTransportError, describeStatus } from '@/lib/apiResponse'
-import { uploadSignupDoc } from '@/lib/signupUpload'
+import { uploadSignupDoc, holdInMemory, UnreadableFileError } from '@/lib/signupUpload'
 import { compressImageIfNeeded } from '@/lib/imageCompression'
 import { isValidPhoneNumber } from 'libphonenumber-js'
 
@@ -123,6 +123,17 @@ const MAX_FILE_BYTES = 3 * 1024 * 1024 // 3 MB — enforced on all document uplo
    resolution for review and are not the upload that fails. */
 const AVATAR_MAX_BYTES     = 600 * 1024 // ~0.6 MB
 const AVATAR_MAX_DIMENSION = 1024
+
+/* Shown when the phone will not let the page read a file it just picked
+   (a cloud-only gallery item, a revoked permission). Said at pick time, where
+   choosing again is one tap away. */
+const UNREADABLE_PICK = 'We could not read that file from your phone. Please choose it again (or pick a different copy).'
+
+/** Copy the picked (and shrunk) file into memory so it can still be sent at
+    Submit, four screens later — see holdInMemory. null when unreadable. */
+async function keepPicked(f: File): Promise<File | null> {
+  try { return await holdInMemory(f) } catch { return null }
+}
 
 /* The server's upload allow-lists (backend/src/middleware/upload.middleware.ts),
    applied here FIRST so a wrong file is refused where it was picked and the
@@ -1191,6 +1202,22 @@ export function RegisterForm({ onSwitch, lockFull = false }: { onSwitch: () => v
 
       window.location.href = returnTo()
     } catch (err: unknown) {
+      /* A picked file the phone will no longer let us read. Clear it and take
+         the student to its box: choosing it again is the only fix. */
+      if (err instanceof UnreadableFileError) {
+        setApiErr(err.message); setApiErrCode(null); setLoading(false)
+        if (err.file === avatarFile) {
+          setAvatarFile(null); setAvatarPreview(null); setAvatarError('Please choose your profile photo again.')
+          scrollToErrorRef.current = true; setStep(0)
+        } else if (err.file === data.passportFile) {
+          set('passportFile', null); setErrors(e => ({ ...e, passportFile: 'Please choose your passport copy again.' }))
+          scrollToErrorRef.current = true; setStep(1)
+        } else if (err.file === data.idDocFile) {
+          set('idDocFile', null); setErrors(e => ({ ...e, idDocFile: 'Please choose this document again.' }))
+          scrollToErrorRef.current = true; setStep(1)
+        }
+        return
+      }
       const response = (err as { response?: { status?: number; data?: { error?: { message?: string; code?: string; details?: unknown } } } })?.response
       const resp = response?.data?.error
       const code = resp?.code
@@ -1365,8 +1392,10 @@ export function RegisterForm({ onSwitch, lockFull = false }: { onSwitch: () => v
                 setAvatarError('Profile photo must not exceed 3 MB')
                 return
               }
-              setAvatarFile(compressed)
-              setAvatarPreview(URL.createObjectURL(compressed))
+              const held = await keepPicked(compressed)
+              if (!held) { setAvatarError(UNREADABLE_PICK); return }
+              setAvatarFile(held)
+              setAvatarPreview(URL.createObjectURL(held))
             }}
           />
           <p className="text-[11px] text-[var(--color-text-muted)]">Profile photo <span className="text-red-400">*</span> <span className="text-[var(--color-text-muted)]">(max 3 MB)</span></p>
@@ -1538,7 +1567,9 @@ export function RegisterForm({ onSwitch, lockFull = false }: { onSwitch: () => v
                   setErrors(e => ({ ...e, passportFile: 'Passport copy must not exceed 3 MB' }))
                   return
                 }
-                set('passportFile', compressed)
+                const held = await keepPicked(compressed)
+                if (!held) { setErrors(e => ({ ...e, passportFile: UNREADABLE_PICK })); return }
+                set('passportFile', held)
               }}
               onClear={() => set('passportFile', null)}
               hint="Clear scan or photo of your passport identity page (max 3 MB)"
@@ -1577,7 +1608,9 @@ export function RegisterForm({ onSwitch, lockFull = false }: { onSwitch: () => v
                       setErrors(e => ({ ...e, idDocFile: `${docMeta.label} must not exceed 3 MB` }))
                       return
                     }
-                    set('idDocFile', compressed)
+                    const held = await keepPicked(compressed)
+                    if (!held) { setErrors(e => ({ ...e, idDocFile: UNREADABLE_PICK })); return }
+                    set('idDocFile', held)
                   }}
                   onClear={() => set('idDocFile', null)}
                   hint={docMeta.hint}

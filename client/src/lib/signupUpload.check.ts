@@ -7,7 +7,7 @@
    come back — and that is precisely what filling in the form by hand will
    almost never show you.
    ───────────────────────────────────────────────────────────────────────── */
-import { uploadSignupDoc, ATTEMPTS, __forgetUpload } from '@/lib/signupUpload'
+import { uploadSignupDoc, ATTEMPTS, PHOTO_ATTEMPTS, UnreadableFileError, holdInMemory, __forgetUpload } from '@/lib/signupUpload'
 
 let pass = 0, fail = 0
 const check = (name: string, ok: boolean, detail = '') => {
@@ -124,6 +124,57 @@ console.log('\nF. Each attempt is given a deadline')
   const r = await grab(() => uploadSignupDoc(file(), 'kyc', 'passport copy', { fetchImpl: stall, sleep: nosleep }))
   check('F2 a stalled request ends rather than hanging', !!r.err, JSON.stringify(r))
   check('F3 and reads as slow, not broken', !!r.err && /took too long/i.test(r.err), r.err)
+}
+
+console.log('\nG. The profile photo gets one more try than a document')
+{
+  let calls = 0
+  const f = (async () => { calls++; if (calls < 3) throw dropped(); return ok('https://r2/photo.jpg') }) as unknown as typeof fetch
+  const r = await grab(() => uploadSignupDoc(file('me.jpg'), 'photo', 'profile photo', { fetchImpl: f, sleep: nosleep }))
+  check(`G1 a photo is tried ${PHOTO_ATTEMPTS} times and the third lands`, r.url === 'https://r2/photo.jpg' && calls === 3, `${calls} ${JSON.stringify(r)}`)
+  let c2 = 0
+  const f2 = (async () => { c2++; throw dropped() }) as unknown as typeof fetch
+  await grab(() => uploadSignupDoc(file('doc.jpg'), 'kyc', 'passport copy', { fetchImpl: f2, sleep: nosleep }))
+  check(`G2 a document still stops at ${ATTEMPTS}`, c2 === ATTEMPTS, String(c2))
+  const waits: number[] = []
+  let c3 = 0
+  const f3 = (async () => { c3++; throw dropped() }) as unknown as typeof fetch
+  await grab(() => uploadSignupDoc(file('me2.jpg'), 'photo', 'profile photo', { fetchImpl: f3, sleep: async ms => { waits.push(ms) } }))
+  check('G3 the waits grow (2 s, then 5 s)', JSON.stringify(waits) === '[2000,5000]', JSON.stringify(waits))
+}
+
+console.log('\nH. A file the phone will no longer read: "choose it again", not "check your internet"')
+{
+  /* What Android hands back for a gallery file whose permission has gone:
+     a File whose bytes cannot be read. */
+  const gone = file('gone.jpg')
+  ;(gone as unknown as { slice: () => Blob }).slice = () => ({ arrayBuffer: () => Promise.reject(new DOMException('NotReadableError', 'NotReadableError')) }) as unknown as Blob
+  let calls = 0
+  const f = (async () => { calls++; throw dropped() }) as unknown as typeof fetch
+  let caught: unknown
+  try { await uploadSignupDoc(gone, 'photo', 'profile photo', { fetchImpl: f, sleep: nosleep }) } catch (e) { caught = e }
+  check('H1 it is an UnreadableFileError carrying the file', caught instanceof UnreadableFileError && (caught as UnreadableFileError).file === gone, String(caught))
+  check('H2 nothing is sent for it', calls === 0, String(calls))
+  const m = (caught as Error)?.message ?? ''
+  check('H3 it says to choose it again, and names it', /choose it again/i.test(m) && /profile photo/.test(m) && !/internet/i.test(m), m)
+
+  /* Readable at first, unreadable by the time every attempt has failed. */
+  const fades = file('fades.jpg')
+  let reads = 0
+  const realSlice = fades.slice.bind(fades)
+  ;(fades as unknown as { slice: (...a: unknown[]) => Blob }).slice = (...a: unknown[]) => {
+    reads++
+    if (reads > 1) return { arrayBuffer: () => Promise.reject(new Error('gone')) } as unknown as Blob
+    return realSlice(...(a as []))
+  }
+  let c2 = 0
+  const f2 = (async () => { c2++; throw dropped() }) as unknown as typeof fetch
+  let caught2: unknown
+  try { await uploadSignupDoc(fades, 'kyc', 'passport copy', { fetchImpl: f2, sleep: nosleep }) } catch (e) { caught2 = e }
+  check('H4 after the attempts fail, an unreadable file is named as the cause', caught2 instanceof UnreadableFileError && c2 === ATTEMPTS, `${String(caught2)} ${c2}`)
+
+  const held = await holdInMemory(file('keep.jpg'))
+  check('H5 holdInMemory keeps name, type and size', held.name === 'keep.jpg' && held.type === 'image/jpeg' && held.size === 1024)
 }
 
 console.log(`\nsignupUpload.check — ${pass} passed, ${fail} failed\n`)
