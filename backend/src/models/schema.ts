@@ -1386,7 +1386,15 @@ export interface ILiveClass extends Document {
   endedAt?:       Date
   /* Who said the class ended, when it wasn't the LMS's own room or stream: 'meet' — Google Meet's
      conference record (reminders.job.ts runMeetClassEnd; Meet sends no webhook). */
-  endSource?:     'meet'
+  endSource?:     'meet' | 'mentor'
+  /* The mentor's "did the class end?" pop-up (2026-11-18, services/classOutcome.service.ts): when they answered
+     "it ended" (with the review), and — after "still going" — when to ask again. */
+  mentorOutcomeAt?: Date
+  endAskAfter?:     Date
+  /* Cancelled — or, in report mode, would have been — for having no bookings 10 minutes before the start
+     (2026-11-18, runAutoCancelEmpty). Set once, so each class is looked at once. */
+  emptyCheckedAt?:  Date
+  emptyWouldCancel?: boolean
 
   /* Module (section) link — optional, associates session with a course section */
   sectionId?:        Types.ObjectId
@@ -1597,7 +1605,11 @@ const LiveClassSchema = new Schema<ILiveClass>(
     viewerCount:       { type: Number, default: 0 },
     startedAt:         { type: Date },
     endedAt:           { type: Date },
-    endSource:         { type: String, enum: ['meet'] },
+    endSource:         { type: String, enum: ['meet', 'mentor'] },
+    mentorOutcomeAt:   { type: Date },
+    endAskAfter:       { type: Date },
+    emptyCheckedAt:    { type: Date },
+    emptyWouldCancel:  { type: Boolean },
     // Module link
     sectionId:         { type: Schema.Types.ObjectId, ref: 'Section' },
     /* 100000, not 500: a Program seats all its students (thousands); the class forms keep their own 500 (admin.routes.ts). */
@@ -2830,6 +2842,7 @@ export type AuditAction =
   | 'settings.device-limit'
   | 'settings.finance-check'
   | 'class.verify'
+  | 'class.outcome'
   | 'message.send'
 
 export interface IAuditLog extends Document {

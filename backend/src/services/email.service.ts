@@ -1130,6 +1130,28 @@ export async function sendMentorVerifyRequest(
   })
 }
 
+/* A class called off for having no bookings 10 minutes before its start (2026-11-18, runAutoCancelEmpty) — so the
+   mentor does not open an empty room. */
+export async function sendMentorClassAutoCancelled(
+  to: string,
+  name: string,
+  liveTitle: string,
+  whenText: string,
+): Promise<void> {
+  const subject = `Cancelled: "${liveTitle}" — no students booked`
+  const lead = `Your class <strong>${escapeHtml(liveTitle)}</strong> (${escapeHtml(whenText)}) had no bookings 10 minutes before it started, so it has been cancelled. You don't need to join it.`
+  const html = wrap(subject, `
+    <h2 style="margin:0 0 16px;font-size:20px;font-weight:700;color:#0D0F1A">Class cancelled — no bookings</h2>
+    <p>Hi ${escapeHtml(name)},</p>
+    <p>${lead}</p>
+    <p>If students were expecting this class, tell your admin and it can be scheduled again.</p>
+  `)
+  await sender.send({
+    to, subject, html,
+    text: `Hi ${name},\n\n${lead.replace(/<[^>]+>/g, '')}\n\nIf students were expecting this class, tell your admin and it can be scheduled again.`,
+  })
+}
+
 export async function sendMentorNoShowAlert(
   to: string,
   recipientName: string,

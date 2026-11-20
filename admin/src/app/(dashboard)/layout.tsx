@@ -11,6 +11,7 @@ import { InstallPopup } from '@/components/pwa/InstallPopup'
 import { AdminGuard } from '@/components/auth/AdminGuard'
 import { RootPortalHistoryBridge } from '@/components/RootPortalHistoryBridge'
 import { MeetingOutcomeGate } from '@/components/meetings/MeetingOutcomeGate'
+import { ClassOutcomeGate } from '@/components/live-classes/ClassOutcomeGate'
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   const { sidebarCollapsed } = useUIStore()
@@ -52,6 +53,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         <Toaster />
         <InstallPopup />
         <MeetingOutcomeGate />
+        <ClassOutcomeGate />
       </div>
     </AdminGuard>
   )

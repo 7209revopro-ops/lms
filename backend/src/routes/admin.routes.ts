@@ -1790,7 +1790,11 @@ router.get('/recordings', requireAnyAdmin, requireClassroomAccess, async (req: R
     const { Types } = await import('mongoose')
     const { page, per_page } = parsePagination(req.query as Record<string, unknown>)
 
-    const filter: Record<string, unknown> = { cltRecordingId: { $exists: true } }
+    /* The classroom's own recordings (cltRecordingId, played through CLT below) and, since 2026-11-18, every other
+       class with a recording link saved on it — a Google Meet recording in Drive (reminders.job.ts
+       runRecordingPoller) or the in-app stream's. Those open their link instead. */
+    const filter: Record<string, unknown> = {}
+    andFilter(filter, { $or: [{ cltRecordingId: { $exists: true } }, { recordingUrl: { $exists: true, $nin: [null, ''] } }] })
     const orgId = req.user!.organizationId
     /* Keyed off orgId being SET, not off role: a super_admin who has picked
        an academy via the topbar's org switcher (X-Organization-Id, read by
@@ -1856,7 +1860,10 @@ router.get('/recordings', requireAnyAdmin, requireClassroomAccess, async (req: R
       endedAt:         d.endedAt ?? null,
       durationMins:    d.durationMins,
       recordingSecs:   d.recordingDurationSecs ?? null,
-      cltRecordingId:  d.cltRecordingId,
+      cltRecordingId:  d.cltRecordingId ?? null,
+      /* Opened as it is when there is no classroom recording to mint a playback link for. A classroom recording
+         never carries one — its link is minted on play. */
+      ...(d.cltRecordingId ? {} : { recordingUrl: d.recordingUrl || null }),
       course:          d.courseId ? { id: String(d.courseId._id), title: d.courseId.title } : null,
       instructor:      d.instructorId ? { id: String(d.instructorId._id), name: d.instructorId.name } : null,
       organizationId:  d.organizationId ? String(d.organizationId) : null,
@@ -2243,6 +2250,45 @@ router.post('/meeting-outcomes/:id', requireInstructor, async (req: Request, res
   try {
     const { saveOutcomeForUser } = await import('@/services/meetingOutcome.service.ts')
     sendSuccess(res, await saveOutcomeForUser({ id: String(req.user?.id ?? ''), email: String(req.user?.email ?? '') }, req.params['id'], (req.body ?? {}) as Record<string, unknown>), 'Outcome saved')
+  } catch (err) { next(err) }
+})
+
+/* "Did the class end?" (2026-11-18, classOutcome.service.ts): the signed-in mentor's classes waiting for it — 30
+   minutes after each starts — and their answer. The pop-up on every page (ClassOutcomeGate) asks until each is
+   answered. Only a class's own mentor; anyone else gets nothing to answer. */
+const classOutcomeSchema = z.union([
+  z.object({ stillRunning: z.literal(true) }),
+  z.object({
+    stillRunning: z.literal(false).optional(),
+    endedAt: z.string().refine(s => !Number.isNaN(Date.parse(s)), 'Invalid date').optional(),
+    rating:  z.number().int().min(1).max(5),
+    topics:  z.string().trim().min(3).max(2000),
+    issues:  z.string().trim().max(2000).optional(),
+    summary: z.string().trim().max(3000).optional(),
+  }),
+])
+router.get('/class-outcomes/pending', requireInstructor, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    if (req.user?.role !== 'instructor') { sendSuccess(res, { classes: [], next: null }); return }
+    const { pendingClassOutcomes } = await import('@/services/classOutcome.service.ts')
+    sendSuccess(res, await pendingClassOutcomes(String(req.user.id)))
+  } catch (err) { next(err) }
+})
+router.post('/class-outcomes/:id', requireInstructor, validate(classOutcomeSchema),
+  audit('class.outcome', 'LiveClass', r => String(r.params['id'] ?? ''), r => ({ stillRunning: r.body.stillRunning === true, rating: r.body.rating })),
+  async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { answerClassOutcome, ClassOutcomeError } = await import('@/services/classOutcome.service.ts')
+    try {
+      const r = await answerClassOutcome(String(req.user?.id ?? ''), String(req.params['id'] ?? ''), req.body)
+      sendSuccess(res, r, r.stillRunning ? 'We will ask again later' : 'Class review saved')
+    } catch (err) {
+      if (err instanceof ClassOutcomeError) {
+        const { sendError } = await import('@/utils/response.ts')
+        sendError(res, err.code, err.message, err.status); return
+      }
+      throw err
+    }
   } catch (err) { next(err) }
 })
 

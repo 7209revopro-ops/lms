@@ -1311,9 +1311,14 @@ export async function runReviewRequestDispatch(now: Date = new Date()): Promise<
       /* $ne: true, not `false` — a class from before this field existed must still match. */
       reviewRequestSent: { $ne: true },
       scheduledStart: { $gte: earliest, $lt: now },
-    }).select('_id title instructorId courseId programId scheduledStart durationMins').lean()
-    const ended = started.filter(c =>
-      new Date(c.scheduledStart).getTime() + (c.durationMins ?? 0) * 60_000 + REVIEW_REQUEST_AFTER_END_MS <= now.getTime())
+    }).select('_id title instructorId courseId programId scheduledStart durationMins endedAt endSource').lean()
+    /* The timetable end — or, when the mentor said it ended earlier (the "did the class end?" pop-up, 2026-11-18),
+       that end. Google Meet's end is not used here: a class that ran over still asks at the timetable time. */
+    const endOf = (c: { scheduledStart: Date; durationMins?: number; endedAt?: Date; endSource?: string }) => {
+      const timetable = new Date(c.scheduledStart).getTime() + (c.durationMins ?? 0) * 60_000
+      return c.endSource === 'mentor' && c.endedAt ? Math.min(timetable, new Date(c.endedAt).getTime()) : timetable
+    }
+    const ended = started.filter(c => endOf(c as never) + REVIEW_REQUEST_AFTER_END_MS <= now.getTime())
     if (ended.length === 0) return
     const byId = new Map(ended.map(c => [String(c._id), c]))
 
@@ -1476,6 +1481,13 @@ export function startReminderJobs(): void {
 
   // Every 5 min — a Meet class past its timetable end: has Google Meet recorded it ending?
   cron.schedule('*/5 * * * *', exclusive('meet-class-end', () => runMeetClassEnd()))
+
+  // Every minute — an online class with no bookings 10 min before its start: cancelled (AUTO_CANCEL_EMPTY=on), or
+  // only noted (report, the default). services/classOutcome.service.ts.
+  cron.schedule('* * * * *', exclusive('auto-cancel-empty', async () => {
+    const { runAutoCancelEmpty } = await import('@/services/classOutcome.service.ts')
+    await runAutoCancelEmpty()
+  }))
 
   logger.info('[Reminders] Cron jobs scheduled')
 }

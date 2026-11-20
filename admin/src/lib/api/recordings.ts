@@ -17,7 +17,10 @@ export interface RecordingRow {
   endedAt:        string | null
   durationMins:   number
   recordingSecs:  number | null
-  cltRecordingId: number
+  /** The classroom's recording, played through a minted link; null for the others. */
+  cltRecordingId: number | null
+  /** A Google Meet recording in Drive, or the in-app stream's — opened as it is (2026-11-18). Absent on a classroom one. */
+  recordingUrl?:  string | null
   course:     { id: string; title: string } | null
   instructor: { id: string; name: string } | null
   organizationId: string | null

@@ -159,8 +159,9 @@ export default function RecordingsPage() {
           </p>
           <p className="mx-auto mt-1.5 max-w-sm text-[11px] leading-relaxed"
             style={{ color: 'rgba(255,255,255,0.35)' }}>
-            Interactive classes record automatically and appear here a few minutes
-            after the class ends.
+            Classes appear here once their recording is ready: in-app classes a few
+            minutes after they end, Google Meet classes once the recording reaches
+            Google Drive (usually 15–40 minutes).
           </p>
         </div>
       )}
@@ -182,6 +183,14 @@ export default function RecordingsPage() {
                 </div>
               </div>
 
+              {/* A Google Meet recording (in Drive) or the in-app stream's: its own link, opened as it is. */}
+              {row.recordingUrl ? (
+                <a href={row.recordingUrl} target="_blank" rel="noopener noreferrer"
+                  className="flex flex-shrink-0 items-center gap-1.5 rounded-xl px-3.5 py-2 text-xs font-bold text-white"
+                  style={{ background: 'linear-gradient(135deg, #16A34A, #15803D)' }}>
+                  <ExternalLink size={12} />{/drive\.google\.com/.test(row.recordingUrl) ? 'Open in Drive' : 'Open'}
+                </a>
+              ) : (
               <motion.button
                 whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.97 }}
                 onClick={() => watch(row)}
@@ -192,6 +201,7 @@ export default function RecordingsPage() {
                   ? <><Loader2 size={12} className="animate-spin" />Preparing…</>
                   : <><Play size={12} />Watch</>}
               </motion.button>
+              )}
             </div>
           ))}
         </div>
