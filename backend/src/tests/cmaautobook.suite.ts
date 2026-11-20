@@ -29,7 +29,7 @@ const section = (n: string) => lines.push(`\n${n}`)
 const mongoose = (await import('mongoose')).default
 mongoose.set('autoIndex', false)
 const M = await import('@/models/schema.ts')
-const { bookCmaClasses, tellCmaStudents, runCmaAutoBook, cmaAutoBookOn } = await import('@/services/cmaAutoBook.service.ts')
+const { bookCmaClasses, tellCmaStudents, tellClassNow, runCmaAutoBook, cmaAutoBookOn } = await import('@/services/cmaAutoBook.service.ts')
 
 await mongoose.connect(process.env.DATABASE_URL!)
 if (mongoose.connection.db!.databaseName !== 'lms_cmaautobook') { console.error('REFUSING TO RUN'); process.exit(1) }
@@ -131,6 +131,27 @@ try {
   check('is booked into the upcoming classes on the next sweep', r3.booked === 3 && (await bookedIds(c1)).includes(String(dee._id)), JSON.stringify(r3))
   const told2 = await tellCmaStudents(new Date(Date.now() + 5 * MIN), { whatsapp })
   check('…and only they are told', told2 === 1 && sent.length === 5)
+
+  section('F · one class by hand, while it is live (--class)')
+  /* A course whose programme was never set — the case on 20 Nov — with a class running now. */
+  const plain = await M.CourseModel.create({ title: 'CMA US', slug: 'cma-us', description: 'd', instructorId: mentor._id, price: 0, isFree: true, status: 'published', language: 'English', organizationId: org._id })
+  const eve = await st('Eve'), fay = await st('Fay'), gus = await st('Gus', { enrollmentStatus: 'pending' })
+  for (const u of [eve, fay, gus]) await enrol(u, plain)
+  const liveNow = await M.LiveClassModel.create({ title: 'CMA Introductory class', courseId: plain._id, instructorId: mentor._id, organizationId: org._id, scheduledStart: new Date(Date.now() - 20 * MIN), durationMins: 120, type: 'external', isOnline: true, status: 'live', sessionCapacity: 500, bookedCount: 1 })
+  await M.ClassBookingModel.create({ userId: fay._id, liveClassId: liveNow._id, status: 'booked' } as any)
+  const sweep = await bookCmaClasses()
+  check('the sweep leaves a running class alone', !(await seats(liveNow)).some(b => String(b.userId) === String(eve._id)))
+  const pv = await bookCmaClasses(new Date(), { dryRun: true, classId: String(liveNow._id) })
+  check('preview: one to book (Eve) — Fay already is, Gus is pending', pv.booked === 1 && (await seats(liveNow)).length === 1, JSON.stringify({ booked: pv.booked, sweep: sweep.booked }))
+  const done = await bookCmaClasses(new Date(), { classId: String(liveNow._id) })
+  check('--commit books Eve into the live class', done.booked === 1 && (await bookedIds(liveNow)).includes(String(eve._id)))
+  const sentNow: string[] = [], mails: string[] = []
+  const toldNow = await tellClassNow(String(liveNow._id), new Date(), { whatsapp: async (_p, _n, _c, what) => { sentNow.push(what) }, email: async (_to, subject) => { mails.push(subject) } })
+  check('told at once: WhatsApp and an e-mail saying it is live', toldNow === 1 && sentNow.length === 1 && mails.length === 1 && /Live now/.test(mails[0]!), JSON.stringify({ toldNow, sentNow, mails }))
+  const note = await M.NotificationModel.findOne({ userId: eve._id }).lean() as any
+  check('in-app: tap Join', !!note && /tap Join/.test(note.body), JSON.stringify(note?.body))
+  check('never told twice (nor by the sweep)', (await tellClassNow(String(liveNow._id))) === 0 && (await tellCmaStudents(new Date(Date.now() + 10 * MIN), { whatsapp })) === 0)
+  check('a second run books nobody', (await bookCmaClasses(new Date(), { classId: String(liveNow._id) })).booked === 0)
 } catch (err) {
   fail++; lines.push(`  FAIL  suite threw — ${(err as Error).message}\n${(err as Error).stack}`)
 } finally {

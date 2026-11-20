@@ -48,19 +48,36 @@ export interface CmaPlanRow { classId: string; title: string; start: Date; stude
 export interface CmaSweep { classes: number; booked: number; plan: CmaPlanRow[]; told: number }
 
 /** Book every student who may attend into every upcoming CMA class they are not in — or, dryRun, only say who. */
-export async function bookCmaClasses(now = new Date(), opts: { dryRun?: boolean } = {}): Promise<{ classes: number; booked: number; plan: CmaPlanRow[] }> {
+export async function bookCmaClasses(now = new Date(), opts: {
+  dryRun?: boolean
+  /** ONE class, by hand (cma-autobook.ts --class, 2026-11-20): its own course's
+      students, even while it is live and whatever the course's programme. */
+  classId?: string
+} = {}): Promise<{ classes: number; booked: number; plan: CmaPlanRow[] }> {
   const { LiveClassModel, ClassBookingModel, EnrollmentModel, UserModel } = await import('@/models/schema.ts')
   const { resolveClassEntitlement } = await import('@/services/classEntitlement.service.ts')
   const { reserveFlatSeats, reserveSeat, seatStampFrom } = await import('@/services/seatPool.service.ts')
   const out = { classes: 0, booked: 0, plan: [] as CmaPlanRow[] }
 
-  const courses = [...await cmaCourseIds(true)].map(id => new Types.ObjectId(id))
-  if (!courses.length) return out
-  const classes = await LiveClassModel.find({
-    courseId: { $in: courses },
-    status: 'scheduled',
-    scheduledStart: { $gt: new Date(now.getTime() + NOT_BEFORE_MS), $lt: new Date(now.getTime() + LOOK_AHEAD_MS) },
-  }).select('_id title scheduledStart courseId sectionId organizationId guestCohorts isOnline hybridPairId').lean() as any[]
+  const CLASS_FIELDS = '_id title scheduledStart courseId sectionId organizationId guestCohorts isOnline hybridPairId'
+  let courses: Types.ObjectId[]
+  let classes: any[]
+  if (opts.classId) {
+    if (!Types.ObjectId.isValid(opts.classId)) return out
+    /* Not over and not cancelled — a class already running still takes students. */
+    const one = await LiveClassModel.findOne({ _id: new Types.ObjectId(opts.classId), status: { $in: ['scheduled', 'live'] } }).select(CLASS_FIELDS).lean() as any
+    if (!one?.courseId) return out
+    courses = [one.courseId]
+    classes = [{ ...one, hybridPairId: undefined }]   /* asked for by name: book it, whichever half it is */
+  } else {
+    courses = [...await cmaCourseIds(true)].map(id => new Types.ObjectId(id))
+    if (!courses.length) return out
+    classes = await LiveClassModel.find({
+      courseId: { $in: courses },
+      status: 'scheduled',
+      scheduledStart: { $gt: new Date(now.getTime() + NOT_BEFORE_MS), $lt: new Date(now.getTime() + LOOK_AHEAD_MS) },
+    }).select(CLASS_FIELDS).lean() as any[]
+  }
   out.classes = classes.length
 
   /* Who is enrolled in each course, and which of them are approved, active students. */
@@ -201,6 +218,66 @@ export async function tellCmaStudents(now = new Date(), deps: {
       } catch (err) { logger.warn({ err, userId }, '[CMA] WhatsApp failed') }
     }
     await ClassBookingModel.updateMany({ _id: { $in: rows.map(b => b._id) } }, { $set: { autoNoticeSentAt: now } })
+    told++
+  }
+  return told
+}
+
+/** Tell the students just booked into ONE class by hand (cma-autobook.ts --class) — at once, since it may already be
+    running: in-app, an e-mail now (not the daily digest), and WhatsApp with a sign-in link to their bookings, where
+    the Join button is. Marks them told, so the sweep never tells them again. */
+export async function tellClassNow(classId: string, now = new Date(), deps: {
+  whatsapp?: (phone: string, name: string, courseTitle: string, what: string, day: string, time: string, code: string) => Promise<void>
+  email?: (to: string, subject: string, body: string, button: { label: string; url: string }) => Promise<void>
+} = {}): Promise<number> {
+  const { ClassBookingModel, CourseModel, LiveClassModel } = await import('@/models/schema.ts')
+  if (!Types.ObjectId.isValid(classId)) return 0
+  const cls = await LiveClassModel.findById(classId).select('title scheduledStart courseId status organizationId').lean() as any
+  if (!cls) return 0
+  const rows = await ClassBookingModel.find({
+    liveClassId: cls._id, status: 'booked', autoBookedAt: { $exists: true }, autoNoticeSentAt: { $exists: false },
+  }).select('_id userId').populate('userId', 'name email isActive organizationId enrollmentApplication.phone').lean() as any[]
+  if (!rows.length) return 0
+
+  const { NotificationService } = await import('@/services/notification.service.ts')
+  const { mintSigninCode } = await import('@/services/signinLink.service.ts')
+  const { sendNewClassScheduledWhatsApp } = await import('@/services/whatsapp.service.ts')
+  const { sendAdminMessageEmail } = await import('@/services/email.service.ts')
+  const { SCHEDULE_LINK, scheduleUrl } = await import('@/utils/clientLinks.ts')
+  const { ensureOrgSlugs, orgSlugFor } = await import('@/utils/orgSlugs.ts')
+  const { zoneForAcademy, zoneTag } = await import('@/utils/academyClock.ts')
+  await ensureOrgSlugs().catch(() => {})
+  const course = await CourseModel.findById(cls.courseId).select('title').lean() as any
+  const courseTitle = course?.title ?? 'your course'
+  const running = cls.status === 'live' || new Date(cls.scheduledStart).getTime() <= now.getTime()
+  const notes = new NotificationService()
+  const whatsapp = deps.whatsapp ?? ((phone, name, c, what, day, time, code) => sendNewClassScheduledWhatsApp(phone, name, c, what, day, time, code, 'cma'))
+  const email = deps.email ?? sendAdminMessageEmail
+
+  let told = 0
+  for (const b of rows) {
+    const u = b.userId
+    if (!u || u.isActive === false) { await ClassBookingModel.updateOne({ _id: b._id }, { $set: { autoNoticeSentAt: now } }); continue }
+    const zone = zoneForAcademy(orgSlugFor(u.organizationId) ?? orgSlugFor(cls.organizationId) ?? null)
+    const day = new Date(cls.scheduledStart).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', timeZone: zone }).replace(/^(\w{3}) /, '$1, ')
+    const time = `${new Date(cls.scheduledStart).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', timeZone: zone })} ${zoneTag(zone)}`
+    const title = running ? `Live now — you're booked: ${cls.title}` : `You're booked: ${cls.title}`
+    const body = running
+      ? `${cls.title} (${courseTitle}) has started and your seat is saved. Open My bookings and tap Join to come in now.`
+      : `${cls.title} (${courseTitle}) — ${day}, ${time}. Your seat is saved, no need to book.`
+    try { await notes.create(String(u._id), { kind: 'booking-confirmed', title, body, link: SCHEDULE_LINK }) } catch (err) { logger.warn({ err, userId: String(u._id) }, '[CMA] in-app notice failed') }
+    if (u.email) {
+      try { await email(u.email, title, `Hi ${u.name ?? 'there'},\n\n${body}`, { label: running ? 'Join the class' : 'My bookings', url: scheduleUrl() }) }
+      catch (err) { logger.warn({ err, userId: String(u._id) }, '[CMA] e-mail failed') }
+    }
+    const phone = u.enrollmentApplication?.phone
+    if (phone) {
+      try {
+        const code = await mintSigninCode(String(u._id), SCHEDULE_LINK)
+        await whatsapp(phone, u.name ?? '', courseTitle, cls.title, day, time, code)
+      } catch (err) { logger.warn({ err, userId: String(u._id) }, '[CMA] WhatsApp failed') }
+    }
+    await ClassBookingModel.updateOne({ _id: b._id }, { $set: { autoNoticeSentAt: now } })
     told++
   }
   return told
