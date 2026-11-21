@@ -9,7 +9,7 @@ import {
   Tag, Star, Settings, ChevronLeft, ChevronRight, LogOut, X,
   ShoppingBag, Ticket, Map, ClipboardList, Video, CalendarDays, Repeat, BarChart3, ShieldCheck, UserCog, LifeBuoy,
   ClipboardCheck, Film, MonitorSmartphone, FileCheck2, Megaphone, Mail, UserX, Award, MessageCircle, MessagesSquare, Send, ListChecks, DoorOpen, GitMerge,
-  WalletCards, Gauge, CalendarClock, CalendarCheck, Coins,
+  WalletCards, Gauge, CalendarClock, CalendarCheck, Coins, Gem, ExternalLink,
 } from 'lucide-react'
 import { useStaffUnread } from '@/lib/api/chat'
 import { useUIStore } from '@/store/ui.store'
@@ -132,6 +132,10 @@ const instructorNavItems = [
    instructor who tapped it got a page of bcrypt/JWT/rate-limit rows with a
    403 in the middle of it. */
 const settingsItem = { label: 'Settings', href: '/settings', icon: Settings }
+
+/* DGO Points (2026-11-21): staff rewards live in HRMS, so the menu links out to it in a new tab (HRMS asks for its
+   own sign-in if needed). Not a page here, so it isn't one of the nav lists above and is never the active item. */
+const HRMS_DGO_POINTS_URL = `${(process.env.NEXT_PUBLIC_HRMS_URL || 'https://hrms.deltainstitutions.com').replace(/\/+$/, '')}/dgo-points`
 
 /* Which Roles & Permissions resource each page is (2026-10-17). With a custom role, a page whose resource it may
    neither Read nor List is hidden — the backend refuses its data anyway. Pages not listed always show. */
@@ -353,6 +357,30 @@ function SidebarContent({ collapsed, onClose }: SidebarContentProps) {
             </Link>
           )
         })}
+
+        <a href={HRMS_DGO_POINTS_URL} target="_blank" rel="noopener noreferrer" onClick={onClose}>
+          <motion.div
+            whileHover={{ x: collapsed ? 0 : 3 }}
+            whileTap={{ scale: 0.97 }}
+            transition={{ type: 'spring', stiffness: 400, damping: 28 }}
+            className="relative flex items-center gap-3 rounded-xl px-3 py-2.5 transition-colors"
+            style={{ color: 'rgba(255,255,255,0.5)' }}
+            title={collapsed ? 'DGO Points (opens HRMS)' : undefined}
+          >
+            <Gem size={17} className="relative z-10 flex-shrink-0" strokeWidth={1.8} />
+            <AnimatePresence>
+              {!collapsed && (
+                <motion.span
+                  initial={{ opacity: 0, x: -6 }} animate={{ opacity: 1, x: 0 }}
+                  exit={{ opacity: 0, x: -6 }} transition={{ duration: 0.13 }}
+                  className="relative z-10 flex flex-1 items-center justify-between whitespace-nowrap text-sm font-medium">
+                  DGO Points
+                  <ExternalLink size={13} className="ml-1.5 opacity-60" aria-hidden="true" />
+                </motion.span>
+              )}
+            </AnimatePresence>
+          </motion.div>
+        </a>
       </nav>
 
       {/* ── Bottom ──────────────────────────────── */}
