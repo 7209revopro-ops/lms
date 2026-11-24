@@ -74,6 +74,8 @@ const scopedAdminNavItems = [
      only creatable role IS instructor — so the page has to be reachable
      from here, not only from the link the Users page offers. */
   { label: 'Instructors', href: '/instructors',          icon: GraduationCap },
+  /* Their department's students — list, add, edit, block, enrol (2026-11-24; the server keeps it to them). */
+  { label: 'Students',   href: '/students',               icon: Users },
   { label: 'Devices',    href: '/devices',                icon: MonitorSmartphone },
   { label: 'Courses',          href: '/courses',                icon: BookOpen },
   { label: 'Live Classes',     href: '/live-classes',           icon: Video },

@@ -19,6 +19,7 @@ import { useCurrentUser } from '@/lib/api/user'
 import { useOrgStore } from '@/store/org.store'
 import { useCourseOutline } from '@/lib/api/outline'
 import { useBackdropClose } from '@/hooks/useBackdropClose'
+import { categoryScopeOf } from '@/lib/programScope'
 
 /* ── Types ──────────────────────────────────────────------ */
 interface CourseState {
@@ -194,6 +195,9 @@ export function AddStudentModal({ open, onClose }: Props) {
      a required field, not an inherited one. */
   const { data: me } = useCurrentUser()
   const isSuper = me?.role === 'super_admin'
+  /* A department's sub admin (2026-11-24): their student is in their department — the server stamps it either way. */
+  const myDept = me?.role === 'sub_admin' ? categoryScopeOf(me) : undefined
+  useEffect(() => { if (myDept) setCategories(new Set([myDept])) }, [myDept])
   const activeOrgId = useOrgStore(s => s.activeOrgId)
   const { data: orgs } = useOrganizations(isSuper)
   const [orgId, setOrgId] = useState<string>('')
@@ -307,7 +311,7 @@ export function AddStudentModal({ open, onClose }: Props) {
       setStep(1)
       setBlockState({})
       setAccountValues(null)
-      setCategories(new Set())
+      setCategories(new Set(myDept ? [myDept] : []))
       setOrgId('')
       setOrgError(null)
       onClose()
@@ -320,7 +324,7 @@ export function AddStudentModal({ open, onClose }: Props) {
     setStep(1)
     setBlockState({})
     setAccountValues(null)
-    setCategories(new Set())
+    setCategories(new Set(myDept ? [myDept] : []))
     setCategoryError(null)
     setOrgId('')
     setOrgError(null)
@@ -469,8 +473,9 @@ export function AddStudentModal({ open, onClose }: Props) {
                         <div className="flex flex-wrap gap-2">
                           {CATS.map(({ value, label, color, Icon }) => {
                             const active = categories.has(value)
+                            const locked = !!myDept
                             return (
-                              <button key={value} type="button"
+                              <button key={value} type="button" disabled={locked}
                                 onClick={() => {
                                   setCategoryError(null)
                                   setCategories(prev => {

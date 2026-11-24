@@ -27,6 +27,7 @@ import { programLabel } from '@/lib/programs'
 import { AvatarImg } from '@/components/ui/AvatarImg'
 import { useBackdropClose } from '@/hooks/useBackdropClose'
 import { CsTag } from '@/components/ui/CsTag'
+import { categoryScopeOf } from '@/lib/programScope'
 
 /* ── Custom dark course picker (avoids native white dropdown) ── */
 function CourseSelect({
@@ -301,6 +302,8 @@ export function EditStudentModal({ user, onClose, onSuccess }: Props) {
      Bangalore copies this way and saw every course twice. */
   const { data: me } = useCurrentUser()
   const isSuper = me?.role === 'super_admin'
+  /* A department's sub admin: the one programme they may add or remove. */
+  const myDept = me?.role === 'sub_admin' ? categoryScopeOf(me) : undefined
   const { data: orgs = [] } = useOrganizations(isSuper)
   const academyOf = new Map(orgs.map(o => [o.id, o.name]))
   const enrolledCourseIds = new Set((enrollments ?? []).map(e => e.courseId?.id))
@@ -569,8 +572,11 @@ export function EditStudentModal({ user, onClose, onSuccess }: Props) {
                     { value: 'ai',                label: 'AI',                color: '#c084fc', Icon: Cpu },
                   ] as const).map(({ value, label, color, Icon }) => {
                     const active = categories.has(value)
+                    /* A sub admin adds or removes only their own department; the server refuses the rest. */
+                    const locked = !!myDept && value !== myDept
                     return (
-                      <button key={value} type="button"
+                      <button key={value} type="button" disabled={locked}
+                        title={locked ? 'Another department — only an admin can change it' : undefined}
                         onClick={() => {
                           setCategoryError(null)
                           setCategories(prev => {
@@ -580,7 +586,7 @@ export function EditStudentModal({ user, onClose, onSuccess }: Props) {
                             return next
                           })
                         }}
-                        className="flex items-center gap-1.5 rounded-xl px-3 py-1.5 text-xs font-semibold transition-all"
+                        className="flex items-center gap-1.5 rounded-xl px-3 py-1.5 text-xs font-semibold transition-all disabled:cursor-not-allowed disabled:opacity-40"
                         style={active
                           ? { background: `${color}18`, border: `1px solid ${color}45`, color }
                           : categoryError

@@ -352,6 +352,48 @@ router.patch ('/categories/:id', requirePermission('categories','update'), requi
 router.delete('/categories/:id', requirePermission('categories','delete'), requireAdmin, audit('category.delete', 'Category', r => String(r.params['id'] ?? '')), ctrl.deleteCategory)
 
 /* ─── Users (admin-only) ──────────────────────────── */
+
+/* A department's sub admin edits ITS students (2026-11-24) — the Students page's Edit and Block. Admins and super
+   admins pass as before; every other role is refused, as requireAdmin did. For a sub admin:
+     · the account must be a student their department reaches — the Students list's own rule (mayAccessStudent);
+       anyone else answers 404, as the department guards do;
+     · only these fields: name, email, phone, photo, and whether they can sign in;
+     · programmes: they may add or remove THEIR department only — another department's stays as it is. */
+const SUB_ADMIN_STUDENT_FIELDS = new Set(['name', 'email', 'phone', 'avatarUrl', 'isActive', 'categories', 'category'])
+async function requireAdminOrDepartmentStudentEdit(req: Request, res: Response, next: NextFunction): Promise<void> {
+  const role = req.user?.role
+  if (role === 'super_admin' || role === 'admin') { next(); return }
+  const refuse = (status: number, code: string, message: string) => { res.status(status).json({ success: false, error: { code, message } }) }
+  if (role !== 'sub_admin') { refuse(403, 'FORBIDDEN', 'Access denied.'); return }
+  try {
+    const body = (req.body ?? {}) as Record<string, unknown>
+    const extra = Object.keys(body).filter(k => !SUB_ADMIN_STUDENT_FIELDS.has(k))
+    if (extra.length) {
+      refuse(403, 'FORBIDDEN', "You can change a student's name, email, phone, photo, programme and whether they can sign in — not " + extra.join(', ') + '.')
+      return
+    }
+    const id = String(req.params['id'] ?? '')
+    const { Types } = await import('mongoose')
+    const { UserModel } = await import('@/models/schema.ts')
+    if (!Types.ObjectId.isValid(id)) { refuse(404, 'NOT_FOUND', 'User not found.'); return }
+    const target = await UserModel.findById(id)
+      .select('role category categories enrollmentStatus enrollmentApplication.programs')
+      .lean<{ _id: unknown; role?: string; category?: string; categories?: string[]; enrollmentStatus?: string; enrollmentApplication?: { programs?: unknown[] } }>()
+    if (!target || target.role !== 'student' || !(await mayAccessStudent(req, target))) { refuse(404, 'NOT_FOUND', 'User not found.'); return }
+    if (body['categories'] !== undefined || body['category'] !== undefined) {
+      const dept = callerDepartment(req)
+      const before = new Set([...(target.categories ?? []), ...(target.category ? [target.category] : [])])
+      const after = new Set(Array.isArray(body['categories']) ? (body['categories'] as unknown[]).map(String) : body['category'] ? [String(body['category'])] : [])
+      const changed = [...before].filter(c => !after.has(c)).concat([...after].filter(c => !before.has(c)))
+      if (changed.some(c => c !== dept)) {
+        refuse(403, 'FORBIDDEN', 'You can only add or remove your own department — another department\'s programme stays as it is.')
+        return
+      }
+    }
+    next()
+  } catch (err) { next(err) }
+}
+
 const userUpdateSchema = z.object({
   role:       z.enum(['student', 'instructor', 'admin', 'sub_admin', 'support', 'super_admin']).optional(),
   isActive:   z.boolean().optional(),
@@ -444,8 +486,10 @@ router.post ('/users', requirePermission('users','create'),          validate(us
       res.status(403).json({ success: false, error: { code: 'FORBIDDEN', message: 'Instructors cannot create accounts.' } })
       return
     }
-    if (role === 'sub_admin' && targetRole !== 'instructor') {
-      res.status(403).json({ success: false, error: { code: 'FORBIDDEN', message: 'You can only create instructor accounts.' } })
+    /* A department's sub admin creates its instructors and — since 2026-11-24 — its students. Either way the
+       account is stamped with their department below, and any enrolment must be into its own courses. */
+    if (role === 'sub_admin' && targetRole !== 'instructor' && targetRole !== 'student') {
+      res.status(403).json({ success: false, error: { code: 'FORBIDDEN', message: 'You can only create student and instructor accounts.' } })
       return
     }
     if (role === 'support' && !['student', 'instructor'].includes(targetRole)) {
@@ -644,7 +688,7 @@ router.post ('/users', requirePermission('users','create'),          validate(us
   },
 )
 router.patch ('/users/:id', requirePermission('users','update'),
-  requireAdmin,
+  requireAdminOrDepartmentStudentEdit,
   requireSameOrgUser('id'),
   /* requireSameOrgUser lets EITHER academy's admin through for a lent
      instructor. This says what that does not extend to — see the guard. */

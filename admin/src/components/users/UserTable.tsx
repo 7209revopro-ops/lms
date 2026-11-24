@@ -583,14 +583,14 @@ function UserRow({ user, index, onEdit, onViewHistory, readOnly = false }: {
                   style={{ color: user.isActive ? '#F87171' : '#4ADE80' }}>
                   {user.isActive ? <><ShieldOff size={12} />Deactivate</> : <><ShieldCheck size={12} />Activate</>}
                 </button>
-                {user.role !== 'instructor' && (
+                {user.role !== 'instructor' && me?.role !== 'sub_admin' && (
                   <button onClick={() => setRole('instructor')}
                     className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-xs font-semibold transition-colors hover:bg-white/[0.05]"
                     style={{ color: 'rgba(255,255,255,0.75)' }}>
                     <ArrowUp size={12} />Make instructor
                   </button>
                 )}
-                {user.role !== 'student' && (
+                {user.role !== 'student' && me?.role !== 'sub_admin' && (
                   <button onClick={() => setRole('student')}
                     className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-xs font-semibold transition-colors hover:bg-white/[0.05]"
                     style={{ color: 'rgba(255,255,255,0.75)' }}>

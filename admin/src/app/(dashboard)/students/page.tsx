@@ -16,7 +16,8 @@ export default function StudentsPage() {
   const { data: me } = useCurrentUser()
   /* Not an instructor: the server never let them create an account (POST /admin/users) — and their Students page is
      every Forex student of their academy, to read (2026-11-10). */
-  const canAddStudent = ['super_admin', 'admin'].includes(me?.role ?? '')
+  /* A department's sub admin adds its own students too (2026-11-24) — the server puts them in that department. */
+  const canAddStudent = ['super_admin', 'admin', 'sub_admin'].includes(me?.role ?? '')
   const forexReader = me?.role === 'instructor'
 
   const handleClose = () => {
