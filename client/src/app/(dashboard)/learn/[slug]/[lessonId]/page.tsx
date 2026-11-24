@@ -36,6 +36,23 @@ function fmt(mins: number) {
   return h > 0 ? `${h}h ${m > 0 ? m + 'm' : ''}`.trim() : `${m}m`
 }
 
+/** The first lesson, in course order, the student has not finished and may open — else the first they may open.
+    `blocked` holds section ids (Enrollment.blockedLessons is a legacy misnomer) and, on older rows, lesson ids. */
+function firstOpenLesson(
+  sections: { id: string; order: number }[],
+  lessons: { id: string; sectionId: string; order: number }[],
+  completed: string[] = [],
+  blocked: string[] = [],
+): string | undefined {
+  const sectionOrder = new Map([...sections].sort((a, b) => a.order - b.order).map((s, i) => [s.id, i]))
+  const ordered = [...lessons].sort((a, b) =>
+    (sectionOrder.get(a.sectionId) ?? 1e9) - (sectionOrder.get(b.sectionId) ?? 1e9) || a.order - b.order)
+  const shut = new Set(blocked)
+  const open = ordered.filter(l => !shut.has(l.id) && !shut.has(l.sectionId))
+  const done = new Set(completed)
+  return (open.find(l => !done.has(l.id)) ?? open[0])?.id
+}
+
 export default function LessonPlayerPage({ params }: { params: Promise<{ slug: string; lessonId: string }> }) {
   const { slug, lessonId } = use(params)
   const router = useRouter()
@@ -43,8 +60,19 @@ export default function LessonPlayerPage({ params }: { params: Promise<{ slug: s
 
   const { data: user } = useCurrentUser()
   const { data, isLoading, isError } = useCourse(slug)
-  const { data: progress } = useCourseProgress(slug)
+  const { data: progress, isLoading: progressLoading } = useCourseProgress(slug)
   const markComplete = useMarkLessonComplete(slug)
+
+  /* A lesson that is not (or no longer) in this course (2026-11-24). My Learning, the right sidebar and the course
+     page's Continue open the lesson saved as the student's last one — and that lesson can since have been deleted,
+     unpublished or moved, which left them on "Lesson not found in this course". Take them on instead: the first
+     lesson they have not finished (or the first), or the course page when it has no lessons. */
+  const lessonMissing = !!data && !data.lessons.some(l => l.id === lessonId)
+  useEffect(() => {
+    if (!lessonMissing || !data || progressLoading) return
+    const next = firstOpenLesson(data.sections, data.lessons, progress?.completedLessons, progress?.blockedLessons)
+    router.replace(next ? `/learn/${slug}/${next}` : `/courses/${slug}`)
+  }, [lessonMissing, data, progress, progressLoading, slug, router])
 
   /* Expose player ref so BookmarkPanel's onSeek can seek to a timestamp */
   const playerRef = useRef<MediaPlayerInstance>(null)
@@ -153,9 +181,11 @@ export default function LessonPlayerPage({ params }: { params: Promise<{ slug: s
     : null
 
   if (!lesson) {
+    /* Moving them on (the effect above); the link stays in case that cannot happen. */
     return (
       <div className="flex h-[70vh] flex-col items-center justify-center gap-4">
-        <p className="text-base font-semibold" style={{ color: 'var(--color-text-primary)' }}>Lesson not found in this course</p>
+        <Spinner />
+        <p className="text-base font-semibold" style={{ color: 'var(--color-text-primary)' }}>Taking you to your course…</p>
         <Link href={`/courses/${slug}`} className="text-sm font-semibold" style={{ color: 'var(--color-primary)' }}>
           ← Back to course
         </Link>

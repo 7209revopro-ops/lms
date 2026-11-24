@@ -175,7 +175,9 @@ function CourseDetailInner({ slug }: { slug: string }) {
     }
   }
 
-  const continueLessonId = progress?.lastLessonId ?? lessons[0]?.id
+  /* The saved last lesson only while it is still in the course — a deleted or unpublished one left "Continue" on
+     "Lesson not found" (2026-11-24). */
+  const continueLessonId = (progress?.lastLessonId && lessons.some(l => l.id === progress.lastLessonId) ? progress.lastLessonId : undefined) ?? lessons[0]?.id
 
   return (
     <div className="mx-auto max-w-5xl pb-24 lg:pb-0">
