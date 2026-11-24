@@ -22,13 +22,18 @@ export interface CalendarMentor {
   id: string; name: string; email: string; shared: boolean; slots: MentorSlot[]; classes: MentorClass[]; meetings: MentorMeeting[]
   /** Absent from an older server. */
   timeOff?: MentorTimeOff[]
+  /** The academy the mentor belongs to — absent from an older server. */
+  academy?: { id: string; name: string } | null
 }
 export interface MentorCalendar { timezone: string; from: string; to: string; mentors: CalendarMentor[] }
 
-export function useMentorCalendar(from: string, to: string) {
+/** `allAcademies`: both academies' mentors (the Staff meeting dialog, 2026-11-24) — the server gives them only to whoever
+ *  may book a staff meeting, this academy's to anybody else. */
+export function useMentorCalendar(from: string, to: string, opts: { allAcademies?: boolean } = {}) {
+  const all = opts.allAcademies === true
   return useQuery({
-    queryKey: ['admin', 'mentor-calendar', from, to],
-    queryFn: () => apiGet<MentorCalendar>(`/admin/mentor-calendar?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`),
+    queryKey: ['admin', 'mentor-calendar', from, to, ...(all ? ['all-academies'] : [])],
+    queryFn: () => apiGet<MentorCalendar>(`/admin/mentor-calendar?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}${all ? '&allAcademies=1' : ''}`),
     staleTime: 30_000,
   })
 }
@@ -53,12 +58,15 @@ export function useMentorClass(id: string | null) {
 export interface BookMeetingInput {
   mentorEmail: string; title: string; kind: 'staff' | 'student' | 'client'; scheduledStart: string; durationMins: number
   attendees: { name: string; email: string }[]; inPerson: boolean; location?: string; notes?: string
-  /** A staff meeting's other mentors, by address (2026-11-14) — a Chief Mentor's team, an admin anyone. */
+  /** A staff meeting's other mentors, by address (2026-11-14) — any mentor of either academy (2026-11-24). */
   staffEmails?: string[]
+  /** The mentors may be either academy's (a staff meeting, 2026-11-24). */
+  allAcademies?: boolean
 }
 
 /* Whether the signed-in person books a staff meeting with several mentors in it, and with whom (2026-11-14): an
-   admin with anyone (team null); an instructor the CS Portal calls a Chief Mentor with their team; nobody else. */
+   admin, or an instructor the CS Portal calls a Chief Mentor, with anyone (team null — a Chief had their team only
+   until 2026-11-24); nobody else. */
 export interface StaffMeetingReach { may: boolean; team: string[] | null; reason?: string }
 export function useStaffMeetingReach() {
   return useQuery({

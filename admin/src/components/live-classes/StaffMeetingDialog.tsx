@@ -2,20 +2,24 @@
 
 import { useMemo, useState } from 'react'
 import { Search, Users } from 'lucide-react'
-import { useBookMeeting, wallInZone, refusal, type CalendarMentor } from '@/lib/api/mentorCalendar'
+import { useBookMeeting, useMentorCalendar, wallInZone, refusal, type CalendarMentor } from '@/lib/api/mentorCalendar'
 
 /* A staff meeting with several mentors in it, from the Mentor Calendar's "Staff meeting" button (the user, 2026-11-14:
-   "in the LMS also a separate button") — as in the CS Portal. A Chief Mentor with their own team, an admin with
-   anyone (`team` null; the server checks it again). Each mentor ticked shows Free, or Busy with what and when, at the
-   time chosen; "Find free time" lists every start between two times when everybody ticked is free — on the day, or
-   the seven on screen. Nothing is fetched: the week on screen has every diary. The LMS refuses it over anybody busy,
-   by name, books one meeting that shows on each of their calendars, and emails each. */
+   "in the LMS also a separate button") — as in the CS Portal. A Chief Mentor or an admin, with any mentor of either
+   academy (2026-11-24: "show every mentor including Bangalore and Dubai" — `team` null; a Chief had their own team
+   only before; the server checks it again). Each mentor ticked shows Free, or Busy with what and when, at the time
+   chosen; "Find free time" lists every start between two times when everybody ticked is free — on the day, or the
+   seven on screen. The calendar behind lists this academy's mentors only, so the same days are asked for again with
+   both academies'. The LMS refuses it over anybody busy, by name, books one meeting that shows on each of their
+   calendars, and emails each. */
 
 const SLOT = 30
 const pad = (n: number) => String(n).padStart(2, '0')
 const hhmm = (m: number) => `${pad(Math.floor(m / 60))}:${pad(m % 60)}`
 const toMins = (v: string) => { const [h, m] = v.split(':').map(Number); return (h || 0) * 60 + (m || 0) }
 const lower = (v: unknown) => String(v ?? '').trim().toLowerCase()
+const DAY_MS = 864e5
+const inBangalore = (m: CalendarMentor) => /bangal|banglo|bengal/i.test(String(m.academy?.name ?? ''))
 type Busy = { from: number; to: number; kind: 'class' | 'meeting' | 'off'; what: string }
 
 export function StaffMeetingDialog({ mentors, team, myEmail, days, tz, onClose }: {
@@ -24,11 +28,19 @@ export function StaffMeetingDialog({ mentors, team, myEmail, days, tz, onClose }
   const book = useBookMeeting()
   const keyOf = (d: Date | string) => new Date(d).toLocaleDateString('en-CA', { timeZone: tz })
   const dayKeys = useMemo(() => days.map(keyOf), [days, tz])   // eslint-disable-line react-hooks/exhaustive-deps
-  /** The mentors this person may put in it — their team's, or (an admin) everybody's. */
+  /* Both academies' mentors for the same days as the calendar behind (it asks from the day before to a day after);
+     until they come — or from a server that gives this academy's only — the ones on screen. */
+  const start = days[0] ?? new Date()
+  const everyone = useMentorCalendar(new Date(start.getTime() - DAY_MS).toISOString(), new Date(start.getTime() + 8 * DAY_MS).toISOString(), { allAcademies: true })
+  const all = everyone.data?.mentors ?? mentors
+  const bothAcademies = all.some(m => m.academy && inBangalore(m))
+  /** The mentors this person may put in it — everybody (a `team` list, if ever given, holds): Dubai's, then Bangalore's, each by name. */
   const invitable = useMemo(() => {
     const t = team === null ? null : new Set(team.map(lower))
-    return mentors.filter(m => !t || t.has(lower(m.email)))
-  }, [mentors, team])
+    return all.filter(m => !t || t.has(lower(m.email)))
+      .sort((a, b) => Number(inBangalore(a)) - Number(inBangalore(b)) || String(a.name).localeCompare(String(b.name)))
+  }, [all, team])
+  const academyTag = (m: CalendarMentor) => bothAcademies && m.academy ? (inBangalore(m) ? 'Bangalore' : 'Dubai') : ''
   const [ownerEmail, setOwnerEmail] = useState(() => lower((invitable.find(m => lower(m.email) === myEmail) ?? invitable[0])?.email))
   const owner = invitable.find(m => lower(m.email) === ownerEmail) ?? invitable[0]
   const [ticked, setTicked] = useState<Set<string>>(() => new Set())
@@ -97,6 +109,7 @@ export function StaffMeetingDialog({ mentors, team, myEmail, days, tz, onClose }
         mentorEmail: owner.email, title: f.title.trim(), kind: 'staff', scheduledStart: wallInZone(f.day, f.time, tz).toISOString(), durationMins: duration,
         attendees: f.guestName.trim() ? [{ name: f.guestName.trim(), email: f.guestEmail.trim() }] : [],
         staffEmails: people.slice(1).map(p => lower(p.email)), inPerson: f.inPerson, location: f.location.trim(), notes: f.notes.trim(),
+        allAcademies: true,
       })
       onClose()
     } catch (e) { setErr(refusal(e, 'Could not book it')) }
@@ -134,7 +147,7 @@ export function StaffMeetingDialog({ mentors, team, myEmail, days, tz, onClose }
                 setTicked(prev => { const n = new Set(prev); n.delete(e.target.value); n.add(was); return n })
                 setOwnerEmail(e.target.value)
               }}>
-                {invitable.map(m => <option key={m.id} value={lower(m.email)}>{m.name}</option>)}
+                {invitable.map(m => <option key={m.id} value={lower(m.email)}>{m.name}{academyTag(m) ? ` · ${academyTag(m)}` : ''}</option>)}
               </select>
             </label>
           )}
@@ -155,6 +168,7 @@ export function StaffMeetingDialog({ mentors, team, myEmail, days, tz, onClose }
                     <input type="checkbox" className="h-4 w-4" checked={on} disabled={own}
                       onChange={() => setTicked(prev => { const n = new Set(prev); const k = lower(m.email); if (n.has(k)) n.delete(k); else n.add(k); return n })} />
                     <span className="min-w-0 flex-1 truncate">{m.name}{own && <span className="text-xs text-white/40"> · the meeting is in their name</span>}</span>
+                    {academyTag(m) && <span className={`shrink-0 rounded border px-1.5 py-0.5 text-[10px] ${inBangalore(m) ? 'border-amber-500/30 text-amber-300' : 'border-sky-500/30 text-sky-300'}`}>{academyTag(m)}</span>}
                     {on && (clash
                       ? <span className={`shrink-0 rounded px-1.5 py-0.5 text-xs ${clash.kind === 'off' ? 'bg-amber-500/15 text-amber-300' : 'bg-rose-500/15 text-rose-300'}`}>
                           {clash.kind === 'off' ? 'Not available' : `Busy · ${clash.kind}: ${clash.what}`} · {hhmm(clash.from)}–{hhmm(Math.min(clash.to, 1440))}

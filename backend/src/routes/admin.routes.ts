@@ -2188,7 +2188,11 @@ router.get('/mentor-calendar', requireInstructor, async (req: Request, res: Resp
     const q = req.query as Record<string, string | undefined>
     /* Time off with its reason for an admin; an instructor reads their own only (2026-10-23). */
     const timeOffReasonsFor = req.user?.role === 'instructor' ? String(req.user?.email ?? '') : 'all'
-    sendSuccess(res, await listMentorsForPortal({ remoteOrgId: await mentorCalendarOrg(req), from: q['from'], to: q['to'], timeOffReasonsFor }))
+    /* ?allAcademies=1 — both academies' mentors, for the Staff meeting dialog (the user, 2026-11-24: "show every mentor
+       including Bangalore and Dubai"); only for whoever may book one (an admin, a Chief Mentor), else this academy's. */
+    const askedAll = q['allAcademies'] === '1' || q['allAcademies'] === 'true'
+    const allAcademies = askedAll && (await staffMeetingReach(req)).may
+    sendSuccess(res, await listMentorsForPortal({ remoteOrgId: await mentorCalendarOrg(req), from: q['from'], to: q['to'], timeOffReasonsFor, allAcademies }))
   } catch (err) { next(err) }
 })
 
@@ -2213,7 +2217,8 @@ async function refuseStudentBooking(req: Request, res: Response, kind: unknown):
 }
 
 /* A staff meeting with several mentors in it (2026-11-14), from the Mentor Calendar here: an admin with anyone; an
-   instructor who is a Chief Mentor in the CS Portal with their own team (csPortalMeetings.service.ts). */
+   instructor who is a Chief Mentor in the CS Portal with whoever it says (csPortalMeetings.service.ts) — anyone of
+   either academy since 2026-11-24; a `team` list, if it ever sends one, still holds. */
 async function staffMeetingReach(req: Request) {
   if (req.user?.role !== 'instructor') return { may: true, team: null as string[] | null }
   const { staffMeetingReachFor } = await import('@/services/csPortalMeetings.service.ts')

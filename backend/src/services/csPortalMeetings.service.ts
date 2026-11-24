@@ -95,9 +95,10 @@ export async function mustAskForStudentMeetings(email: unknown): Promise<boolean
 }
 
 /* ── A staff meeting from the Mentor Calendar here (the user, 2026-11-14: "in the LMS also a separate button") ──
-   Several mentors in one meeting, booked by a Chief Mentor with their own team, as in the CS Portal. The LMS has no
-   Chief of its own: the CS Portal says who is one and who is in their team (its `me`, staff_meeting). An LMS admin
-   books one with anyone, without asking. Kept five minutes, as the answer above. */
+   Several mentors in one meeting, booked by a Chief Mentor, as in the CS Portal. The LMS has no Chief of its own: the
+   CS Portal says who is one and with whom (its `me`, staff_meeting — anyone of either academy since 2026-11-24, team
+   null; a Chief's own team before). An LMS admin books one with anyone, without asking. Kept five minutes, as the
+   answer above. */
 export interface StaffMeetingReach { may: boolean; team: string[] | null; reason?: string }
 const reachCache = new Map<string, { at: number; reach: StaffMeetingReach }>()
 

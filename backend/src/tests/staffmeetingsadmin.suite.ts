@@ -7,6 +7,10 @@
      C  changed: nobody added from outside the team; everybody taken off, as anybody may
      D  an admin books one with anyone; a busy mentor is refused in the LMS's words
      E  any other booking as before — a plain staff meeting by a mentor who isn't a Chief
+     F  every mentor of both academies (the user, 2026-11-24: "show every mentor including Bangalore and Dubai"): the
+        CS Portal now says a Chief may book with anyone (team null); the calendar gives both academies' mentors to
+        whoever may book one (?allAcademies=1), this academy's to anybody else; booked across teams and academies;
+        at most 60 besides its own
    The CS Portal is a stand-in; the app, HTTP and database are real.
    Usage (from backend/): STAFFADMIN_DB_URL=mongodb://127.0.0.1:<port>/lms_staffmeetingsadmin bun --no-env-file src/tests/staffmeetingsadmin.suite.ts
 ───────────────────────────────────────────────────────────── */
@@ -31,6 +35,7 @@ const SECRET = 'staffadmin-s2s-secret'
 let mode: 'ok' | 'old' | 'down' = 'ok'
 const asked: string[] = []
 const TEAM = ['chief@sa.local', 'ana@sa.local', 'bo@sa.local']
+let chiefTeam: string[] | null = TEAM   // F: null — anyone, as the CS Portal says since 2026-11-24
 const fake = http.createServer((req, res) => {
   let raw = ''
   req.on('data', c => (raw += c))
@@ -46,7 +51,7 @@ const fake = http.createServer((req, res) => {
     if (!chief && !senior) return send(200, { success: true, data: { mentor: false } })
     const me: Record<string, unknown> = { mentor: true, role: chief ? 'chief_mentor' : 'senior_mentor', asks: !chief }
     // A CS Portal from before staff meetings says nothing of them.
-    if (mode !== 'old') me['staff_meeting'] = chief ? { may: true, team: TEAM } : { may: false, team: [] }
+    if (mode !== 'old') me['staff_meeting'] = chief ? { may: true, team: chiefTeam } : { may: false, team: [] }
     return send(200, { success: true, data: me })
   })
 })
@@ -149,6 +154,31 @@ try {
   section('E. Everything else as before')
   r = await call('POST', '/admin/mentor-calendar/meetings', senior, meeting({ mentorEmail: 'zed@sa.local', title: 'A plain staff chat', scheduledStart: iso(600), attendees: [{ name: 'Somebody' }] }))
   check('E. a Senior books a plain staff meeting with anyone', r.status === 200 && (r.body.data.meeting.staff ?? []).length === 0, j(r.body))
+
+  section('F. Every mentor of both academies')
+  const blr = await M.OrganizationModel.create({ name: 'Delta Bangalore', slug: 'bangalore', currency: 'INR', paymentGateway: 'abzer' } as any)
+  await mkUser({ name: 'Ravi', email: 'ravi@sa.local', role: 'instructor', organizationId: blr._id })
+  chiefTeam = null; forgetAsks()
+  const week = `from=${encodeURIComponent(new Date().toISOString())}&to=${encodeURIComponent(new Date(Date.now() + 7 * 864e5).toISOString())}`
+  const names = (r: { body: any }) => (r.body?.data?.mentors ?? []).map((m: any) => m.name)
+  r = await call('GET', `/admin/mentor-calendar?${week}`, admin)
+  check('F. the calendar as before: this academy\'s mentors only', r.status === 200 && names(r).includes('Ana') && !names(r).includes('Ravi'), j(names(r)))
+  r = await call('GET', `/admin/mentor-calendar?${week}&allAcademies=1`, admin)
+  const ravi = (r.body?.data?.mentors ?? []).find((m: any) => m.name === 'Ravi')
+  check('F. both academies, for an admin: Bangalore\'s mentor too, said to be Bangalore\'s', r.status === 200 && names(r).includes('Ana') && ravi?.academy?.name === 'Delta Bangalore', j(names(r)))
+  r = await call('GET', `/admin/mentor-calendar?${week}&allAcademies=1`, senior)
+  check('F. …not for a Senior (no staff meetings): this academy\'s only', r.status === 200 && names(r).includes('Ana') && !names(r).includes('Ravi'), j(names(r)))
+  r = await call('GET', '/admin/mentor-calendar/staff-meeting', chief)
+  check('F. a Chief: with anyone now (team null)', r.body.data.may === true && r.body.data.team === null, j(r.body))
+  r = await call('GET', `/admin/mentor-calendar?${week}&allAcademies=1`, chief)
+  check('F. …both academies\' mentors for them', r.status === 200 && names(r).includes('Ravi') && names(r).includes('Zed'), j(names(r)))
+  r = await call('POST', '/admin/mentor-calendar/meetings', chief, meeting({ title: 'Both academies', scheduledStart: iso(420), mentorEmail: 'zed@sa.local', staffEmails: ['ravi@sa.local'] }))
+  check('F. Bangalore\'s mentor without allAcademies: not found here, nothing booked', r.status === 404 && /ravi@sa\.local/.test(msg(r)), j(r.body))
+  r = await call('POST', '/admin/mentor-calendar/meetings', chief, meeting({ title: 'Both academies', scheduledStart: iso(420), mentorEmail: 'zed@sa.local', staffEmails: ['ana@sa.local', 'ravi@sa.local'], allAcademies: true }))
+  const across = r.body?.data?.meeting?.id ? await M.MentorMeetingModel.findById(r.body.data.meeting.id).lean() : null
+  check('F. the Chief, in another team\'s mentor\'s name, with another team\'s and Bangalore\'s: booked', r.status === 200 && (across?.staffIds ?? []).length === 2, j(r.body))
+  r = await call('POST', '/admin/mentor-calendar/meetings', chief, meeting({ title: 'Too many', scheduledStart: iso(480), staffEmails: Array.from({ length: 61 }, (_, i) => `m${i}@sa.local`), allAcademies: true }))
+  check('F. 61 besides its own: refused, said so', r.status === 400 && /At most 60 mentors/.test(msg(r)), j(r.body))
 } catch (err) {
   fail++; console.log('  FAIL  threw', err)
 } finally {

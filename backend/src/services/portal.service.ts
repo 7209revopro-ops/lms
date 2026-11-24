@@ -829,7 +829,8 @@ async function staffNamed(input: unknown, opts: { orgId: unknown; allAcademies: 
   const emails = [...new Set((Array.isArray(input) ? input : []).map((e) => String(e ?? '').toLowerCase().trim()).filter(Boolean))]
     .filter((e) => e !== opts.notEmail.toLowerCase())
   if (emails.length === 0) return []
-  if (emails.length > 30) throw httpError('At most 30 mentors in a staff meeting', 400)
+  // 60 since every mentor of both academies can be picked (2026-11-24: "Select all"); the CS Portal keeps the same.
+  if (emails.length > 60) throw httpError('At most 60 mentors in a staff meeting', 400)
   const found = await UserModel.find(teacherFilter({
     email: { $in: emails },
     ...(opts.allAcademies ? {} : { $or: [{ organizationId: opts.orgId }, { sharedAcrossOrgs: true }] }),
