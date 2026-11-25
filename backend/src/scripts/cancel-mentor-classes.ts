@@ -22,6 +22,12 @@
      --to 2026-11-30          last day, UAE time (default 2026-11-30)
      --from 2026-11-20        first day, UAE time (default today); never before now
      --reason "…"             what students read (default below)
+   By COURSE instead of mentor (2026-11-25: every DFD and DWT session on Fri 27 Nov,
+   except Akhil C P's) — every class of those courses in the range, all mentors:
+     bun src/scripts/cancel-mentor-classes.ts --course "DELTA FLOW DYNAMICS,DELTA WAVE THEORY TRADING PROGRAMME" \
+       --from 2026-11-27 --to 2026-11-27 --keep-mentor "Akhil CP" --reason "…"
+     --course "A,B"           course titles, exact (any case), comma-separated
+     --keep-mentor "Name"     leave this mentor's classes on ("Akhil CP" also finds "AKHIL C P")
    Report: cancel-mentor-report.txt in the backend folder.
 ───────────────────────────────────────────────────────────── */
 import * as fs from 'fs'
@@ -32,7 +38,9 @@ const opt = (k: string) => { const i = argv.indexOf(`--${k}`); return i >= 0 ? a
 const COMMIT = argv.includes('--commit')
 const die = (msg: string): never => { console.error(`\n✖ ${msg}\n`); process.exit(1) }
 
-const MENTOR = opt('mentor') ?? die('Say whose classes: --mentor "Arya"')
+const COURSES = (opt('course') ?? '').split(',').map(s => s.trim()).filter(Boolean)
+const KEEP    = opt('keep-mentor')
+const MENTOR = opt('mentor') ?? (COURSES.length ? '' : die('Say whose classes: --mentor "Arya"  (or which courses: --course "A,B")'))
 const EMAIL  = opt('email')?.trim().toLowerCase()
 const REASON = opt('reason') ?? 'The mentor is not available for this class'
 const DAY = /^\d{4}-\d{2}-\d{2}$/
@@ -51,8 +59,27 @@ mongoose.set('autoIndex', false); mongoose.set('autoCreate', false)
 await mongoose.connect(DB_URL, { autoIndex: false, autoCreate: false })
 const { LiveClassModel, ClassBookingModel, UserModel } = await import('@/models/schema.ts')
 
-/* ── the mentor ── */
 const esc = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+/* "Akhil CP" also finds "AKHIL C P" and "Akhil C.P." */
+const loose = (s: string) => new RegExp(s.replace(/[\s.]+/g, '').split('').map(esc).join('[\\s.]*'), 'i')
+const now = new Date()
+let label: string
+let all: any[]
+if (COURSES.length) {
+  /* ── by course ── */
+  const { CourseModel } = await import('@/models/schema.ts')
+  const found = await CourseModel.find({ title: { $in: COURSES.map(t => new RegExp(`^\\s*${esc(t)}\\s*$`, 'i')) } }).select('title').lean() as any[]
+  const missing = COURSES.filter(t => !found.some(c => String(c.title).trim().toLowerCase() === t.toLowerCase()))
+  if (missing.length) die(`No course titled: ${missing.join(' · ')}`)
+  const keepIds = KEEP ? new Set((await UserModel.find({ name: loose(KEEP), role: { $ne: 'student' } }).select('_id name').lean() as any[]).map(u => String(u._id))) : new Set<string>()
+  if (KEEP && !keepIds.size) die(`--keep-mentor "${KEEP}" matches nobody.`)
+  all = (await LiveClassModel.find({ courseId: { $in: found.map(c => c._id) }, scheduledStart: { $gte: fromAt, $lte: toAt } })
+    .select('title scheduledStart status isOnline courseId instructorId').populate('courseId', 'title').populate('instructorId', 'name').sort({ scheduledStart: 1 }).lean() as any[])
+  const kept = all.filter(c => keepIds.has(String(c.instructorId?._id ?? c.instructorId)))
+  all = all.filter(c => !kept.includes(c))
+  label = `${found.map(c => c.title).join(' + ')}${KEEP ? ` (keeping ${kept.length} of ${KEEP}'s)` : ''}`
+} else {
+/* ── the mentor ── */
 const people = await UserModel.find({
   ...(EMAIL ? { email: EMAIL } : { name: new RegExp(esc(MENTOR.trim()), 'i') }),
   role: { $ne: 'student' },
@@ -71,11 +98,12 @@ if (withClasses.length > 1) {
   die('Pick one:  --email <their email>')
 }
 const mentor = withClasses[0]
+label = `${mentor.name} <${mentor.email}>`
 
 /* ── the classes ── */
-const now = new Date()
-const all = await LiveClassModel.find({ instructorId: mentor._id, scheduledStart: { $gte: fromAt, $lte: toAt } })
+all = await LiveClassModel.find({ instructorId: mentor._id, scheduledStart: { $gte: fromAt, $lte: toAt } })
   .select('title scheduledStart status isOnline courseId').populate('courseId', 'title').sort({ scheduledStart: 1 }).lean() as any[]
+}
 const already = all.filter(c => c.status === 'cancelled')
 const started = all.filter(c => c.status !== 'cancelled' && (c.status !== 'scheduled' || new Date(c.scheduledStart) <= now))
 const target  = all.filter(c => c.status === 'scheduled' && new Date(c.scheduledStart) > now)
@@ -88,10 +116,10 @@ const students = new Set(seats.map(b => String(b.userId)))
 
 const dubai  = (t: Date | string) => new Date(new Date(t).getTime() + 4 * 3_600_000).toISOString().slice(0, 16).replace('T', ' ')
 const pretty = (t: Date | string) => new Date(t).toLocaleString('en-GB', { timeZone: 'Asia/Dubai', weekday: 'short', day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit', hour12: true })
-const line   = (c: any) => `${dubai(c.scheduledStart)}  ${c.title} · ${c.isOnline === false ? 'in person' : 'online'}`
+const line   = (c: any) => `${dubai(c.scheduledStart)}  ${c.title} · ${c.isOnline === false ? 'in person' : 'online'}${c.instructorId?.name ? ` · ${c.instructorId.name}` : ''}`
 
 const out: string[] = []
-out.push(`${mentor.name} <${mentor.email}> — classes ${FROM} → ${TO} (UAE) — ${COMMIT ? 'CANCELLING' : 'preview, nothing changed'}`)
+out.push(`${label} — classes ${FROM} → ${TO} (UAE) — ${COMMIT ? 'CANCELLING' : 'preview, nothing changed'}`)
 out.push('')
 out.push(`To cancel:                     ${target.length}  · ${seats.length} bookings · ${students.size} students to tell`)
 if (already.length) out.push(`Already cancelled (skipped):   ${already.length}`)
@@ -103,7 +131,7 @@ for (const c of target) out.push(`  ${line(c)} · ${(seatsOf.get(String(c._id)) 
 if (started.length) { out.push(''); out.push('LEFT ALONE (started or over):'); for (const c of started) out.push(`  ${line(c)} · ${c.status}`) }
 
 if (COMMIT && target.length) {
-  const ok = prompt(`\nThis CANCELS ${target.length} classes of ${mentor.name} on the LIVE LMS and tells ${students.size} students. Type CANCEL to continue:`)
+  const ok = prompt(`\nThis CANCELS ${target.length} classes (${label}) on the LIVE LMS and tells ${students.size} students. Type CANCEL to continue:`)
   if (ok !== 'CANCEL') { await mongoose.disconnect(); die('Stopped — nothing changed.') }
 
   const { LiveClassService } = await import('@/services/liveClass.service.ts')
