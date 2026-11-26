@@ -265,6 +265,37 @@ export async function findDuplicateGroups(opts: { organizationId?: string; inclu
   return { groups, dismissed }
 }
 
+/* ── Picking any two by hand (2026-11-25) ──────────────
+   The groups above only pair accounts that share a phone number; a student who
+   signed up twice with different numbers (or none) never shows there. This
+   finds student accounts to merge by name, email (or a secondary one) or phone
+   — in ANY state, pending and rejected included, which the Students list does
+   not search — skipping accounts already merged away. Every word must match
+   somewhere, as on the Students list; a phone matches on its last 7+ digits,
+   however it was typed. */
+export async function searchMergeCandidates(q: string, limit = 20): Promise<Array<DuplicateAccount & { categories: string[] }>> {
+  const words = String(q ?? '').trim().slice(0, 100).split(/\s+/).filter(Boolean).slice(0, 6)
+  if (!words.length) return []
+  const esc = (w: string) => w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  const clause = (w: string) => {
+    const digits = w.replace(/\D/g, '')
+    const or: Lean[] = [
+      { name: { $regex: esc(w), $options: 'i' } },
+      { email: { $regex: esc(w), $options: 'i' } },
+      { 'secondaryEmails.email': { $regex: esc(w), $options: 'i' } },
+    ]
+    if (digits.length >= 7) {
+      const tail = new RegExp(`${digits.slice(-9).split('').join('\\D*')}\\D*$`)
+      or.push({ phone: tail }, { 'enrollmentApplication.phone': tail })
+    }
+    return { $or: or }
+  }
+  const { UserModel } = await import('@/models/schema.ts')
+  const rows = await UserModel.find({ role: 'student', mergedInto: { $exists: false }, $and: words.map(clause) })
+    .select(USER_FIELDS).sort({ createdAt: -1 }).limit(Math.min(Math.max(limit, 1), 50)).lean<Lean[]>()
+  return rows.map(u => ({ ...summarize(u), categories: u.categories ?? [] }))
+}
+
 export async function dismissGroup(userIds: string[], by: string): Promise<{ key: string }> {
   const ids = [...new Set(userIds)]
   if (ids.length < 2 || !ids.every(i => Types.ObjectId.isValid(i))) throw new UserError('INVALID_GROUP', 'Pick at least two accounts.', 422)

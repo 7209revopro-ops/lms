@@ -815,6 +815,14 @@ router.get('/duplicates', requireRole('super_admin'), async (req: Request, res: 
   } catch (err) { next(err) }
 })
 
+/* Any two accounts, picked by hand (2026-11-25): student accounts in any state, by name, email or phone. */
+router.get('/duplicates/search', requireRole('super_admin'), async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { searchMergeCandidates } = await import('@/services/accountMerge.service.ts')
+    sendSuccess(res, await searchMergeCandidates(String(req.query['q'] ?? '')))
+  } catch (err) { next(err) }
+})
+
 router.get('/duplicates/compare', requireRole('super_admin'), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { compareAccounts } = await import('@/services/accountMerge.service.ts')

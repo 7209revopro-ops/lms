@@ -69,6 +69,19 @@ export function useDuplicateGroups(dismissed = false) {
   })
 }
 
+/** Student accounts in any state, by name, email or phone — to pick any two to merge (2026-11-25). */
+export type MergeCandidate = DuplicateAccount & { categories: string[] }
+export function useMergeSearch(q: string) {
+  const term = q.trim()
+  return useQuery({
+    queryKey: ['admin', 'duplicates', 'search', term] as const,
+    queryFn:  () => apiGet<MergeCandidate[]>('/admin/duplicates/search', { q: term }),
+    enabled:  term.length >= 2,
+    placeholderData: keepPreviousData,
+    staleTime: 10_000,
+  })
+}
+
 export function useCompareAccounts(ids: string[] | null) {
   return useQuery({
     queryKey: KEYS.compare(ids ?? []),

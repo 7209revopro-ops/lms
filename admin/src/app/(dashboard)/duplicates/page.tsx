@@ -1,10 +1,10 @@
 'use client'
 
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { motion } from 'framer-motion'
 import {
   Users, Phone, GitMerge, EyeOff, Eye, BadgeCheck, AlertTriangle, AlertCircle,
-  History, Undo2, CheckCircle2, ShieldAlert, Inbox,
+  History, Undo2, CheckCircle2, ShieldAlert, Inbox, Search, X, MousePointerClick,
 } from 'lucide-react'
 import Spinner from '@/components/ui/Spinner'
 import { AvatarImg } from '@/components/ui/AvatarImg'
@@ -13,8 +13,8 @@ import { useToast } from '@/store/ui.store'
 import { useCurrentUser } from '@/lib/api/user'
 import { useOrganizations } from '@/lib/api/organizations'
 import {
-  useDuplicateGroups, useDismissGroup, useUndismissGroup, useMergeHistory, useUndoMerge,
-  type DuplicateGroup, type Confidence, type MergeRecord,
+  useDuplicateGroups, useDismissGroup, useUndismissGroup, useMergeHistory, useUndoMerge, useMergeSearch,
+  type DuplicateGroup, type Confidence, type MergeRecord, type MergeCandidate,
 } from '@/lib/api/duplicates'
 import { useQueryState, setQueryParams } from '@/lib/useQueryState'
 
@@ -233,10 +233,110 @@ function MergeHistory() {
   )
 }
 
+/* ── Merge any two accounts (2026-11-25) ─────────────
+   The groups above pair only accounts that share a phone number. Here a super
+   admin finds the two themselves — any student account, in any state — and
+   opens the same Review & merge. */
+function useSettled(value: string, ms = 300) {
+  const [v, setV] = useState(value)
+  useEffect(() => { const t = setTimeout(() => setV(value), ms); return () => clearTimeout(t) }, [value, ms])
+  return v
+}
+
+const STATUS_STYLE: Record<string, string> = { approved: '#4ADE80', pending: '#FACC15', rejected: '#F87171', cancelled: '#F87171' }
+
+function CandidateLine({ a, orgName }: { a: MergeCandidate; orgName: (id?: string) => string }) {
+  return (
+    <div className="flex min-w-0 flex-1 items-center gap-3">
+      <AvatarImg src={a.avatarUrl} className="h-8 w-8 flex-shrink-0 rounded-full object-cover" fallback={(a.name || a.email).charAt(0).toUpperCase()} />
+      <div className="min-w-0 flex-1">
+        <p className="truncate text-sm font-semibold text-white">{a.name || '—'}</p>
+        <p className="truncate text-xs" style={{ color: muted }}>{a.email}{a.phone ? ` · ${a.phone}` : ''}</p>
+      </div>
+      <div className="hidden flex-shrink-0 text-right text-[11px] sm:block" style={{ color: muted }}>
+        <p>
+          <span style={{ color: STATUS_STYLE[a.enrollmentStatus ?? ''] ?? muted }}>{a.enrollmentStatus ? a.enrollmentStatus[0]!.toUpperCase() + a.enrollmentStatus.slice(1) : '—'}</span>
+          {!a.isActive && <span style={{ color: '#F87171' }}> · Blocked</span>}
+          {' · '}{orgName(a.organizationId)}
+        </p>
+        <p>Created {fmt(a.createdAt)} · Signed in {a.lastLoginAt ? fmt(a.lastLoginAt) : 'never'}</p>
+      </div>
+    </div>
+  )
+}
+
+function AccountSlot({ label, picked, other, onPick, orgName }: {
+  label: string; picked: MergeCandidate | null; other: MergeCandidate | null
+  onPick: (a: MergeCandidate | null) => void; orgName: (id?: string) => string
+}) {
+  const [q, setQ] = useState('')
+  const term = useSettled(q)
+  const { data, isFetching } = useMergeSearch(picked ? '' : term)
+  const results = (data ?? []).filter(a => a.id !== other?.id)
+  return (
+    <div className="rounded-2xl p-4" style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.08)' }}>
+      <p className="mb-2 text-[11px] font-bold uppercase tracking-widest" style={{ color: muted }}>{label}</p>
+      {picked ? (
+        <div className="flex items-center gap-3 rounded-xl px-3 py-2.5" style={{ background: 'rgba(0,87,184,0.12)', border: '1px solid rgba(96,165,250,0.35)' }}>
+          <CandidateLine a={picked} orgName={orgName} />
+          <button onClick={() => { onPick(null); setQ('') }} aria-label="Change" className="rounded-lg p-1.5 hover:bg-white/[0.08]" style={{ color: muted }}><X size={14} /></button>
+        </div>
+      ) : (
+        <>
+          <div className="relative">
+            <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2" style={{ color: muted }} />
+            <input value={q} onChange={e => setQ(e.target.value)} placeholder="Name, email or phone…"
+              className="h-10 w-full rounded-xl pl-9 pr-3 text-sm text-white outline-none"
+              style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)' }} />
+            {isFetching && <span className="absolute right-3 top-1/2 -translate-y-1/2"><Spinner size={12} variant="muted" /></span>}
+          </div>
+          {term.trim().length >= 2 && (
+            <div className="mt-2 max-h-72 space-y-1 overflow-y-auto">
+              {!results.length && !isFetching ? (
+                <p className="px-1 py-3 text-xs" style={{ color: muted }}>No student account matches “{term.trim()}”.</p>
+              ) : results.map(a => (
+                <button key={a.id} onClick={() => onPick(a)}
+                  className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left transition-colors hover:bg-white/[0.06]">
+                  <CandidateLine a={a} orgName={orgName} />
+                </button>
+              ))}
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  )
+}
+
+function PickAnyTwo({ orgName, onReview }: { orgName: (id?: string) => string; onReview: (ids: [string, string]) => void }) {
+  const [a, setA] = useState<MergeCandidate | null>(null)
+  const [b, setB] = useState<MergeCandidate | null>(null)
+  return (
+    <div className="space-y-3">
+      <p className="text-sm" style={{ color: muted }}>
+        Find the two accounts of one student — any student account, pending, approved or blocked, whatever their phone.
+        You choose which one to keep in the next step.
+      </p>
+      <div className="grid gap-3 lg:grid-cols-2">
+        <AccountSlot label="Account 1" picked={a} other={b} onPick={setA} orgName={orgName} />
+        <AccountSlot label="Account 2" picked={b} other={a} onPick={setB} orgName={orgName} />
+      </div>
+      <div className="flex justify-end">
+        <button onClick={() => a && b && onReview([a.id, b.id])} disabled={!a || !b}
+          className="flex items-center gap-1.5 rounded-xl px-4 py-2 text-sm font-semibold text-white disabled:opacity-40"
+          style={{ background: 'linear-gradient(135deg, #0057b8, #2F6BFF)' }}>
+          {a && b ? <GitMerge size={14} /> : <MousePointerClick size={14} />}
+          {a && b ? 'Review & merge' : 'Pick two accounts'}
+        </button>
+      </div>
+    </div>
+  )
+}
+
 export default function DuplicatesPage() {
   const { data: me, isLoading: meLoading } = useCurrentUser()
   const isSuper = me?.role === 'super_admin'
-  const [tab] = useQueryState<'groups' | 'history'>('tab', 'groups')
+  const [tab] = useQueryState<'groups' | 'pick' | 'history'>('tab', 'groups')
   const [showDismissed, setShowDismissed] = useState(false)
   const [conf, setConf] = useState<Confidence | ''>('')
   const [reviewing, setReviewing] = useState<[string, string] | null>(null)
@@ -277,7 +377,7 @@ export default function DuplicatesPage() {
       </div>
 
       <div className="flex flex-wrap items-center gap-2">
-        {([['groups', 'Possible duplicates', GitMerge], ['history', 'Merge history', History]] as const).map(([k, label, Icon]) => (
+        {([['groups', 'Possible duplicates', GitMerge], ['pick', 'Merge any two accounts', MousePointerClick], ['history', 'Merge history', History]] as const).map(([k, label, Icon]) => (
           <button key={k} onClick={() => setQueryParams({ tab: k === 'groups' ? null : k })}
             className="flex items-center gap-1.5 rounded-xl px-3 py-2 text-xs font-semibold transition-colors"
             style={{
@@ -291,7 +391,7 @@ export default function DuplicatesPage() {
         ))}
       </div>
 
-      {tab === 'history' ? <MergeHistory /> : (
+      {tab === 'history' ? <MergeHistory /> : tab === 'pick' ? <PickAnyTwo orgName={orgName} onReview={setReviewing} /> : (
         <>
           <div className="flex flex-wrap items-center gap-2">
             {(['', 'high', 'medium', 'low'] as const).map(k => (
