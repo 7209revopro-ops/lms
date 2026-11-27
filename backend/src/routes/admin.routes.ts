@@ -1995,6 +1995,19 @@ router.get('/recordings/filters', requireAnyAdmin, requireClassroomAccess, async
   } catch (err) { next(err) }
 })
 
+/* "Check for new recordings": run the 15-minute recording job now (reminders.job.ts runRecordingPoller — Meet
+   classes ended in the last 48 h with no recording yet). It runs in the background, so a slow Google never times
+   the page out; the page refreshes its list a minute later. Shares the job's lock, so it never runs twice at once. */
+router.post('/recordings/refresh', requireAnyAdmin, requireClassroomAccess, async (_req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { runRecordingPoller, countRecordingCandidates, isJobRunning, exclusive } = await import('@/jobs/reminders.job.ts')
+    if (isJobRunning('recording-poller')) { sendSuccess(res, { started: false, running: true, classes: 0 }); return }
+    const classes = await countRecordingCandidates()
+    if (classes > 0) void exclusive('recording-poller', runRecordingPoller)()
+    sendSuccess(res, { started: classes > 0, running: false, classes })
+  } catch (err) { next(err) }
+})
+
 /* Mint a short-lived playback URL. Authorisation happens HERE — reaching CLT
    at all means this LMS admin was allowed to watch. */
 router.post('/recordings/:id/playback', requireAnyAdmin, requireClassroomAccess,

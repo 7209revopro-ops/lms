@@ -1,6 +1,6 @@
 'use client'
 import { useMutation, useQuery } from '@tanstack/react-query'
-import { api, apiGet } from '@/lib/axios'
+import { api, apiGet, apiPost } from '@/lib/axios'
 
 /* Class recordings.
  *
@@ -69,6 +69,14 @@ export function useRecordingFilterChoices(courseId: string) {
     queryKey: recordingKeys.choices(courseId),
     queryFn:  () => apiGet<RecordingFilterChoices>('/admin/recordings/filters', courseId ? { courseId } : undefined),
     staleTime: 5 * 60_000,
+  })
+}
+
+/** "Check for new recordings": start the server's recording job now (Meet classes ended in the last 48 h).
+ *  It runs in the background; `classes` is how many it is looking for, `running` that it was already going. */
+export function useRefreshRecordings() {
+  return useMutation({
+    mutationFn: () => apiPost<{ started: boolean; running: boolean; classes: number }>('/admin/recordings/refresh'),
   })
 }
 

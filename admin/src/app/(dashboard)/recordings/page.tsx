@@ -1,14 +1,16 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
 import { useQueryState } from '@/lib/useQueryState'
+import { useToast } from '@/store/ui.store'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
   Film, Search, Play, Clock, Calendar, User, BookOpen,
-  AlertCircle, X, ExternalLink, Loader2, Layers, Languages,
+  AlertCircle, X, ExternalLink, Loader2, Layers, Languages, RefreshCw,
 } from 'lucide-react'
 import Spinner from '@/components/ui/Spinner'
-import { useRecordings, useRecordingPlayback, useRecordingFilterChoices, type RecordingRow } from '@/lib/api/recordings'
+import { useRecordings, useRecordingPlayback, useRecordingFilterChoices, useRefreshRecordings, recordingKeys, type RecordingRow } from '@/lib/api/recordings'
 import { useCurrentUser } from '@/lib/api/user'
 import { useBackdropClose } from '@/hooks/useBackdropClose'
 
@@ -122,6 +124,30 @@ export default function RecordingsPage() {
   const total = data?.total ?? null
   const playback = useRecordingPlayback()
 
+  /* "Check for new recordings": the server looks in the background, so the list is refreshed a minute later and
+     again a minute after that. The button rests for 2 minutes so repeated clicks don't hammer Google. */
+  const toast = useToast()
+  const qc = useQueryClient()
+  const refresh = useRefreshRecordings()
+  const [resting, setResting] = useState(false)
+  const timers = useRef<ReturnType<typeof setTimeout>[]>([])
+  useEffect(() => () => timers.current.forEach(clearTimeout), [])
+  const checkNew = () => {
+    refresh.mutate(undefined, {
+      onSuccess: r => {
+        if (r.running) toast.info('Already checking — new recordings will appear shortly.')
+        else if (!r.started) toast.info('No classes from the last 48 hours are waiting for a recording.')
+        else toast.success(`Looking for ${r.classes} recording${r.classes === 1 ? '' : 's'} — the list refreshes in a minute.`)
+        if (r.started || r.running) {
+          setResting(true)
+          const again = () => { void qc.invalidateQueries({ queryKey: recordingKeys.all }) }
+          timers.current.push(setTimeout(again, 60_000), setTimeout(again, 120_000), setTimeout(() => setResting(false), 120_000))
+        }
+      },
+      onError: (e: any) => toast.error(e?.response?.data?.error?.message ?? 'Could not check for new recordings.'),
+    })
+  }
+
   const watch = (row: RecordingRow) => {
     setFailed(null)
     playback.mutate(row.id, {
@@ -148,6 +174,13 @@ export default function RecordingsPage() {
               : 'Recorded classes in your academy'}
           </p>
         </div>
+        <button type="button" onClick={checkNew} disabled={refresh.isPending || resting}
+          title="Ask Google now for recordings of Meet classes that ended in the last 48 hours"
+          className="ml-auto flex items-center gap-1.5 rounded-xl px-3 py-2 text-xs font-semibold text-white disabled:opacity-50"
+          style={{ background: 'rgba(0,87,184,0.25)', border: '1px solid rgba(0,87,184,0.5)' }}>
+          <RefreshCw size={13} className={refresh.isPending || resting ? 'animate-spin' : ''} />
+          {resting ? 'Checking…' : 'Check for new recordings'}
+        </button>
       </div>
 
       <div className="mb-4 flex items-center gap-2 rounded-2xl px-3 py-2"

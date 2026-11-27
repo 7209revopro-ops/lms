@@ -1013,12 +1013,15 @@ export async function runMentorNoShowEscalation(): Promise<void> {
   }
 }
 
-/* ── Recording poller ────────────────────────────────── */
-async function runRecordingPoller(): Promise<void> {
-  try {
-    const { LiveClassModel } = await import('@/models/schema.ts')
-    const { fetchMeetRecordingUrl } = await import('@/services/googleMeet.service.ts')
+/* ── Recording poller ──────────────────────────────────
+   Every 15 minutes, and on demand from the Recordings page's "Check for new
+   recordings" button (POST /admin/recordings/refresh, since 2026-11-27). */
+export async function countRecordingCandidates(): Promise<number> {
+  return (await pickRecordingCandidates()).length
+}
 
+async function pickRecordingCandidates() {
+    const { LiveClassModel } = await import('@/models/schema.ts')
     const now      = new Date()
     const earliest = new Date(now.getTime() - 48 * 60 * 60 * 1000)  // don't poll classes older than 48 h
 
@@ -1032,10 +1035,17 @@ async function runRecordingPoller(): Promise<void> {
       .populate('instructorId', 'email').lean()
 
     // Filter to those whose scheduled end time has passed
-    const ended = candidates.filter(c => {
+    return candidates.filter(c => {
       const endMs = new Date(c.scheduledStart).getTime() + c.durationMins * 60_000
       return endMs < now.getTime()
     })
+}
+
+export async function runRecordingPoller(): Promise<void> {
+  try {
+    const { LiveClassModel } = await import('@/models/schema.ts')
+    const { fetchMeetRecordingUrl } = await import('@/services/googleMeet.service.ts')
+    const ended = await pickRecordingCandidates()
 
     let found = 0
     for (const cls of ended) {
@@ -1418,6 +1428,9 @@ export async function runReviewRequestDispatch(now: Date = new Date()): Promise<
    silently stops working because an option was renamed is worse than none, and
    this one is directly testable. */
 const inFlight = new Set<string>()
+/* Whether a job is running right now (the Recordings page asks before starting the poller itself). */
+export const isJobRunning = (name: string): boolean => inFlight.has(name)
+
 export function exclusive(name: string, task: () => Promise<void>): () => Promise<void> {
   return async () => {
     if (inFlight.has(name)) {
