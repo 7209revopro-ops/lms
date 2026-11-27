@@ -7,9 +7,9 @@
    of the class. Submit saves the marks and the review and verifies the class
    (POST /admin/class-verification/:id). Re-submitting edits it.
 ───────────────────────────────────────────────────────────── */
-import { use, useEffect, useState } from 'react'
+import { use, useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
-import { ArrowLeft, CheckCircle2, Star, Phone, UserCheck, UserX } from 'lucide-react'
+import { ArrowLeft, CheckCircle2, Star, Phone, UserCheck, UserX, Search, Download } from 'lucide-react'
 import { useVerifyClass, useSubmitVerification, type VerifyStudent } from '@/lib/api/classVerification'
 import { useToast } from '@/store/ui.store'
 import Spinner from '@/components/ui/Spinner'
@@ -26,6 +26,21 @@ function joinedLabel(s: VerifyStudent): string {
   return 'No join recorded'
 }
 
+/* A CSV with a BOM opens straight in Excel with accents and Malayalam intact —
+   the same export the other admin pages use. */
+function downloadCsv(name: string, head: string[], rows: unknown[][]) {
+  const cell = (v: unknown) => {
+    const s = v == null ? '' : String(v)
+    return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s
+  }
+  const blob = new Blob(['﻿' + [head, ...rows].map(r => r.map(cell).join(',')).join('\r\n')], { type: 'text/csv;charset=utf-8' })
+  const a = document.createElement('a')
+  a.href = URL.createObjectURL(blob); a.download = name; a.click(); URL.revokeObjectURL(a.href)
+}
+const dubai = (iso: string) => new Date(iso).toLocaleString('en-GB', { timeZone: 'Asia/Dubai', day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: true })
+const NONE = '__none__'
+const selectStyle = { background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)' }
+
 export default function VerifyClassPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params)
   const toast = useToast()
@@ -35,6 +50,30 @@ export default function VerifyClassPage({ params }: { params: Promise<{ id: stri
   const [rating, setRating] = useState(0)
   const [topics, setTopics] = useState('')
   const [issues, setIssues] = useState('')
+  const [q, setQ] = useState('')
+  const [fAtt, setFAtt] = useState<'' | 'attended' | 'missed'>('')
+  const [fJoin, setFJoin] = useState<'' | 'joined' | 'none'>('')
+  const [fCs, setFCs] = useState('')
+  const [fTeam, setFTeam] = useState('')
+
+  const students = cls?.students ?? []
+  const csChoices = useMemo(() => [...new Set(students.map(s => s.cs).filter((v): v is string => !!v))].sort((a, b) => a.localeCompare(b)), [students])
+  const teamChoices = useMemo(() => [...new Set(students.map(s => s.team).filter((v): v is string => !!v))].sort((a, b) => a.localeCompare(b)), [students])
+  /* Filters only hide rows: every student's mark is still sent on submit. */
+  const shown = useMemo(() => {
+    const needle = q.trim().toLowerCase()
+    return students.filter(s => {
+      const st = marks[s.bookingId]?.status ?? 'missed'
+      if (fAtt && st !== fAtt) return false
+      if (fJoin === 'joined' && !s.joinedAt) return false
+      if (fJoin === 'none' && s.joinedAt) return false
+      if (fCs && (fCs === NONE ? !!s.cs : s.cs !== fCs)) return false
+      if (fTeam && (fTeam === NONE ? !!s.team : s.team !== fTeam)) return false
+      if (needle && ![s.name, s.email, s.phone, s.studentCode].some(v => v?.toLowerCase().includes(needle))) return false
+      return true
+    })
+  }, [students, marks, q, fAtt, fJoin, fCs, fTeam])
+  const filtered = !!(q.trim() || fAtt || fJoin || fCs || fTeam)
 
   /* Start from what is stored: the automatic Present/Absent (an unmarked seat
      counts as present if a join was recorded), and any earlier review. */
@@ -62,6 +101,20 @@ export default function VerifyClassPage({ params }: { params: Promise<{ id: stri
   const present = Object.values(marks).filter(m => m.status === 'attended').length
   const setMark = (bookingId: string, patch: Partial<Mark>) =>
     setMarks(m => ({ ...m, [bookingId]: { ...(m[bookingId] ?? { status: 'missed', note: '' }), ...patch } }))
+
+  function onExport() {
+    if (!cls) return
+    const day = new Date(cls.scheduledStart).toLocaleDateString('en-CA', { timeZone: 'Asia/Dubai' })
+    const slug = cls.title.trim().replace(/[^\w]+/g, '-').replace(/^-|-$/g, '').toLowerCase() || 'class'
+    downloadCsv(`${slug}-${day}-attendance.csv`,
+      ['Student', 'Email', 'Student code', 'Phone', 'CS', 'Team', 'LMS saw', 'Joined at (Dubai)', 'Attendance', 'Note'],
+      shown.map(s => {
+        const m = marks[s.bookingId] ?? { status: 'missed', note: '' }
+        return [s.name, s.email ?? '', s.studentCode ?? '', s.phone ?? '', s.cs ?? (s.csOpen ? 'No CS yet' : ''), s.team ?? '',
+          s.joinedAt ? `Joined${s.joinedVia === 'click' ? ' (link)' : s.joinedVia === 'livekit' ? ' (in-app)' : ''}` : 'No join recorded',
+          s.joinedAt ? dubai(s.joinedAt) : '', m.status === 'attended' ? 'Present' : 'Absent', m.note]
+      }))
+  }
 
   async function onSubmit() {
     if (!rating) { toast.error('Give the class a rating (1–5) first.'); return }
@@ -110,6 +163,45 @@ export default function VerifyClassPage({ params }: { params: Promise<{ id: stri
           <p className="text-sm font-semibold text-white">Students ({cls.students.length})</p>
           <p className="text-xs" style={muted}><span style={{ color: '#4ADE80' }}>{present} present</span> · <span style={{ color: '#F87171' }}>{cls.students.length - present} absent</span></p>
         </div>
+        {cls.students.length > 0 && (
+          <div className="flex flex-wrap items-center gap-2 px-4 py-3" style={{ borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
+            <label className="flex items-center gap-1.5 rounded-lg px-2.5 py-1.5" style={selectStyle}>
+              <Search size={13} style={muted} />
+              <input value={q} onChange={e => setQ(e.target.value)} placeholder="Name, email, phone, code"
+                className="w-52 bg-transparent text-xs text-white outline-none" />
+            </label>
+            <select value={fAtt} onChange={e => setFAtt(e.target.value as typeof fAtt)} className="rounded-lg px-2.5 py-1.5 text-xs text-white outline-none" style={selectStyle}>
+              <option value="">All attendance</option>
+              <option value="attended">Present</option>
+              <option value="missed">Absent</option>
+            </select>
+            <select value={fJoin} onChange={e => setFJoin(e.target.value as typeof fJoin)} className="rounded-lg px-2.5 py-1.5 text-xs text-white outline-none" style={selectStyle}>
+              <option value="">LMS saw: all</option>
+              <option value="joined">Joined</option>
+              <option value="none">No join recorded</option>
+            </select>
+            <select value={fCs} onChange={e => setFCs(e.target.value)} className="rounded-lg px-2.5 py-1.5 text-xs text-white outline-none" style={selectStyle}>
+              <option value="">All CS</option>
+              <option value={NONE}>No CS</option>
+              {csChoices.map(c => <option key={c} value={c}>{c}</option>)}
+            </select>
+            <select value={fTeam} onChange={e => setFTeam(e.target.value)} className="rounded-lg px-2.5 py-1.5 text-xs text-white outline-none" style={selectStyle}>
+              <option value="">All teams</option>
+              <option value={NONE}>No team</option>
+              {teamChoices.map(t => <option key={t} value={t}>{t}</option>)}
+            </select>
+            {filtered && (
+              <button type="button" onClick={() => { setQ(''); setFAtt(''); setFJoin(''); setFCs(''); setFTeam('') }}
+                className="text-xs font-semibold" style={{ color: '#A78BFA' }}>Clear filters</button>
+            )}
+            <span className="ml-auto text-xs" style={muted}>Showing {shown.length.toLocaleString()} of {cls.students.length.toLocaleString()}</span>
+            <button type="button" onClick={onExport} disabled={shown.length === 0}
+              className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-40"
+              style={{ background: 'rgba(16,185,129,0.18)', border: '1px solid rgba(16,185,129,0.35)' }}>
+              <Download size={13} />Export to Excel
+            </button>
+          </div>
+        )}
         {cls.students.length === 0 ? (
           <p className="py-10 text-center text-sm" style={muted}>Nobody was booked on this class.</p>
         ) : (
@@ -126,7 +218,10 @@ export default function VerifyClassPage({ params }: { params: Promise<{ id: stri
                 </tr>
               </thead>
               <tbody>
-                {cls.students.map(s => {
+                {shown.length === 0 && (
+                  <tr><td colSpan={6} className="py-10 text-center text-sm" style={muted}>No students match these filters.</td></tr>
+                )}
+                {shown.map(s => {
                   const m = marks[s.bookingId] ?? { status: 'missed' as const, note: '' }
                   return (
                     <tr key={s.bookingId} style={{ borderTop: '1px solid rgba(255,255,255,0.06)' }}>
