@@ -1,6 +1,6 @@
 'use client'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { apiGet, apiPatch, api } from '@/lib/axios'
+import { apiGet, apiPatch, api, clearAccessToken } from '@/lib/axios'
 import { ANNOUNCEMENT_DISMISS_PREFIX } from '@/lib/announcementDismiss'
 
 export interface EnrollmentApplication {
@@ -146,7 +146,8 @@ export function logout(): Promise<void> {
       }
     } catch { /* storage blocked — nothing to clear */ }
   }
-  return api.post('/auth/logout').then(() => {/* no-op */}).catch(() => {/* best-effort */})
+  /* The Bearer token goes with the session, whatever the server answered (lib/axios.ts). */
+  return api.post('/auth/logout').then(() => {/* no-op */}).catch(() => {/* best-effort */}).finally(clearAccessToken)
 }
 
 /* PATCH /auth/me/password */

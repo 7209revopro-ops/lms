@@ -12,11 +12,12 @@ import {
   ADMIN_REFRESH_COOKIE,
   ADMIN_ACCESS_COOKIE,
   ADMIN_SESSION_COOKIE,
+  SESSION_COOKIE,
   setImpersonationCookie,
   clearImpersonationCookie,
   resolveDeviceId,
 } from '@/utils/authCookies.ts'
-import { currentSessionToken, issueSession, isMobileClient, mobileDeviceId, presentedRefreshToken } from '@/utils/mobileClient.ts'
+import { currentSessionToken, issueSession, isMobileClient, mobileDeviceId, presentedRefreshToken, wantsBearer } from '@/utils/mobileClient.ts'
 import { refreshTtl } from '@/utils/refreshTtl.ts'
 
 /* ─────────────────────────────────────────────────────
@@ -83,14 +84,6 @@ function isDeadSession(err: unknown): boolean {
    the present-but-dead state that loops — still gets cleaned up. */
 function hasStaleCookie(req: Request, name: string): boolean {
   return typeof req.cookies?.[name] === 'string' && req.cookies[name].length > 0
-}
-
-/* The admin website since 2026-11-27 keeps the access token itself and sends it as `Authorization: Bearer` (the user:
-   "do as bearer token in admin side also instead of cookie"). It says so with this header on sign-in and refresh; the
-   answer then carries the token in its body and no access cookie is set (authCookies.ts setAdminAuthCookies). The
-   refresh token stays an httpOnly cookie either way — it is never handed to the page. */
-function wantsBearer(req: Request): boolean {
-  return String(req.headers['x-auth-mode'] ?? '').toLowerCase() === 'bearer'
 }
 
 export class AuthController {
@@ -247,7 +240,7 @@ export class AuthController {
            the access cookie with it — see isDeadSession above for why a
            dead-but-present cookie is the thing that loops. Guarded so an
            anonymous cross-site POST cannot use this as a logout. */
-        if (hasStaleCookie(req, ACCESS_COOKIE)) clearAuthCookies(res)
+        if (hasStaleCookie(req, ACCESS_COOKIE) || hasStaleCookie(req, SESSION_COOKIE)) clearAuthCookies(res)
         res.status(401).json({
           success: false,
           error: { code: 'MISSING_REFRESH_TOKEN', message: 'Refresh session not found' },
@@ -257,7 +250,7 @@ export class AuthController {
 
       const tokens = await this.service.refresh(rawToken, sessionMeta(req, res))
       const session = issueSession(req, res, tokens)
-      sendSuccess(res, isMobileClient(req) ? session : null, 'Session refreshed')
+      sendSuccess(res, isMobileClient(req) || wantsBearer(req) ? session : null, 'Session refreshed')
     } catch (err) {
       if (isDeadSession(err)) clearAuthCookies(res)
       next(err)
@@ -510,7 +503,7 @@ export class AuthController {
          cookies for the browser, in the body for the app (which would
          otherwise be signed out by its own password change). */
       const session = issueSession(req, res, tokens)
-      sendSuccess(res, isMobileClient(req) ? session : null, 'Password changed successfully. Other devices have been signed out.')
+      sendSuccess(res, isMobileClient(req) || wantsBearer(req) ? session : null, 'Password changed successfully. Other devices have been signed out.')
     } catch (err) {
       next(err)
     }

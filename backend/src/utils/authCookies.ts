@@ -25,6 +25,12 @@ export const REFRESH_COOKIE = 'lms_rt'
 export const DEVICE_COOKIE = 'lms_device'
 const DEVICE_TTL_MS = 400 * 86_400_000 // 400 days (Chrome's max cookie lifetime)
 
+/* "A student session exists in this browser" — just '1', readable by the page (like lms_imp). The student website
+   keeps its access token in memory and sends it as `Authorization: Bearer` since 2026-11-27, so there is no access
+   cookie for its page guard to look for, and its script has to know whether to ask for a token on a fresh page
+   WITHOUT asking the server: that site has public pages, where a signed-out visitor must cause no refresh call at
+   all. It grants nothing — the API never reads it; forging it buys a refused refresh. */
+export const SESSION_COOKIE = 'lms_s'
 export const ADMIN_ACCESS_COOKIE  = 'lms_admin_at'
 export const ADMIN_REFRESH_COOKIE = 'lms_admin_rt'
 /* "An admin session exists in this browser" — the value is just '1'. The admin website's page guard can only see
@@ -119,8 +125,34 @@ function parseDurationMs(duration: string): number {
    refreshTtl.ts. Omitted, this keeps its old behaviour exactly: the env
    default, same as every non-login-form issuance path (register, OTP, 2FA,
    magic link, token rotation) that never passes one. */
-export function setAuthCookies(res: Response, tokens: TokenPair, refreshTtlOverride?: string): void {
+/* `bearer`: the caller keeps the access token itself and sends it as `Authorization: Bearer` (the student website
+   since 2026-11-27, asking with `X-Auth-Mode: bearer` — mobileClient.ts issueSession). Then the access token is NOT
+   put in a cookie, and one left from before is taken down: the auth middleware reads a cookie BEFORE a Bearer header,
+   so a stale one would outrank the fresh token. Only the refresh cookie and the "a session exists" marker are set. */
+export function setAuthCookies(res: Response, tokens: TokenPair, refreshTtlOverride?: string, opts: { bearer?: boolean } = {}): void {
   const sessionMs = parseDurationMs(refreshTtlOverride ?? env.JWT_REFRESH_EXPIRES_IN)
+  res.cookie(SESSION_COOKIE, '1', {
+    httpOnly: false,
+    secure:   isProd(),
+    sameSite: 'lax',
+    domain:   cookieDomain(),
+    path:     '/',
+    maxAge:   sessionMs,
+  })
+  if (opts.bearer) {
+    res.clearCookie(ACCESS_COOKIE, { path: '/', domain: cookieDomain() })
+    res.cookie(REFRESH_COOKIE, tokens.refresh_token, {
+      httpOnly: true,
+      secure:   isProd(),
+      sameSite: 'lax',
+      domain:   cookieDomain(),
+      path:     REFRESH_PATH,
+      maxAge:   sessionMs,
+    })
+    evictLegacyCookie(res, ACCESS_COOKIE,  '/')
+    evictLegacyCookie(res, REFRESH_COOKIE, REFRESH_PATH)
+    return
+  }
   /* The access COOKIE lives as long as the session; the JWT inside it still
      expires after JWT_ACCESS_EXPIRES_IN and the API refuses it (TOKEN_EXPIRED).
 
@@ -154,6 +186,7 @@ export function setAuthCookies(res: Response, tokens: TokenPair, refreshTtlOverr
 
 export function clearAuthCookies(res: Response): void {
   res.clearCookie(ACCESS_COOKIE,  { path: '/',          domain: cookieDomain() })
+  res.clearCookie(SESSION_COOKIE, { path: '/',          domain: cookieDomain() })
   res.clearCookie(REFRESH_COOKIE, { path: REFRESH_PATH, domain: cookieDomain() })
   /* Logout must clear the legacy-scoped pair too. Missing it would leave a
      still-valid apex cookie in the jar, so "sign out" would not sign out. */

@@ -23,6 +23,13 @@ import { setAuthCookies } from '@/utils/authCookies.ts'
 export const isMobileClient = (req: Request): boolean =>
   String(req.headers['x-client'] ?? '').toLowerCase() === 'mobile'
 
+/* A website that keeps the access token itself and sends it as `Authorization: Bearer` (the user, 2026-11-27: "do as
+   bearer token in admin side also instead of cookie", then "same as the client also"). It says so with this header
+   on every call; what changes is only what sign-in and refresh answer with (issueSession below; auth.controller.ts
+   for the admin's). A website build from before the change never sends it and gets its cookies exactly as before. */
+export const wantsBearer = (req: Request): boolean =>
+  String(req.headers['x-auth-mode'] ?? '').toLowerCase() === 'bearer'
+
 /* Same shape as the id resolveDeviceId mints for a browser: 64 hex chars. */
 const DEVICE_ID = /^[a-f0-9]{64}$/
 
@@ -41,9 +48,15 @@ export function mobileDeviceId(req: Request): string | undefined {
  */
 export function issueSession(
   req: Request, res: Response, tokens: TokenPair, refreshTtlOverride?: string,
-): { tokens?: { accessToken: string; refreshToken: string } } {
+): { tokens?: { accessToken: string; refreshToken: string }; access_token?: string } {
   if (isMobileClient(req)) {
     return { tokens: { accessToken: tokens.access_token, refreshToken: tokens.refresh_token } }
+  }
+  /* The websites since 2026-11-27: the access token in the answer, to be sent back as a Bearer header; the refresh
+     token still only ever an httpOnly cookie. */
+  if (wantsBearer(req)) {
+    setAuthCookies(res, tokens, refreshTtlOverride, { bearer: true })
+    return { access_token: tokens.access_token }
   }
   setAuthCookies(res, tokens, refreshTtlOverride)
   return {}

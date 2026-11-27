@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 
 const ACCESS_COOKIE = 'lms_at'
+const SESSION_COOKIE = 'lms_s'
 const IMPERSONATION_COOKIE = 'lms_imp_at'
 /* Guest-only: signed-in users get bounced away from these */
 const GUEST_ONLY = ['/login', '/register']
@@ -21,7 +22,11 @@ const PUBLIC = ['/forgot-password', '/reset-password', '/verify-email', '/imp/en
    arriving with only that one is authenticated as far as routing is concerned.
    The API still decides whether the session means anything. */
 function isAuthenticated(req: NextRequest): boolean {
-  return !!req.cookies.get(ACCESS_COOKIE)?.value
+  /* `lms_s` since 2026-11-27: the access token is no longer a cookie (it is sent as a Bearer header, lib/axios.ts),
+     so the backend sets this marker — just "1" — to say a session exists. `lms_at` is still honoured for a session
+     from before the change, and for a backend not yet updated. */
+  return !!req.cookies.get(SESSION_COOKIE)?.value
+      || !!req.cookies.get(ACCESS_COOKIE)?.value
       || !!req.cookies.get(IMPERSONATION_COOKIE)?.value
 }
 

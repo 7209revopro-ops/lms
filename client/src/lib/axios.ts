@@ -15,6 +15,71 @@ export const api = axios.create({
   headers: { 'Content-Type': 'application/json' },
 })
 
+/* ── The access token: a Bearer header, not a cookie (2026-11-27) ──────────
+   The same change the admin website got (the user: "same as the client also"). Asked with `X-Auth-Mode: bearer`, the
+   backend answers sign-in and refresh with the access token and no longer sets it as the `lms_at` cookie; every call
+   carries it as `Authorization: Bearer`.
+
+   It is kept in MEMORY only — not localStorage or sessionStorage, where any script on the page could read it for as
+   long as it lives. The refresh token stays an httpOnly cookie the page never sees, so a reload or a new tab starts
+   with no access token and asks /auth/refresh for one before its first call (ensureAccessToken).
+
+   Only when a session exists. This site has public pages (/explore, /p/…, the sign-in forms), and a signed-out
+   visitor must cause no refresh call at all — so the backend sets a readable marker, `lms_s=1`, beside the refresh
+   cookie, and nothing is asked without it. It is not a token and grants nothing.
+
+   Against a backend from before this change the answer carries no token and there is no marker: nothing is kept, no
+   header is sent, and the `lms_at` cookie that backend still sets goes on working. A session from before the change
+   (cookie, no marker) is served by its cookie until that expires, and moves over on the refresh that follows. */
+const AUTH_MODE = { 'X-Auth-Mode': 'bearer' }
+let accessToken: string | null = null
+
+export function clearAccessToken(): void { accessToken = null }
+
+const tokenIn = (data: unknown): string | null => {
+  const t = (data as { data?: { access_token?: unknown } } | null | undefined)?.data?.access_token
+  return typeof t === 'string' && t.split('.').length === 3 ? t : null
+}
+
+const hasCookie = (pair: string): boolean =>
+  typeof document !== 'undefined' && document.cookie.split('; ').some(c => c === pair)
+
+/* One refresh at a time, whoever asks: the first call of a fresh page, or a 401 further down. Bounded like every
+   other call — a refresh stalled on a poor connection would otherwise hold every request queued behind it. */
+let refreshing: Promise<boolean> | null = null
+function refreshSession(): Promise<boolean> {
+  refreshing ??= axios.post('/api/v1/auth/refresh', null, { withCredentials: true, timeout: 15_000, headers: AUTH_MODE })
+    .then(res => { accessToken = tokenIn(res.data) ?? accessToken; return true })
+    .finally(() => { refreshing = null })
+  return refreshing
+}
+
+/* A page that has just loaded has no token yet. Asking once here, before the first call goes out, replaces a burst
+   of 401s (one per query on the page), and every call of that first burst waits on the same one. If it is refused,
+   the calls go out without a token and their 401 takes the usual road. */
+const NO_TOKEN_NEEDED = /^\/auth\/(login|register|otp|refresh|logout|forgot-password|reset-password|impersonation)(\/|$|\?)/
+/* (A sign-in or join link is NOT in that list: opened by someone already signed in, it has to say who they are.) */
+let bootstrap: Promise<unknown> | null = null
+async function ensureAccessToken(url: string | undefined): Promise<void> {
+  if (accessToken) return
+  if (!hasCookie('lms_s=1')) return          // signed out, or a session from before the change: nothing to ask for
+  if (hasCookie('lms_imp=1')) return         // viewing as a student: that session is its own cookie, with no refresh
+  if (NO_TOKEN_NEEDED.test(url ?? '')) return
+  bootstrap ??= refreshAllowed() ? refreshSession().catch(() => false) : Promise.resolve(false)
+  await bootstrap
+}
+
+api.interceptors.request.use(async config => {
+  if (typeof window !== 'undefined') {
+    config.headers = config.headers ?? {}
+    config.headers['X-Auth-Mode'] = 'bearer'
+    await ensureAccessToken(config.url)
+    if (accessToken) config.headers['Authorization'] = `Bearer ${accessToken}`
+    else delete config.headers['Authorization']
+  }
+  return config
+})
+
 /* ─── Response interceptor ───────────────────────── */
 // On 401: attempt silent token refresh once, then retry.
 // Only redirect to /login if refresh itself fails.
@@ -54,7 +119,13 @@ function refreshAllowed(): boolean {
 }
 
 api.interceptors.response.use(
-  res => res,
+  res => {
+    /* Every way in (password, code, second factor, a sign-in or join link, registering, a changed password) answers
+       with the token; signing out drops it. */
+    if (String(res.config?.url ?? '').startsWith('/auth/logout')) accessToken = null
+    else accessToken = tokenIn(res.data) ?? accessToken
+    return res
+  },
   async err => {
     const original = err.config
 
@@ -116,10 +187,7 @@ api.interceptors.response.use(
 
     isRefreshing = true
     try {
-      /* Bounded like every other call. Without a timeout a refresh stalled on
-         a poor connection never settled, and every request queued behind it
-         (refreshQueue) waited with it — a page simply spun. */
-      await axios.post('/api/v1/auth/refresh', null, { withCredentials: true, timeout: 15_000 })
+      await refreshSession()
       isRefreshing = false
       drainQueue(true)
       return api(original)
