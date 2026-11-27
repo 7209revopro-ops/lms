@@ -13,7 +13,7 @@ export interface Program {
   joinCode?: string; joinUrl?: string
   mentor: ProgramPerson | null; coMentors?: ProgramPerson[]; meetingMode?: 'auto' | 'link' | 'app'; meetingUrl?: string; language?: string
   students: ProgramPerson[]; createdByName: string; createdByEmail: string
-  classes: { id: string; startsAt: string; status: string }[]; nextClassAt: string | null; missing?: string[]
+  classes: { id: string; startsAt: string; status: string; /** Its Google Meet link; '' in person or in-app. */ meetUrl?: string }[]; nextClassAt: string | null; missing?: string[]
 }
 export interface ProgramInput {
   title: string; description?: string; repeat: 'weekly' | 'monthly'; weekdays?: number[]; monthDay?: number | null

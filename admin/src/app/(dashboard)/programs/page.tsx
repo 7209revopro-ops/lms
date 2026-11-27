@@ -57,6 +57,11 @@ function ProgramCard({ p, open, onToggle }: { p: Program; open: boolean; onToggl
   const [editing, setEditing] = useState(false)
   const [err, setErr] = useState('')
   const upcoming = p.classes.filter(c => c.status === 'scheduled' && new Date(c.startsAt).getTime() > Date.now())
+  /* The Google Meet link to show (2026-11-27: "show the google meet link also there"): the next class's, else — all
+     held — the latest one that had a link. Each class of a weekly program can have its own room. */
+  const meetUrl = upcoming.find(c => c.meetUrl)?.meetUrl
+    || [...p.classes].sort((a, b) => +new Date(b.startsAt) - +new Date(a.startsAt)).find(c => c.meetUrl && c.status !== 'cancelled')?.meetUrl
+    || ''
   const remove = async (s: ProgramPerson) => {
     if (!confirm(`Take ${s.name} off "${p.title}"? Their seats on the classes still to come are freed.`)) return
     try { setErr(''); await change.mutateAsync({ id: p.id, remove: [s.id] }) } catch (e) { setErr(errText(e)) }
@@ -75,6 +80,7 @@ function ProgramCard({ p, open, onToggle }: { p: Program; open: boolean; onToggl
         </div>
       </button>
       {p.joinUrl && <ProgramLink url={p.joinUrl} />}
+      {meetUrl && <ProgramLink url={meetUrl} label="Meet" />}
       {open && (
         <div className="mt-4 space-y-4 border-t border-white/5 pt-4">
           <Guests id={p.id} />
@@ -325,12 +331,13 @@ function PickStudents({ students, setStudents }: { students: ProgramPerson[]; se
   )
 }
 
-/* The programme's shareable link — sign in, or a short form for people without an LMS account. */
-function ProgramLink({ url }: { url: string }) {
+/* The programme's shareable link — sign in, or a short form for people without an LMS account — and, labelled "Meet",
+   its Google Meet room. */
+function ProgramLink({ url, label = 'Link' }: { url: string; label?: string }) {
   const [copied, setCopied] = useState(false)
   return (
-    <div className="mt-3 flex items-center gap-2 rounded-lg bg-white/[0.03] px-3 py-2 text-xs" onClick={e => e.stopPropagation()}>
-      <span className="opacity-60">Link</span>
+    <div className={`${label === 'Link' ? 'mt-3' : 'mt-2'} flex items-center gap-2 rounded-lg bg-white/[0.03] px-3 py-2 text-xs`} onClick={e => e.stopPropagation()}>
+      <span className="w-8 shrink-0 opacity-60">{label}</span>
       <span className="min-w-0 flex-1 truncate font-mono opacity-90" title={url}>{url}</span>
       <button type="button" onClick={() => { void navigator.clipboard?.writeText(url); setCopied(true); setTimeout(() => setCopied(false), 1500) }}
         className="rounded-md bg-blue-600 px-2.5 py-1 font-semibold text-white">{copied ? 'Copied' : 'Copy'}</button>
