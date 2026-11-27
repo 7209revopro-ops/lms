@@ -23,21 +23,52 @@ export interface RecordingRow {
   recordingUrl?:  string | null
   course:     { id: string; title: string } | null
   instructor: { id: string; name: string } | null
+  section?:   { id: string; title: string } | null
+  language?:  string
   organizationId: string | null
 }
 
-export const recordingKeys = {
-  all:  ['admin', 'recordings'] as const,
-  list: (p: { page: number; search: string }) => ['admin', 'recordings', p] as const,
+/* The page's filters (2026-11-27) — every one optional, kept in the address bar by the page. */
+export interface RecordingFilters {
+  search: string; courseId: string; sectionId: string; language: string; instructorId: string; from: string; to: string
 }
 
-export function useRecordings(page: number, search: string) {
+export interface RecordingFilterChoices {
+  courses: { id: string; title: string }[]
+  instructors: { id: string; name: string }[]
+  sections: { id: string; title: string }[]
+  languages: string[]
+}
+
+export const recordingKeys = {
+  all:     ['admin', 'recordings'] as const,
+  list:    (p: { page: number } & RecordingFilters) => ['admin', 'recordings', p] as const,
+  choices: (courseId: string) => ['admin', 'recordings', 'filters', courseId] as const,
+}
+
+const present = (f: RecordingFilters) =>
+  Object.fromEntries(Object.entries(f).filter(([, v]) => v !== '')) as Partial<RecordingFilters>
+
+/** One page of recordings and how many there are in all for these filters. */
+export function useRecordings(page: number, filters: RecordingFilters) {
   return useQuery({
-    queryKey: recordingKeys.list({ page, search }),
-    queryFn:  () => apiGet<RecordingRow[]>('/admin/recordings', {
-      page, per_page: 20, ...(search ? { search } : {}),
-    }),
+    queryKey: recordingKeys.list({ page, ...filters }),
+    queryFn:  async () => {
+      const res = await api.get<{ success: true; data: RecordingRow[]; meta?: { total_count?: number } }>('/admin/recordings', {
+        params: { page, per_page: 20, ...present(filters) },
+      })
+      return { rows: res.data.data, total: res.data.meta?.total_count ?? null }
+    },
     staleTime: 30_000,
+  })
+}
+
+/** What the filters can offer: only courses, modules, mentors and languages that have a recording. */
+export function useRecordingFilterChoices(courseId: string) {
+  return useQuery({
+    queryKey: recordingKeys.choices(courseId),
+    queryFn:  () => apiGet<RecordingFilterChoices>('/admin/recordings/filters', courseId ? { courseId } : undefined),
+    staleTime: 5 * 60_000,
   })
 }
 

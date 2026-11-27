@@ -1842,6 +1842,59 @@ async function requireClassroomAccess(req: Request, res: Response, next: NextFun
    The URL is NOT stored — see cltWebhook.service.ts. A separate call mints a
    short-lived link at play time, so a stale presign can never be served.
 ──────────────────────────────────────────────────────────────────────────── */
+/* Which recorded classes this admin may see: the listing's rules, shared with the filter choices below so a dropdown
+   never offers a course or mentor whose recordings the list would then refuse. */
+async function recordingsScopeFilter(req: Request): Promise<Record<string, unknown>> {
+  const { Types } = await import('mongoose')
+  const filter: Record<string, unknown> = {}
+  andFilter(filter, { $or: [{ cltRecordingId: { $exists: true } }, { recordingUrl: { $exists: true, $nin: [null, ''] } }] })
+  const orgId = req.user!.organizationId
+  /* Keyed off orgId being SET, not off role: a super_admin who has picked
+     an academy via the topbar's org switcher (X-Organization-Id, read by
+     authenticateAdmin) must be scoped to it exactly like anybody else —
+     the comment two lines up already said so, but `role !== 'super_admin'`
+     here unconditionally skipped this branch for every super_admin
+     regardless of what the switcher sent, leaking every academy's
+     recordings into a switcher-scoped view. Same bug class already fixed
+     in classAssignment.service.ts's #reach()/#reviewable(). */
+  if (orgId && Types.ObjectId.isValid(orgId)) {
+    /* CLASSES THIS ACADEMY IS SERVED BY, not only the ones it owns — the
+       same widening the console list, the calendar and the bookings roster
+       already carry. Strict ownership meant a guest academy could send its
+       students into a shared class, mark their attendance, and then not be
+       able to review the recording of the hour they sat in. The recording is
+       the class; whoever may see the class may see it. */
+    andFilter(filter, servedClassFilter(orgId))
+  }
+
+  /* Programme scope, mirroring assertAdminMayObserve: a sub_admin who may not
+     ENTER a JURA class must not be able to WATCH it afterwards either. The
+     recording is the class. Scope lives on the course, so this resolves the
+     caller's programme to a course id set first. */
+  const scope = req.user!.categoryScope
+  if (isDepartmentScoped(req)) {
+    /* A department's sub_admin: the shared rule, both arms tied to the
+       caller's own academy (plan.md §10). The guest arm below matched a
+       guest cohort course from ANY academy. */
+    andFilter(filter, await liveClassClause(req))
+  } else if (scope) {
+    const { CourseModel } = await import('@/models/schema.ts')
+    const scoped = await CourseModel.find({ program: scope }).select('_id').lean()
+    const ids = scoped.map(c => c._id)
+    /* The guest door's course counts as "this programme" here too, for the
+       reason set out on the same narrowing in liveClass.repository.ts: a
+       guest academy's programme-scoped admin holds their OWN course and never
+       the host's, so asking only about `courseId` hid every shared class from
+       them. Composed under $and, because `title` search and the status terms
+       are assigned above and an assignment to $or would drop them. */
+    andFilter(filter, CROSS_ORG_CLASSES_ENABLED
+      ? { $or: [{ courseId: { $in: ids } }, { 'guestCohorts.courseId': { $in: ids } }] }
+      : { courseId: { $in: ids } })
+  }
+
+  return filter
+}
+
 router.get('/recordings', requireAnyAdmin, requireClassroomAccess, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { LiveClassModel } = await import('@/models/schema.ts')
@@ -1851,55 +1904,31 @@ router.get('/recordings', requireAnyAdmin, requireClassroomAccess, async (req: R
     /* The classroom's own recordings (cltRecordingId, played through CLT below) and, since 2026-11-18, every other
        class with a recording link saved on it — a Google Meet recording in Drive (reminders.job.ts
        runRecordingPoller) or the in-app stream's. Those open their link instead. */
-    const filter: Record<string, unknown> = {}
-    andFilter(filter, { $or: [{ cltRecordingId: { $exists: true } }, { recordingUrl: { $exists: true, $nin: [null, ''] } }] })
-    const orgId = req.user!.organizationId
-    /* Keyed off orgId being SET, not off role: a super_admin who has picked
-       an academy via the topbar's org switcher (X-Organization-Id, read by
-       authenticateAdmin) must be scoped to it exactly like anybody else —
-       the comment two lines up already said so, but `role !== 'super_admin'`
-       here unconditionally skipped this branch for every super_admin
-       regardless of what the switcher sent, leaking every academy's
-       recordings into a switcher-scoped view. Same bug class already fixed
-       in classAssignment.service.ts's #reach()/#reviewable(). */
-    if (orgId && Types.ObjectId.isValid(orgId)) {
-      /* CLASSES THIS ACADEMY IS SERVED BY, not only the ones it owns — the
-         same widening the console list, the calendar and the bookings roster
-         already carry. Strict ownership meant a guest academy could send its
-         students into a shared class, mark their attendance, and then not be
-         able to review the recording of the hour they sat in. The recording is
-         the class; whoever may see the class may see it. */
-      andFilter(filter, servedClassFilter(orgId))
-    }
+    const filter = await recordingsScopeFilter(req)
     /* Escaped and capped: typed text, not a pattern — "(" used to answer 500,
        and a crafted pattern could tie the database up. */
     const search = String((req.query as Record<string, string>)['search'] ?? '').trim().slice(0, 100)
     if (search) filter['title'] = { $regex: search.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), $options: 'i' }
-
-    /* Programme scope, mirroring assertAdminMayObserve: a sub_admin who may not
-       ENTER a JURA class must not be able to WATCH it afterwards either. The
-       recording is the class. Scope lives on the course, so this resolves the
-       caller's programme to a course id set first. */
-    const scope = req.user!.categoryScope
-    if (isDepartmentScoped(req)) {
-      /* A department's sub_admin: the shared rule, both arms tied to the
-         caller's own academy (plan.md §10). The guest arm below matched a
-         guest cohort course from ANY academy. */
-      andFilter(filter, await liveClassClause(req))
-    } else if (scope) {
-      const { CourseModel } = await import('@/models/schema.ts')
-      const scoped = await CourseModel.find({ program: scope }).select('_id').lean()
-      const ids = scoped.map(c => c._id)
-      /* The guest door's course counts as "this programme" here too, for the
-         reason set out on the same narrowing in liveClass.repository.ts: a
-         guest academy's programme-scoped admin holds their OWN course and never
-         the host's, so asking only about `courseId` hid every shared class from
-         them. Composed under $and, because `title` search and the status terms
-         are assigned above and an assignment to $or would drop them. */
-      andFilter(filter, CROSS_ORG_CLASSES_ENABLED
-        ? { $or: [{ courseId: { $in: ids } }, { 'guestCohorts.courseId': { $in: ids } }] }
-        : { courseId: { $in: ids } })
+    /* The page's filters (2026-11-27: "module based, course based, language based, instructor based and date range").
+       Ids are checked before they reach a query; a date is a Dubai day, the 'to' day included whole. */
+    const q = req.query as Record<string, string | undefined>
+    const idOf = (v: string | undefined) => (v && Types.ObjectId.isValid(v) ? new Types.ObjectId(v) : null)
+    const courseId = idOf(q['courseId']), sectionId = idOf(q['sectionId']), instructorId = idOf(q['instructorId'])
+    if (courseId)     andFilter(filter, { courseId })
+    if (sectionId)    andFilter(filter, { sectionId })
+    if (instructorId) andFilter(filter, { instructorId })
+    const language = String(q['language'] ?? '').trim().slice(0, 40)
+    if (language) andFilter(filter, language === 'English'
+      ? { $or: [{ language: 'English' }, { language: { $exists: false } }, { language: null }, { language: '' }] }
+      : { language })
+    const day = (v: string | undefined) => {
+      if (!v || !/^\d{4}-\d{2}-\d{2}$/.test(v)) return null
+      const d = new Date(`${v}T00:00:00+04:00`)
+      return Number.isNaN(d.getTime()) ? null : d          // 2026-13-99 has the shape and is still not a day
     }
+    const from = day(q['from']), toDay = day(q['to'])
+    if (from || toDay) andFilter(filter, { scheduledStart: {
+      ...(from ? { $gte: from } : {}), ...(toDay ? { $lt: new Date(toDay.getTime() + 86_400_000) } : {}) } })
 
     const [docs, totalCount] = await Promise.all([
       LiveClassModel.find(filter)
@@ -1907,6 +1936,7 @@ router.get('/recordings', requireAnyAdmin, requireClassroomAccess, async (req: R
         .skip((page - 1) * per_page).limit(per_page)
         .populate('instructorId', 'name email')
         .populate('courseId', 'title slug')
+        .populate('sectionId', 'title')
         .lean(),
       LiveClassModel.countDocuments(filter),
     ])
@@ -1924,9 +1954,44 @@ router.get('/recordings', requireAnyAdmin, requireClassroomAccess, async (req: R
       ...(d.cltRecordingId ? {} : { recordingUrl: d.recordingUrl || null }),
       course:          d.courseId ? { id: String(d.courseId._id), title: d.courseId.title } : null,
       instructor:      d.instructorId ? { id: String(d.instructorId._id), name: d.instructorId.name } : null,
+      section:         d.sectionId?._id ? { id: String(d.sectionId._id), title: d.sectionId.title } : null,
+      language:        d.language || 'English',
       organizationId:  d.organizationId ? String(d.organizationId) : null,
     }))
     sendSuccess(res, rows, undefined, 200, buildPaginationMeta(totalCount, page, per_page))
+  } catch (err) { next(err) }
+})
+
+/* The choices for the Recordings page's filters: only courses, modules, mentors and languages that have a recording
+   this admin may see. Modules only for the course asked about (?courseId=). */
+router.get('/recordings/filters', requireAnyAdmin, requireClassroomAccess, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { LiveClassModel, CourseModel, UserModel, SectionModel } = await import('@/models/schema.ts')
+    const { Types } = await import('mongoose')
+    const filter = await recordingsScopeFilter(req)
+    const [courseIds, instructorIds, languages] = await Promise.all([
+      LiveClassModel.distinct('courseId', filter),
+      LiveClassModel.distinct('instructorId', filter),
+      LiveClassModel.distinct('language', filter),
+    ])
+    const courseQ = String((req.query as Record<string, string>)['courseId'] ?? '')
+    const [courses, instructors, sectionIds] = await Promise.all([
+      CourseModel.find({ _id: { $in: courseIds } }).select('title').sort({ title: 1 }).lean() as Promise<any[]>,
+      UserModel.find({ _id: { $in: instructorIds } }).select('name').sort({ name: 1 }).lean() as Promise<any[]>,
+      Types.ObjectId.isValid(courseQ)
+        ? LiveClassModel.distinct('sectionId', { $and: [filter, { courseId: new Types.ObjectId(courseQ) }] })
+        : Promise.resolve([]),
+    ])
+    const sections = sectionIds.length
+      ? await SectionModel.find({ _id: { $in: sectionIds } }).select('title order').sort({ order: 1, title: 1 }).lean() as any[]
+      : []
+    const langs = [...new Set((languages as unknown[]).map(l => (typeof l === 'string' && l.trim() ? l.trim() : 'English')))].sort()
+    sendSuccess(res, {
+      courses:     courses.map(c => ({ id: String(c._id), title: c.title })),
+      instructors: instructors.map(u => ({ id: String(u._id), name: u.name })),
+      sections:    sections.map(x => ({ id: String(x._id), title: x.title })),
+      languages:   langs,
+    })
   } catch (err) { next(err) }
 })
 

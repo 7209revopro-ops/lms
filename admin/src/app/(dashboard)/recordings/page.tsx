@@ -5,10 +5,10 @@ import { useQueryState } from '@/lib/useQueryState'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
   Film, Search, Play, Clock, Calendar, User, BookOpen,
-  AlertCircle, X, ExternalLink, Loader2,
+  AlertCircle, X, ExternalLink, Loader2, Layers, Languages,
 } from 'lucide-react'
 import Spinner from '@/components/ui/Spinner'
-import { useRecordings, useRecordingPlayback, type RecordingRow } from '@/lib/api/recordings'
+import { useRecordings, useRecordingPlayback, useRecordingFilterChoices, type RecordingRow } from '@/lib/api/recordings'
 import { useCurrentUser } from '@/lib/api/user'
 import { useBackdropClose } from '@/hooks/useBackdropClose'
 
@@ -79,16 +79,47 @@ function PlayerModal({ row, url, onClose }: { row: RecordingRow; url: string; on
   )
 }
 
+/* ── A filter dropdown ──────────────────────────────── */
+function FilterSelect({ icon, label, value, options, onChange, disabled }: {
+  icon: React.ReactNode; label: string; value: string; options: { value: string; label: string }[]
+  onChange: (v: string) => void; disabled?: boolean
+}) {
+  return (
+    <label className={`flex items-center gap-1.5 rounded-xl px-2.5 py-1.5 ${disabled ? 'opacity-50' : ''}`}
+      style={{ background: value ? 'rgba(0,87,184,0.18)' : 'rgba(255,255,255,0.04)', border: `1px solid ${value ? 'rgba(0,87,184,0.45)' : 'rgba(255,255,255,0.08)'}`, color: 'rgba(255,255,255,0.55)' }}>
+      {icon}
+      <select value={value} disabled={disabled} onChange={e => onChange(e.target.value)} aria-label={label}
+        className="max-w-[12rem] truncate bg-transparent text-white outline-none [color-scheme:dark]">
+        <option value="">{label}</option>
+        {options.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+      </select>
+    </label>
+  )
+}
+
 /* ── Page ───────────────────────────────────────────── */
 export default function RecordingsPage() {
   const { data: me } = useCurrentUser()
   /* Search and page in the address bar (lib/useQueryState.ts). */
   const [search, setSearch]   = useQueryState('q', '', { history: 'replace' })
   const [page,   setPage]     = useQueryState('page', 1)
+  /* The filters (2026-11-27: "module based, course based, language based, instructor based and date range"), in the
+     address bar too, so a filtered view can be shared. A module belongs to a course: changing the course clears it. */
+  const [courseId,     setCourseId]     = useQueryState('course', '', { history: 'replace' })
+  const [sectionId,    setSectionId]    = useQueryState('module', '', { history: 'replace' })
+  const [language,     setLanguage]     = useQueryState('lang', '', { history: 'replace' })
+  const [instructorId, setInstructorId] = useQueryState('mentor', '', { history: 'replace' })
+  const [from,         setFrom]         = useQueryState('from', '', { history: 'replace' })
+  const [to,           setTo]           = useQueryState('to', '', { history: 'replace' })
+  const { data: choices } = useRecordingFilterChoices(courseId)
+  const filtered = !!(search || courseId || sectionId || language || instructorId || from || to)
+  const clearAll = () => { setSearch(''); setCourseId(''); setSectionId(''); setLanguage(''); setInstructorId(''); setFrom(''); setTo(''); setPage(1) }
   const [playing, setPlaying] = useState<{ row: RecordingRow; url: string } | null>(null)
   const [failed,  setFailed]  = useState<string | null>(null)
 
-  const { data: rows = [], isLoading, isError } = useRecordings(page, search)
+  const { data, isLoading, isError } = useRecordings(page, { search, courseId, sectionId, language, instructorId, from, to })
+  const rows = data?.rows ?? []
+  const total = data?.total ?? null
   const playback = useRecordingPlayback()
 
   const watch = (row: RecordingRow) => {
@@ -129,6 +160,41 @@ export default function RecordingsPage() {
           className="w-full bg-transparent text-sm text-white outline-none placeholder:text-white/30" />
       </div>
 
+      <div className="mb-4 flex flex-wrap items-center gap-2 text-xs">
+        <FilterSelect icon={<BookOpen size={12} />} label="All courses" value={courseId}
+          onChange={v => { setCourseId(v); setSectionId(''); setPage(1) }}
+          options={(choices?.courses ?? []).map(c => ({ value: c.id, label: c.title }))} />
+        <FilterSelect icon={<Layers size={12} />} label={courseId ? 'All modules' : 'Module — pick a course'} value={sectionId}
+          disabled={!courseId} onChange={v => { setSectionId(v); setPage(1) }}
+          options={(choices?.sections ?? []).map(x => ({ value: x.id, label: x.title }))} />
+        <FilterSelect icon={<Languages size={12} />} label="All languages" value={language}
+          onChange={v => { setLanguage(v); setPage(1) }}
+          options={(choices?.languages ?? []).map(l => ({ value: l, label: l }))} />
+        <FilterSelect icon={<User size={12} />} label="All instructors" value={instructorId}
+          onChange={v => { setInstructorId(v); setPage(1) }}
+          options={(choices?.instructors ?? []).map(u => ({ value: u.id, label: u.name }))} />
+        <label className="flex items-center gap-1.5 rounded-xl px-2.5 py-1.5"
+          style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)', color: 'rgba(255,255,255,0.55)' }}>
+          <Calendar size={12} />
+          <input type="date" aria-label="From" value={from} max={to || undefined}
+            onChange={e => { setFrom(e.target.value); setPage(1) }}
+            className="bg-transparent text-white outline-none [color-scheme:dark]" />
+          <span>to</span>
+          <input type="date" aria-label="To" value={to} min={from || undefined}
+            onChange={e => { setTo(e.target.value); setPage(1) }}
+            className="bg-transparent text-white outline-none [color-scheme:dark]" />
+        </label>
+        {filtered && (
+          <button type="button" onClick={clearAll}
+            className="rounded-xl px-2.5 py-1.5 font-semibold" style={{ color: '#93C5FD' }}>Clear filters</button>
+        )}
+        {total != null && (
+          <span className="ml-auto" style={{ color: 'rgba(255,255,255,0.45)' }}>
+            {total} recording{total === 1 ? '' : 's'}
+          </span>
+        )}
+      </div>
+
       {failed && (
         <div className="mb-4 flex items-start gap-2 rounded-xl px-3 py-2.5 text-xs"
           style={{ background: 'rgba(248,113,113,0.10)', border: '1px solid rgba(248,113,113,0.25)', color: '#FCA5A5' }}>
@@ -155,7 +221,7 @@ export default function RecordingsPage() {
           style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.07)' }}>
           <Film size={28} className="mx-auto mb-3" style={{ color: 'rgba(255,255,255,0.25)' }} />
           <p className="text-sm font-semibold text-white">
-            {search ? 'No recordings match that search' : 'No recordings yet'}
+            {filtered ? 'No recordings match these filters' : 'No recordings yet'}
           </p>
           <p className="mx-auto mt-1.5 max-w-sm text-[11px] leading-relaxed"
             style={{ color: 'rgba(255,255,255,0.35)' }}>
@@ -179,7 +245,9 @@ export default function RecordingsPage() {
                   <span className="flex items-center gap-1"><Calendar size={10} />{fmtWhen(row.endedAt, row.scheduledStart)}</span>
                   <span className="flex items-center gap-1"><Clock size={10} />{fmtDuration(row.recordingSecs, row.durationMins)}</span>
                   {row.course && <span className="flex items-center gap-1"><BookOpen size={10} />{row.course.title}</span>}
+                  {row.section && <span className="flex items-center gap-1"><Layers size={10} />{row.section.title}</span>}
                   {row.instructor && <span className="flex items-center gap-1"><User size={10} />{row.instructor.name}</span>}
+                  {row.language && <span className="flex items-center gap-1"><Languages size={10} />{row.language}</span>}
                 </div>
               </div>
 
