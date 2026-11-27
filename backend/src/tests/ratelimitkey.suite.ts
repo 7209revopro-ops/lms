@@ -110,10 +110,12 @@ try {
     const adminRoutes = await readFile(
       nodePath.join(process.cwd(), 'src', 'routes', 'admin.routes.ts'), 'utf8')
 
-    check('the student refresh route uses the refresh limiter',
-      /router\.post\('\/refresh',\s*refreshRateLimit/.test(routes))
-    check('and the admin one does too — same problem, same fix',
-      /router\.post\('\/auth\/refresh',\s*refreshRateLimit/.test(adminRoutes))
+    /* Since 2026-11-27 session renewal carries NO limiter at all (the user: "remove the rate limiting"; routes/index.ts),
+       and certainly not the sign-in one. */
+    check('the student refresh route carries no limiter',
+      /router\.post\('\/refresh',\s*auth\.refresh\)/.test(routes))
+    check('and the admin one neither',
+      /router\.post\('\/auth\/refresh',\s*authCtrl\.adminRefresh\)/.test(adminRoutes))
     check('while sign-in keeps the tighter bucket',
       /router\.post\('\/login',\s*authRateLimit/.test(routes))
 

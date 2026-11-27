@@ -1,6 +1,5 @@
 import { Router, type Request, type Response } from 'express'
 import mongoose from 'mongoose'
-import { apiRateLimit } from '@/middleware/rateLimit.middleware.ts'
 import authRoutes          from './auth.routes.ts'
 import courseRoutes        from './courses.routes.ts'
 import categoryRoutes      from './categories.routes.ts'
@@ -50,8 +49,12 @@ import portalActivityRoutes from './portalActivity.routes.ts'
 
 const router = Router()
 
-/* ─── Global API rate limit ──────────────────────── */
-router.use(apiRateLimit)
+/* ─── No global API rate limit (removed 2026-11-27) ─
+   The user: "remove the rate limiting". It counted 100 requests a minute per internet address, ahead of sign-in, so
+   a whole office (or a classroom on one Wi-Fi) shared one allowance and normal work was refused with "Too many
+   requests. Please slow down." The limits on guessing — sign-in, codes, password reset — and on checkout, uploads,
+   search and chat stay where they are. apiRateLimit is still exported (rateLimit.middleware.ts) if it is ever wanted
+   back, keyed per person. */
 
 /* ─── Health check ───────────────────────────────── */
 router.get('/health', (_req: Request, res: Response) => {

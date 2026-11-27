@@ -14,7 +14,7 @@ import { authenticateAdmin, requireRole, requireAdmin, requireAnyAdmin, requireI
 import { issueClassHandoff } from '@/controllers/classHandoff.controller.ts'
 import { validate } from '@/middleware/validate.middleware.ts'
 import { env } from '@/config/env.ts'
-import { authRateLimit, refreshRateLimit, impersonationRateLimit } from '@/middleware/rateLimit.middleware.ts'
+import { authRateLimit, impersonationRateLimit } from '@/middleware/rateLimit.middleware.ts'
 import { QuizService } from '@/services/quiz.service.ts'
 import { AdminExamService } from '@/services/admin-exam.service.ts'
 import { AssignmentService } from '@/services/assignment.service.ts'
@@ -105,7 +105,7 @@ router.post('/auth/sso-login', authRateLimit, validate(adminSsoLoginSchema), aut
 router.post('/auth/login/2fa', authRateLimit, validate(adminLoginTwoFactorSchema), authCtrl.adminLoginTwoFactor)
 router.post('/auth/forgot-password', authRateLimit, validate(adminForgotSchema), authCtrl.adminForgotPassword)
 router.post('/auth/reset-password',  authRateLimit, validate(adminResetSchema),  authCtrl.resetPassword)
-router.post('/auth/refresh', refreshRateLimit, authCtrl.adminRefresh)
+router.post('/auth/refresh', authCtrl.adminRefresh)   // no limit since 2026-11-27: see routes/index.ts
 router.post('/auth/logout',  authRateLimit, authCtrl.adminLogout)
 router.get ('/auth/me',      authenticateAdmin, authCtrl.me)
 

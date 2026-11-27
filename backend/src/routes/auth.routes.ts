@@ -3,7 +3,7 @@ import { z } from 'zod'
 import { AuthController } from '@/controllers/auth.controller.ts'
 import { validate } from '@/middleware/validate.middleware.ts'
 import { authenticate, optionalAuthenticate } from '@/middleware/auth.middleware.ts'
-import { authRateLimit, refreshRateLimit, impersonationRateLimit } from '@/middleware/rateLimit.middleware.ts'
+import { authRateLimit, impersonationRateLimit } from '@/middleware/rateLimit.middleware.ts'
 import { documentRef, requiredDocumentRef } from '@/utils/documentRef.ts'
 import totpRoutes from './totp.routes.ts'
 
@@ -121,7 +121,7 @@ router.post('/join-link/redeem',  authRateLimit, optionalAuthenticate, validate(
 router.post('/join-link/fallback', authRateLimit, validate(z.object({ token: z.string().min(10).max(100) })), auth.joinLinkFallback)
 /* The admin portal's second factor lives beside its own login, at
    /api/v1/admin/auth/login/2fa (see admin.routes.ts). */
-router.post('/refresh',          refreshRateLimit, auth.refresh)
+router.post('/refresh',          auth.refresh)   // no limit since 2026-11-27: see routes/index.ts
 router.post('/logout',           authRateLimit, auth.logout)
 router.post('/forgot-password',  authRateLimit, validate(forgotSchema),   auth.forgotPassword)
 router.post('/reset-password',   authRateLimit, validate(resetSchema),    auth.resetPassword)

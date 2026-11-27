@@ -175,6 +175,9 @@ export const authRateLimit = rateLimit({
 })
 
 /* ─── Session renewal ───────────────────────────────
+   NOT MOUNTED since 2026-11-27 (the user: "remove the rate limiting"; see routes/index.ts). Each page load now
+   asks for a token once (the websites send it as a Bearer header), and a shared office address ran out of these.
+
    Token refresh USED to sit in the auth bucket above, next to sign-in and
    password reset. It does not belong there: an access token lives 15 minutes,
    so every signed-in person spends one auth attempt every 15 minutes simply by
