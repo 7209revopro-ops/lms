@@ -27,6 +27,11 @@ const DEVICE_TTL_MS = 400 * 86_400_000 // 400 days (Chrome's max cookie lifetime
 
 export const ADMIN_ACCESS_COOKIE  = 'lms_admin_at'
 export const ADMIN_REFRESH_COOKIE = 'lms_admin_rt'
+/* "An admin session exists in this browser" — the value is just '1'. The admin website's page guard can only see
+   cookies sent with a page (lms_admin_rt is Path=/api/v1/admin/auth), and since 2026-11-27 the access token is no
+   longer a cookie there: the website keeps it in memory and sends it as `Authorization: Bearer` (the user: "do as
+   bearer token in admin side also instead of cookie"). It grants nothing — the API never reads it. */
+export const ADMIN_SESSION_COOKIE = 'lms_admin_s'
 
 /* Client-portal impersonation rides its OWN cookie rather than overwriting
    `lms_at`. A super admin usually has a real student session in the same
@@ -182,8 +187,36 @@ export function clearAuthCookies(res: Response): void {
  */
 const adminSameSite = (): 'lax' | 'none' => (isProd() ? 'none' : 'lax')
 
-export function setAdminAuthCookies(res: Response, tokens: TokenPair): void {
+/**
+ * `bearer`: the caller keeps the access token itself and sends it as `Authorization: Bearer` (the admin website since
+ * 2026-11-27, which asks with `X-Auth-Mode: bearer`). Then the access token is NOT put in a cookie — an older one is
+ * taken down — and only the refresh cookie and the "a session exists" marker are set. Without it, as before: both
+ * cookies, so an admin website build from before the change keeps working until it is redeployed.
+ */
+export function setAdminAuthCookies(res: Response, tokens: TokenPair, opts: { bearer?: boolean } = {}): void {
   const sessionMs = parseDurationMs(env.JWT_REFRESH_EXPIRES_IN)
+  res.cookie(ADMIN_SESSION_COOKIE, '1', {
+    httpOnly: true,
+    secure:   isProd(),
+    sameSite: adminSameSite(),
+    domain:   cookieDomain(),
+    path:     '/',
+    maxAge:   sessionMs,
+  })
+  if (opts.bearer) {
+    res.clearCookie(ADMIN_ACCESS_COOKIE, { path: '/', domain: cookieDomain() })
+    res.cookie(ADMIN_REFRESH_COOKIE, tokens.refresh_token, {
+      httpOnly: true,
+      secure:   isProd(),
+      sameSite: adminSameSite(),
+      domain:   cookieDomain(),
+      path:     ADMIN_REFRESH_PATH,
+      maxAge:   sessionMs,
+    })
+    evictLegacyCookie(res, ADMIN_ACCESS_COOKIE,  '/')
+    evictLegacyCookie(res, ADMIN_REFRESH_COOKIE, ADMIN_REFRESH_PATH)
+    return
+  }
   /* The access COOKIE lives as long as the session, as the client's does
      (setAuthCookies above); the JWT inside still expires after
      JWT_ACCESS_EXPIRES_IN and the API refuses it (TOKEN_EXPIRED).
@@ -217,6 +250,7 @@ export function setAdminAuthCookies(res: Response, tokens: TokenPair): void {
 
 export function clearAdminAuthCookies(res: Response): void {
   res.clearCookie(ADMIN_ACCESS_COOKIE,  { path: '/',               domain: cookieDomain() })
+  res.clearCookie(ADMIN_SESSION_COOKIE, { path: '/',               domain: cookieDomain() })
   res.clearCookie(ADMIN_REFRESH_COOKIE, { path: ADMIN_REFRESH_PATH, domain: cookieDomain() })
   evictLegacyCookie(res, ADMIN_ACCESS_COOKIE,  '/')
   evictLegacyCookie(res, ADMIN_REFRESH_COOKIE, ADMIN_REFRESH_PATH)

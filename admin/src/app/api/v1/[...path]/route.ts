@@ -47,6 +47,8 @@ const FORWARD_REQUEST_HEADERS = [
   'accept', 'accept-language', 'content-type', 'cookie', 'authorization',
   'origin', 'referer', 'user-agent', 'x-organization-id', 'x-refresh-token',
   'x-requested-with', 'if-none-match', 'if-modified-since', 'range',
+  /* "Answer with the access token, don't set it as a cookie" (lib/axios.ts, 2026-11-27). */
+  'x-auth-mode',
 ]
 
 /* Response headers that describe THIS hop rather than the payload.

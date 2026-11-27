@@ -17,14 +17,60 @@ export const api = axios.create({
   headers: { 'Content-Type': 'application/json' },
 })
 
-/* ── Request interceptor — inject impersonation token ── */
-api.interceptors.request.use(config => {
+/* ── The admin's own access token: a Bearer header, not a cookie (2026-11-27) ──
+   The user: "do as bearer token in admin side also instead of cookie". The backend hands the access token back in the
+   answer to sign-in and refresh when asked with `X-Auth-Mode: bearer`, and no longer sets it as a cookie; every
+   request carries it as `Authorization: Bearer`.
+
+   It is kept in MEMORY only — not localStorage or sessionStorage, where any script on the page could read it for as
+   long as it lives. The refresh token stays an httpOnly cookie the page never sees, so a reload or a new tab starts
+   with no access token and asks /admin/auth/refresh for one before its first call (ensureAccessToken).
+
+   Against a backend from before this change the answer carries no token: nothing is kept, no header is sent, and the
+   `lms_admin_at` cookie that backend still sets goes on working. */
+const AUTH_MODE = { 'X-Auth-Mode': 'bearer' }
+let accessToken: string | null = null
+
+export function clearAccessToken(): void { accessToken = null }
+
+const tokenIn = (data: unknown): string | null => {
+  const t = (data as { data?: { access_token?: unknown } } | null | undefined)?.data?.access_token
+  return typeof t === 'string' && t.length > 0 ? t : null
+}
+
+/* One refresh at a time, whoever asks: the first call of a fresh page, or a 401 further down. */
+let refreshing: Promise<boolean> | null = null
+function refreshSession(): Promise<boolean> {
+  refreshing ??= axios.post('/api/v1/admin/auth/refresh', null, { withCredentials: true, headers: AUTH_MODE })
+    .then(res => { accessToken = tokenIn(res.data) ?? accessToken; return true })
+    .finally(() => { refreshing = null })
+  return refreshing
+}
+
+/* A page that has just loaded has no token yet. Asking once here, before the first call goes out, replaces a burst
+   of 401s (one per query on the page) each of which would otherwise refresh. Tried once per page load: if it is
+   refused the call goes out without a token and its 401 takes the usual road to the sign-in page. */
+let bootstrap: Promise<unknown> | null = null
+async function ensureAccessToken(url: string | undefined): Promise<void> {
+  if (accessToken) return
+  /* Signing in, signing out, a forgotten password: nothing to wait for. (/admin/auth/me and the rest do wait.) */
+  if (/^\/admin\/auth\/(login|sso-login|refresh|logout|forgot-password|reset-password)(\/|$|\?)/.test(url ?? '')) return
+  if (PUBLIC_PATHS.has(window.location.pathname)) return
+  /* Every call of the first burst waits on the same one. */
+  bootstrap ??= refreshAllowed() ? refreshSession().catch(() => false) : Promise.resolve(false)
+  await bootstrap
+}
+
+/* ── Request interceptor — the Bearer token (impersonation's, else the admin's own) ── */
+api.interceptors.request.use(async config => {
   if (typeof window !== 'undefined') {
-    const token = useImpersonationStore.getState().token
-    if (token) {
-      config.headers = config.headers ?? {}
-      config.headers['Authorization'] = `Bearer ${token}`
-    }
+    config.headers = config.headers ?? {}
+    config.headers['X-Auth-Mode'] = 'bearer'
+    const impersonation = useImpersonationStore.getState().token
+    if (!impersonation) await ensureAccessToken(config.url)
+    const token = impersonation ?? accessToken
+    if (token) config.headers['Authorization'] = `Bearer ${token}`
+    else delete config.headers['Authorization']
     const orgId = useOrgStore.getState().activeOrgId
     /* The org switcher, UNLESS the caller already named an academy for this
        one request. A super admin filling in a cross-academy class has to read
@@ -107,7 +153,15 @@ function toLogin() {
 }
 
 api.interceptors.response.use(
-  res => res,
+  res => {
+    /* Sign-in (password, second factor, from the Root portal) answers with the token; sign-out drops it. */
+    const url = res.config?.url ?? ''
+    if (url.startsWith('/admin/auth/')) {
+      if (url.startsWith('/admin/auth/logout')) accessToken = null
+      else accessToken = tokenIn(res.data) ?? accessToken
+    }
+    return res
+  },
   async err => {
     const original = err.config
 
@@ -146,7 +200,7 @@ api.interceptors.response.use(
 
     isRefreshing = true
     try {
-      await axios.post('/api/v1/admin/auth/refresh', null, { withCredentials: true })
+      await refreshSession()
       isRefreshing = false
       drainQueue(true)
       return api(original)

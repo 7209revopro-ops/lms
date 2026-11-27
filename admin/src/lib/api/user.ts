@@ -1,6 +1,6 @@
 'use client'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { apiGet, api } from '@/lib/axios'
+import { apiGet, api, clearAccessToken } from '@/lib/axios'
 
 /* ── Staff email-notification preferences ───────────────
    Opt-out model: a key that is absent means "send". The one exception is
@@ -103,5 +103,6 @@ export function useUpdateEmailPrefs() {
 }
 
 export function logout(): Promise<void> {
-  return api.post('/admin/auth/logout').then(() => {/* no-op */}).catch(() => {/* best-effort */})
+  /* The Bearer token goes with the session, whatever the server answered (lib/axios.ts). */
+  return api.post('/admin/auth/logout').then(() => {/* no-op */}).catch(() => {/* best-effort */}).finally(clearAccessToken)
 }

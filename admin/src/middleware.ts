@@ -21,7 +21,10 @@ export function middleware(req: NextRequest) {
     return NextResponse.next()
   }
 
-  const hasToken = !!req.cookies.get('lms_admin_at')?.value
+  /* `lms_admin_s` since 2026-11-27: the access token is no longer a cookie (the admin sends it as a Bearer header,
+     lib/axios.ts), so the backend sets this marker — just "1" — to say a session exists. `lms_admin_at` is still
+     honoured for a session from before the change, and for a backend not yet updated. */
+  const hasToken = !!req.cookies.get('lms_admin_s')?.value || !!req.cookies.get('lms_admin_at')?.value
 
   /* Already logged-in users visiting /login → dashboard.
 

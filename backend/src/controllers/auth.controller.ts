@@ -11,6 +11,7 @@ import {
   clearAdminAuthCookies,
   ADMIN_REFRESH_COOKIE,
   ADMIN_ACCESS_COOKIE,
+  ADMIN_SESSION_COOKIE,
   setImpersonationCookie,
   clearImpersonationCookie,
   resolveDeviceId,
@@ -82,6 +83,14 @@ function isDeadSession(err: unknown): boolean {
    the present-but-dead state that loops — still gets cleaned up. */
 function hasStaleCookie(req: Request, name: string): boolean {
   return typeof req.cookies?.[name] === 'string' && req.cookies[name].length > 0
+}
+
+/* The admin website since 2026-11-27 keeps the access token itself and sends it as `Authorization: Bearer` (the user:
+   "do as bearer token in admin side also instead of cookie"). It says so with this header on sign-in and refresh; the
+   answer then carries the token in its body and no access cookie is set (authCookies.ts setAdminAuthCookies). The
+   refresh token stays an httpOnly cookie either way — it is never handed to the page. */
+function wantsBearer(req: Request): boolean {
+  return String(req.headers['x-auth-mode'] ?? '').toLowerCase() === 'bearer'
 }
 
 export class AuthController {
@@ -290,8 +299,9 @@ export class AuthController {
         })
         return
       }
-      setAdminAuthCookies(res, result.tokens)
-      sendSuccess(res, { user: result.user }, 'Signed in successfully')
+      const bearer = wantsBearer(req)
+      setAdminAuthCookies(res, result.tokens, { bearer })
+      sendSuccess(res, { user: result.user, ...(bearer ? { access_token: result.tokens.access_token } : {}) }, 'Signed in successfully')
     } catch (err) {
       next(err)
     }
@@ -341,8 +351,9 @@ export class AuthController {
       clearAuthCookies(res)
       clearAdminAuthCookies(res)
 
-      setAdminAuthCookies(res, result.tokens)
-      sendSuccess(res, { user: result.user }, 'Signed in successfully')
+      const bearer = wantsBearer(req)
+      setAdminAuthCookies(res, result.tokens, { bearer })
+      sendSuccess(res, { user: result.user, ...(bearer ? { access_token: result.tokens.access_token } : {}) }, 'Signed in successfully')
     } catch (err) {
       next(err)
     }
@@ -362,8 +373,9 @@ export class AuthController {
         })
         return
       }
-      setAdminAuthCookies(res, tokens)
-      sendSuccess(res, { user }, 'Signed in successfully')
+      const bearer = wantsBearer(req)
+      setAdminAuthCookies(res, tokens, { bearer })
+      sendSuccess(res, { user, ...(bearer ? { access_token: tokens.access_token } : {}) }, 'Signed in successfully')
     } catch (err) {
       next(err)
     }
@@ -374,7 +386,7 @@ export class AuthController {
     try {
       const rawToken = req.cookies?.[ADMIN_REFRESH_COOKIE]
       if (!rawToken) {
-        if (hasStaleCookie(req, ADMIN_ACCESS_COOKIE)) clearAdminAuthCookies(res)
+        if (hasStaleCookie(req, ADMIN_ACCESS_COOKIE) || hasStaleCookie(req, ADMIN_SESSION_COOKIE)) clearAdminAuthCookies(res)
         res.status(401).json({ success: false, error: { code: 'NO_REFRESH_TOKEN', message: 'No refresh token' } })
         return
       }
@@ -392,8 +404,9 @@ export class AuthController {
         })
         return
       }
-      setAdminAuthCookies(res, tokens)
-      sendSuccess(res, null, 'Session refreshed')
+      const bearer = wantsBearer(req)
+      setAdminAuthCookies(res, tokens, { bearer })
+      sendSuccess(res, bearer ? { access_token: tokens.access_token } : null, 'Session refreshed')
     } catch (err) {
       if (isDeadSession(err)) clearAdminAuthCookies(res)
       next(err)
